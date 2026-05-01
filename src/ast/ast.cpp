@@ -85,6 +85,9 @@ void destroy_node(ExprNode* node) noexcept {
     case ExprKind::Matrix:
         static_cast<Matrix*>(node)->~Matrix();
         break;
+    case ExprKind::SeriesExp:
+        static_cast<SeriesExp*>(node)->~SeriesExp();
+        break;
     case ExprKind::Null:
         break;
     }
@@ -267,6 +270,18 @@ bool structural_equal(ExprPtr lhs, ExprPtr rhs) noexcept {
                lhs_value.cols == rhs_value.cols &&
                expr_ptr_range_equal(lhs_value.elements, rhs_value.elements);
     }
+    case ExprKind::SeriesExp: {
+        const auto& l = expr_ref<SeriesExp>(lhs);
+        const auto& r = expr_ref<SeriesExp>(rhs);
+        if (l.var.name != r.var.name || l.order != r.order) return false;
+        if (!structural_equal(l.point, r.point)) return false;
+        if (l.terms.size() != r.terms.size()) return false;
+        for (std::size_t i = 0; i < l.terms.size(); ++i) {
+            if (l.terms[i].first != r.terms[i].first) return false;
+            if (!structural_equal(l.terms[i].second, r.terms[i].second)) return false;
+        }
+        return true;
+    }
     case ExprKind::Null:
         return false;
     }
@@ -370,6 +385,17 @@ std::size_t expr_hash(ExprPtr expr) noexcept {
         for (auto elem : node.elements) hash_combine(seed, expr_hash(elem));
         break;
     }
+    case ExprKind::SeriesExp: {
+        const auto& node = expr_ref<SeriesExp>(expr);
+        hash_combine(seed, std::hash<std::string>{}(node.var.name));
+        hash_combine(seed, expr_hash(node.point));
+        hash_combine(seed, static_cast<std::size_t>(node.order));
+        for (const auto& [exp, coeff] : node.terms) {
+            hash_combine(seed, static_cast<std::size_t>(exp));
+            hash_combine(seed, expr_hash(coeff));
+        }
+        break;
+    }
     case ExprKind::Null:
         break;
     }
@@ -413,6 +439,8 @@ std::string_view expr_kind_name(ExprKind kind) noexcept {
         return "RootOf";
     case ExprKind::Matrix:
         return "Matrix";
+    case ExprKind::SeriesExp:
+        return "SeriesExp";
     }
 
     return "Unknown";
@@ -521,12 +549,22 @@ ExprPtr clone_into_arena(ExprPtr expr, AstArena& target, std::unordered_map<Expr
     }
     case ExprKind::Matrix: {
         const auto& node = expr_ref<Matrix>(expr);
-        std::vector<ExprPtr> elements;
-        elements.reserve(node.elements.size());
+        std::vector<ExprPtr> cloned_elements;
+        cloned_elements.reserve(node.elements.size());
         for (auto elem : node.elements) {
-            elements.push_back(clone_into_arena(elem, target, cache));
+            cloned_elements.push_back(clone_into_arena(elem, target, cache));
         }
-        cloned = target.make<Matrix>(node.rows, node.cols, std::move(elements));
+        cloned = target.make<Matrix>(node.rows, node.cols, std::move(cloned_elements));
+        break;
+    }
+    case ExprKind::SeriesExp: {
+        const auto& node = expr_ref<SeriesExp>(expr);
+        std::vector<std::pair<long long, ExprPtr>> cloned_terms;
+        cloned_terms.reserve(node.terms.size());
+        for (const auto& [exp, coeff] : node.terms) {
+            cloned_terms.push_back({exp, clone_into_arena(coeff, target, cache)});
+        }
+        cloned = target.make<SeriesExp>(Symbol(node.var.name), clone_into_arena(node.point, target, cache), std::move(cloned_terms), node.order);
         break;
     }
     case ExprKind::Null:

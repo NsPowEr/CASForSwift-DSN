@@ -94,6 +94,7 @@ set(CAS_SYMBOLIC_SOURCES
     src/symbolic/rewrite_matching.cpp
     src/symbolic/substitute.cpp
     src/symbolic/functions_special.cpp
+    src/symbolic/series_arithmetic.cpp
 )
 
 set(CAS_CALCULUS_SOURCES
@@ -337,6 +338,8 @@ if(CAS_ENABLE_TESTING)
         test/unit/test_stress.cpp
         test/unit/test_supreme.cpp
         test/unit/test_hpprime_acid.cpp
+        test/unit/test_ode.cpp
+        test/unit/test_ode_critical.cpp
         test/unit/test_acid_complex_canonical.cpp
         test/regression/test_regression.cpp
     )

@@ -25,7 +25,7 @@ void collect_mrv_candidates(ExprPtr e, const Symbol& var, MRVSet& candidates, sy
     }
 
     if (const auto* call = expr_cast<FuncCall>(e)) {
-        if (call->func_id == BuiltinOp::Exp) {
+        if (call->func_id == BuiltinOp::Exp || call->func_id == BuiltinOp::Ln) {
             candidates.insert(e);
         }
         for (auto arg : call->args) collect_mrv_candidates(arg, var, candidates, ctx);
@@ -41,23 +41,35 @@ void collect_mrv_candidates(ExprPtr e, const Symbol& var, MRVSet& candidates, sy
     }
 }
 
-int compare_growth(ExprPtr a, ExprPtr b, const Symbol&, symbolic::CASContext&) {
+// Heuristic for growth comparison: 1 if a > b, -1 if b > a, 0 if same growth class
+int compare_growth(ExprPtr a, ExprPtr b, const Symbol& var, symbolic::CASContext& ctx) {
     if (structural_equal(a, b)) return 0;
 
-    auto get_exp_depth = [](ExprPtr e) {
-        int depth = 0;
-        while (const auto* call = expr_cast<FuncCall>(e)) {
-            if (call->func_id == BuiltinOp::Exp) {
-                depth++;
-                e = call->args[0];
-            } else break;
+    auto get_base_type = [](ExprPtr e) {
+        if (expr_is<Symbol>(e)) return 0; // x
+        if (const auto* call = expr_cast<FuncCall>(e)) {
+            if (call->func_id == BuiltinOp::Ln) return -1; // log(x)
+            if (call->func_id == BuiltinOp::Exp) return 1;  // exp(x)
         }
-        return depth;
+        return 0;
     };
 
-    int da = get_exp_depth(a);
-    int db = get_exp_depth(b);
-    if (da != db) return da > db ? 1 : -1;
+    int ta = get_base_type(a);
+    int tb = get_base_type(b);
+
+    if (ta != tb) return ta > tb ? 1 : -1;
+
+    // Same type, compare arguments
+    if (ta == 1) { // Both exp
+        ExprPtr arga = expr_cast<FuncCall>(a)->args[0];
+        ExprPtr argb = expr_cast<FuncCall>(b)->args[0];
+        return compare_growth(arga, argb, var, ctx);
+    }
+    if (ta == -1) { // Both ln
+        ExprPtr arga = expr_cast<FuncCall>(a)->args[0];
+        ExprPtr argb = expr_cast<FuncCall>(b)->args[0];
+        return compare_growth(arga, argb, var, ctx);
+    }
 
     return 0; 
 }
@@ -160,7 +172,6 @@ Result<ExprPtr> compute_limit_mrv(ExprPtr expr, const Symbol& var, ExprPtr point
     auto simplified = ctx.simplify(rewritten.value());
     if (simplified.is_error()) return simplified;
 
-    // Use Taylor series on w -> 0
     auto series = taylor_series(simplified.value(), w_var, limit_make_integer(arena, 0), 4U, ctx);
     if (series.is_error()) return fail<ExprPtr>(series.error());
 

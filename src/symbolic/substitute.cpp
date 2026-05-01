@@ -377,6 +377,33 @@ private:
         return ok(context_.arena().make<Matrix>(node.rows, node.cols, std::move(elements)));
     }
 
+    [[nodiscard]] Result<ExprPtr> substitute_node(ExprPtr original, const SeriesExp& node) {
+        const bool shadows_variable = node.var.name == variable_.name;
+        
+        // Point is ALWAYS substituted
+        auto substituted_point = substitute_expr(node.point);
+        if (substituted_point.is_error()) return substituted_point;
+
+        if (shadows_variable) {
+            if (substituted_point.value() == node.point) return ok(original);
+            return ok(context_.arena().make<SeriesExp>(node.var, substituted_point.value(), node.terms, node.order));
+        }
+
+        // Coefficients are substituted
+        std::vector<std::pair<long long, ExprPtr>> terms;
+        terms.reserve(node.terms.size());
+        bool changed = (substituted_point.value() != node.point);
+        for (std::size_t i = 0; i < node.terms.size(); ++i) {
+            auto substituted_coeff = substitute_expr(node.terms[i].second);
+            if (substituted_coeff.is_error()) return substituted_coeff;
+            if (substituted_coeff.value() != node.terms[i].second) changed = true;
+            terms.push_back({node.terms[i].first, substituted_coeff.value()});
+        }
+
+        if (!changed) return ok(original);
+        return ok(context_.arena().make<SeriesExp>(node.var, substituted_point.value(), std::move(terms), node.order));
+    }
+
     CASContext& context_;
     const Symbol& variable_;
     ExprPtr value_;

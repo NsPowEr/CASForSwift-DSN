@@ -52,9 +52,20 @@ Result<ExprPtr> Simplifier::simplify_sum_terms(const std::vector<ExprPtr>& terms
 
     Rational constant(BigInt(0));
     std::map<MonomialKey, Rational> collected;
+    bool has_infinity = false;
+    bool has_neg_infinity = false;
+
     for (ExprPtr term : flat_terms) {
         auto timeout = check_timeout();
         if (timeout.is_error()) return fail<ExprPtr>(timeout.error());
+
+        if (is_constant_expr(term, MathConstant::Infinity)) { has_infinity = true; continue; }
+        if (const auto* u = expr_cast<Unary>(term); u != nullptr && u->op == UnaryOp::Neg) {
+            if (is_constant_expr(u->operand, MathConstant::Infinity)) {
+                has_neg_infinity = true; continue;
+            }
+        }
+
         LiteralRational rational;
         auto exact = try_get_exact_rational(term, rational);
         if (exact.is_ok() && exact.value()) {
@@ -70,6 +81,10 @@ Result<ExprPtr> Simplifier::simplify_sum_terms(const std::vector<ExprPtr>& terms
         auto& monomial = *monomial_res.value();
         collected[monomial.key] += monomial.coefficient;
     }
+
+    if (has_infinity && has_neg_infinity) return fail<ExprPtr>(make_error(CASErrorKind::Undefined, "Infinity - Infinity is undefined"));
+    if (has_infinity) return ok(arena_.make<Constant>(MathConstant::Infinity));
+    if (has_neg_infinity) return ok(arena_.make<Unary>(UnaryOp::Neg, arena_.make<Constant>(MathConstant::Infinity)));
 
     std::vector<ExprPtr> normalized;
     for (const auto& [key, coeff] : collected) {
@@ -117,10 +132,9 @@ Result<ExprPtr> Simplifier::simplify_product_factors(const std::vector<ExprPtr>&
 
     if (has_zero) {
         for (ExprPtr factor : initial_factors) {
-            if (const auto* c = expr_cast<Constant>(factor)) {
-                if (c->value == MathConstant::Infinity) {
-                    return fail<ExprPtr>(make_error(CASErrorKind::Undefined, "0 * Infinity is undefined"));
-                }
+            if (is_constant_expr(factor, MathConstant::Infinity)) return fail<ExprPtr>(make_error(CASErrorKind::Undefined, "0 * Infinity is undefined"));
+            if (const auto* u = expr_cast<Unary>(factor); u != nullptr && u->op == UnaryOp::Neg) {
+                if (is_constant_expr(u->operand, MathConstant::Infinity)) return fail<ExprPtr>(make_error(CASErrorKind::Undefined, "0 * Infinity is undefined"));
             }
         }
         return traced_result(RuleId::SimplifyMultiplyByZero, target_before, make_integer(arena_, BigInt(0)));
@@ -147,34 +161,39 @@ Result<ExprPtr> Simplifier::simplify_product_factors(const std::vector<ExprPtr>&
     };
     for (ExprPtr f : initial_factors) if (auto res = flatten(f, false); res.is_error()) return fail<ExprPtr>(res.error());
 
-    /*
-    for (std::size_t i = 0; i < flat_factors.size(); ++i) {
-        const auto* sum = expr_cast<Sum>(flat_factors[i]);
-        if (sum == nullptr) continue;
-        std::vector<ExprPtr> dist_terms;
-        for (ExprPtr term : sum->terms) {
-            std::vector<ExprPtr> dist_factors;
-            for (std::size_t j = 0; j < flat_factors.size(); ++j) dist_factors.push_back(j == i ? term : flat_factors[j]);
-            auto dist = simplify_product_factors(dist_factors, ExprPtr{}, true);
-            if (dist.is_error()) return dist;
-            dist_terms.push_back(dist.value());
-        }
-        auto rewritten = simplify_sum_terms(dist_terms, make_sum_target(dist_terms));
-        if (rewritten.is_error()) return rewritten;
-        append_trace(RuleId::SimplifyDistributeProductOverSum, target_before, rewritten.value());
-        return rewritten;
-    }
-    */
-
     Rational coefficient(BigInt(1));
     std::vector<std::pair<ExprPtr, BigInt>> symbolic;
     BigInt i_count(0);
+    bool has_infinity = false;
+    int infinity_sign = 1;
+
     for (ExprPtr f : flat_factors) {
         if (auto timeout = check_timeout(); timeout.is_error()) return fail<ExprPtr>(timeout.error());
+        
+        int sign = 1;
+        ExprPtr core = f;
+        if (const auto* u = expr_cast<Unary>(f); u != nullptr && u->op == UnaryOp::Neg) {
+            sign = -1;
+            core = u->operand;
+        }
+
+        if (is_constant_expr(core, MathConstant::Infinity)) {
+            has_infinity = true;
+            infinity_sign *= sign;
+            continue;
+        }
+
         LiteralRational rat;
         auto exact = try_get_exact_rational(f, rat);
-        if (exact.is_ok() && exact.value()) { coefficient *= rat.value; continue; }
-        if (const auto* unary = expr_cast<Unary>(f); unary != nullptr && unary->op == UnaryOp::Neg) { coefficient *= Rational(BigInt(-1)); f = unary->operand; }
+        if (exact.is_ok() && exact.value()) { 
+            coefficient *= rat.value; 
+            continue; 
+        }
+        
+        if (const auto* unary = expr_cast<Unary>(f); unary != nullptr && unary->op == UnaryOp::Neg) { 
+            coefficient *= Rational(BigInt(-1)); 
+            f = unary->operand; 
+        }
         
         if (is_constant_expr(f, MathConstant::I)) {
             i_count += BigInt(1);
@@ -188,9 +207,23 @@ Result<ExprPtr> Simplifier::simplify_product_factors(const std::vector<ExprPtr>&
                     continue;
                 }
             }
-            if (auto exponent = try_get_integer_exponent(binary->right); exponent.has_value()) { symbolic.push_back({binary->left, *exponent}); continue; }
+            if (auto exponent = try_get_integer_exponent(binary->right); exponent.has_value()) { 
+                symbolic.push_back({binary->left, *exponent}); 
+                continue; 
+            }
         }
         symbolic.push_back({f, BigInt(1)});
+    }
+
+    if (has_infinity) {
+        if (coefficient.numerator().is_negative()) infinity_sign *= -1;
+        // Check if i_count affects sign (I^2 = -1)
+        BigInt rem = i_count % BigInt(4);
+        if (rem == BigInt(2) || rem == BigInt(3)) infinity_sign *= -1;
+        
+        ExprPtr inf = arena_.make<Constant>(MathConstant::Infinity);
+        if (infinity_sign < 0) return ok(arena_.make<Unary>(UnaryOp::Neg, inf));
+        return ok(inf);
     }
     
     if (!i_count.is_zero()) {
@@ -209,7 +242,6 @@ Result<ExprPtr> Simplifier::simplify_product_factors(const std::vector<ExprPtr>&
     merge_symbolic_factors(symbolic);
 
     // GAP #4: Branch Cuts / Sqrt Product Merging
-    // Collect sqrt calls to merge them safely: sqrt(A)*sqrt(B) -> sqrt(A*B) if A>=0 or B>=0.
     std::vector<ExprPtr> sqrt_args;
     std::vector<std::pair<ExprPtr, BigInt>> other_symbolic;
     for (auto& factor : symbolic) {
@@ -224,14 +256,8 @@ Result<ExprPtr> Simplifier::simplify_product_factors(const std::vector<ExprPtr>&
     }
 
     if (sqrt_args.size() >= 2U) {
-        // Safe to merge if at most one is not known non-negative.
         std::size_t known_nonnegative_count = 0;
-        for (const auto& arg : sqrt_args) {
-            if (is_known_nonnegative(arg)) {
-                known_nonnegative_count++;
-            }
-        }
-
+        for (const auto& arg : sqrt_args) if (is_known_nonnegative(arg)) known_nonnegative_count++;
         if (known_nonnegative_count >= sqrt_args.size() - 1) {
             auto inner_res = simplify_product_factors(sqrt_args, ExprPtr{}, true);
             if (inner_res.is_ok()) {
@@ -239,45 +265,56 @@ Result<ExprPtr> Simplifier::simplify_product_factors(const std::vector<ExprPtr>&
                 other_symbolic.push_back({merged_sqrt, BigInt(1)});
             }
         } else {
-            // Merge not safe: put sqrt factors back
-            for (ExprPtr arg : sqrt_args) {
-                other_symbolic.push_back({arena_.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{arg}), BigInt(1)});
-            }
+            for (ExprPtr arg : sqrt_args) other_symbolic.push_back({arena_.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{arg}), BigInt(1)});
         }
     } else if (!sqrt_args.empty()) {
-        // Single sqrt: put it back
         other_symbolic.push_back({arena_.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{sqrt_args.front()}), BigInt(1)});
     }
-    // Always restore symbolic from other_symbolic (move invalidated original entries)
     symbolic = std::move(other_symbolic);
+    merge_symbolic_factors(symbolic);
+
+    // GAP #5: exp(a)*exp(b) -> exp(a+b)
+    std::vector<ExprPtr> exp_args;
+    std::vector<std::pair<ExprPtr, BigInt>> other_symbolic_exp;
+    for (auto& factor : symbolic) {
+        if (factor.second == BigInt(1)) {
+            if (const auto* call = expr_cast<FuncCall>(factor.first);
+                call != nullptr && call->func_id == BuiltinOp::Exp && call->args.size() == 1U) {
+                exp_args.push_back(call->args.front());
+                continue;
+            }
+        }
+        other_symbolic_exp.push_back(std::move(factor));
+    }
+
+    if (exp_args.size() >= 2U) {
+        auto inner_res = simplify_sum_terms(exp_args, ExprPtr{}, true);
+        if (inner_res.is_ok()) {
+            ExprPtr merged_exp = arena_.make<FuncCall>(BuiltinOp::Exp, std::vector<ExprPtr>{inner_res.value()});
+            other_symbolic_exp.push_back({merged_exp, BigInt(1)});
+        }
+    } else if (!exp_args.empty()) {
+        other_symbolic_exp.push_back({arena_.make<FuncCall>(BuiltinOp::Exp, std::vector<ExprPtr>{exp_args.front()}), BigInt(1)});
+    }
+    symbolic = std::move(other_symbolic_exp);
     merge_symbolic_factors(symbolic);
 
     std::vector<ExprPtr> normalized;
     bool is_neg = (coefficient == Rational(BigInt(-1)));
-    if (!is_neg && (!(coefficient == Rational(BigInt(1))) || symbolic.empty())) {
-        normalized.push_back(make_rational(arena_, coefficient));
-    }
+    if (!is_neg && (!(coefficient == Rational(BigInt(1))) || symbolic.empty())) normalized.push_back(make_rational(arena_, coefficient));
     for (const auto& [base, exp] : symbolic) {
         if (exp.is_zero()) continue;
         normalized.push_back(exp == BigInt(1) ? base : arena_.make<Binary>(BinaryOp::Pow, base, make_integer(arena_, exp)));
     }
     normalized.erase(std::remove_if(normalized.begin(), normalized.end(), [](ExprPtr e) { return is_one_expr(e); }), normalized.end());
     
-    if (normalized.empty()) {
-        return traced_result(RuleId::SimplifyMultiplyByOne, target_before, make_rational(arena_, coefficient));
-    }
+    if (normalized.empty()) return traced_result(RuleId::SimplifyMultiplyByOne, target_before, make_rational(arena_, coefficient));
 
     ExprPtr result;
-    if (normalized.size() == 1U) {
-        result = normalized.front();
-    } else {
-        result = arena_.make<Product>(std::move(normalized));
-    }
+    if (normalized.size() == 1U) result = normalized.front();
+    else result = arena_.make<Product>(std::move(normalized));
 
-    if (is_neg) {
-        return traced_result(RuleId::SimplifyMultiplyByOne, target_before, arena_.make<Unary>(UnaryOp::Neg, result));
-    }
-
+    if (is_neg) return traced_result(RuleId::SimplifyMultiplyByOne, target_before, arena_.make<Unary>(UnaryOp::Neg, result));
     return ok(result);
 }
 

@@ -40,6 +40,7 @@ enum class ExprKind : std::uint8_t {
     Limit,
     RootOf,
     Matrix,
+    SeriesExp,
 };
 
 struct ExprNode {
@@ -291,6 +292,18 @@ struct Matrix : ExprNode {
     std::vector<ExprPtr> elements;
 };
 
+struct SeriesExp : ExprNode {
+    static constexpr ExprKind KIND = ExprKind::SeriesExp;
+
+    SeriesExp(Symbol series_var, ExprPtr series_point, std::vector<std::pair<long long, ExprPtr>> series_terms, long long series_order)
+        : ExprNode(KIND), var(std::move(series_var)), point(series_point), terms(std::move(series_terms)), order(series_order) {}
+
+    Symbol var;
+    ExprPtr point;
+    std::vector<std::pair<long long, ExprPtr>> terms; // (exp, coeff)
+    long long order;
+};
+
 [[nodiscard]] ExprKind expr_kind(ExprPtr expr) noexcept;
 [[nodiscard]] bool structural_equal(ExprPtr lhs, ExprPtr rhs) noexcept;
 [[nodiscard]] std::size_t expr_hash(ExprPtr expr) noexcept;
@@ -451,6 +464,8 @@ decltype(auto) visit_expr(ExprPtr expr, Visitor&& visitor) {
         return std::forward<Visitor>(visitor)(expr_ref<RootOf>(expr));
     case ExprKind::Matrix:
         return std::forward<Visitor>(visitor)(expr_ref<Matrix>(expr));
+    case ExprKind::SeriesExp:
+        return std::forward<Visitor>(visitor)(expr_ref<SeriesExp>(expr));
     case ExprKind::Null:
         std::abort();
     }

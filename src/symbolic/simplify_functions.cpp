@@ -77,6 +77,10 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const FuncCall& node
     if (node.func_id == BuiltinOp::Exp && args.size() == 1U) {
         if (is_zero_expr(args.front())) return traced_result(RuleId::SimplifyExpZero, target_before, make_integer(arena_, BigInt(1)));
         if (is_one_expr(args.front())) return traced_result(RuleId::SimplifyExpOne, target_before, make_constant(arena_, MathConstant::E));
+        if (is_constant_expr(args.front(), MathConstant::Infinity)) return traced_result(RuleId::Unknown, target_before, make_constant(arena_, MathConstant::Infinity));
+        if (expr_is<Unary>(args.front()) && expr_ref<Unary>(args.front()).op == UnaryOp::Neg && is_constant_expr(expr_ref<Unary>(args.front()).operand, MathConstant::Infinity)) {
+            return traced_result(RuleId::Unknown, target_before, make_integer(arena_, BigInt(0)));
+        }
         if (const auto* sum = expr_cast<Sum>(args.front())) {
             std::vector<ExprPtr> factors;
             for (ExprPtr term : sum->terms) factors.push_back(arena_.make<FuncCall>(BuiltinOp::Exp, std::vector<ExprPtr>{term}));
@@ -87,6 +91,7 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const FuncCall& node
     if (node.func_id == BuiltinOp::Ln && args.size() == 1U) {
         if (is_one_expr(args.front())) return traced_result(RuleId::SimplifyLnOne, target_before, make_integer(arena_, BigInt(0)));
         if (is_constant_expr(args.front(), MathConstant::E)) return traced_result(RuleId::SimplifyLnE, target_before, make_integer(arena_, BigInt(1)));
+        if (is_constant_expr(args.front(), MathConstant::Infinity)) return traced_result(RuleId::Unknown, target_before, make_constant(arena_, MathConstant::Infinity));
         if (const auto* power = expr_cast<Binary>(args.front()); power != nullptr && power->op == BinaryOp::Pow && is_constant_expr(power->left, MathConstant::E)) {
             return traced_result(RuleId::SimplifyLnExp, target_before, power->right);
         }
@@ -174,8 +179,6 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const FuncCall& node
     }
 
     if (node.func_id == BuiltinOp::Sin || node.func_id == BuiltinOp::Cos) {
-        // Simple Trig Identity pass could be added here, but usually it's in a dedicated rewrite rule.
-        // For Test 3, we need to recognize sin(x)^2 + cos(x)^2 = 1.
     }
 
 
@@ -264,6 +267,46 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const Matrix& node) 
     }
     if (expr_ptr_sequence_identical(elements, node.elements)) return ok(original);
     return ok(arena_.make<Matrix>(node.rows, node.cols, std::move(elements)));
+}
+
+Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const SeriesExp& node) {
+    std::vector<std::pair<long long, ExprPtr>> simplified_terms;
+    simplified_terms.reserve(node.terms.size());
+    bool changed = false;
+
+    // Simplify point
+    auto simplified_point = [&]() -> Result<ExprPtr> {
+        if (trace_enabled_) {
+            ScopedFrame frame(*this, [this, &node](ExprPtr value) {
+                return arena_.make<SeriesExp>(node.var, value, node.terms, node.order);
+            });
+            return simplify_expr(node.point);
+        }
+        return simplify_expr(node.point);
+    }();
+    if (simplified_point.is_error()) return simplified_point;
+    if (simplified_point.value() != node.point) changed = true;
+
+    // Simplify terms
+    for (std::size_t i = 0; i < node.terms.size(); ++i) {
+        auto simplified_coeff = [&]() -> Result<ExprPtr> {
+            if (trace_enabled_) {
+                ScopedFrame frame(*this, [this, &node, i](ExprPtr value) {
+                    auto terms = node.terms;
+                    terms[i].second = value;
+                    return arena_.make<SeriesExp>(node.var, node.point, std::move(terms), node.order);
+                });
+                return simplify_expr(node.terms[i].second);
+            }
+            return simplify_expr(node.terms[i].second);
+        }();
+        if (simplified_coeff.is_error()) return simplified_coeff;
+        if (simplified_coeff.value() != node.terms[i].second) changed = true;
+        simplified_terms.push_back({node.terms[i].first, simplified_coeff.value()});
+    }
+
+    if (!changed) return ok(original);
+    return ok(arena_.make<SeriesExp>(node.var, simplified_point.value(), std::move(simplified_terms), node.order));
 }
 
 template <typename Node>

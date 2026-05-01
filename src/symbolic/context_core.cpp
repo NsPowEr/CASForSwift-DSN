@@ -128,6 +128,10 @@ namespace cas::symbolic {
                     weight += expr_weight(element);
                 }
                 return weight;
+            } else if constexpr (std::is_same_v<Node, SeriesExp>) {
+                std::size_t weight = expr_weight(node.point);
+                for (const auto& [exp, coeff] : node.terms) weight += expr_weight(coeff);
+                return weight;
             } else {
                 return 0U;
             }
@@ -216,6 +220,13 @@ namespace cas::symbolic {
                     elements.push_back(materialize_expr_impl(element, arena).value());
                 }
                 return arena.make<Matrix>(node.rows, node.cols, std::move(elements));
+            } else if constexpr (std::is_same_v<Node, SeriesExp>) {
+                std::vector<std::pair<long long, ExprPtr>> terms;
+                terms.reserve(node.terms.size());
+                for (const auto& [exp, coeff] : node.terms) {
+                    terms.push_back({exp, materialize_expr_impl(coeff, arena).value()});
+                }
+                return arena.make<SeriesExp>(node.var, materialize_expr_impl(node.point, arena).value(), std::move(terms), node.order);
             } else {
                 return ExprPtr{};
             }
@@ -308,6 +319,13 @@ namespace cas::symbolic {
                     elements.push_back(instantiate_pattern(element, matches, arena));
                 }
                 return arena.make<Matrix>(node.rows, node.cols, std::move(elements));
+            } else if constexpr (std::is_same_v<Node, SeriesExp>) {
+                std::vector<std::pair<long long, ExprPtr>> terms;
+                terms.reserve(node.terms.size());
+                for (const auto& [exp, coeff] : node.terms) {
+                    terms.push_back({exp, instantiate_pattern(coeff, matches, arena)});
+                }
+                return arena.make<SeriesExp>(node.var, instantiate_pattern(node.point, matches, arena), std::move(terms), node.order);
             } else {
                 return ExprPtr{};
             }

@@ -57,6 +57,11 @@ void append_difference_terms(ExprPtr expr, bool negate, std::vector<ExprPtr>& te
         else if constexpr (std::is_same_v<Node, Limit>) return expr_weight(node.expression) + expr_weight(node.point);
         else if constexpr (std::is_same_v<Node, RootOf>) return expr_weight(node.polynomial);
         else if constexpr (std::is_same_v<Node, Matrix>) { std::size_t w = 0; for (ExprPtr e : node.elements) w += expr_weight(e); return w; }
+        else if constexpr (std::is_same_v<Node, SeriesExp>) {
+            std::size_t w = expr_weight(node.point);
+            for (const auto& [exp, coeff] : node.terms) w += expr_weight(coeff);
+            return w;
+        }
         return 0U;
     });
 }

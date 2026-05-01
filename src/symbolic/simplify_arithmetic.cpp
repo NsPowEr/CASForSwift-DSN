@@ -489,6 +489,32 @@ Result<ExprPtr> Simplifier::simplify_power(ExprPtr base, ExprPtr exponent, ExprP
         }
     }
 
+    // GAP #6: exp(a)^b -> exp(a*b)
+    ExprPtr exp_base = base;
+    bool neg_sign = false;
+    if (const auto* neg = expr_cast<Unary>(base); neg != nullptr && neg->op == UnaryOp::Neg) {
+        exp_base = neg->operand;
+        neg_sign = true;
+    }
+
+    if (const auto* exp_call = expr_cast<FuncCall>(exp_base);
+        exp_call != nullptr && exp_call->func_id == BuiltinOp::Exp && exp_call->args.size() == 1U) {
+        auto new_arg = simplify_expr(arena_.make<Binary>(BinaryOp::Mul, exp_call->args.front(), exponent));
+        if (new_arg.is_ok()) {
+            ExprPtr res = arena_.make<FuncCall>(BuiltinOp::Exp, std::vector<ExprPtr>{new_arg.value()});
+            if (neg_sign) {
+                if (auto exp_val = try_get_integer_exponent(exponent); exp_val.has_value()) {
+                    if ((*exp_val % BigInt(2)) != BigInt(0)) res = arena_.make<Unary>(UnaryOp::Neg, res);
+                    // if even, remains positive
+                } else {
+                    // complex case, skip for now
+                    return ok(arena_.make<Binary>(BinaryOp::Pow, base, exponent));
+                }
+            }
+            return simplify_expr(res);
+        }
+    }
+
     if (expr_is<Binary>(target_before)) {
         const auto& before = expr_ref<Binary>(target_before);
         if (before.op == BinaryOp::Pow && before.left == base && before.right == exponent) return ok(target_before);

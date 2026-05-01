@@ -11,6 +11,10 @@
 
 namespace cas::calculus {
 
+[[nodiscard]] static CASError make_error(CASErrorKind kind, std::string message) {
+    return CASError{.kind = kind, .message = std::move(message), .hint = std::nullopt};
+}
+
 [[nodiscard]] ExprPtr limit_make_integer(AstArena& arena, long long value) {
     return arena.make<IntegerLit>(BigInt(value));
 }
@@ -189,11 +193,54 @@ std::optional<QuotientView> extract_quotient_view(ExprPtr expr, AstArena& arena)
 Result<ExprPtr> try_infinite_limit(ExprPtr expr, const Symbol& var, ExprPtr point, AstArena& arena) {
     if (!depends_on(expr, var)) return ok(expr);
     
-    // Check for exp(x) -> inf when x -> inf
+    const bool is_pos_inf = !expr_is<Unary>(point);
+
     if (const auto* call = expr_cast<FuncCall>(expr)) {
         if (call->func_id == BuiltinOp::Exp) {
-            if (!expr_is<Unary>(point)) return ok(arena.make<Constant>(MathConstant::Infinity));
+            if (is_pos_inf) return ok(arena.make<Constant>(MathConstant::Infinity));
             return ok(limit_make_integer(arena, 0));
+        }
+        if (call->func_id == BuiltinOp::Ln) {
+            auto inner = try_infinite_limit(call->args[0], var, point, arena);
+            if (inner.is_ok() && limit_is_infinity(inner.value())) {
+                if (expr_is<Unary>(inner.value())) {
+                    return fail<ExprPtr>(make_error(CASErrorKind::Undefined, "ln(-inf) is undefined"));
+                }
+                return ok(arena.make<Constant>(MathConstant::Infinity));
+            }
+        }
+    }
+
+    if (const auto* sum = expr_cast<Sum>(expr)) {
+        for (auto t : sum->terms) {
+            auto lim_t = try_infinite_limit(t, var, point, arena);
+            if (lim_t.is_ok() && limit_is_infinity(lim_t.value())) {
+                return lim_t;
+            }
+        }
+    }
+
+    if (const auto* sym = expr_cast<Symbol>(expr)) {
+        if (sym->name == var.name) return ok(point);
+    }
+
+    if (const auto* bin = expr_cast<Binary>(expr)) {
+        if (bin->op == BinaryOp::Pow) {
+            auto base_lim = try_infinite_limit(bin->left, var, point, arena);
+            auto exp_lim = try_infinite_limit(bin->right, var, point, arena);
+            if (base_lim.is_ok() && limit_is_infinity(base_lim.value()) && !expr_is<Unary>(base_lim.value())) {
+                if (exp_lim.is_ok()) {
+                    if (limit_is_infinity(exp_lim.value())) {
+                        if (!expr_is<Unary>(exp_lim.value())) return ok(base_lim.value()); // inf^inf = inf
+                        return ok(limit_make_integer(arena, 0)); // inf^-inf = 0
+                    }
+                    auto rat = rational_from_expr(exp_lim.value());
+                    if (rat.has_value()) {
+                        if (rat->numerator() > BigInt(0)) return ok(base_lim.value());
+                        if (rat->numerator() < BigInt(0)) return ok(limit_make_integer(arena, 0));
+                    }
+                }
+            }
         }
     }
     

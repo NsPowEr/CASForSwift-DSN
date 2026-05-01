@@ -167,6 +167,17 @@ struct DebugPrintVisitor {
         out << "Matrix(" << value.rows << ", " << value.cols << ", [" << join_expr_list(value.elements) << "])";
         return std::move(out).str();
     }
+
+    [[nodiscard]] std::string operator()(const SeriesExp& value) const {
+        std::ostringstream out;
+        out << "SeriesExp(" << value.var.name << ", point=" << debug_print_impl(value.point) << ", terms=[";
+        for (std::size_t i = 0; i < value.terms.size(); ++i) {
+            if (i > 0) out << ", ";
+            out << "(" << value.terms[i].first << ", " << debug_print_impl(value.terms[i].second) << ")";
+        }
+        out << "], order=" << value.order << ")";
+        return std::move(out).str();
+    }
 };
 
 [[nodiscard]] std::string debug_print_impl(ExprPtr expr) {

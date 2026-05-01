@@ -111,6 +111,7 @@ private:
     [[nodiscard]] Result<ExprPtr> simplify_node(ExprPtr original, const Limit& node);
     [[nodiscard]] Result<ExprPtr> simplify_node(ExprPtr original, const RootOf& node);
     [[nodiscard]] Result<ExprPtr> simplify_node(ExprPtr original, const Matrix& node);
+    [[nodiscard]] Result<ExprPtr> simplify_node(ExprPtr original, const SeriesExp& node);
 
     // Template and generic node handlers
     template <typename Node>

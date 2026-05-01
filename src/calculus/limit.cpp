@@ -53,8 +53,9 @@ public:
             if (q_inf.has_value()) {
                 LimitDirection inf_dir = point_is_pos_inf
                     ? LimitDirection::Right : LimitDirection::Left;
-                if (auto ll = try_log_log_limit(q_inf.value(), var,
-                                                 simplified_point.value(), inf_dir, 0U)) {
+                auto ll = try_log_log_limit(q_inf.value(), var,
+                                                 simplified_point.value(), inf_dir, 0U);
+                if (ll.has_value()) {
                     return ll.value();
                 }
             }
@@ -95,7 +96,8 @@ private:
         if (substituted.is_error()) {
             return substituted;
         }
-        return context_.simplify(substituted.value());
+        auto res = context_.simplify(substituted.value());
+        return res;
     }
 
     [[nodiscard]] Result<ExprPtr> compute_recursive(
@@ -212,11 +214,11 @@ private:
         ExprPtr a = num_call->args[0];
         ExprPtr b = den_call->args[0];
 
-        // Verifica a,b→∞ al punto (sostituzione produce errore Undefined = diverge)
-        auto a_at_pt = substitute_and_simplify(a, var, point);
-        if (a_at_pt.is_ok() && !limit_is_infinity(a_at_pt.value())) return std::nullopt;
-        auto b_at_pt = substitute_and_simplify(b, var, point);
-        if (b_at_pt.is_ok() && !limit_is_infinity(b_at_pt.value())) return std::nullopt;
+        // Verifica a,b→∞ al punto
+        auto a_lim = compute_recursive(a, var, point, dir, depth + 1U);
+        if (!a_lim.is_ok() || !limit_is_infinity(a_lim.value())) return std::nullopt;
+        auto b_lim = compute_recursive(b, var, point, dir, depth + 1U);
+        if (!b_lim.is_ok() || !limit_is_infinity(b_lim.value())) return std::nullopt;
 
         // Calcola lim(a/b) ricorsivamente
         ExprPtr a_over_b = arena_.make<Binary>(BinaryOp::Div, a, b);

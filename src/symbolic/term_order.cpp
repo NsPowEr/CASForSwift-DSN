@@ -36,6 +36,7 @@ namespace {
     case ExprKind::Limit:
     case ExprKind::RootOf:
     case ExprKind::Matrix:
+    case ExprKind::SeriesExp:
         return 8;
     }
 
@@ -134,6 +135,10 @@ namespace {
                 return {node.polynomial};
             } else if constexpr (std::is_same_v<Node, Matrix>) {
                 return node.elements;
+            } else if constexpr (std::is_same_v<Node, SeriesExp>) {
+                std::vector<ExprPtr> children{node.point};
+                for (const auto& [exp, coeff] : node.terms) children.push_back(coeff);
+                return children;
             } else {
                 return {};
             }
@@ -179,6 +184,44 @@ int canonical_compare(ExprPtr lhs, ExprPtr rhs) noexcept {
         if (lhs_symbol->name < rhs_symbol->name) return -1;
         if (rhs_symbol->name < lhs_symbol->name) return 1;
         return 0;
+    }
+
+    if (const auto* lhs_derivative = expr_cast<Derivative>(lhs)) {
+        const auto* rhs_derivative = expr_cast<Derivative>(rhs);
+        if (lhs_derivative->order < rhs_derivative->order) return -1;
+        if (lhs_derivative->order > rhs_derivative->order) return 1;
+        int var_cmp = compare_string_precedence(lhs_derivative->variable.name, rhs_derivative->variable.name);
+        if (var_cmp != 0) return var_cmp;
+        return canonical_compare(lhs_derivative->expression, rhs_derivative->expression);
+    }
+
+    if (const auto* lhs_integral = expr_cast<Integral>(lhs)) {
+        const auto* rhs_integral = expr_cast<Integral>(rhs);
+        int var_cmp = compare_string_precedence(lhs_integral->variable.name, rhs_integral->variable.name);
+        if (var_cmp != 0) return var_cmp;
+        int int_cmp = canonical_compare(lhs_integral->integrand, rhs_integral->integrand);
+        if (int_cmp != 0) return int_cmp;
+        // Compare optional limits
+        auto compare_opt = [](const std::optional<ExprPtr>& l, const std::optional<ExprPtr>& r) -> int {
+            if (!l.has_value() && !r.has_value()) return 0;
+            if (!l.has_value()) return -1;
+            if (!r.has_value()) return 1;
+            return canonical_compare(*l, *r);
+        };
+        int low_cmp = compare_opt(lhs_integral->lower, rhs_integral->lower);
+        if (low_cmp != 0) return low_cmp;
+        return compare_opt(lhs_integral->upper, rhs_integral->upper);
+    }
+
+    if (const auto* lhs_limit = expr_cast<Limit>(lhs)) {
+        const auto* rhs_limit = expr_cast<Limit>(rhs);
+        int var_cmp = compare_string_precedence(lhs_limit->variable.name, rhs_limit->variable.name);
+        if (var_cmp != 0) return var_cmp;
+        if (lhs_limit->direction < rhs_limit->direction) return -1;
+        if (lhs_limit->direction > rhs_limit->direction) return 1;
+        int expr_cmp = canonical_compare(lhs_limit->expression, rhs_limit->expression);
+        if (expr_cmp != 0) return expr_cmp;
+        return canonical_compare(lhs_limit->point, rhs_limit->point);
     }
 
     if (const auto* lhs_unary = expr_cast<Unary>(lhs)) {

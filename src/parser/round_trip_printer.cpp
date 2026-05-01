@@ -348,6 +348,22 @@ private:
         out << ']';
         return ok(std::move(out).str());
     }
+
+    [[nodiscard]] Result<std::string> print_node(const SeriesExp& value, int) const {
+        auto point = print_expr(value.point, static_cast<int>(ExprPrecedence::Lowest));
+        if (point.is_error()) return point;
+
+        std::ostringstream out;
+        out << "Series(" << value.var.name << "," << point.value() << ",[";
+        for (std::size_t i = 0; i < value.terms.size(); ++i) {
+            if (i > 0) out << ",";
+            auto coeff = print_expr(value.terms[i].second, static_cast<int>(ExprPrecedence::Lowest));
+            if (coeff.is_error()) return coeff;
+            out << "(" << value.terms[i].first << "," << coeff.value() << ")";
+        }
+        out << "]," << value.order << ")";
+        return ok(std::move(out).str());
+    }
 };
 
 }  // namespace

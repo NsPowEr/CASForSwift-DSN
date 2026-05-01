@@ -243,16 +243,26 @@ using RewriteStep = std::function<Result<ExprPtr>(ExprPtr)>;
                 bool changed = false;
                 for (ExprPtr element : node.elements) {
                     auto rewritten = recurse(element);
-                    if (rewritten.is_error()) {
-                        return rewritten;
-                    }
+                    if (rewritten.is_error()) return rewritten;
                     changed = changed || rewritten.value() != element;
                     elements.push_back(rewritten.value());
                 }
-                if (!changed) {
-                    return ok(expr);
-                }
+                if (!changed) return ok(expr);
                 return ok(arena.make<Matrix>(node.rows, node.cols, std::move(elements)));
+            } else if constexpr (std::is_same_v<Node, SeriesExp>) {
+                auto rewritten_point = recurse(node.point);
+                if (rewritten_point.is_error()) return rewritten_point;
+                bool changed = rewritten_point.value() != node.point;
+                std::vector<std::pair<long long, ExprPtr>> terms;
+                terms.reserve(node.terms.size());
+                for (const auto& [exp, coeff] : node.terms) {
+                    auto rewritten_coeff = recurse(coeff);
+                    if (rewritten_coeff.is_error()) return rewritten_coeff;
+                    changed = changed || rewritten_coeff.value() != coeff;
+                    terms.push_back({exp, rewritten_coeff.value()});
+                }
+                if (!changed) return ok(expr);
+                return ok(arena.make<SeriesExp>(node.var, rewritten_point.value(), std::move(terms), node.order));
             } else {
                 return ok(expr);
             }
