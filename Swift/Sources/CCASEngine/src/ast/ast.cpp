@@ -1,0 +1,377 @@
+#include "cas/ast.hpp"
+
+#include <cstddef>
+#include <new>
+
+namespace cas {
+
+namespace {
+
+bool optional_expr_equal(const std::optional<ExprPtr>& lhs, const std::optional<ExprPtr>& rhs) noexcept {
+    if (lhs.has_value() != rhs.has_value()) {
+        return false;
+    }
+
+    if (!lhs.has_value()) {
+        return true;
+    }
+
+    return structural_equal(*lhs, *rhs);
+}
+
+template <typename Container>
+bool expr_ptr_range_equal(const Container& lhs, const Container& rhs) noexcept {
+    if (lhs.size() != rhs.size()) {
+        return false;
+    }
+
+    for (std::size_t index = 0; index < lhs.size(); ++index) {
+        if (!structural_equal(lhs[index], rhs[index])) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool big_int_equal(const BigInt& lhs, const BigInt& rhs) noexcept {
+    return lhs == rhs;
+}
+
+void destroy_node(ExprNode* node) noexcept {
+    switch (node->kind) {
+    case ExprKind::IntegerLit:
+        static_cast<IntegerLit*>(node)->~IntegerLit();
+        break;
+    case ExprKind::RationalLit:
+        static_cast<RationalLit*>(node)->~RationalLit();
+        break;
+    case ExprKind::DecimalLit:
+        static_cast<DecimalLit*>(node)->~DecimalLit();
+        break;
+    case ExprKind::Symbol:
+        static_cast<Symbol*>(node)->~Symbol();
+        break;
+    case ExprKind::Constant:
+        static_cast<Constant*>(node)->~Constant();
+        break;
+    case ExprKind::Unary:
+        static_cast<Unary*>(node)->~Unary();
+        break;
+    case ExprKind::Binary:
+        static_cast<Binary*>(node)->~Binary();
+        break;
+    case ExprKind::FuncCall:
+        static_cast<FuncCall*>(node)->~FuncCall();
+        break;
+    case ExprKind::Sum:
+        static_cast<Sum*>(node)->~Sum();
+        break;
+    case ExprKind::Product:
+        static_cast<Product*>(node)->~Product();
+        break;
+    case ExprKind::Integral:
+        static_cast<Integral*>(node)->~Integral();
+        break;
+    case ExprKind::Derivative:
+        static_cast<Derivative*>(node)->~Derivative();
+        break;
+    case ExprKind::Limit:
+        static_cast<Limit*>(node)->~Limit();
+        break;
+    case ExprKind::RootOf:
+        static_cast<RootOf*>(node)->~RootOf();
+        break;
+    case ExprKind::Matrix:
+        static_cast<Matrix*>(node)->~Matrix();
+        break;
+    case ExprKind::Null:
+        break;
+    }
+}
+
+}  // namespace
+
+AstArena::~AstArena() {
+    for (auto& chunk : node_chunks_) {
+        for (ExprNode* node : chunk) {
+            if (node != nullptr) {
+                destroy_node(node);
+            }
+        }
+    }
+}
+
+void* AstArena::allocate(std::size_t size, std::size_t alignment) {
+    if (blocks_.empty()) {
+        append_block(size + alignment);
+    }
+
+    auto align_up = [](std::size_t value, std::size_t align) noexcept {
+        const std::size_t remainder = value % align;
+        return remainder == 0U ? value : value + (align - remainder);
+    };
+
+    Block* block = &blocks_.back();
+    std::size_t offset = align_up(block->used, alignment);
+    if (offset + size > block->capacity) {
+        append_block(size + alignment);
+        block = &blocks_.back();
+        offset = align_up(block->used, alignment);
+    }
+
+    std::byte* memory = block->data.get() + offset;
+    block->used = offset + size;
+    return memory;
+}
+
+void AstArena::append_block(std::size_t minimum_bytes) {
+    const std::size_t capacity = minimum_bytes > DEFAULT_BLOCK_BYTES ? minimum_bytes : DEFAULT_BLOCK_BYTES;
+    blocks_.push_back(Block{
+        .data = std::make_unique<std::byte[]>(capacity),
+        .capacity = capacity,
+        .used = 0U,
+    });
+}
+
+std::size_t AstArena::size() const noexcept {
+    return total_nodes_;
+}
+
+ExprKind expr_kind(ExprPtr expr) noexcept {
+    return expr ? expr->kind : ExprKind::Null;
+}
+
+bool structural_equal(ExprPtr lhs, ExprPtr rhs) noexcept {
+    if (lhs == rhs) {
+        return true;
+    }
+
+    if (!lhs || !rhs) {
+        return false;
+    }
+
+    if (lhs->kind != rhs->kind) {
+        return false;
+    }
+
+    switch (lhs->kind) {
+    case ExprKind::IntegerLit: {
+        const auto& lhs_value = expr_ref<IntegerLit>(lhs);
+        const auto& rhs_value = expr_ref<IntegerLit>(rhs);
+        return big_int_equal(lhs_value.value, rhs_value.value);
+    }
+    case ExprKind::RationalLit: {
+        const auto& lhs_value = expr_ref<RationalLit>(lhs);
+        const auto& rhs_value = expr_ref<RationalLit>(rhs);
+        return big_int_equal(lhs_value.numerator, rhs_value.numerator) &&
+               big_int_equal(lhs_value.denominator, rhs_value.denominator);
+    }
+    case ExprKind::DecimalLit:
+        return expr_ref<DecimalLit>(lhs).text == expr_ref<DecimalLit>(rhs).text;
+    case ExprKind::Symbol:
+        return expr_ref<Symbol>(lhs).name == expr_ref<Symbol>(rhs).name;
+    case ExprKind::Constant:
+        return expr_ref<Constant>(lhs).value == expr_ref<Constant>(rhs).value;
+    case ExprKind::Unary: {
+        const auto& lhs_value = expr_ref<Unary>(lhs);
+        const auto& rhs_value = expr_ref<Unary>(rhs);
+        return lhs_value.op == rhs_value.op && structural_equal(lhs_value.operand, rhs_value.operand);
+    }
+    case ExprKind::Binary: {
+        const auto& lhs_value = expr_ref<Binary>(lhs);
+        const auto& rhs_value = expr_ref<Binary>(rhs);
+        return lhs_value.op == rhs_value.op &&
+               structural_equal(lhs_value.left, rhs_value.left) &&
+               structural_equal(lhs_value.right, rhs_value.right);
+    }
+    case ExprKind::FuncCall: {
+        const auto& lhs_value = expr_ref<FuncCall>(lhs);
+        const auto& rhs_value = expr_ref<FuncCall>(rhs);
+        return lhs_value.name == rhs_value.name && expr_ptr_range_equal(lhs_value.args, rhs_value.args);
+    }
+    case ExprKind::Sum:
+        return expr_ptr_range_equal(expr_ref<Sum>(lhs).terms, expr_ref<Sum>(rhs).terms);
+    case ExprKind::Product:
+        return expr_ptr_range_equal(expr_ref<Product>(lhs).factors, expr_ref<Product>(rhs).factors);
+    case ExprKind::Integral: {
+        const auto& lhs_value = expr_ref<Integral>(lhs);
+        const auto& rhs_value = expr_ref<Integral>(rhs);
+        return structural_equal(lhs_value.integrand, rhs_value.integrand) &&
+               lhs_value.variable.name == rhs_value.variable.name &&
+               optional_expr_equal(lhs_value.lower, rhs_value.lower) &&
+               optional_expr_equal(lhs_value.upper, rhs_value.upper);
+    }
+    case ExprKind::Derivative: {
+        const auto& lhs_value = expr_ref<Derivative>(lhs);
+        const auto& rhs_value = expr_ref<Derivative>(rhs);
+        return structural_equal(lhs_value.expression, rhs_value.expression) &&
+               lhs_value.variable.name == rhs_value.variable.name &&
+               lhs_value.order == rhs_value.order;
+    }
+    case ExprKind::Limit: {
+        const auto& lhs_value = expr_ref<Limit>(lhs);
+        const auto& rhs_value = expr_ref<Limit>(rhs);
+        return structural_equal(lhs_value.expression, rhs_value.expression) &&
+               lhs_value.variable.name == rhs_value.variable.name &&
+               structural_equal(lhs_value.point, rhs_value.point) &&
+               lhs_value.direction == rhs_value.direction;
+    }
+    case ExprKind::RootOf: {
+        const auto& lhs_value = expr_ref<RootOf>(lhs);
+        const auto& rhs_value = expr_ref<RootOf>(rhs);
+        return structural_equal(lhs_value.polynomial, rhs_value.polynomial) &&
+               lhs_value.variable.name == rhs_value.variable.name &&
+               lhs_value.root_index == rhs_value.root_index;
+    }
+    case ExprKind::Matrix: {
+        const auto& lhs_value = expr_ref<Matrix>(lhs);
+        const auto& rhs_value = expr_ref<Matrix>(rhs);
+        return lhs_value.rows == rhs_value.rows &&
+               lhs_value.cols == rhs_value.cols &&
+               expr_ptr_range_equal(lhs_value.elements, rhs_value.elements);
+    }
+    case ExprKind::Null:
+        return false;
+    }
+
+    return false;
+}
+
+std::size_t expr_hash(ExprPtr expr) noexcept {
+    if (!expr) return 0;
+
+    auto hash_combine = [](std::size_t& seed, std::size_t value) {
+        seed ^= value + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+    };
+
+    std::size_t seed = static_cast<std::size_t>(expr->kind);
+
+    switch (expr->kind) {
+    case ExprKind::IntegerLit:
+        hash_combine(seed, std::hash<std::string>{}(expr_ref<IntegerLit>(expr).value.decimal()));
+        break;
+    case ExprKind::RationalLit: {
+        const auto& node = expr_ref<RationalLit>(expr);
+        hash_combine(seed, std::hash<std::string>{}(node.numerator.decimal()));
+        hash_combine(seed, std::hash<std::string>{}(node.denominator.decimal()));
+        break;
+    }
+    case ExprKind::DecimalLit:
+        hash_combine(seed, std::hash<std::string>{}(expr_ref<DecimalLit>(expr).text));
+        break;
+    case ExprKind::Symbol:
+        hash_combine(seed, std::hash<std::string>{}(expr_ref<Symbol>(expr).name));
+        break;
+    case ExprKind::Constant:
+        hash_combine(seed, static_cast<std::size_t>(expr_ref<Constant>(expr).value));
+        break;
+    case ExprKind::Unary: {
+        const auto& node = expr_ref<Unary>(expr);
+        hash_combine(seed, static_cast<std::size_t>(node.op));
+        hash_combine(seed, expr_hash(node.operand));
+        break;
+    }
+    case ExprKind::Binary: {
+        const auto& node = expr_ref<Binary>(expr);
+        hash_combine(seed, static_cast<std::size_t>(node.op));
+        hash_combine(seed, expr_hash(node.left));
+        hash_combine(seed, expr_hash(node.right));
+        break;
+    }
+    case ExprKind::FuncCall: {
+        const auto& node = expr_ref<FuncCall>(expr);
+        hash_combine(seed, std::hash<std::string>{}(node.name));
+        for (auto arg : node.args) hash_combine(seed, expr_hash(arg));
+        break;
+    }
+    case ExprKind::Sum:
+        for (auto term : expr_ref<Sum>(expr).terms) hash_combine(seed, expr_hash(term));
+        break;
+    case ExprKind::Product:
+        for (auto factor : expr_ref<Product>(expr).factors) hash_combine(seed, expr_hash(factor));
+        break;
+    case ExprKind::Integral: {
+        const auto& node = expr_ref<Integral>(expr);
+        hash_combine(seed, expr_hash(node.integrand));
+        hash_combine(seed, std::hash<std::string>{}(node.variable.name));
+        if (node.lower) hash_combine(seed, expr_hash(*node.lower));
+        if (node.upper) hash_combine(seed, expr_hash(*node.upper));
+        break;
+    }
+    case ExprKind::Derivative: {
+        const auto& node = expr_ref<Derivative>(expr);
+        hash_combine(seed, expr_hash(node.expression));
+        hash_combine(seed, std::hash<std::string>{}(node.variable.name));
+        hash_combine(seed, node.order);
+        break;
+    }
+    case ExprKind::Limit: {
+        const auto& node = expr_ref<Limit>(expr);
+        hash_combine(seed, expr_hash(node.expression));
+        hash_combine(seed, std::hash<std::string>{}(node.variable.name));
+        hash_combine(seed, expr_hash(node.point));
+        hash_combine(seed, static_cast<std::size_t>(node.direction));
+        break;
+    }
+    case ExprKind::RootOf: {
+        const auto& node = expr_ref<RootOf>(expr);
+        hash_combine(seed, expr_hash(node.polynomial));
+        hash_combine(seed, std::hash<std::string>{}(node.variable.name));
+        if (node.root_index) hash_combine(seed, *node.root_index);
+        break;
+    }
+    case ExprKind::Matrix: {
+        const auto& node = expr_ref<Matrix>(expr);
+        hash_combine(seed, node.rows);
+        hash_combine(seed, node.cols);
+        for (auto elem : node.elements) hash_combine(seed, expr_hash(elem));
+        break;
+    }
+    case ExprKind::Null:
+        break;
+    }
+
+    return seed;
+}
+
+std::string_view expr_kind_name(ExprKind kind) noexcept {
+    switch (kind) {
+    case ExprKind::Null:
+        return "Null";
+    case ExprKind::IntegerLit:
+        return "IntegerLit";
+    case ExprKind::RationalLit:
+        return "RationalLit";
+    case ExprKind::DecimalLit:
+        return "DecimalLit";
+    case ExprKind::Symbol:
+        return "Symbol";
+    case ExprKind::Constant:
+        return "Constant";
+    case ExprKind::Unary:
+        return "Unary";
+    case ExprKind::Binary:
+        return "Binary";
+    case ExprKind::FuncCall:
+        return "FuncCall";
+    case ExprKind::Sum:
+        return "Sum";
+    case ExprKind::Product:
+        return "Product";
+    case ExprKind::Integral:
+        return "Integral";
+    case ExprKind::Derivative:
+        return "Derivative";
+    case ExprKind::Limit:
+        return "Limit";
+    case ExprKind::RootOf:
+        return "RootOf";
+    case ExprKind::Matrix:
+        return "Matrix";
+    }
+
+    return "Unknown";
+}
+
+}  // namespace cas

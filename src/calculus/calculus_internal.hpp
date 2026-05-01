@@ -1,0 +1,96 @@
+#pragma once
+
+#include "cas/ast.hpp"
+#include "cas/calculus.hpp"
+#include "cas/result.hpp"
+#include "cas/symbolic.hpp"
+
+#include <optional>
+#include <string>
+#include <vector>
+#include <set>
+
+namespace cas::calculus {
+
+struct QuotientView {
+    ExprPtr numerator;
+    ExprPtr denominator;
+};
+
+/// @brief Differentiates transcendental functions.
+/// Handles asin, acos, atan, sinh, cosh, tanh.
+[[nodiscard]] Result<ExprPtr> differentiate_transcendental(
+    BuiltinOp func_id,
+    ExprPtr argument,
+    const Symbol& var,
+    symbolic::CASContext& context);
+
+/// @brief Integration by parts: ∫ u dv = uv - ∫ v du
+[[nodiscard]] Result<ExprPtr> integrate_by_parts(
+    ExprPtr expr,
+    const Symbol& var,
+    symbolic::CASContext& context);
+
+/// @brief Partial Risch Algorithm for Logarithmic and Exponential extensions.
+[[nodiscard]] Result<ExprPtr> integrate_risch(
+    ExprPtr expr,
+    const Symbol& var,
+    symbolic::CASContext& context);
+
+[[nodiscard]] ExprPtr limit_make_integer(AstArena& arena, long long value);
+[[nodiscard]] ExprPtr limit_make_binary(AstArena& arena, BinaryOp op, ExprPtr lhs, ExprPtr rhs);
+[[nodiscard]] bool limit_is_zero(ExprPtr expr);
+[[nodiscard]] bool limit_is_infinity(ExprPtr expr);
+[[nodiscard]] std::optional<QuotientView> extract_quotient_view(ExprPtr expr, AstArena& arena);
+[[nodiscard]] std::optional<ExprPtr> cancel_common_linear_factor(
+    ExprPtr numerator,
+    ExprPtr denominator,
+    const Symbol& var,
+    ExprPtr point,
+    AstArena& arena);
+[[nodiscard]] std::optional<Result<ExprPtr>> try_polynomial_pole_limit(
+    ExprPtr numerator,
+    ExprPtr denominator,
+    const Symbol& var,
+    ExprPtr point,
+    LimitDirection dir,
+    AstArena& arena);
+[[nodiscard]] std::optional<Result<ExprPtr>> try_logarithmic_root_limit(
+    ExprPtr expr,
+    const Symbol& var,
+    ExprPtr point,
+    LimitDirection dir,
+    AstArena& arena);
+[[nodiscard]] Result<ExprPtr> try_infinite_limit(
+    ExprPtr expr,
+    const Symbol& var,
+    ExprPtr point,
+    AstArena& arena);
+
+[[nodiscard]] bool depends_on(ExprPtr expr, const Symbol& var);
+[[nodiscard]] bool is_bounded(ExprPtr expr, const Symbol& var);
+
+[[nodiscard]] Result<ExprPtr> symbolic_sum(
+    ExprPtr term,
+    const Symbol& var,
+    ExprPtr lower,
+    ExprPtr upper,
+    symbolic::CASContext& ctx);
+
+[[nodiscard]] Result<ExprPtr> residue(
+    ExprPtr expr,
+    const Symbol& var,
+    ExprPtr pole,
+    symbolic::CASContext& ctx);
+
+// MRV Algorithm (Gruntz)
+struct MRVCompare {
+    bool operator()(ExprPtr lhs, ExprPtr rhs) const noexcept;
+};
+using MRVSet = std::set<ExprPtr, MRVCompare>;
+
+[[nodiscard]] MRVSet mrv_set(ExprPtr e, const Symbol& var, symbolic::CASContext& ctx);
+[[nodiscard]] Result<ExprPtr> rewrite_mrv(ExprPtr e, const MRVSet& mrv, ExprPtr w, const Symbol& var, symbolic::CASContext& ctx);
+[[nodiscard]] Result<ExprPtr> compute_limit_mrv(ExprPtr expr, const Symbol& var, ExprPtr point, symbolic::CASContext& ctx);
+
+}  // namespace cas::calculus

@@ -1,0 +1,225 @@
+#include "integrate_engine.hpp"
+
+#include <optional>
+#include <vector>
+
+namespace cas::calculus::integrate_detail {
+namespace {
+
+struct ConstantSquareMinusVariableSquare {
+    ExprPtr constant_base;
+};
+
+struct VariableSquareAndConstantSquare {
+    ExprPtr constant_base;
+};
+
+[[nodiscard]] bool extract_square_base(ExprPtr expr, ExprPtr& base) {
+    const auto* power = expr_cast<Binary>(expr);
+    if (power == nullptr || power->op != BinaryOp::Pow) {
+        return false;
+    }
+    if (!is_rational_value(power->right, 2, 1)) {
+        return false;
+    }
+    base = power->left;
+    return true;
+}
+
+[[nodiscard]] bool extract_negative_square_base(ExprPtr expr, ExprPtr& base) {
+    if (const auto* unary = expr_cast<Unary>(expr)) {
+        return unary->op == UnaryOp::Neg && extract_square_base(unary->operand, base);
+    }
+    if (const auto* product = expr_cast<Product>(expr)) {
+        if (product->factors.size() != 2U) {
+            return false;
+        }
+        if (is_negative_one(product->factors[0]) && extract_square_base(product->factors[1], base)) {
+            return true;
+        }
+        if (is_negative_one(product->factors[1]) && extract_square_base(product->factors[0], base)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+[[nodiscard]] bool extract_constant_square_base(AstArena& arena, ExprPtr expr, const Symbol& var, ExprPtr& base) {
+    if (is_one(expr)) {
+        base = make_integer(arena, 1);
+        return true;
+    }
+    if (!extract_square_base(expr, base)) {
+        return false;
+    }
+    return !depends_on(base, var);
+}
+
+[[nodiscard]] bool matches_negative_square_of_variable(ExprPtr expr, const Symbol& var) {
+    ExprPtr base{};
+    return extract_negative_square_base(expr, base) && is_same_symbol(base, var);
+}
+
+[[nodiscard]] std::optional<ConstantSquareMinusVariableSquare> match_constant_square_minus_variable_square(
+    AstArena& arena,
+    ExprPtr expr,
+    const Symbol& var) {
+    auto pair_matches = [&](ExprPtr constant_term, ExprPtr variable_term) -> std::optional<ConstantSquareMinusVariableSquare> {
+        ExprPtr constant_base{};
+        if (!extract_constant_square_base(arena, constant_term, var, constant_base)) {
+            return std::nullopt;
+        }
+        if (!matches_negative_square_of_variable(variable_term, var)) {
+            return std::nullopt;
+        }
+        return ConstantSquareMinusVariableSquare{constant_base};
+    };
+
+    if (const auto* binary = expr_cast<Binary>(expr)) {
+        if (binary->op == BinaryOp::Sub) {
+            ExprPtr constant_base{};
+            if (extract_constant_square_base(arena, binary->left, var, constant_base) &&
+                matches_square_of_variable(binary->right, var)) {
+                return ConstantSquareMinusVariableSquare{constant_base};
+            }
+        }
+        if (binary->op == BinaryOp::Add) {
+            if (auto matched = pair_matches(binary->left, binary->right); matched.has_value()) {
+                return matched;
+            }
+            return pair_matches(binary->right, binary->left);
+        }
+    }
+
+    if (const auto* sum = expr_cast<Sum>(expr)) {
+        if (sum->terms.size() != 2U) {
+            return std::nullopt;
+        }
+        if (auto matched = pair_matches(sum->terms[0], sum->terms[1]); matched.has_value()) {
+            return matched;
+        }
+        return pair_matches(sum->terms[1], sum->terms[0]);
+    }
+
+    return std::nullopt;
+}
+
+[[nodiscard]] std::optional<VariableSquareAndConstantSquare> match_variable_square_plus_constant_square(
+    AstArena& arena,
+    ExprPtr expr,
+    const Symbol& var) {
+    auto pair_matches = [&](ExprPtr variable_term, ExprPtr constant_term) -> std::optional<VariableSquareAndConstantSquare> {
+        ExprPtr constant_base{};
+        if (!matches_square_of_variable(variable_term, var) ||
+            !extract_constant_square_base(arena, constant_term, var, constant_base)) {
+            return std::nullopt;
+        }
+        return VariableSquareAndConstantSquare{constant_base};
+    };
+
+    if (const auto* binary = expr_cast<Binary>(expr)) {
+        if (binary->op == BinaryOp::Add) {
+            if (auto matched = pair_matches(binary->left, binary->right); matched.has_value()) {
+                return matched;
+            }
+            return pair_matches(binary->right, binary->left);
+        }
+    }
+
+    if (const auto* sum = expr_cast<Sum>(expr)) {
+        if (sum->terms.size() != 2U) {
+            return std::nullopt;
+        }
+        if (auto matched = pair_matches(sum->terms[0], sum->terms[1]); matched.has_value()) {
+            return matched;
+        }
+        return pair_matches(sum->terms[1], sum->terms[0]);
+    }
+
+    return std::nullopt;
+}
+
+[[nodiscard]] std::optional<VariableSquareAndConstantSquare> match_variable_square_minus_constant_square(
+    AstArena& arena,
+    ExprPtr expr,
+    const Symbol& var) {
+    if (const auto* binary = expr_cast<Binary>(expr)) {
+        if (binary->op == BinaryOp::Sub) {
+            ExprPtr constant_base{};
+            if (matches_square_of_variable(binary->left, var) &&
+                extract_constant_square_base(arena, binary->right, var, constant_base)) {
+                return VariableSquareAndConstantSquare{constant_base};
+            }
+        }
+    }
+
+    if (const auto* sum = expr_cast<Sum>(expr)) {
+        if (sum->terms.size() != 2U) {
+            return std::nullopt;
+        }
+        for (std::size_t variable_index = 0; variable_index < 2U; ++variable_index) {
+            const std::size_t constant_index = 1U - variable_index;
+            ExprPtr constant_base{};
+            if (matches_square_of_variable(sum->terms[variable_index], var) &&
+                extract_negative_square_base(sum->terms[constant_index], constant_base) &&
+                !depends_on(constant_base, var)) {
+                return VariableSquareAndConstantSquare{constant_base};
+            }
+        }
+    }
+
+    return std::nullopt;
+}
+
+[[nodiscard]] ExprPtr square_expr(AstArena& arena, ExprPtr base) {
+    return make_binary(arena, BinaryOp::Pow, base, make_integer(arena, 2));
+}
+
+[[nodiscard]] ExprPtr half_times(AstArena& arena, ExprPtr expr) {
+    return make_product(arena, {make_rational(arena, 1, 2), expr});
+}
+
+}  // namespace
+
+Result<ExprPtr> Integrator::integrate_sqrt_quadratic(ExprPtr radicand, const Symbol& var) {
+    ExprPtr x = arena_.make<Symbol>(var);
+    ExprPtr sqrt_radicand = make_function(arena_, "sqrt", {radicand});
+    ExprPtr x_sqrt = make_product(arena_, {x, sqrt_radicand});
+
+    if (auto matched = match_constant_square_minus_variable_square(arena_, radicand, var); matched.has_value()) {
+        ExprPtr a_squared = square_expr(arena_, matched->constant_base);
+        ExprPtr arcsin_arg = make_binary(arena_, BinaryOp::Div, x, matched->constant_base);
+        return ok(half_times(arena_, make_sum(arena_, {
+            x_sqrt,
+            make_product(arena_, {a_squared, make_function(arena_, "arcsin", {arcsin_arg})}),
+        })));
+    }
+
+    if (auto matched = match_variable_square_plus_constant_square(arena_, radicand, var); matched.has_value()) {
+        ExprPtr a_squared = square_expr(arena_, matched->constant_base);
+        return ok(half_times(arena_, make_sum(arena_, {
+            x_sqrt,
+            make_product(arena_, {
+                a_squared,
+                make_function(arena_, "ln", {make_function(arena_, "abs", {make_sum(arena_, {x, sqrt_radicand})})}),
+            }),
+        })));
+    }
+
+    if (auto matched = match_variable_square_minus_constant_square(arena_, radicand, var); matched.has_value()) {
+        ExprPtr a_squared = square_expr(arena_, matched->constant_base);
+        return ok(half_times(arena_, make_sum(arena_, {
+            x_sqrt,
+            make_unary(arena_, UnaryOp::Neg, make_product(arena_, {
+                a_squared,
+                make_function(arena_, "ln", {make_function(arena_, "abs", {make_sum(arena_, {x, sqrt_radicand})})}),
+            })),
+        })));
+    }
+
+    return fail<ExprPtr>(make_error(
+        CASErrorKind::Unimplemented,
+        "No supported trigonometric substitution pattern found for sqrt radicand"));
+}
+
+}  // namespace cas::calculus::integrate_detail

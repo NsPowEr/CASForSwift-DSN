@@ -1,0 +1,32 @@
+# Build directories
+build/
+build-ast/
+bin/
+lib/
+*.o
+*.a
+*.so
+*.dylib
+
+# IDE and System files
+.DS_Store
+.vscode/
+.idea/
+.cache/
+.claude/
+.gemini/
+.trae/
+.codex/
+.APROJECT_REFERENCES/
+
+# Temporary and log files
+*.log
+*.tmp
+Archivio.zip
+repro_limit.cpp
+debug_limit.cpp
+print_gcd.cpp
+test_csolve_nd.cpp
+
+# Hooks
+rtk

@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "default_threshold_pct": 15.0,
+  "profiles": {
+    "release": {
+      "baseline": "test/benchmarks/baseline_release.txt",
+      "metrics": {
+        "parse_implicit_mul_ms": {
+          "max_regression_pct": 15.0,
+          "description": "Prestazioni parsing con moltiplicazione implicita."
+        },
+        "round_trip_ms": {
+          "max_regression_pct": 15.0,
+          "description": "Prestazioni parse -> print -> parse parser-safe."
+        },
+        "simplify_basic_ms": {
+          "max_regression_pct": 15.0,
+          "description": "Prestazioni del simplifier su un caso base simbolico."
+        },
+        "arena_alloc_ms": {
+          "max_regression_pct": 15.0,
+          "description": "Costo medio di allocazione e chaining AST nell'arena."
+        }
+      }
+    }
+  }
+}
