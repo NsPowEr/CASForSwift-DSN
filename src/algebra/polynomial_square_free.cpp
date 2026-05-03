@@ -68,14 +68,17 @@ namespace {
         // Since G = gcd(A, A'), they are guaranteed to divide.
         // We use pseudo_remainder or a dedicated exact division.
         auto exact_div = [](const IntPoly& num, const IntPoly& den) -> IntPoly {
+            if (den.is_zero() || num.is_zero()) return num;
             if (den.degree() == 0) {
+                if (den.constant_term().is_zero()) return num;  // guard against /0
                 IntPoly res = num;
                 divide_integer_coefficients_by_scalar(res, den.constant_term());
                 return res;
             }
             // For square-free, den is a factor of num, so pseudo_remainder should result in 0
-            // but we want the quotient. 
+            // but we want the quotient.
             // We can use a simple division here because we know it's exact.
+            if (num.degree() < den.degree()) return IntPoly{};  // safety: underflow guard
             IntPoly q;
             IntPoly r = num;
             q.resize(num.degree() - den.degree() + 1);

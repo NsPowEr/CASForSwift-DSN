@@ -171,6 +171,17 @@ namespace cas::calculus::integrate_detail {
             if (affine.has_value()) return AffineArgument{scalar * affine->coefficient, scalar * affine->constant};
         }
     }
+    if (const auto* s = expr_cast<Sum>(expr); s != nullptr) {
+        Rational coeff(0);
+        Rational constant(0);
+        for (ExprPtr term : s->terms) {
+            auto affine = extract_affine_argument(term, var);
+            if (!affine.has_value()) return std::nullopt;
+            coeff += affine->coefficient;
+            constant += affine->constant;
+        }
+        return AffineArgument{coeff, constant};
+    }
     return std::nullopt;
 }
 

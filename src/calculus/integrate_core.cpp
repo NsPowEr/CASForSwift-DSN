@@ -9,9 +9,16 @@
 
 namespace cas::calculus::integrate_detail {
 
+thread_local std::size_t Integrator::depth_ = 0U;
+
 Integrator::Integrator(symbolic::CASContext& context) noexcept : context_(context), arena_(context.arena()) {}
 
 Result<ExprPtr> Integrator::integrate(ExprPtr expr, const Symbol& var) {
+    if (depth_ >= 16U) {
+        return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Integration recursion budget exceeded"));
+    }
+    DepthGuard guard(depth_);
+
     // 1. Try elementary patterns first (substitution, partial fractions, arctan, etc.)
     {
         auto direct = integrate_once(expr, var);
@@ -338,10 +345,6 @@ Result<ExprPtr> Integrator::integrate_binary(const Binary& binary, const Symbol&
             quadratic_integral.is_ok()) {
             return quadratic_integral;
         }
-        if (auto denominator = extract_quadratic_argument(binary.right, var);
-            denominator.has_value() && !denominator->quadratic.numerator().is_zero()) {
-            return integrate_linear_over_quadratic(binary, var);
-        }
         if (auto rational_integral = integrate_via_partial_fractions(make_binary(arena_, BinaryOp::Div, binary.left, binary.right), var);
             rational_integral.is_ok()) {
             return rational_integral;
@@ -368,17 +371,6 @@ Result<ExprPtr> Integrator::integrate_binary(const Binary& binary, const Symbol&
 }
 
 Result<ExprPtr> integrate_indefinite_impl(ExprPtr expr, const Symbol& var, symbolic::CASContext& ctx) {
-    static thread_local std::size_t integration_depth = 0U;
-    if (integration_depth >= 16U) {
-        return fail<ExprPtr>(make_error(
-            CASErrorKind::Unimplemented,
-            "Integration recursion budget exceeded"));
-    }
-    struct DepthGuard {
-        std::size_t& depth;
-        explicit DepthGuard(std::size_t& current_depth) : depth(current_depth) { ++depth; }
-        ~DepthGuard() { --depth; }
-    } guard(integration_depth);
     return Integrator(ctx).integrate(expr, var);
 }
 
