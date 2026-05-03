@@ -113,6 +113,7 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/differential_field.cpp
     src/calculus/limit.cpp
     src/calculus/limit_helpers.cpp
+    src/calculus/limit_infinite.cpp
     src/calculus/limit_polynomial.cpp
     src/calculus/limit_series.cpp
     src/calculus/limit_mrv.cpp
@@ -138,6 +139,7 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/polynomial_resultant.cpp
     src/algebra/polynomial_square_free.cpp
     src/algebra/factorization_integers.cpp
+    src/algebra/factorization_recombination.cpp
     src/algebra/factorization_polynomials.cpp
     src/algebra/polynomial_groebner.cpp
     src/algebra/polynomial_groebner_f4.cpp
@@ -332,6 +334,8 @@ if(CAS_ENABLE_TESTING)
         test/unit/algebra/test_factorization_trager.cpp
         test/unit/algebra/test_regression.cpp
         test/unit/algebra/test_gap6.cpp
+        test/unit/symbolic/test_mathematical_equality.cpp
+        test/unit/symbolic/test_property_based.cpp
         test/unit/symbolic/test_regression.cpp
         test/unit/symbolic/test_assumptions_advanced.cpp
         test/unit/symbolic/test_assumptions_stability.cpp
