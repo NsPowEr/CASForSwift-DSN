@@ -2,6 +2,7 @@
 
 #include "cas/ast.hpp"
 #include "cas/calculus.hpp"
+#include "cas/differential_algebra.hpp"
 #include "cas/result.hpp"
 #include "cas/symbolic.hpp"
 
@@ -40,6 +41,7 @@ struct QuotientView {
 [[nodiscard]] ExprPtr limit_make_integer(AstArena& arena, long long value);
 [[nodiscard]] ExprPtr limit_make_binary(AstArena& arena, BinaryOp op, ExprPtr lhs, ExprPtr rhs);
 [[nodiscard]] bool limit_is_zero(ExprPtr expr);
+[[nodiscard]] bool limit_is_one(ExprPtr expr);
 [[nodiscard]] bool limit_is_infinity(ExprPtr expr);
 [[nodiscard]] std::optional<QuotientView> extract_quotient_view(ExprPtr expr, AstArena& arena);
 [[nodiscard]] std::optional<ExprPtr> cancel_common_linear_factor(
@@ -82,6 +84,10 @@ struct QuotientView {
     const Symbol& var,
     ExprPtr pole,
     symbolic::CASContext& ctx);
+
+// Hermite reduction on the base field (exact RatPoly-based)
+[[nodiscard]] Result<HermiteReduction> hermite_reduction_exact(
+    ExprPtr P, ExprPtr Q, const Symbol& var, symbolic::CASContext& ctx);
 
 // MRV Algorithm (Gruntz)
 struct MRVCompare {

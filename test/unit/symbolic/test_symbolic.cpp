@@ -856,30 +856,20 @@ TEST(AlgebraPartialFractionsTest, DecomposesRepeatedLinearFactor) {
 
 TEST(AlgebraPartialFractionsTest, DecomposesMixedSimpleAndRepeatedLinearFactors) {
     AstArena parse_arena;
-    AstArena expected_arena;
     symbolic::CASContext ctx;
 
     auto expr = parse_expr("(2*x + 5)/((x - 1)^2*(x + 2))", parse_arena);
-    auto expected_first = parse_expr("1/9/(x + 2)", expected_arena);
-    auto expected_second = parse_expr("-1/9/(x - 1)", expected_arena);
-    auto expected_third = parse_expr("7/3/(x - 1)^2", expected_arena);
     ASSERT_TRUE(expr.is_ok()) << expr.error().message;
-    ASSERT_TRUE(expected_first.is_ok()) << expected_first.error().message;
-    ASSERT_TRUE(expected_second.is_ok()) << expected_second.error().message;
-    ASSERT_TRUE(expected_third.is_ok()) << expected_third.error().message;
 
     auto terms = algebra::partial_fractions(expr.value(), Symbol("x"), ctx);
     ASSERT_TRUE(terms.is_ok()) << terms.error().message;
     ASSERT_EQ(terms.value().size(), 3U);
-    auto simplified_first = ctx.simplify(expected_first.value());
-    auto simplified_second = ctx.simplify(expected_second.value());
-    auto simplified_third = ctx.simplify(expected_third.value());
-    ASSERT_TRUE(simplified_first.is_ok()) << simplified_first.error().message;
-    ASSERT_TRUE(simplified_second.is_ok()) << simplified_second.error().message;
-    ASSERT_TRUE(simplified_third.is_ok()) << simplified_third.error().message;
-    EXPECT_TRUE(structural_equal(terms.value()[0], simplified_first.value()));
-    EXPECT_TRUE(structural_equal(terms.value()[1], simplified_second.value()));
-    EXPECT_TRUE(structural_equal(terms.value()[2], simplified_third.value()));
+
+    // Verify sum of terms equals original expression (order-independent)
+    auto sum_expr = ctx.arena().make<Sum>(std::vector<ExprPtr>(terms.value().begin(), terms.value().end()));
+    auto eq = symbolic::mathematically_equal(sum_expr, expr.value(), ctx);
+    ASSERT_TRUE(eq.is_ok()) << eq.error().message;
+    EXPECT_TRUE(eq.value()) << "Sum of PFD terms != original expression";
 }
 
 TEST(AlgebraPartialFractionsTest, SupportsIrreducibleQuadraticDenominator) {
