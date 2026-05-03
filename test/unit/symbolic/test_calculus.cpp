@@ -566,6 +566,17 @@ TEST(CalculusLimitTest, ComputesDirectSubstitutionAndLHopitalCases) {
     expect_equivalent(l4.value(), e4.value());
 }
 
+TEST(CalculusLimitTest, DebugLimitSimplifyInf) {
+    symbolic::CASContext context;
+    AstArena& arena = context.arena();
+    auto e1 = arena.make<Binary>(BinaryOp::Div, arena.make<IntegerLit>(BigInt(1)), arena.make<Constant>(MathConstant::Infinity));
+    auto s1 = context.simplify(e1);
+    if (s1.is_ok()) {
+        auto expected = arena.make<IntegerLit>(BigInt(0));
+        expect_equivalent(s1.value(), expected);
+    }
+}
+
 TEST(CalculusLimitTest, ComputesBasicInfiniteGrowthComparisons) {
     symbolic::CASContext context;
     AstArena expected_arena;
@@ -582,18 +593,21 @@ TEST(CalculusLimitTest, ComputesBasicInfiniteGrowthComparisons) {
     ASSERT_TRUE(e2.is_ok()) << e2.error().message;
     expect_equivalent(l2.value(), e2.value());
 
+    std::cerr << "Test l3" << std::endl;
     auto l3 = limit_input("(1+1/n)^n", "n", "inf", LimitDirection::Both, context);
     auto e3 = parse_expr("e", expected_arena);
     ASSERT_TRUE(l3.is_ok()) << l3.error().message;
     ASSERT_TRUE(e3.is_ok()) << e3.error().message;
     expect_equivalent(l3.value(), e3.value());
 
+    std::cerr << "Test l4" << std::endl;
     auto l4 = limit_input("x^x", "x", "0", LimitDirection::Right, context);
     auto e4 = parse_expr("1", expected_arena);
     ASSERT_TRUE(l4.is_ok()) << l4.error().message;
     ASSERT_TRUE(e4.is_ok()) << e4.error().message;
     expect_equivalent(l4.value(), e4.value());
 
+    std::cerr << "Test l5" << std::endl;
     auto l5 = limit_input("exp(x)/x^2", "x", "inf", LimitDirection::Both, context);
     auto e5 = parse_expr("inf", expected_arena);
     ASSERT_TRUE(l5.is_ok()) << l5.error().message;
@@ -783,6 +797,56 @@ TEST(CalculusTaylorTest, BuildsTaylorSeriesAroundNonZeroPointForPolynomial) {
     ASSERT_TRUE(expected.is_ok()) << expected.error().message;
     EXPECT_EQ(expansion.value().computed_order, 3U);
     expect_equivalent(expansion.value().polynomial, expected.value());
+}
+
+// --- P0-003 acceptance criteria: polynomial degree comparison in growth ---
+
+TEST(CalculusLimitTest, PolynomialDegreeComparison_HigherDominates) {
+    symbolic::CASContext context;
+    AstArena arena;
+
+    // lim(x→∞) x^10/x^2 = ∞  (degree 10 > degree 2)
+    auto r = limit_input("x^10/x^2", "x", "inf", LimitDirection::Both, context);
+    ASSERT_TRUE(r.is_ok()) << r.error().message;
+    auto expected = parse_expr("inf", arena);
+    ASSERT_TRUE(expected.is_ok());
+    expect_equivalent(r.value(), expected.value());
+}
+
+TEST(CalculusLimitTest, PolynomialDegreeComparison_LowerGoesToZero) {
+    symbolic::CASContext context;
+    AstArena arena;
+
+    // lim(x→∞) x^2/x^10 = 0  (degree 2 < degree 10)
+    auto r = limit_input("x^2/x^10", "x", "inf", LimitDirection::Both, context);
+    ASSERT_TRUE(r.is_ok()) << r.error().message;
+    auto expected = parse_expr("0", arena);
+    ASSERT_TRUE(expected.is_ok());
+    expect_equivalent(r.value(), expected.value());
+}
+
+TEST(CalculusLimitTest, PolynomialDegreeComparison_SameDegreeFiniteLimit) {
+    symbolic::CASContext context;
+    AstArena arena;
+
+    // lim(x→∞) x^5/x^5 = 1  (same degree)
+    auto r = limit_input("x^5/x^5", "x", "inf", LimitDirection::Both, context);
+    ASSERT_TRUE(r.is_ok()) << r.error().message;
+    auto expected = parse_expr("1", arena);
+    ASSERT_TRUE(expected.is_ok());
+    expect_equivalent(r.value(), expected.value());
+}
+
+TEST(CalculusLimitTest, PolynomialDegreeComparison_HighDegreeRatio) {
+    symbolic::CASContext context;
+    AstArena arena;
+
+    // lim(x→∞) x^7/x^3 = ∞  (degree 7 >> degree 3)
+    auto r = limit_input("x^7/x^3", "x", "inf", LimitDirection::Both, context);
+    ASSERT_TRUE(r.is_ok()) << r.error().message;
+    auto expected = parse_expr("inf", arena);
+    ASSERT_TRUE(expected.is_ok());
+    expect_equivalent(r.value(), expected.value());
 }
 
 }  // namespace

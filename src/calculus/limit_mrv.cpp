@@ -1,7 +1,5 @@
 #include "calculus_internal.hpp"
-#include "cas/ast_debug.hpp"
 #include "cas/error.hpp"
-#include "cas/formatter.hpp"
 #include "cas/symbolic.hpp"
 
 #include <algorithm>
@@ -41,37 +39,107 @@ void collect_mrv_candidates(ExprPtr e, const Symbol& var, MRVSet& candidates, sy
     }
 }
 
-// Heuristic for growth comparison: 1 if a > b, -1 if b > a, 0 if same growth class
+// Returns polynomial degree of e w.r.t. var, or nullopt if not a polynomial.
+std::optional<int> poly_degree_wrt(ExprPtr e, const Symbol& var) {
+    if (!depends_on(e, var)) return 0;
+    if (const auto* sym = expr_cast<Symbol>(e)) {
+        return (sym->name == var.name) ? 1 : 0;
+    }
+    if (const auto* sum = expr_cast<Sum>(e)) {
+        int deg = 0;
+        for (auto t : sum->terms) {
+            auto d = poly_degree_wrt(t, var);
+            if (!d) return std::nullopt;
+            deg = std::max(deg, *d);
+        }
+        return deg;
+    }
+    if (const auto* product = expr_cast<Product>(e)) {
+        int deg = 0;
+        for (auto f : product->factors) {
+            auto d = poly_degree_wrt(f, var);
+            if (!d) return std::nullopt;
+            deg += *d;
+        }
+        return deg;
+    }
+    if (const auto* binary = expr_cast<Binary>(e)) {
+        if (binary->op == BinaryOp::Pow) {
+            auto base_deg = poly_degree_wrt(binary->left, var);
+            if (!base_deg) return std::nullopt;
+            if (*base_deg == 0) return 0;
+            // base depends on var — need non-negative integer exponent
+            if (const auto* exp_lit = expr_cast<IntegerLit>(binary->right)) {
+                if (!exp_lit->value.is_negative()) {
+                    auto eu = exp_lit->value.to_u64();
+                    if (eu > static_cast<std::uint64_t>(std::numeric_limits<int>::max())) return std::nullopt;
+                    return *base_deg * static_cast<int>(eu);
+                }
+            }
+            return std::nullopt;
+        }
+        if (binary->op == BinaryOp::Add) {
+            auto l = poly_degree_wrt(binary->left, var);
+            auto r = poly_degree_wrt(binary->right, var);
+            if (!l || !r) return std::nullopt;
+            return std::max(*l, *r);
+        }
+        if (binary->op == BinaryOp::Mul) {
+            auto l = poly_degree_wrt(binary->left, var);
+            auto r = poly_degree_wrt(binary->right, var);
+            if (!l || !r) return std::nullopt;
+            return *l + *r;
+        }
+    }
+    return std::nullopt;  // FuncCall or unrecognized — not polynomial
+}
+
+// Growth comparison for x → ∞.
+// Returns: +1 if a grows faster, -1 if b grows faster, 0 if same rate, 0 for INCOMPARABLE.
+// Ranks: constant(0) < ln(...)(1) < polynomial(2, degree as tiebreak) < exp(...)(3)
+// For exp vs exp: compare arguments recursively (one level only to avoid infinite recursion).
 int compare_growth(ExprPtr a, ExprPtr b, const Symbol& var, symbolic::CASContext& ctx) {
+    (void)ctx;
     if (structural_equal(a, b)) return 0;
 
-    auto get_base_type = [](ExprPtr e) {
-        if (expr_is<Symbol>(e)) return 0; // x
+    // Assigns a coarse rank: 0=constant, 1=log, 2=polynomial, 3=exp
+    auto get_growth_rank = [&](ExprPtr e) -> int {
+        if (!depends_on(e, var)) return 0;
         if (const auto* call = expr_cast<FuncCall>(e)) {
-            if (call->func_id == BuiltinOp::Ln) return -1; // log(x)
-            if (call->func_id == BuiltinOp::Exp) return 1;  // exp(x)
+            if (call->func_id == BuiltinOp::Ln) return 1;
+            if (call->func_id == BuiltinOp::Exp) return 3;
         }
-        return 0;
+        return 2;  // polynomial or mixed expression depending on var
     };
 
-    int ta = get_base_type(a);
-    int tb = get_base_type(b);
+    int ra = get_growth_rank(a);
+    int rb = get_growth_rank(b);
 
-    if (ta != tb) return ta > tb ? 1 : -1;
+    if (ra != rb) return ra > rb ? 1 : -1;
 
-    // Same type, compare arguments
-    if (ta == 1) { // Both exp
-        ExprPtr arga = expr_cast<FuncCall>(a)->args[0];
-        ExprPtr argb = expr_cast<FuncCall>(b)->args[0];
-        return compare_growth(arga, argb, var, ctx);
-    }
-    if (ta == -1) { // Both ln
-        ExprPtr arga = expr_cast<FuncCall>(a)->args[0];
-        ExprPtr argb = expr_cast<FuncCall>(b)->args[0];
-        return compare_growth(arga, argb, var, ctx);
+    // Same coarse rank — use polynomial degree as tiebreak
+    if (ra == 2) {
+        auto da = poly_degree_wrt(a, var);
+        auto db = poly_degree_wrt(b, var);
+        if (da && db) {
+            if (*da != *db) return *da > *db ? 1 : -1;
+            return 0;
+        }
     }
 
-    return 0; 
+    // Both exp: compare arguments (non-recursive — one level only)
+    if (ra == 3) {
+        const auto* ca = expr_cast<FuncCall>(a);
+        const auto* cb = expr_cast<FuncCall>(b);
+        if (ca && cb && !ca->args.empty() && !cb->args.empty()) {
+            auto darg_a = poly_degree_wrt(ca->args[0], var);
+            auto darg_b = poly_degree_wrt(cb->args[0], var);
+            if (darg_a && darg_b && *darg_a != *darg_b)
+                return *darg_a > *darg_b ? 1 : -1;
+        }
+    }
+
+    return 0;
 }
 
 } // namespace
@@ -173,7 +241,13 @@ Result<ExprPtr> compute_limit_mrv(ExprPtr expr, const Symbol& var, ExprPtr point
     if (simplified.is_error()) return simplified;
 
     auto series = taylor_series(simplified.value(), w_var, limit_make_integer(arena, 0), 4U, ctx);
-    if (series.is_error()) return fail<ExprPtr>(series.error());
+    if (series.is_error()) {
+        return fail<ExprPtr>(CASError{
+            .kind = CASErrorKind::Unimplemented,
+            .message = "MRV taylor series failed: " + series.error().message,
+            .hint = std::nullopt,
+        });
+    }
 
     auto res = ctx.substitute(series.value().polynomial, w_var, limit_make_integer(arena, 0));
     if (res.is_ok()) {

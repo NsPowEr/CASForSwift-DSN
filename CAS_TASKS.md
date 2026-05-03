@@ -16,7 +16,7 @@
 |---|---|---|---|---|---|---|---|---|
 | CAS-P0-001 | Equivalenza | Forma normale polinomiale (confronto matematico reale) | P0 | Risolta | AST, Rational, Polynomial core | Molto alto | `are_mathematically_equal()` via normal form | — |
 | CAS-P0-002 | Frazioni parziali | Rimpiazzare sampling-based PFD con algoritmo simbolico | P0 | Aperta | GCD esteso polinomiale, Bezout | Molto alto | Decomposizione simbolica corretta | Implementare extended GCD + Bezout step |
-| CAS-P0-003 | Limiti | Fix confronto asintotico (MRV fake → ranking reale) | P0 | Parziale | Simplifier, normal form poli | Alto | Analisi asintotica generalizzabile | Estendere confronto gradi polinomiali generalizzato |
+| CAS-P0-003 | Limiti | Fix confronto asintotico (MRV fake → ranking reale) | P0 | Risolta | Simplifier, normal form poli | Alto | Analisi asintotica generalizzabile | — |
 | CAS-P0-004 | Testing | Infrastruttura test anti-hardcode + property-based | P0 | Risolta | Test framework (GoogleTest presente) | Molto alto | Validazione robusta non-specifica | — |
 | CAS-P1-001 | Integrazione | Hermite Reduction (Bezout step mancante) | P1 | Bloccata | CAS-P0-002 (GCD esteso + Bezout) | Molto alto | Riduzione Hermite per integrali razionali | Verificare e implementare `bezout_polynomials()` |
 | CAS-P1-002 | Integrazione | Rothstein-Trager / Lazard-Rioboo (log-part) | P1 | Bloccata | CAS-P1-001 | Molto alto | Integrazione razionale simbolica completa | Attendere CAS-P1-001 |
@@ -241,11 +241,14 @@ Nessun campionamento numerico. Solo algebra simbolica. `integrate("1/(x^3+x)", "
 **Area:** Limiti  
 **Priorità:** P0  
 **Gravità:** Alta  
-**Stato:** Parziale  
+**Stato:** Risolta  
 **Agente assegnato:** Non assegnato  
 **Data ultimo aggiornamento:** 2026-05-03
 
-**Aggiornamento Codex 2026-05-03:**  
+**Aggiornamento Codex 2026-05-03 (finale):**  
+`compare_growth()` riscritto con `poly_degree_wrt()` che estrae grado rispetto alla variabile specifica. Rank: costante(0) < ln(1) < polinomio(2, tiebreak per grado) < exp(3). Exp vs exp: confronto argomenti. 4 nuovi test P0-003 accettazione: `x^10/x^2=∞`, `x^2/x^10=0`, `x^5/x^5=1`, `x^7/x^3=∞`. Tutti 29 test P0 passano.
+
+**Aggiornamento Codex 2026-05-03 (precedente):**  
 Chiusi casi base verificati per gerarchie `log < potenza < exp`, potenze/inversi a `±inf`, `1/inf -> 0`, dominio `ln(-inf)` e assenza di fallback MRV rumoroso. Verificato con `CalculusLimitTest.*` 8/8. La task resta **Parziale**: manca ancora un comparatore MRV/degree generalizzato come da criteri completi.
 
 **Problema attuale:**  
