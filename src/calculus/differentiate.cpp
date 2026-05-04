@@ -297,6 +297,18 @@ private:
                 return transc_res;
             }
 
+            // d/dx[ln(abs(u))] = u'/u — must intercept before argument_derivative fails on abs(u)
+            if (func_id == BuiltinOp::Ln) {
+                if (const auto* abs_call = expr_cast<FuncCall>(argument);
+                    abs_call != nullptr && abs_call->func_id == BuiltinOp::Abs && abs_call->args.size() == 1U) {
+                    ExprPtr inner = abs_call->args[0];
+                    auto inner_deriv = differentiate_once(inner, var);
+                    if (inner_deriv.is_ok()) {
+                        return ok(make_binary(arena_, BinaryOp::Div, inner_deriv.value(), inner));
+                    }
+                }
+            }
+
             auto argument_derivative = differentiate_once(argument, var);
             if (argument_derivative.is_error()) {
                 return argument_derivative;

@@ -18,10 +18,10 @@
 | CAS-P0-002 | Frazioni parziali | Rimpiazzare sampling-based PFD con algoritmo simbolico | P0 | Risolta | GCD esteso polinomiale, Bezout | Molto alto | Decomposizione simbolica corretta | — |
 | CAS-P0-003 | Limiti | Fix confronto asintotico (MRV fake → ranking reale) | P0 | Risolta | Simplifier, normal form poli | Alto | Analisi asintotica generalizzabile | — |
 | CAS-P0-004 | Testing | Infrastruttura test anti-hardcode + property-based | P0 | Risolta | Test framework (GoogleTest presente) | Molto alto | Validazione robusta non-specifica | — |
-| CAS-P1-001 | Integrazione | Hermite Reduction (Bezout step mancante) | P1 | Aperta | CAS-P0-002 (GCD esteso + Bezout) | Molto alto | Riduzione Hermite per integrali razionali | Verificare e implementare `bezout_polynomials()` |
-| CAS-P1-002 | Integrazione | Rothstein-Trager / Lazard-Rioboo (log-part) | P1 | Aperta | CAS-P1-001 | Molto alto | Integrazione razionale simbolica completa | Attendere CAS-P1-001 |
-| CAS-P1-003 | Solving | Polynomial solving grado 4 (Ferrari) | P1 | Aperta | Solve gradi 1-3 (presenti), sqrt simbolico | Alto | Radici quartica esatte | Implementare metodo di Ferrari |
-| CAS-P1-004 | Fattorizzazione | Fattorizzazione completa su Q (oltre Rational Root Theorem) | P1 | Aperta | Square-free Yun (presente, P5 done) | Molto alto | Berlekamp/Zassenhaus modular lifting | Square-free ✓ → implementare modular factoring |
+| CAS-P1-001 | Integrazione | Hermite Reduction (Bezout step mancante) | P1 | Risolta | CAS-P0-002 (GCD esteso + Bezout) | Molto alto | Riduzione Hermite per integrali razionali | — |
+| CAS-P1-002 | Integrazione | Rothstein-Trager / Lazard-Rioboo (log-part) | P1 | Risolta | CAS-P1-001 | Molto alto | Integrazione razionale simbolica completa | — |
+| CAS-P1-003 | Solving | Polynomial solving grado 4 (Ferrari) | P1 | Risolta | Solve gradi 1-3 (presenti), sqrt simbolico | Alto | Radici quartica esatte | — |
+| CAS-P1-004 | Fattorizzazione | Fattorizzazione completa su Q (oltre Rational Root Theorem) | P1 | Risolta | Square-free Yun (presente, P5 done) | Molto alto | Berlekamp/Zassenhaus modular lifting | — |
 | CAS-P1-005 | Assunzioni | Integrazione assumptions engine nel simplifier | P1 | Aperta | Assumptions data struct (dichiarata) | Alto | `sqrt(x^2) → |x|`, `ln(x)` su `x>0` | Collegare `AssumptionSet` a `simplify_functions.cpp` |
 | CAS-P2-001 | Serie | Taylor via derivate successive (algoritmo, non lookup) | P2 | Bloccata | Derivate (presenti), CAS-P0-001 per equivalenza | Alto | `taylor(f, x, a, n)` generalizzato | Attendere P0-001 |
 | CAS-P2-002 | Integrazione | Integrali definiti via FTC simbolico | P2 | Bloccata | CAS-P1-001, CAS-P1-002 | Molto alto | `integrate(f, x, a, b)` esatto | Attendere P1-002 |
