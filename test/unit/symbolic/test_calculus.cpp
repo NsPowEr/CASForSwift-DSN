@@ -471,10 +471,7 @@ TEST(CalculusIntegrateTest, P1_HermiteReduction_RepeatedQuadraticFactor) {
 // --- P1-002 acceptance criteria: Rothstein-Trager log-part ---
 TEST(CalculusIntegrateTest, P1_RothsteinTrager_CubicWithLinearAndQuadratic) {
     // 1/(x^3+x) = 1/(x*(x^2+1)) → ln|x| - 1/2*ln(x^2+1)
-    symbolic::CASContext ctx;
-    auto primitive = integrate_input("1/(x^3+x)", "x", ctx);
-    ASSERT_TRUE(primitive.is_ok()) << primitive.error().message;
-    EXPECT_TRUE(contains_builtin(primitive.value(), BuiltinOp::Ln));
+    expect_integration_oracle("1/(x^3+x)", "x");
 }
 
 TEST(CalculusIntegrateTest, IntegratesSimpleLinearNumeratorOverIrreducibleQuadratic) {
@@ -871,6 +868,137 @@ TEST(CalculusLimitTest, PolynomialDegreeComparison_HighDegreeRatio) {
     auto r = limit_input("x^7/x^3", "x", "inf", LimitDirection::Both, context);
     ASSERT_TRUE(r.is_ok()) << r.error().message;
     auto expected = parse_expr("inf", arena);
+    ASSERT_TRUE(expected.is_ok());
+    expect_equivalent(r.value(), expected.value());
+}
+
+// P2-005: Trig angle reduction
+TEST(P2_005_TrigReduction, SinExactSpecialAngles) {
+    symbolic::CASContext ctx;
+
+    auto check_sin = [&](const std::string& expr_str, const std::string& expected_str) {
+        auto e = parse_expr(expr_str, ctx.arena());
+        ASSERT_TRUE(e.is_ok()) << expr_str;
+        auto result = ctx.simplify(e.value());
+        ASSERT_TRUE(result.is_ok()) << "simplify failed: " << expr_str;
+        auto ex = parse_expr(expected_str, ctx.arena());
+        ASSERT_TRUE(ex.is_ok()) << expected_str;
+        auto exs = ctx.simplify(ex.value());
+        ASSERT_TRUE(exs.is_ok());
+        auto eq = mathematically_equal(result.value(), exs.value(), ctx);
+        ASSERT_TRUE(eq.is_ok());
+        EXPECT_TRUE(eq.value()) << expr_str << " → got wrong value, expected " << expected_str;
+    };
+
+    check_sin("sin(pi/6)", "1/2");
+    check_sin("sin(pi/4)", "sqrt(2)/2");
+    check_sin("sin(pi/3)", "sqrt(3)/2");
+    check_sin("sin(pi/2)", "1");
+    check_sin("sin(5*pi/6)", "1/2");       // Q2: sin(π - π/6) = sin(π/6)
+    check_sin("sin(3*pi/4)", "sqrt(2)/2"); // Q2: sin(π - π/4)
+    check_sin("sin(2*pi/3)", "sqrt(3)/2"); // Q2: sin(π - π/3)
+    check_sin("sin(7*pi/6)", "-1/2");      // Q3: -sin(π/6)
+    check_sin("sin(5*pi/4)", "-sqrt(2)/2");// Q3: -sin(π/4)
+    check_sin("sin(4*pi/3)", "-sqrt(3)/2");// Q3: -sin(π/3)
+    check_sin("sin(3*pi/2)", "-1");        // Q3/Q4 boundary
+    check_sin("sin(11*pi/6)", "-1/2");     // Q4: -sin(π/6)
+    check_sin("sin(7*pi/4)", "-sqrt(2)/2");// Q4: -sin(π/4)
+    check_sin("sin(5*pi/3)", "-sqrt(3)/2");// Q4: -sin(π/3)
+    check_sin("sin(2*pi)", "0");           // full period
+}
+
+TEST(P2_005_TrigReduction, CosExactSpecialAngles) {
+    symbolic::CASContext ctx;
+
+    auto check_cos = [&](const std::string& expr_str, const std::string& expected_str) {
+        auto e = parse_expr(expr_str, ctx.arena());
+        ASSERT_TRUE(e.is_ok()) << expr_str;
+        auto result = ctx.simplify(e.value());
+        ASSERT_TRUE(result.is_ok()) << "simplify failed: " << expr_str;
+        auto ex = parse_expr(expected_str, ctx.arena());
+        ASSERT_TRUE(ex.is_ok()) << expected_str;
+        auto exs = ctx.simplify(ex.value());
+        ASSERT_TRUE(exs.is_ok());
+        auto eq = mathematically_equal(result.value(), exs.value(), ctx);
+        ASSERT_TRUE(eq.is_ok());
+        EXPECT_TRUE(eq.value()) << expr_str << " → got wrong value, expected " << expected_str;
+    };
+
+    check_cos("cos(pi/6)", "sqrt(3)/2");
+    check_cos("cos(pi/4)", "sqrt(2)/2");
+    check_cos("cos(pi/3)", "1/2");
+    check_cos("cos(pi/2)", "0");
+    check_cos("cos(5*pi/6)", "-sqrt(3)/2");// Q2: -cos(π/6)
+    check_cos("cos(3*pi/4)", "-sqrt(2)/2");// Q2: -cos(π/4)
+    check_cos("cos(2*pi/3)", "-1/2");      // Q2: -cos(π/3)
+    check_cos("cos(7*pi/6)", "-sqrt(3)/2");// Q3: -cos(π/6)
+    check_cos("cos(5*pi/4)", "-sqrt(2)/2");// Q3: -cos(π/4)
+    check_cos("cos(4*pi/3)", "-1/2");      // Q3: -cos(π/3)
+    check_cos("cos(7*pi/4)", "sqrt(2)/2"); // Q4: +cos(π/4)
+    check_cos("cos(5*pi/3)", "1/2");       // Q4: +cos(π/3)
+    check_cos("cos(11*pi/6)", "sqrt(3)/2");// Q4: +cos(π/6)
+    check_cos("cos(2*pi)", "1");           // full period
+}
+
+TEST(P2_005_TrigReduction, MultiplePeriodsReduce) {
+    symbolic::CASContext ctx;
+    // sin(13*pi/6) = sin(pi/6) = 1/2 (13/6 = 2 + 1/6)
+    auto e = parse_expr("sin(13*pi/6)", ctx.arena());
+    ASSERT_TRUE(e.is_ok());
+    auto result = ctx.simplify(e.value());
+    ASSERT_TRUE(result.is_ok());
+    auto eq = mathematically_equal(result.value(),
+        parse_expr("1/2", ctx.arena()).value(), ctx);
+    ASSERT_TRUE(eq.is_ok());
+    EXPECT_TRUE(eq.value());
+}
+
+// P2-001: Taylor for composite/non-lookup function (via derivative-based algorithm)
+TEST(P2_001_Taylor, CompositeNonLookupFunction) {
+    symbolic::CASContext ctx;
+    // sin(x^2) has no direct lookup — must use derivative algorithm
+    auto expansion = taylor_input("sin(x^2)", "x", "0", 6U, ctx);
+    ASSERT_TRUE(expansion.is_ok()) << expansion.error().message;
+    // sin(x^2) = x^2 - x^6/6 + ... — polynomial must be non-trivial
+    EXPECT_NE(expansion.value().polynomial, nullptr);
+    EXPECT_GE(expansion.value().computed_order, 1U);
+}
+
+TEST(P2_001_Taylor, GenericFunctionAtNonZeroPoint) {
+    symbolic::CASContext ctx;
+    // exp(x) around x=1: e + e*(x-1) + e/2*(x-1)^2 + ...
+    auto expansion = taylor_input("exp(x)", "x", "1", 2U, ctx);
+    ASSERT_TRUE(expansion.is_ok()) << expansion.error().message;
+    EXPECT_NE(expansion.value().polynomial, nullptr);
+}
+
+// P2-004: L'Hôpital x^2/exp(x) at infinity
+TEST(P2_004_LHopital, PolynomialOverExpAtInfinity) {
+    symbolic::CASContext ctx;
+    // lim(x→∞) x^2/e^x = 0
+    auto r = limit_input("x^2/exp(x)", "x", "inf", LimitDirection::Both, ctx);
+    ASSERT_TRUE(r.is_ok()) << r.error().message;
+    auto expected = parse_expr("0", ctx.arena());
+    ASSERT_TRUE(expected.is_ok());
+    expect_equivalent(r.value(), expected.value());
+}
+
+TEST(P2_004_LHopital, SinOverXAtZero) {
+    symbolic::CASContext ctx;
+    // lim(x→0) sin(x)/x = 1
+    auto r = limit_input("sin(x)/x", "x", "0", LimitDirection::Both, ctx);
+    ASSERT_TRUE(r.is_ok()) << r.error().message;
+    auto expected = parse_expr("1", ctx.arena());
+    ASSERT_TRUE(expected.is_ok());
+    expect_equivalent(r.value(), expected.value());
+}
+
+TEST(P2_004_LHopital, ExponentialMinusOneOverX) {
+    symbolic::CASContext ctx;
+    // lim(x→0) (e^x - 1)/x = 1
+    auto r = limit_input("(exp(x)-1)/x", "x", "0", LimitDirection::Both, ctx);
+    ASSERT_TRUE(r.is_ok()) << r.error().message;
+    auto expected = parse_expr("1", ctx.arena());
     ASSERT_TRUE(expected.is_ok());
     expect_equivalent(r.value(), expected.value());
 }

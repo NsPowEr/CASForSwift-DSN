@@ -8,6 +8,169 @@
 
 namespace cas::symbolic::detail {
 
+// ── P2-005: Trig angle reduction ─────────────────────────────────────────────
+
+// Extract rational r such that arg = r * π, or nullopt if arg is not that form.
+[[nodiscard]] static std::optional<Rational> try_extract_pi_coefficient(ExprPtr arg) {
+    if (!arg) return std::nullopt;
+
+    if (const auto* c = expr_cast<Constant>(arg); c && c->value == MathConstant::Pi)
+        return Rational(BigInt(1));
+
+    if (const auto* u = expr_cast<Unary>(arg); u && u->op == UnaryOp::Neg) {
+        if (const auto* c = expr_cast<Constant>(u->operand); c && c->value == MathConstant::Pi)
+            return Rational(BigInt(-1));
+    }
+
+    // Binary(Mul, scalar, Pi) or Binary(Mul, Pi, scalar)
+    if (const auto* bin = expr_cast<Binary>(arg); bin && bin->op == BinaryOp::Mul) {
+        LiteralRational lr;
+        if (const auto* c = expr_cast<Constant>(bin->right); c && c->value == MathConstant::Pi) {
+            auto ex = try_get_exact_rational(bin->left, lr);
+            if (ex.is_ok() && ex.value()) return lr.value;
+        }
+        if (const auto* c = expr_cast<Constant>(bin->left); c && c->value == MathConstant::Pi) {
+            auto ex = try_get_exact_rational(bin->right, lr);
+            if (ex.is_ok() && ex.value()) return lr.value;
+        }
+    }
+
+    // Product{scalar, Pi} (canonical form after simplification)
+    if (const auto* prod = expr_cast<Product>(arg)) {
+        ExprPtr scalar_factor = nullptr;
+        bool found_pi = false;
+        int scalar_count = 0;
+        for (ExprPtr f : prod->factors) {
+            if (const auto* c = expr_cast<Constant>(f); c && c->value == MathConstant::Pi) {
+                found_pi = true;
+            } else {
+                scalar_factor = f;
+                ++scalar_count;
+            }
+        }
+        if (found_pi && scalar_count == 1 && scalar_factor) {
+            LiteralRational lr;
+            auto ex = try_get_exact_rational(scalar_factor, lr);
+            if (ex.is_ok() && ex.value()) return lr.value;
+        }
+    }
+
+    return std::nullopt;
+}
+
+// Reduce rational r to [0, 2) by subtracting multiples of 2.
+[[nodiscard]] static Rational reduce_to_period(Rational r) {
+    // floor(r/2) = floor(num / (2*den)) with floor toward -inf
+    const BigInt two_den = BigInt(2) * r.denominator();
+    BigInt q = r.numerator() / two_den;
+    BigInt rem = r.numerator() - q * two_den;
+    if (rem < BigInt(0)) {
+        q = q - BigInt(1);
+        rem = rem + two_den;
+    }
+    return Rational(rem, r.denominator());
+}
+
+// Return sin(ref * π) for ref ∈ [0, 1/2], or nullptr if not in table.
+// Handles denominators dividing 12: 0, π/6, π/4, π/3, π/2.
+[[nodiscard]] static ExprPtr sin_ref_value(Rational ref, AstArena& arena) {
+    const Rational zero(BigInt(0));
+    const Rational one_sixth(BigInt(1), BigInt(6));
+    const Rational one_quarter(BigInt(1), BigInt(4));
+    const Rational one_third(BigInt(1), BigInt(3));
+    const Rational one_half(BigInt(1), BigInt(2));
+
+    if (ref == zero)       return make_integer(arena, BigInt(0));
+    if (ref == one_sixth)  return make_rational(arena, Rational(BigInt(1), BigInt(2)));
+    if (ref == one_quarter)
+        return arena.make<Binary>(BinaryOp::Div,
+            arena.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{make_integer(arena, BigInt(2))}),
+            make_integer(arena, BigInt(2)));
+    if (ref == one_third)
+        return arena.make<Binary>(BinaryOp::Div,
+            arena.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{make_integer(arena, BigInt(3))}),
+            make_integer(arena, BigInt(2)));
+    if (ref == one_half)   return make_integer(arena, BigInt(1));
+    return nullptr;
+}
+
+// Return cos(ref * π) for ref ∈ [0, 1/2], or nullptr if not in table.
+[[nodiscard]] static ExprPtr cos_ref_value(Rational ref, AstArena& arena) {
+    const Rational zero(BigInt(0));
+    const Rational one_sixth(BigInt(1), BigInt(6));
+    const Rational one_quarter(BigInt(1), BigInt(4));
+    const Rational one_third(BigInt(1), BigInt(3));
+    const Rational one_half(BigInt(1), BigInt(2));
+
+    if (ref == zero)       return make_integer(arena, BigInt(1));
+    if (ref == one_sixth)
+        return arena.make<Binary>(BinaryOp::Div,
+            arena.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{make_integer(arena, BigInt(3))}),
+            make_integer(arena, BigInt(2)));
+    if (ref == one_quarter)
+        return arena.make<Binary>(BinaryOp::Div,
+            arena.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{make_integer(arena, BigInt(2))}),
+            make_integer(arena, BigInt(2)));
+    if (ref == one_third)  return make_rational(arena, Rational(BigInt(1), BigInt(2)));
+    if (ref == one_half)   return make_integer(arena, BigInt(0));
+    return nullptr;
+}
+
+// Negate an expression: if it's already 0 return 0, else wrap in Unary(Neg).
+[[nodiscard]] static ExprPtr negate_expr(ExprPtr e, AstArena& arena) {
+    if (is_zero_expr(e)) return e;
+    LiteralRational lr;
+    auto ex = try_get_exact_rational(e, lr);
+    if (ex.is_ok() && ex.value()) return make_rational(arena, -lr.value);
+    return arena.make<Unary>(UnaryOp::Neg, e);
+}
+
+// Compute sin(r * π) or cos(r * π) where r is any rational, using quadrant reduction.
+// Returns nullptr if reference angle not in table.
+[[nodiscard]] static ExprPtr trig_exact_at_pi_multiple(
+    BuiltinOp func_id, Rational r, AstArena& arena) {
+
+    const Rational half(BigInt(1), BigInt(2));
+    const Rational one(BigInt(1));
+    const Rational three_halves(BigInt(3), BigInt(2));
+
+    Rational red = reduce_to_period(r); // red ∈ [0, 2)
+    // Quadrant:
+    //   Q1 [0, 1/2]:   sin = +sin_ref(red),     cos = +cos_ref(red)
+    //   Q2 (1/2, 1]:   sin = +sin_ref(1 - red), cos = -cos_ref(1 - red)
+    //   Q3 (1, 3/2]:   sin = -sin_ref(red - 1), cos = -cos_ref(red - 1)
+    //   Q4 (3/2, 2):   sin = -sin_ref(2 - red), cos = +cos_ref(2 - red)
+
+    Rational ref;
+    int sin_sign = 1;
+    int cos_sign = 1;
+
+    if (red <= half) {
+        ref = red;
+    } else if (red <= one) {
+        ref = one - red;
+        cos_sign = -1;
+    } else if (red <= three_halves) {
+        ref = red - one;
+        sin_sign = -1;
+        cos_sign = -1;
+    } else {
+        ref = Rational(BigInt(2)) - red;
+        sin_sign = -1;
+    }
+
+    ExprPtr val = (func_id == BuiltinOp::Sin)
+        ? sin_ref_value(ref, arena)
+        : cos_ref_value(ref, arena);
+    if (!val) return nullptr;
+
+    int sign = (func_id == BuiltinOp::Sin) ? sin_sign : cos_sign;
+    if (sign < 0) return negate_expr(val, arena);
+    return val;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 [[nodiscard]] static BigInt integer_sqrt(const BigInt& n) {
     if (n.is_zero()) return BigInt(0);
     static const BigInt one(1);
@@ -57,10 +220,24 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const FuncCall& node
     if (node.func_id == BuiltinOp::Sin && args.size() == 1U) {
         if (is_zero_expr(args.front())) return traced_result(RuleId::SimplifySinZero, target_before, make_integer(arena_, BigInt(0)));
         if (is_constant_expr(args.front(), MathConstant::Pi)) return traced_result(RuleId::SimplifySinPi, target_before, make_integer(arena_, BigInt(0)));
+        // P2-005: sin(r*π) exact for r = k/12
+        if (auto coeff = try_extract_pi_coefficient(args.front())) {
+            if (ExprPtr val = trig_exact_at_pi_multiple(BuiltinOp::Sin, *coeff, arena_)) {
+                auto simplified = simplify_expr(val);
+                if (simplified.is_ok()) return traced_result(RuleId::Unknown, target_before, simplified.value());
+            }
+        }
     }
     if (node.func_id == BuiltinOp::Cos && args.size() == 1U) {
         if (is_zero_expr(args.front())) return traced_result(RuleId::SimplifyCosZero, target_before, make_integer(arena_, BigInt(1)));
         if (is_constant_expr(args.front(), MathConstant::Pi)) return traced_result(RuleId::SimplifyCosPi, target_before, make_integer(arena_, BigInt(-1)));
+        // P2-005: cos(r*π) exact for r = k/12
+        if (auto coeff = try_extract_pi_coefficient(args.front())) {
+            if (ExprPtr val = trig_exact_at_pi_multiple(BuiltinOp::Cos, *coeff, arena_)) {
+                auto simplified = simplify_expr(val);
+                if (simplified.is_ok()) return traced_result(RuleId::Unknown, target_before, simplified.value());
+            }
+        }
     }
 
     // Regola per Test 3: sin(x)^2 -> 1 - cos(x)^2

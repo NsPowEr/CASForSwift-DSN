@@ -458,4 +458,53 @@ TEST(MatrixBasicTest, ComputesSmithNormalForm) {
     }
 }
 
+// P2-006: Eigenvalues for n>3 matrices (unblocked by Ferrari/P1-003)
+TEST(MatrixEigenvalueTest, DiagonalFourByFourEigenvalues) {
+    symbolic::CASContext context;
+    // Diagonal 4x4: eigenvalues are the diagonal entries {1,2,3,4}
+    MatrixExpr mat(4U, 4U, {
+        integer(context, 1), integer(context, 0), integer(context, 0), integer(context, 0),
+        integer(context, 0), integer(context, 2), integer(context, 0), integer(context, 0),
+        integer(context, 0), integer(context, 0), integer(context, 3), integer(context, 0),
+        integer(context, 0), integer(context, 0), integer(context, 0), integer(context, 4),
+    });
+
+    auto evals = eigenvalues(mat, context);
+    ASSERT_TRUE(evals.is_ok()) << evals.error().message;
+    ASSERT_EQ(evals.value().size(), 4U);
+
+    for (int expected : {1, 2, 3, 4}) {
+        bool found = false;
+        for (ExprPtr ev : evals.value()) {
+            auto eq = symbolic::mathematically_equal(ev, integer(context, expected), context);
+            if (eq.is_ok() && eq.value()) { found = true; break; }
+        }
+        EXPECT_TRUE(found) << "Eigenvalue " << expected << " not found";
+    }
+}
+
+TEST(MatrixEigenvalueTest, UpperTriangularFourByFourEigenvalues) {
+    symbolic::CASContext context;
+    // Upper triangular 4x4: eigenvalues = diagonal = {2,3,5,7}
+    MatrixExpr mat(4U, 4U, {
+        integer(context, 2), integer(context, 1), integer(context, 4), integer(context, 9),
+        integer(context, 0), integer(context, 3), integer(context, 2), integer(context, 1),
+        integer(context, 0), integer(context, 0), integer(context, 5), integer(context, 6),
+        integer(context, 0), integer(context, 0), integer(context, 0), integer(context, 7),
+    });
+
+    auto evals = eigenvalues(mat, context);
+    ASSERT_TRUE(evals.is_ok()) << evals.error().message;
+    ASSERT_EQ(evals.value().size(), 4U);
+
+    for (int expected : {2, 3, 5, 7}) {
+        bool found = false;
+        for (ExprPtr ev : evals.value()) {
+            auto eq = symbolic::mathematically_equal(ev, integer(context, expected), context);
+            if (eq.is_ok() && eq.value()) { found = true; break; }
+        }
+        EXPECT_TRUE(found) << "Eigenvalue " << expected << " not found";
+    }
+}
+
 }  // namespace cas::linalg

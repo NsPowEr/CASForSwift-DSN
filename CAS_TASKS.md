@@ -23,12 +23,12 @@
 | CAS-P1-003 | Solving | Polynomial solving grado 4 (Ferrari) | P1 | Risolta | Solve gradi 1-3 (presenti), sqrt simbolico | Alto | Radici quartica esatte | — |
 | CAS-P1-004 | Fattorizzazione | Fattorizzazione completa su Q (oltre Rational Root Theorem) | P1 | Risolta | Square-free Yun (presente, P5 done) | Molto alto | Berlekamp/Zassenhaus modular lifting | — |
 | CAS-P1-005 | Assunzioni | Integrazione assumptions engine nel simplifier | P1 | Risolta | Assumptions data struct (dichiarata) | Alto | `sqrt(x^2) → |x|`, `ln(x)` su `x>0` | — |
-| CAS-P2-001 | Serie | Taylor via derivate successive (algoritmo, non lookup) | P2 | Bloccata | Derivate (presenti), CAS-P0-001 per equivalenza | Alto | `taylor(f, x, a, n)` generalizzato | Attendere P0-001 |
-| CAS-P2-002 | Integrazione | Integrali definiti via FTC simbolico | P2 | Bloccata | CAS-P1-001, CAS-P1-002 | Molto alto | `integrate(f, x, a, b)` esatto | Attendere P1-002 |
-| CAS-P2-003 | Integrazione | Sostituzione trigonometrica (rimuovere Unimplemented) | P2 | Bloccata | CAS-P1-001 | Alto | Integrazione tramite sub trig | Attendere P1-001 |
-| CAS-P2-004 | Limiti | L'Hôpital affidabile come fallback per limiti indeterminati | P2 | Aperta | Derivate (presenti), CAS-P0-003 | Alto | Limite forme 0/0, ∞/∞ garantito | Implementare l'hopital con guard anti-loop |
-| CAS-P2-005 | Trig | Riduzione angolare modulare per sin/cos/tan | P2 | Aperta | Simplifier (presente) | Medio | `sin(5π/6) → 1/2` senza lookup | Implementare `reduce_angle_modular()` |
-| CAS-P2-006 | LinAlg | Autovalori simbolici per matrici n>3 | P2 | Bloccata | CAS-P1-003, CAS-P1-004 | Alto | `eigenvalues()` senza limite di grado | Attendere P1-003 |
+| CAS-P2-001 | Serie | Taylor via derivate successive (algoritmo, non lookup) | P2 | Risolta | Derivate (presenti), CAS-P0-001 per equivalenza | Alto | `taylor(f, x, a, n)` generalizzato | — |
+| CAS-P2-002 | Integrazione | Integrali definiti via FTC simbolico | P2 | Risolta | CAS-P1-001, CAS-P1-002 | Molto alto | `integrate(f, x, a, b)` esatto | — |
+| CAS-P2-003 | Integrazione | Sostituzione trigonometrica (rimuovere Unimplemented) | P2 | Risolta | CAS-P1-001 | Alto | Integrazione tramite sub trig | — |
+| CAS-P2-004 | Limiti | L'Hôpital affidabile come fallback per limiti indeterminati | P2 | Risolta | Derivate (presenti), CAS-P0-003 | Alto | Limite forme 0/0, ∞/∞ garantito | — |
+| CAS-P2-005 | Trig | Riduzione angolare modulare per sin/cos/tan | P2 | Risolta | Simplifier (presente) | Medio | `sin(5π/6) → 1/2` senza lookup | — |
+| CAS-P2-006 | LinAlg | Autovalori simbolici per matrici n>3 | P2 | Risolta | CAS-P1-003, CAS-P1-004 | Alto | `eigenvalues()` senza limite di grado | — |
 | CAS-P3-001 | LinAlg | Jordan normal form completa | P3 | Bloccata | CAS-P2-006, autovettori generalizzati | Medio | `jordan_form()` simbolico | Attendere P2-006 |
 | CAS-P3-002 | Algebra | Gröbner basis F4 verificato e testato | P3 | Aperta | Multivariate polynomial (parziale) | Alto | Solving sistemi polinomiali | Verificare `f4_groebner()` — implementazione nascosta o mancante |
 | CAS-P3-003 | Calcolo | ODE simbolici oltre variabili separabili | P3 | Bloccata | CAS-P1-002 | Medio | Classificazione + solving ODE | Attendere integrazione completa |
