@@ -15,11 +15,11 @@
 | ID | Area | Titolo | Priorità | Stato | Dipendenze | Impatto HP Prime G2 | Muscolo matematico | Prossima azione |
 |---|---|---|---|---|---|---|---|---|
 | CAS-P0-001 | Equivalenza | Forma normale polinomiale (confronto matematico reale) | P0 | Risolta | AST, Rational, Polynomial core | Molto alto | `are_mathematically_equal()` via normal form | — |
-| CAS-P0-002 | Frazioni parziali | Rimpiazzare sampling-based PFD con algoritmo simbolico | P0 | Aperta | GCD esteso polinomiale, Bezout | Molto alto | Decomposizione simbolica corretta | Implementare extended GCD + Bezout step |
+| CAS-P0-002 | Frazioni parziali | Rimpiazzare sampling-based PFD con algoritmo simbolico | P0 | Risolta | GCD esteso polinomiale, Bezout | Molto alto | Decomposizione simbolica corretta | — |
 | CAS-P0-003 | Limiti | Fix confronto asintotico (MRV fake → ranking reale) | P0 | Risolta | Simplifier, normal form poli | Alto | Analisi asintotica generalizzabile | — |
 | CAS-P0-004 | Testing | Infrastruttura test anti-hardcode + property-based | P0 | Risolta | Test framework (GoogleTest presente) | Molto alto | Validazione robusta non-specifica | — |
-| CAS-P1-001 | Integrazione | Hermite Reduction (Bezout step mancante) | P1 | Bloccata | CAS-P0-002 (GCD esteso + Bezout) | Molto alto | Riduzione Hermite per integrali razionali | Verificare e implementare `bezout_polynomials()` |
-| CAS-P1-002 | Integrazione | Rothstein-Trager / Lazard-Rioboo (log-part) | P1 | Bloccata | CAS-P1-001 | Molto alto | Integrazione razionale simbolica completa | Attendere CAS-P1-001 |
+| CAS-P1-001 | Integrazione | Hermite Reduction (Bezout step mancante) | P1 | Aperta | CAS-P0-002 (GCD esteso + Bezout) | Molto alto | Riduzione Hermite per integrali razionali | Verificare e implementare `bezout_polynomials()` |
+| CAS-P1-002 | Integrazione | Rothstein-Trager / Lazard-Rioboo (log-part) | P1 | Aperta | CAS-P1-001 | Molto alto | Integrazione razionale simbolica completa | Attendere CAS-P1-001 |
 | CAS-P1-003 | Solving | Polynomial solving grado 4 (Ferrari) | P1 | Aperta | Solve gradi 1-3 (presenti), sqrt simbolico | Alto | Radici quartica esatte | Implementare metodo di Ferrari |
 | CAS-P1-004 | Fattorizzazione | Fattorizzazione completa su Q (oltre Rational Root Theorem) | P1 | Aperta | Square-free Yun (presente, P5 done) | Molto alto | Berlekamp/Zassenhaus modular lifting | Square-free ✓ → implementare modular factoring |
 | CAS-P1-005 | Assunzioni | Integrazione assumptions engine nel simplifier | P1 | Aperta | Assumptions data struct (dichiarata) | Alto | `sqrt(x^2) → |x|`, `ln(x)` su `x>0` | Collegare `AssumptionSet` a `simplify_functions.cpp` |
@@ -62,15 +62,15 @@
 **Area:** Equivalenza matematica  
 **Priorità:** P0  
 **Gravità:** Critica  
-**Stato:** Aperta  
+**Stato:** Risolta  
 **Agente assegnato:** Non assegnato  
 **Data ultimo aggiornamento:** 2026-05-03
 
-**Aggiornamento Codex 2026-05-03:**  
-Rumore debug rimosso da `partial_fractions.cpp`; il caso mirato `CalculusIntegrateTest.IntegratesRationalPartialFractionsWithLinearFactors` passa. La task resta **Aperta**: il core PFD usa ancora campionamento e non è stato sostituito con algoritmo Bezout/Hermite simbolico.
+**Aggiornamento Codex 2026-05-03 (finale):**  
+Implementata `polynomial_normal_form(expr)` in `src/symbolic/normal_form.cpp` e `include/cas/normal_form.hpp`. La funzione `mathematically_equal` in `src/algebra/algebraic_equal.cpp` è stata aggiornata per utilizzare la forma normale (espansione e raccolta termini in mappa Monomial->Rational). Verificata con `test_math_equal.cpp`: tutti i criteri P0-001 passano (inclusi anti-hardcode e coefficienti grandi).
 
-**Problema attuale:**  
-`structural_equal()` è l'unico metodo di confronto tra espressioni. Due espressioni matematicamente identiche ma sintatticamente diverse (es. `(x+1)^2` vs `x^2+2*x+1`) sono considerate diverse. Questo rende inaffidabili tutti i test di correttezza del CAS.
+**Problema risolto:**  
+`structural_equal()` non era sufficiente per il confronto matematico. Ora `mathematically_equal(a, b)` verifica `normal_form(expand(a - b)) == 0`.
 
 **Evidenza tecnica:**  
 - `src/symbolic/simplify_utils.cpp`: `structural_equal()` — confronto puntatori/struttura AST
@@ -154,15 +154,15 @@ EXPECT_FALSE(are_equal("(x+1)^2", "x^2+x+1", ctx));
 **Area:** Frazioni parziali  
 **Priorità:** P0  
 **Gravità:** Critica  
-**Stato:** Aperta  
+**Stato:** Risolta  
 **Agente assegnato:** Non assegnato  
 **Data ultimo aggiornamento:** 2026-05-03
 
-**Aggiornamento Codex 2026-05-03:**  
-Rumore debug rimosso da `partial_fractions.cpp`; il caso mirato `CalculusIntegrateTest.IntegratesRationalPartialFractionsWithLinearFactors` passa. La task resta **Aperta**: il core PFD usa ancora campionamento e non è stato sostituito con algoritmo Bezout/Hermite simbolico.
+**Aggiornamento Codex 2026-05-03 (finale):**  
+Rimpiazzato l'algoritmo di campionamento (Vandermonde) con un algoritmo di Bezout simbolico ricorsivo operante su `RatPoly`. L'implementazione in `src/algebra/partial_fractions.cpp` ora esegue la decomposizione esatta su Q[x] e l'espansione delle potenze via divisioni successive. Verificato con `test_pf_debug.cpp` e `CalculusIntegrateTest.*`: i casi precedentemente critici o crashanti ora restituiscono risultati simbolici corretti.
 
-**Problema attuale:**  
-`src/algebra/partial_fractions.cpp`: la decomposizione in frazioni parziali usa campionamento numerico (valutazione del denominatore a interi 0,-1,1,-2,...) e costruisce un sistema di Vandermonde. Questo **non è un algoritmo simbolico**. Fallisce su denominatori con radici irrazionali o complesse.
+**Problema risolto:**  
+Il sampling numerico falliva su radici non intere e non era conforme agli standard HP Prime G2. Ora il motore è puramente simbolico.
 
 **Evidenza tecnica:**  
 ```cpp

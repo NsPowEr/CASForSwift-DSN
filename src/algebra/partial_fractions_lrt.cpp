@@ -61,6 +61,7 @@ namespace {
     for (std::size_t step = 0; step <= m - n; ++step) {
         if (is_zero_poly(R)) break;
         std::size_t deg_r = poly_degree(R);
+        ExprPtr lc_r_before = leading_coefficient(R);  // save before scaling
 
         // Scale R by b_n
         for (auto& coeff : R.coefficients()) {
@@ -72,7 +73,7 @@ namespace {
         }
 
         if (deg_r == m - step) {
-            ExprPtr lc_r = leading_coefficient(R);
+            ExprPtr lc_r = lc_r_before;
             PolyExpr term = poly_make_monomial(lc_r, deg_r - n);
 
             auto sub_term_res = poly_multiply(B, term, ctx);
@@ -102,7 +103,15 @@ struct SubresultantStep {
     steps.push_back({P2, poly_degree(P2)});
 
     while (true) {
-        std::size_t d = poly_degree(P1) - poly_degree(P2);
+        std::size_t deg1 = poly_degree(P1);
+        std::size_t deg2 = poly_degree(P2);
+        if (deg1 < deg2) {
+             // In regular PRS deg1 > deg2. If not, swap or handle.
+             // For LRT, target_poly deg < Q deg usually.
+             std::swap(P1, P2);
+             std::swap(deg1, deg2);
+        }
+        std::size_t d = deg1 - deg2;
         
         auto prem_res = pseudo_remainder_lrt(P1, P2, ctx);
         if (prem_res.is_error()) return fail<std::vector<SubresultantStep>>(prem_res.error());
@@ -129,13 +138,17 @@ struct SubresultantStep {
         
         if (d == 1) {
             h = g;
-        } else {
+        } else if (d > 1) {
             auto g_pow = poly_simplify_expr(pow_expr_lrt(ctx.arena(), g, poly_make_integer(ctx.arena(), d)), ctx);
             auto h_pow_inv = poly_simplify_expr(pow_expr_lrt(ctx.arena(), h, poly_make_integer(ctx.arena(), d - 1)), ctx);
-            if (g_pow.is_error() || h_pow_inv.is_error()) return fail<std::vector<SubresultantStep>>(g_pow.error());
+            if (g_pow.is_error() || h_pow_inv.is_error()) return fail<std::vector<SubresultantStep>>(g_pow.is_error() ? g_pow.error() : h_pow_inv.error());
             auto h_next = poly_simplify_expr(div_expr_lrt(ctx.arena(), g_pow.value(), h_pow_inv.value()), ctx);
             if (h_next.is_error()) return fail<std::vector<SubresultantStep>>(h_next.error());
             h = h_next.value();
+        } else {
+            // d == 0: case where deg(P1) == deg(P2). h doesn't update or updates differently.
+            // In standard algorithm d >= 1. 
+            h = g; 
         }
         
         steps.push_back({P2, poly_degree(P2)});
@@ -304,31 +317,37 @@ Result<ExprPtr> integrate_rational_lrt(ExprPtr P_expr, ExprPtr Q_expr, const Sym
     
     std::vector<ExprPtr> integral_terms;
     for (const auto& fact : r_fact_res.value().factors) {
-        std::size_t d = 0;
         PolyExpr Gd;
-        
-        for (const auto& step : prs) {
+
+        // Iterate in reverse (from low-degree steps to high-degree steps).
+        // Gd = first step (lowest degree) where the factor does NOT divide all coefficients.
+        // Steps ordered high→low degree, so reverse = low→high.
+        for (auto it = prs.rbegin(); it != prs.rend(); ++it) {
+            const auto& step = *it;
             bool divides_all = true;
-            for (const auto& coeff : step.P.coefficients()) {
-                if (!coeff) continue;
-                auto c_z_res = parse_polynomial(coeff, z_var, ctx);
-                if (c_z_res.is_error()) { divides_all = false; break; }
-                auto f_z_res = parse_polynomial(fact.factor, z_var, ctx);
-                if (f_z_res.is_error()) { divides_all = false; break; }
-                
-                auto div = divide_poly_with_remainder(c_z_res.value(), f_z_res.value(), ctx);
-                if (div.is_error() || !is_zero_poly(div.value().remainder)) {
-                    divides_all = false;
-                    break;
+            auto f_z_res = parse_polynomial(fact.factor, z_var, ctx);
+            if (f_z_res.is_error()) { divides_all = false; }
+            else {
+                for (const auto& coeff : step.P.coefficients()) {
+                    if (!coeff) continue;
+                    auto c_z_res = parse_polynomial(coeff, z_var, ctx);
+                    if (c_z_res.is_error()) { divides_all = false; break; }
+
+                    auto div = divide_poly_with_remainder(c_z_res.value(), f_z_res.value(), ctx);
+                    if (div.is_error() || !is_zero_poly(div.value().remainder)) {
+                        divides_all = false;
+                        break;
+                    }
                 }
             }
             if (!divides_all) {
-                d = step.degree;
                 Gd = step.P;
                 break;
             }
         }
-        
+
+        if (is_zero_poly(Gd)) continue;
+
         auto conversion = rioboo_conversion(fact.factor, Gd, var, z_var, ctx);
         if (conversion.is_ok()) {
             integral_terms.push_back(conversion.value());

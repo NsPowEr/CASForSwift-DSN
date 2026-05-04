@@ -27,9 +27,17 @@ public:
     [[nodiscard]] bool empty() const noexcept { return coefficients_.empty(); }
     [[nodiscard]] bool is_zero() const noexcept { return coefficients_.empty(); }
     [[nodiscard]] std::size_t size() const noexcept { return coefficients_.size(); }
-    [[nodiscard]] std::size_t degree() const noexcept { return coefficients_.empty() ? 0U : coefficients_.size() - 1U; }
+    [[nodiscard]] std::size_t degree() const noexcept { 
+        if (coefficients_.empty()) return 0U; 
+        std::size_t d = coefficients_.size() - 1U;
+        // In case of hidden zeroes at the end, though normalize() should prevent this.
+        return d;
+    }
     [[nodiscard]] Coeff constant_term() const { return coefficients_.empty() ? Coeff{} : coefficients_.front(); }
-    [[nodiscard]] const Coeff& leading_coeff() const { return coefficients_.back(); }
+    [[nodiscard]] const Coeff& leading_coeff() const { 
+        static const Coeff kZero{};
+        return coefficients_.empty() ? kZero : coefficients_.back(); 
+    }
     [[nodiscard]] const std::vector<Coeff>& coefficients() const noexcept { return coefficients_; }
     [[nodiscard]] std::vector<Coeff>& coefficients() noexcept { return coefficients_; }
 
@@ -38,7 +46,13 @@ public:
     void push_back(Coeff value) { coefficients_.push_back(std::move(value)); }
 
     Coeff& operator[](std::size_t index) { return coefficients_[index]; }
-    const Coeff& operator[](std::size_t index) const { return coefficients_[index]; }
+    const Coeff& operator[](std::size_t index) const { 
+        if (index >= coefficients_.size()) {
+            static const Coeff kZero{};
+            return kZero;
+        }
+        return coefficients_[index]; 
+    }
 
     template <typename ZeroPredicate>
     void normalize(ZeroPredicate&& is_zero) {
@@ -163,6 +177,9 @@ void normalize_rational_coefficients(RatPoly& coefficients);
 [[nodiscard]] RatPoly mul_rational_poly(const RatPoly& a, const RatPoly& b);
 [[nodiscard]] std::pair<RatPoly, RatPoly> div_rem_rational_poly(const RatPoly& a, const RatPoly& b);
 [[nodiscard]] std::tuple<RatPoly, RatPoly, RatPoly> extended_gcd_rational_poly(const RatPoly& a, const RatPoly& b);
+[[nodiscard]] inline std::tuple<RatPoly, RatPoly, RatPoly> bezout_polynomials(const RatPoly& a, const RatPoly& b) {
+    return extended_gcd_rational_poly(a, b);
+}
 
 // Hensel Lifting
 [[nodiscard]] Result<std::pair<IntPoly, IntPoly>> hensel_lift(
@@ -188,6 +205,13 @@ void lll_reduction(LatticeMatrix& b, double delta = 0.75);
     const IntPoly& g,
     const BigInt& pk,
     std::size_t max_deg);
+
+[[nodiscard]] std::optional<IntPoly> find_factor_by_hensel_recombination(
+    const IntPoly& f,
+    const std::vector<IntPoly>& modular_factors,
+    const BigInt& prime,
+    std::size_t lift_steps,
+    std::size_t max_degree);
 
 // Modular Factoring
 [[nodiscard]] Result<std::vector<IntPoly>> factor_polynomial_mod_p(IntPoly f, const BigInt& p);

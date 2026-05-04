@@ -68,6 +68,13 @@ public:
 private:
     symbolic::CASContext& context_;
     AstArena& arena_;
+    
+    struct DepthGuard {
+        std::size_t& depth;
+        explicit DepthGuard(std::size_t& d) : depth(d) { ++depth; }
+        ~DepthGuard() { --depth; }
+    };
+    static thread_local std::size_t depth_;
 };
 
 [[nodiscard]] Result<ExprPtr> integrate_indefinite_impl(ExprPtr expr, const Symbol& var, symbolic::CASContext& ctx);

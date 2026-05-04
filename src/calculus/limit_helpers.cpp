@@ -11,10 +11,6 @@
 
 namespace cas::calculus {
 
-[[nodiscard]] static CASError make_error(CASErrorKind kind, std::string message) {
-    return CASError{.kind = kind, .message = std::move(message), .hint = std::nullopt};
-}
-
 [[nodiscard]] ExprPtr limit_make_integer(AstArena& arena, long long value) {
     return arena.make<IntegerLit>(BigInt(value));
 }
@@ -27,6 +23,13 @@ namespace cas::calculus {
     if (!expr) return false;
     if (const auto* i = expr_cast<IntegerLit>(expr)) return i->value.is_zero();
     if (const auto* r = expr_cast<RationalLit>(expr)) return r->numerator.is_zero();
+    return false;
+}
+
+[[nodiscard]] bool limit_is_one(ExprPtr expr) {
+    if (!expr) return false;
+    if (const auto* i = expr_cast<IntegerLit>(expr)) return i->value == BigInt(1);
+    if (const auto* r = expr_cast<RationalLit>(expr)) return r->numerator == r->denominator;
     return false;
 }
 
@@ -86,6 +89,9 @@ namespace cas::calculus {
     return arena.make<Product>(std::move(filtered));
 }
 
+[[nodiscard]] bool is_same_symbol(ExprPtr expr, const Symbol& var);
+[[nodiscard]] std::optional<Rational> rational_from_expr(ExprPtr expr);
+
 [[nodiscard]] bool is_same_symbol(ExprPtr expr, const Symbol& var) {
     const auto* symbol = expr_cast<Symbol>(expr);
     return symbol != nullptr && symbol->name == var.name;
@@ -107,23 +113,36 @@ namespace cas::calculus {
     return std::nullopt;
 }
 
-[[nodiscard]] std::optional<int> sign_of_variable_power_at_infinity(ExprPtr expr, const Symbol& var, int point_sign) {
-    if (point_sign == 0) return std::nullopt;
-    if (is_same_symbol(expr, var)) return point_sign;
-    const auto* power = expr_cast<Binary>(expr);
-    if (power == nullptr || power->op != BinaryOp::Pow || !is_same_symbol(power->left, var)) return std::nullopt;
-    auto exponent = rational_from_expr(power->right);
-    if (!exponent.has_value() || !exponent->is_integer() || exponent->numerator().is_negative()) return std::nullopt;
-    if (point_sign > 0) return 1;
-    return (exponent->numerator() % BigInt(2)).is_zero() ? 1 : -1;
-}
-
 std::optional<QuotientView> extract_quotient_view(ExprPtr expr, AstArena& arena) {
     if (!expr) return std::nullopt;
+
+    if (const auto* call = expr_cast<FuncCall>(expr)) {
+        if (call->func_id == BuiltinOp::Exp) {
+            auto inner = call->args[0];
+            if (const auto* u = expr_cast<Unary>(inner); u && u->op == UnaryOp::Neg) {
+                return QuotientView{
+                    .numerator = limit_make_integer(arena, 1),
+                    .denominator = arena.make<FuncCall>("exp", std::vector<ExprPtr>{u->operand})
+                };
+            }
+        }
+    }
 
     if (const auto* binary = expr_cast<Binary>(expr)) {
         if (binary->op == BinaryOp::Div) {
             return QuotientView{.numerator = binary->left, .denominator = binary->right};
+        }
+        if (binary->op == BinaryOp::Mul) {
+            auto lhs_q = extract_quotient_view(binary->left, arena);
+            auto rhs_q = extract_quotient_view(binary->right, arena);
+            if (lhs_q.has_value() || rhs_q.has_value()) {
+                return QuotientView{
+                    .numerator = make_product(arena, {lhs_q.has_value() ? lhs_q->numerator : binary->left, 
+                                                      rhs_q.has_value() ? rhs_q->numerator : binary->right}),
+                    .denominator = make_product(arena, {lhs_q.has_value() ? lhs_q->denominator : limit_make_integer(arena, 1),
+                                                        rhs_q.has_value() ? rhs_q->denominator : limit_make_integer(arena, 1)})
+                };
+            }
         }
         if (binary->op == BinaryOp::Pow) {
             auto exponent = rational_from_expr(binary->right);
@@ -169,82 +188,29 @@ std::optional<QuotientView> extract_quotient_view(ExprPtr expr, AstArena& arena)
             }
         }
         
-        return QuotientView{.numerator = expr, .denominator = limit_make_integer(arena, 1)};
+        return std::nullopt;
     }
 
     std::vector<ExprPtr> numerator_factors;
     std::vector<ExprPtr> denominator_factors;
+    bool has_den = false;
     for (ExprPtr factor : product->factors) {
         auto factor_quotient = extract_quotient_view(factor, arena);
         if (factor_quotient.has_value()) {
             numerator_factors.push_back(factor_quotient->numerator);
             denominator_factors.push_back(factor_quotient->denominator);
+            has_den = true;
         } else {
             numerator_factors.push_back(factor);
         }
     }
 
+    if (!has_den) return std::nullopt;
+
     return QuotientView{
         .numerator = make_product(arena, std::move(numerator_factors)),
         .denominator = make_product(arena, std::move(denominator_factors)),
     };
-}
-
-Result<ExprPtr> try_infinite_limit(ExprPtr expr, const Symbol& var, ExprPtr point, AstArena& arena) {
-    if (!depends_on(expr, var)) return ok(expr);
-    
-    const bool is_pos_inf = !expr_is<Unary>(point);
-
-    if (const auto* call = expr_cast<FuncCall>(expr)) {
-        if (call->func_id == BuiltinOp::Exp) {
-            if (is_pos_inf) return ok(arena.make<Constant>(MathConstant::Infinity));
-            return ok(limit_make_integer(arena, 0));
-        }
-        if (call->func_id == BuiltinOp::Ln) {
-            auto inner = try_infinite_limit(call->args[0], var, point, arena);
-            if (inner.is_ok() && limit_is_infinity(inner.value())) {
-                if (expr_is<Unary>(inner.value())) {
-                    return fail<ExprPtr>(make_error(CASErrorKind::Undefined, "ln(-inf) is undefined"));
-                }
-                return ok(arena.make<Constant>(MathConstant::Infinity));
-            }
-        }
-    }
-
-    if (const auto* sum = expr_cast<Sum>(expr)) {
-        for (auto t : sum->terms) {
-            auto lim_t = try_infinite_limit(t, var, point, arena);
-            if (lim_t.is_ok() && limit_is_infinity(lim_t.value())) {
-                return lim_t;
-            }
-        }
-    }
-
-    if (const auto* sym = expr_cast<Symbol>(expr)) {
-        if (sym->name == var.name) return ok(point);
-    }
-
-    if (const auto* bin = expr_cast<Binary>(expr)) {
-        if (bin->op == BinaryOp::Pow) {
-            auto base_lim = try_infinite_limit(bin->left, var, point, arena);
-            auto exp_lim = try_infinite_limit(bin->right, var, point, arena);
-            if (base_lim.is_ok() && limit_is_infinity(base_lim.value()) && !expr_is<Unary>(base_lim.value())) {
-                if (exp_lim.is_ok()) {
-                    if (limit_is_infinity(exp_lim.value())) {
-                        if (!expr_is<Unary>(exp_lim.value())) return ok(base_lim.value()); // inf^inf = inf
-                        return ok(limit_make_integer(arena, 0)); // inf^-inf = 0
-                    }
-                    auto rat = rational_from_expr(exp_lim.value());
-                    if (rat.has_value()) {
-                        if (rat->numerator() > BigInt(0)) return ok(base_lim.value());
-                        if (rat->numerator() < BigInt(0)) return ok(limit_make_integer(arena, 0));
-                    }
-                }
-            }
-        }
-    }
-    
-    return fail<ExprPtr>(CASError{CASErrorKind::Unimplemented, "Infinite limit unimplemented for this form", std::nullopt});
 }
 
 } // namespace cas::calculus

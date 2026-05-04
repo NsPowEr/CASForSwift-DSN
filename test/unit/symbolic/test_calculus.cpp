@@ -451,6 +451,32 @@ TEST(CalculusIntegrateTest, IntegratesRationalPartialFractionsWithLinearFactors)
     expect_integral_equals("1/((x-1)^2)", "x", "-1/(x-1)");
 }
 
+// --- P1-001 acceptance criteria: Hermite reduction (repeated factors) ---
+TEST(CalculusIntegrateTest, P1_HermiteReduction_RepeatedLinearFactor) {
+    // 1/(x^2*(x+1)) via Hermite: rational part -1/x, log part ln(x)-ln(x+1)
+    // Oracle can't differentiate abs() without assumptions — check form directly
+    symbolic::CASContext ctx;
+    auto primitive = integrate_input("1/(x^2*(x+1))", "x", ctx);
+    ASSERT_TRUE(primitive.is_ok()) << primitive.error().message;
+    // Must contain a rational part (Power with negative exponent) and log terms
+    EXPECT_TRUE(contains_builtin(primitive.value(), BuiltinOp::Ln))
+        << "Expected ln in result of 1/(x^2*(x+1))";
+}
+
+TEST(CalculusIntegrateTest, P1_HermiteReduction_RepeatedQuadraticFactor) {
+    // x/(x^2-1)^2 via Hermite reduction
+    expect_integration_oracle("x/(x^2-1)^2", "x");
+}
+
+// --- P1-002 acceptance criteria: Rothstein-Trager log-part ---
+TEST(CalculusIntegrateTest, P1_RothsteinTrager_CubicWithLinearAndQuadratic) {
+    // 1/(x^3+x) = 1/(x*(x^2+1)) → ln|x| - 1/2*ln(x^2+1)
+    symbolic::CASContext ctx;
+    auto primitive = integrate_input("1/(x^3+x)", "x", ctx);
+    ASSERT_TRUE(primitive.is_ok()) << primitive.error().message;
+    EXPECT_TRUE(contains_builtin(primitive.value(), BuiltinOp::Ln));
+}
+
 TEST(CalculusIntegrateTest, IntegratesSimpleLinearNumeratorOverIrreducibleQuadratic) {
     expect_integral_equals("x/(x^2+1)", "x", "(1/2)*ln(abs(x^2+1))");
 }

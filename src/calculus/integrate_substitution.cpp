@@ -111,8 +111,11 @@ Result<ExprPtr> Integrator::integrate_via_partial_fractions(ExprPtr expr, const 
     if (terms.value().empty()) {
         return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Partial fraction decomposition produced no terms"));
     }
-    if (terms.value().size() == 1U && structural_equal(terms.value().front(), expr)) {
-        return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Partial fractions did not reduce the rational integrand"));
+
+    // Safety: If only one term is returned, it means no decomposition happened.
+    // Proceeding would lead to infinite recursion if integrate_once calls this again.
+    if (terms.value().size() <= 1U) {
+         return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Partial fractions did not decompose the expression"));
     }
 
     std::vector<ExprPtr> primitives;

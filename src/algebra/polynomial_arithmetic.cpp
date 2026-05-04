@@ -126,18 +126,6 @@ void append_product_factors(std::vector<ExprPtr>& out, ExprPtr expr) {
     return make_sum_expr(std::move(accumulated_terms), ctx);
 }
 
-[[nodiscard]] BigInt combinations(std::size_t n, std::size_t k) {
-    if (k > n) return BigInt(0);
-    if (k == 0 || k == n) return BigInt(1);
-    if (k > n / 2) k = n - k;
-    BigInt result(1);
-    for (std::size_t i = 1; i <= k; ++i) {
-        result *= BigInt(n - i + 1);
-        result /= BigInt(i);
-    }
-    return result;
-}
-
 [[nodiscard]] Result<ExprPtr> expand_power(ExprPtr base, const IntegerExponent& exponent, symbolic::CASContext& ctx) {
     auto expanded_base = expand_expr_impl(base, ctx);
     if (expanded_base.is_error()) {
@@ -163,41 +151,25 @@ void append_product_factors(std::vector<ExprPtr>& out, ExprPtr expr) {
         return expanded_base;
     }
 
-    // Optimization: Binomial Theorem for (A+B)^n
-    if (const auto* sum = expr_cast<Sum>(expanded_base.value()); sum != nullptr && sum->terms.size() == 2U) {
-        std::vector<ExprPtr> terms;
-        terms.reserve(exponent.magnitude + 1U);
-        ExprPtr a = sum->terms[0];
-        ExprPtr b = sum->terms[1];
-        
-        // Pre-expand powers of A and B if they are simple
-        auto get_pow = [&](ExprPtr base, std::size_t exp) -> ExprPtr {
-            if (exp == 0U) return ctx.arena().make<IntegerLit>(BigInt(1));
-            if (exp == 1U) return base;
-            return ctx.arena().make<Binary>(BinaryOp::Pow, base, ctx.arena().make<IntegerLit>(BigInt(exp)));
-        };
-
-        for (std::size_t k = 0; k <= exponent.magnitude; ++k) {
-            BigInt coeff = combinations(exponent.magnitude, k);
-            ExprPtr a_pow = get_pow(a, exponent.magnitude - k);
-            ExprPtr b_pow = get_pow(b, k);
+    // Optimization: Multivariate Polynomial expansion for Sum^n
+    if (expr_is<Sum>(expanded_base.value())) {
+        auto poly_res = parse_multivariate_polynomial(expanded_base.value(), ctx);
+        if (poly_res.is_ok()) {
+            auto& poly = poly_res.value();
+            // We need a way to do poly^n. 
+            // MultivariatePolynomial doesn't have operator^, but we can do it via repeated multiplication or better.
+            // For now, repeated multiplication of the MultivariatePolynomial is faster than Expr distribution.
+            MultivariatePolynomial res_poly({{.coefficient = BigInt(1), .factors = {}}});
+            MultivariatePolynomial base_poly = poly;
+            std::size_t exp = exponent.magnitude;
             
-            std::vector<ExprPtr> factors;
-            if (coeff != BigInt(1)) factors.push_back(ctx.arena().make<IntegerLit>(coeff));
-            if (!is_one_expr(a_pow)) factors.push_back(a_pow);
-            if (!is_one_expr(b_pow)) factors.push_back(b_pow);
-            
-            ExprPtr term;
-            if (factors.empty()) {
-                term = ctx.arena().make<IntegerLit>(BigInt(1));
-            } else if (factors.size() == 1U) {
-                term = factors[0];
-            } else {
-                term = ctx.arena().make<Product>(std::move(factors));
+            while (exp > 0) {
+                if (exp % 2 == 1) res_poly = res_poly * base_poly;
+                exp /= 2;
+                if (exp > 0) base_poly = base_poly * base_poly;
             }
-            terms.push_back(term);
+            return multivariate_to_expr(res_poly, ctx);
         }
-        return simplify_expr(ctx.arena().make<Sum>(std::move(terms)), ctx);
     }
 
     ExprPtr result = make_integer(ctx.arena(), 1);

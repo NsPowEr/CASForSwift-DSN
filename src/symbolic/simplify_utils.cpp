@@ -193,9 +193,9 @@ template <typename UInt>
             const auto exponent = try_get_integer_exponent(binary->right);
             if (exponent.has_value() && !exponent->is_negative()) {
                 if (expr_is<Symbol>(binary->left)) {
-                    const auto parsed = parse_bounded_unsigned_decimal<unsigned int>(exponent->decimal());
-                    if (!parsed.has_value() || parsed.value() > static_cast<unsigned int>(std::numeric_limits<int>::max())) return std::numeric_limits<int>::max();
-                    return static_cast<int>(parsed.value());
+                    const auto exponent_val = exponent->to_u64();
+                    if (exponent_val > static_cast<std::uint64_t>(std::numeric_limits<int>::max())) return std::numeric_limits<int>::max();
+                    return static_cast<int>(exponent_val);
                 }
             }
         }

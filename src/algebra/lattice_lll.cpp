@@ -31,23 +31,26 @@ void lll_reduction(LatticeMatrix& b, double delta_val) {
     std::vector<std::vector<Rational>> mu(n, std::vector<Rational>(n));
     std::vector<Rational> B(n);
     
-    auto compute_gs = [&](std::size_t i) {
-        b_star[i] = b[i];
-        for (std::size_t j = 0; j < i; ++j) {
-            mu[i][j] = dot_product(b[i], b_star[j]) / B[j];
-            for (std::size_t k_idx = 0; k_idx < m; ++k_idx) {
-                b_star[i][k_idx] -= mu[i][j] * b_star[j][k_idx];
+    auto recompute_gs = [&]() {
+        for (std::size_t i = 0U; i < n; ++i) {
+            b_star[i] = b[i];
+            for (std::size_t j = 0U; j < i; ++j) {
+                if (B[j].numerator().is_zero()) {
+                    mu[i][j] = Rational(BigInt(0));
+                    continue;
+                }
+                mu[i][j] = dot_product(b[i], b_star[j]) / B[j];
+                for (std::size_t k_idx = 0U; k_idx < m; ++k_idx) {
+                    b_star[i][k_idx] -= mu[i][j] * b_star[j][k_idx];
+                }
             }
+            B[i] = dot_product(b_star[i], b_star[i]);
         }
-        B[i] = dot_product(b_star[i], b_star[i]);
     };
-    
-    B[0] = dot_product(b[0], b[0]);
-    b_star[0] = b[0];
     
     std::size_t k = 1;
     while (k < n) {
-        compute_gs(k);
+        recompute_gs();
         
         // Size reduction
         for (int j = (int)k - 1; j >= 0; --j) {
@@ -58,8 +61,7 @@ void lll_reduction(LatticeMatrix& b, double delta_val) {
                     for (std::size_t l = 0; l < m; ++l) {
                         b[k][l] -= r_q * b[j][l];
                     }
-                    // Update mu and b_star for the changed b[k]
-                    compute_gs(k);
+                    recompute_gs();
                 }
             }
         }
@@ -76,7 +78,7 @@ void lll_reduction(LatticeMatrix& b, double delta_val) {
 
 // Identify potential factor of f in Z[x] given modular factor g mod p^k
 std::optional<IntPoly> find_factor_lll(
-    [[maybe_unused]] const IntPoly& f,
+    const IntPoly& f,
     const IntPoly& g,
     const BigInt& pk,
     std::size_t max_deg) {
@@ -117,11 +119,13 @@ std::optional<IntPoly> find_factor_lll(
         }
         
         if (all_integers) {
-            h.normalize([](const BigInt& v) { return v.is_zero(); });
-            if (!h.is_zero() && h.degree() > 0) {
-                // Check if h divides f
-                // We should use exact division
-                return h;
+            h = primitive_integer_poly(std::move(h));
+            if (!h.is_zero() && h.degree() > 0 && h.degree() < f.degree()) {
+                auto remainder = pseudo_remainder_integer_poly(f, h);
+                normalize_integer_poly(remainder);
+                if (remainder.is_zero()) {
+                    return h;
+                }
             }
         }
     }

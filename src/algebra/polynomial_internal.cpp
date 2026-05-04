@@ -226,25 +226,50 @@ void normalize_poly(PolyExpr& poly) {
     symbolic::CASContext& ctx) {
     
     if (divisor.is_zero()) return fail<PolyDivisionResult>(make_error(CASErrorKind::Undefined, "Divisione polinomiale per zero"));
-    PolyExpr q, r = dividend;
-    if (r.size() < divisor.size()) return ok(PolyDivisionResult{q, r});
+    if (dividend.is_zero()) return ok(PolyDivisionResult{PolyExpr{}, PolyExpr{}});
+    
+    PolyExpr q;
+    if (dividend.size() < divisor.size()) return ok(PolyDivisionResult{q, dividend});
+    
     q.resize(dividend.size() - divisor.size() + 1, poly_make_integer(ctx.arena(), 0));
+    // Use a temporary vector for coefficients to maintain stable indexing during division
+    std::vector<ExprPtr> r_coeffs = dividend.coefficients();
+    const std::vector<ExprPtr>& d_coeffs = divisor.coefficients();
+    
     auto coeff_or_zero = [&](ExprPtr c) -> ExprPtr { return c ? c : poly_make_integer(ctx.arena(), 0); };
 
     for (int i = static_cast<int>(dividend.size() - divisor.size()); i >= 0; --i) {
-        if (r.size() < divisor.size() + static_cast<std::size_t>(i)) continue;
-        auto term_q = ctx.simplify(ctx.arena().make<Binary>(BinaryOp::Div, coeff_or_zero(r.leading_coeff()), coeff_or_zero(divisor.leading_coeff())));
+        // Find leading coefficient of current remainder r
+        int r_deg = static_cast<int>(r_coeffs.size()) - 1;
+        while (r_deg >= 0 && poly_is_zero_expr(r_coeffs[r_deg])) {
+            r_deg--;
+        }
+        
+        if (r_deg < static_cast<int>(divisor.size() + i - 1)) {
+            continue;
+        }
+
+        auto term_q = ctx.simplify(ctx.arena().make<Binary>(BinaryOp::Div, 
+            coeff_or_zero(r_coeffs[r_deg]), 
+            coeff_or_zero(d_coeffs.back())));
+        
         if (term_q.is_error()) return fail<PolyDivisionResult>(term_q.error());
         q[i] = term_q.value();
-        for (std::size_t j = 0; j < divisor.size(); ++j) {
-            auto prod = ctx.simplify(ctx.arena().make<Binary>(BinaryOp::Mul, q[i], coeff_or_zero(divisor[j])));
+        
+        for (std::size_t j = 0; j < d_coeffs.size(); ++j) {
+            auto prod = ctx.simplify(ctx.arena().make<Binary>(BinaryOp::Mul, q[i], coeff_or_zero(d_coeffs[j])));
             if (prod.is_error()) return fail<PolyDivisionResult>(prod.error());
-            auto sub = ctx.simplify(ctx.arena().make<Binary>(BinaryOp::Sub, coeff_or_zero(r[i + j]), prod.value()));
+            
+            std::size_t r_idx = static_cast<std::size_t>(i) + j;
+            auto sub = ctx.simplify(ctx.arena().make<Binary>(BinaryOp::Sub, coeff_or_zero(r_coeffs[r_idx]), prod.value()));
             if (sub.is_error()) return fail<PolyDivisionResult>(sub.error());
-            r[i + j] = sub.value();
+            r_coeffs[r_idx] = sub.value();
         }
-        normalize_poly(r);
     }
+    
+    PolyExpr r(std::move(r_coeffs));
+    normalize_poly(r);
+    normalize_poly(q);
     return ok(PolyDivisionResult{q, r});
 }
 
@@ -295,19 +320,39 @@ void normalize_rational_coefficients(RatPoly& coefficients) {
 
 [[nodiscard]] std::pair<RatPoly, RatPoly> div_rem_rational_poly(const RatPoly& a, const RatPoly& b) {
     if (b.is_zero()) return {RatPoly{}, a};
-    RatPoly q, r = a;
-    if (r.size() < b.size()) return {q, r};
+    if (a.is_zero()) return {RatPoly{}, RatPoly{}};
+    
+    RatPoly q;
+    if (a.size() < b.size()) return {q, a};
+    
     q.resize(a.size() - b.size() + 1, Rational(0));
-    Rational lb_inv = Rational(b.leading_coeff().denominator(), b.leading_coeff().numerator());
+    std::vector<Rational> r_coeffs = a.coefficients();
+    const std::vector<Rational>& b_coeffs = b.coefficients();
+    
+    Rational lb_inv = Rational(b_coeffs.back().denominator(), b_coeffs.back().numerator());
+    
     for (int i = static_cast<int>(a.size() - b.size()); i >= 0; --i) {
-        if (r.size() < b.size() + i) continue;
-        Rational term_q = r.leading_coeff() * lb_inv;
-        q[i] = term_q;
-        for (std::size_t j = 0; j < b.size(); ++j) {
-            r[i + j] = r[i + j] - (term_q * b[j]);
+        int r_deg = static_cast<int>(r_coeffs.size()) - 1;
+        while (r_deg >= 0 && r_coeffs[r_deg].numerator().is_zero()) {
+            r_deg--;
         }
-        r.normalize([](const Rational& rat) { return rat.numerator().is_zero(); });
+        
+        if (r_deg < static_cast<int>(b_coeffs.size() + i - 1)) {
+            continue;
+        }
+
+        Rational term_q = r_coeffs[r_deg] * lb_inv;
+        q[i] = term_q;
+        
+        for (std::size_t j = 0; j < b_coeffs.size(); ++j) {
+            std::size_t r_idx = static_cast<std::size_t>(i) + j;
+            r_coeffs[r_idx] = r_coeffs[r_idx] - (term_q * b_coeffs[j]);
+        }
     }
+    
+    RatPoly r(std::move(r_coeffs));
+    r.normalize([](const Rational& rat) { return rat.numerator().is_zero(); });
+    q.normalize([](const Rational& rat) { return rat.numerator().is_zero(); });
     return {q, r};
 }
 
@@ -396,6 +441,10 @@ void normalize_rational_coefficients(RatPoly& coefficients) {
 
 [[nodiscard]] std::optional<RationalRootCandidate> find_rational_root_candidate(const IntPoly& coefficients) {
     if (coefficients.size() <= 1U) return std::nullopt;
+    // x=0 is a root iff constant term is zero (zero not found by divisor enumeration below)
+    if (coefficients[0].is_zero()) {
+        return RationalRootCandidate{BigInt(0), BigInt(1)};
+    }
     const std::vector<BigInt> p_divs = positive_divisors_or_one(coefficients[0]);
     const std::vector<BigInt> q_divs = positive_divisors_or_one(coefficients.leading_coeff());
     for (const BigInt& q : q_divs) {
@@ -411,5 +460,7 @@ void normalize_rational_coefficients(RatPoly& coefficients) {
     }
     return std::nullopt;
 }
+
+
 
 } // namespace cas::algebra

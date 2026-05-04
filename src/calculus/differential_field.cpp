@@ -264,8 +264,15 @@ static bool ho_reduce_step(
     return true;
 }
 
+/// Performs Hermite reduction on P/Q with respect to generator t_var
 Result<HermiteReduction> hermite_reduce(
-    ExprPtr P, ExprPtr Q, [[maybe_unused]] const Symbol& t_var, const DifferentialField& field, symbolic::CASContext& ctx) {
+    ExprPtr P, ExprPtr Q, const Symbol& t_var, const DifferentialField& field, symbolic::CASContext& ctx) {
+
+    // If we are in the base field (no extensions), use the exact RatPoly-based reduction.
+    // This is more robust for rational functions over Q(parameters).
+    if (field.extensions().empty() && t_var.name == field.base_var().name) {
+        return hermite_reduction_exact(P, Q, t_var, ctx);
+    }
 
     AstArena& arena = ctx.arena();
     const Symbol& x = field.base_var();

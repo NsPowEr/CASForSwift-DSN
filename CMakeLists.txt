@@ -95,6 +95,7 @@ set(CAS_SYMBOLIC_SOURCES
     src/symbolic/substitute.cpp
     src/symbolic/functions_special.cpp
     src/symbolic/series_arithmetic.cpp
+    src/symbolic/normal_form.cpp
 )
 
 set(CAS_CALCULUS_SOURCES

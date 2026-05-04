@@ -184,17 +184,17 @@ Result<JordanDecomposition> jordan_normal_form(const MatrixExpr& matrix, symboli
         // Actually, the vectors we chose at k+1, their images S(v) are in Ker(S^k).
         
         std::vector<std::vector<std::vector<ExprPtr>>> chosen_vectors(max_k + 1); // vectors chosen AT level k (not their images)
+        std::vector<std::vector<ExprPtr>> current_dropped_vectors;
         
         for (int i = (int)max_k; i >= 1; --i) {
-            // Space already covered by images of vectors from i+1
+            // Space already covered by images of vectors from higher levels
             std::vector<std::vector<ExprPtr>> covered_basis;
-            if (i < (int)max_k) {
-                for (const auto& v : chosen_vectors[i + 1]) {
-                    auto img = apply_matrix(A_minus_lambdaI, v, ctx);
-                    if (img.is_error()) return fail<JordanDecomposition>(img.error());
-                    covered_basis.push_back(img.value());
-                }
+            for (const auto& v : current_dropped_vectors) {
+                auto img = apply_matrix(A_minus_lambdaI, v, ctx);
+                if (img.is_error()) return fail<JordanDecomposition>(img.error());
+                covered_basis.push_back(img.value());
             }
+            
             // And also by Ker(S^{i-1})
             std::vector<std::vector<ExprPtr>> full_small_basis;
             if (i > 1) {
@@ -217,6 +217,12 @@ Result<JordanDecomposition> jordan_normal_form(const MatrixExpr& matrix, symboli
                     chosen_vectors[i].push_back(v);
                 }
             }
+            
+            // Update dropped vectors for the next level down
+            current_dropped_vectors = covered_basis;
+            for (const auto& v : chosen_vectors[i]) {
+                current_dropped_vectors.push_back(v);
+            }
         }
         
         // Now build the blocks and P columns
@@ -237,6 +243,9 @@ Result<JordanDecomposition> jordan_normal_form(const MatrixExpr& matrix, symboli
                 // Add to P in reverse order to get 1s on the superdiagonal
                 std::reverse(chain.begin(), chain.end());
                 for (const auto& vec : chain) {
+                    if (current_col >= n) {
+                        return fail<JordanDecomposition>(make_error(CASErrorKind::InternalError, "Jordan chain columns exceeded matrix dimension"));
+                    }
                     for (std::size_t r = 0; r < n; ++r) {
                         P(r, current_col) = vec[r];
                     }

@@ -418,13 +418,17 @@ public:
                                 
                                 auto exact_div = [](const algebra::IntPoly& num, const algebra::IntPoly& den) -> algebra::IntPoly {
                                     if (den.is_zero()) return num;
+                                    if (num.is_zero()) return algebra::IntPoly{};
+                                    if (num.size() < den.size()) return algebra::IntPoly{};
+                                    
                                     algebra::IntPoly q;
+                                    q.resize(num.size() - den.size() + 1, BigInt(0));
                                     algebra::IntPoly r = num;
-                                    if (num.degree() < den.degree()) return q;
-                                    q.resize(num.degree() - den.degree() + 1);
                                     BigInt lc_den = den.leading_coeff();
-                                    for (int i = static_cast<int>(num.degree() - den.degree()); i >= 0; --i) {
-                                        q[i] = r[i + den.degree()] / lc_den;
+                                    
+                                    for (int i = static_cast<int>(num.size() - den.size()); i >= 0; --i) {
+                                        std::size_t r_idx = static_cast<std::size_t>(i) + den.size() - 1;
+                                        q[i] = r[r_idx] / lc_den;
                                         for (std::size_t j = 0; j < den.size(); ++j) {
                                             r[i + j] -= q[i] * den[j];
                                         }

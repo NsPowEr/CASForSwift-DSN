@@ -291,14 +291,30 @@ void append_factor_with_multiplicity(
             auto lifted_res = hensel_lift_multi(remaining, mod_factors, p, k);
             if (lifted_res.is_ok()) {
                 auto lifted = lifted_res.value();
+                auto recombined = find_factor_by_hensel_recombination(
+                    remaining,
+                    mod_factors,
+                    p,
+                    k,
+                    remaining.degree() / 2U);
+                if (recombined.has_value()) {
+                    auto quotient = exact_divide_integer_poly(remaining, *recombined, ctx);
+                    if (quotient.is_ok()) {
+                        auto factor_expr = integer_coefficients_to_expr(*recombined, var, ctx);
+                        if (factor_expr.is_ok()) {
+                            append_factor_with_multiplicity(factorization.factors, factor_expr.value(), multiplicity);
+                            remaining = primitive_integer_poly(std::move(quotient.value()));
+                        }
+                    }
+                }
                 for (const auto& g_mod : lifted) {
                     auto h = find_factor_lll(remaining, g_mod, pk, remaining.degree() / 2);
                     if (h.has_value()) {
-                        auto h_expr = integer_coefficients_to_expr(*h, var, ctx);
-                        if (h_expr.is_ok()) {
-                            append_factor_with_multiplicity(factorization.factors, h_expr.value(), multiplicity);
-                            auto quotient = exact_divide_integer_poly(remaining, *h, ctx);
-                            if (quotient.is_ok()) {
+                        auto quotient = exact_divide_integer_poly(remaining, *h, ctx);
+                        if (quotient.is_ok()) {
+                            auto h_expr = integer_coefficients_to_expr(*h, var, ctx);
+                            if (h_expr.is_ok()) {
+                                append_factor_with_multiplicity(factorization.factors, h_expr.value(), multiplicity);
                                 remaining = primitive_integer_poly(std::move(quotient.value()));
                             }
                         }

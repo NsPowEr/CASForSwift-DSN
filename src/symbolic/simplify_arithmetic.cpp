@@ -312,6 +312,16 @@ Result<ExprPtr> Simplifier::simplify_power(ExprPtr base, ExprPtr exponent, ExprP
         }
     }
 
+    if (is_constant_expr(base, MathConstant::Infinity) && e_exact.value() && exp_rat.value.is_integer()) {
+        const BigInt power = exp_rat.value.numerator();
+        if (power.is_negative()) {
+            return traced_result(RuleId::SimplifyPowerOne, target_before, make_integer(arena_, BigInt(0)));
+        }
+        if (!power.is_zero()) {
+            return traced_result(RuleId::SimplifyPowerOne, target_before, base);
+        }
+    }
+
     if (is_zero_expr(exponent)) return traced_result(RuleId::SimplifyPowerZero, target_before, make_integer(arena_, BigInt(1)));
     if (is_one_expr(exponent)) return traced_result(RuleId::SimplifyPowerOne, target_before, base);
     if (is_one_expr(base)) return ok(base);

@@ -2,11 +2,8 @@
 #include "cas/algebra.hpp"
 
 #include "calculus_internal.hpp"
-#include "cas/ast_debug.hpp"
 #include "cas/error.hpp"
-#include "cas/formatter.hpp"
 
-#include <iostream>
 #include <utility>
 
 namespace cas::calculus {
@@ -66,6 +63,9 @@ public:
             if (mrv_res.is_ok()) {
                 return mrv_res;
             }
+            if (mrv_res.error().kind != CASErrorKind::Unimplemented) {
+                return fail<ExprPtr>(mrv_res.error());
+            }
         }
 
         // Sviluppo Asintotico all'infinito via trasformazione x -> ±1/t
@@ -84,7 +84,10 @@ public:
             if (expr_t.is_error()) return expr_t;
 
             ExprPtr zero_pt = limit_make_integer(arena_, 0);
-            return compute_recursive(expr_t.value(), t_var, zero_pt, LimitDirection::Right, 0U);
+            auto res = compute_recursive(expr_t.value(), t_var, zero_pt, LimitDirection::Right, 0U);
+            if (res.is_ok() || res.error().kind != CASErrorKind::Unimplemented) {
+                return res;
+            }
         }
 
         return compute_recursive(simplified_expr.value(), var, simplified_point.value(), dir, 0U);
@@ -106,44 +109,13 @@ private:
         ExprPtr point,
         LimitDirection dir,
         unsigned int depth) {
-        if (depth > 6U) {
+        if (depth >= 16U) {
             return fail<ExprPtr>(make_error(
                 CASErrorKind::Unimplemented,
                 "Il limite richiede piu' iterazioni di quelle supportate"));
         }
 
         auto direct = substitute_and_simplify(expr, var, point);
-
-        // Squeeze Theorem: lim(f*g) = 0 if lim(f)=0 and g is bounded
-        if (const auto* prod = expr_cast<Product>(expr)) {
-            bool has_zero = false;
-            bool all_bounded = true;
-            for (auto factor : prod->factors) {
-                auto lim_f = compute_recursive(factor, var, point, dir, depth + 1U);
-                if (lim_f.is_ok() && limit_is_zero(lim_f.value())) {
-                    has_zero = true;
-                } else if (!is_bounded(factor, var)) {
-                    all_bounded = false;
-                    break;
-                }
-            }
-            if (has_zero && all_bounded) {
-                return ok(limit_make_integer(arena_, 0));
-            }
-        }
-
-        if (const auto* bin = expr_cast<Binary>(expr)) {
-            if (bin->op == BinaryOp::Mul) {
-                auto lim_l = compute_recursive(bin->left, var, point, dir, depth + 1U);
-                if (lim_l.is_ok() && limit_is_zero(lim_l.value()) && is_bounded(bin->right, var)) {
-                    return ok(limit_make_integer(arena_, 0));
-                }
-                auto lim_r = compute_recursive(bin->right, var, point, dir, depth + 1U);
-                if (lim_r.is_ok() && limit_is_zero(lim_r.value()) && is_bounded(bin->left, var)) {
-                    return ok(limit_make_integer(arena_, 0));
-                }
-            }
-        }
 
         auto quotient = extract_quotient_view(expr, arena_);
         const bool has_quotient = quotient.has_value();
@@ -162,13 +134,155 @@ private:
             }
         }
 
-        if (direct.is_error() && !has_quotient) {
-            return direct;
-        }
         if (direct.is_ok() && (!expr_is<Binary>(direct.value()) || direct.value() == expr)) {
             if (!expr_is<Binary>(expr) || (!limit_is_zero(direct.value()) && !limit_is_infinity(direct.value()))) {
                 return direct;
             }
+        }
+
+        // Squeeze Theorem: lim(f*g) = 0 if lim(f)=0 and g is bounded
+        if (const auto* prod = expr_cast<Product>(expr)) {
+            bool has_zero = false;
+            bool has_infinity = false;
+            bool all_bounded = true;
+            std::vector<ExprPtr> zero_factors;
+            std::vector<ExprPtr> inf_factors;
+            std::vector<ExprPtr> non_zero_factors;
+
+            for (auto factor : prod->factors) {
+                auto lim_f = compute_recursive(factor, var, point, dir, depth + 1U);
+                if (lim_f.is_ok() && limit_is_zero(lim_f.value())) {
+                    has_zero = true;
+                    zero_factors.push_back(factor);
+                } else if (lim_f.is_ok() && limit_is_infinity(lim_f.value())) {
+                    has_infinity = true;
+                    all_bounded = false;
+                    inf_factors.push_back(factor);
+                } else {
+                    if (!is_bounded(factor, var)) all_bounded = false;
+                    non_zero_factors.push_back(factor);
+                }
+            }
+            if (has_zero && all_bounded) {
+                return ok(limit_make_integer(arena_, 0));
+            }
+            if (has_zero && has_infinity) {
+                auto get_priority = [](ExprPtr f) -> int {
+                    if (const auto* call = expr_cast<FuncCall>(f)) {
+                        if (call->func_id == BuiltinOp::Ln) return 3;
+                        if (call->func_id == BuiltinOp::Exp) return 1;
+                    }
+                    if (expr_cast<Symbol>(f)) return 2;
+                    if (const auto* bin = expr_cast<Binary>(f)) {
+                        if (bin->op == BinaryOp::Pow) return 2;
+                    }
+                    return 0;
+                };
+
+                int max_zero_pri = -1;
+                for (auto f : zero_factors) max_zero_pri = std::max(max_zero_pri, get_priority(f));
+                int max_inf_pri = -1;
+                for (auto f : inf_factors) max_inf_pri = std::max(max_inf_pri, get_priority(f));
+
+                ExprPtr num, den_base;
+                if (max_zero_pri >= max_inf_pri) {
+                    num = zero_factors.size() == 1 ? zero_factors[0] : arena_.make<Product>(std::move(zero_factors));
+                    for (auto factor : non_zero_factors) inf_factors.push_back(factor);
+                    den_base = inf_factors.size() == 1 ? inf_factors[0] : arena_.make<Product>(std::move(inf_factors));
+                } else {
+                    for (auto factor : non_zero_factors) inf_factors.push_back(factor);
+                    num = inf_factors.size() == 1 ? inf_factors[0] : arena_.make<Product>(std::move(inf_factors));
+                    den_base = zero_factors.size() == 1 ? zero_factors[0] : arena_.make<Product>(std::move(zero_factors));
+                }
+
+                ExprPtr den = arena_.make<Binary>(BinaryOp::Pow, den_base, limit_make_integer(arena_, -1));
+                auto simplified_rewritten = context_.simplify(arena_.make<Binary>(BinaryOp::Div, num, den));
+                if (simplified_rewritten.is_error()) return simplified_rewritten;
+                
+                auto qv = extract_quotient_view(simplified_rewritten.value(), arena_);
+                if (qv.has_value()) {
+                    return compute_quotient_limit(simplified_rewritten.value(), var, point, dir, depth + 1U, qv.value(), direct);
+                }
+                return compute_recursive(simplified_rewritten.value(), var, point, dir, depth + 1U);
+            }
+        }
+
+        if (const auto* bin = expr_cast<Binary>(expr)) {
+            if (bin->op == BinaryOp::Mul) {
+                auto lim_l = compute_recursive(bin->left, var, point, dir, depth + 1U);
+                auto lim_r = compute_recursive(bin->right, var, point, dir, depth + 1U);
+
+                if (lim_l.is_ok() && lim_r.is_ok()) {
+                    bool l_zero = limit_is_zero(lim_l.value());
+                    bool r_zero = limit_is_zero(lim_r.value());
+                    bool l_inf = limit_is_infinity(lim_l.value());
+                    bool r_inf = limit_is_infinity(lim_r.value());
+
+                    if ((l_zero && is_bounded(bin->right, var)) || (r_zero && is_bounded(bin->left, var))) {
+                        return ok(limit_make_integer(arena_, 0));
+                    }
+
+                    if ((l_zero && r_inf) || (r_zero && l_inf)) {
+                        auto get_priority = [](ExprPtr f) -> int {
+                            if (const auto* call = expr_cast<FuncCall>(f)) {
+                                if (call->func_id == BuiltinOp::Ln) return 3;
+                                if (call->func_id == BuiltinOp::Exp) return 1;
+                            }
+                            if (expr_cast<Symbol>(f)) return 2;
+                            if (const auto* b = expr_cast<Binary>(f)) {
+                                if (b->op == BinaryOp::Pow) return 2;
+                            }
+                            return 0;
+                        };
+
+                        ExprPtr num, den_base;
+                        if (get_priority(bin->left) >= get_priority(bin->right)) {
+                            num = bin->left;
+                            den_base = bin->right;
+                        } else {
+                            num = bin->right;
+                            den_base = bin->left;
+                        }
+
+                        ExprPtr den = arena_.make<Binary>(BinaryOp::Pow, den_base, limit_make_integer(arena_, -1));
+                        auto simplified_rewritten = context_.simplify(arena_.make<Binary>(BinaryOp::Div, num, den));
+                        if (simplified_rewritten.is_error()) return simplified_rewritten;
+                        
+                        auto qv = extract_quotient_view(simplified_rewritten.value(), arena_);
+                        if (qv.has_value()) {
+                            return compute_quotient_limit(simplified_rewritten.value(), var, point, dir, depth + 1U, qv.value(), direct);
+                        }
+                        return compute_recursive(simplified_rewritten.value(), var, point, dir, depth + 1U);
+                    }
+                }
+            }
+        }
+
+        if (const auto* power = expr_cast<Binary>(expr); power && power->op == BinaryOp::Pow) {
+            auto base_lim = compute_recursive(power->left, var, point, dir, depth + 1U);
+            auto exp_lim = compute_recursive(power->right, var, point, dir, depth + 1U);
+
+            if (base_lim.is_ok() && exp_lim.is_ok()) {
+                const bool base_is_one = limit_is_one(base_lim.value());
+                const bool base_is_zero = limit_is_zero(base_lim.value());
+                const bool base_is_inf = limit_is_infinity(base_lim.value());
+                const bool exp_is_zero = limit_is_zero(exp_lim.value());
+                const bool exp_is_inf = limit_is_infinity(exp_lim.value());
+
+                if ((base_is_one && exp_is_inf) || (base_is_zero && exp_is_zero) || (base_is_inf && exp_is_zero)) {
+                    // f^g -> exp(g * ln(f))
+                    auto ln_f = arena_.make<FuncCall>("ln", std::vector<ExprPtr>{power->left});
+                    auto inner_expr = arena_.make<Binary>(BinaryOp::Mul, power->right, ln_f);
+                    auto inner_lim = compute_recursive(inner_expr, var, point, dir, depth + 1U);
+                    if (inner_lim.is_ok()) {
+                        return ok(arena_.make<FuncCall>("exp", std::vector<ExprPtr>{inner_lim.value()}));
+                    }
+                }
+            }
+        }
+
+        if (direct.is_error() && !has_quotient) {
+            return direct;
         }
 
         if (limit_is_zero(point) && dir == LimitDirection::Right) {
@@ -256,13 +370,13 @@ private:
         };
 
         auto denominator_at_point = as_infinity_if_undefined(quotient.denominator,
-            substitute_and_simplify(quotient.denominator, var, point));
+            compute_recursive(quotient.denominator, var, point, dir, depth + 1U));
 
         // Bounded / Infinity -> 0 (Squeeze Theorem variant for quotients)
         if (denominator_at_point.is_ok() && limit_is_infinity(denominator_at_point.value())) {
             // Check numerator. If it's also infinity, it's inf/inf.
             auto numerator_check = as_infinity_if_undefined(quotient.numerator,
-                substitute_and_simplify(quotient.numerator, var, point));
+                compute_recursive(quotient.numerator, var, point, dir, depth + 1U));
             if (!numerator_check.is_ok() || !limit_is_infinity(numerator_check.value())) {
                 if (is_bounded(quotient.numerator, var)) {
                     return ok(limit_make_integer(arena_, 0));
@@ -271,7 +385,7 @@ private:
         }
 
         auto numerator_at_point = as_infinity_if_undefined(quotient.numerator,
-            substitute_and_simplify(quotient.numerator, var, point));
+            compute_recursive(quotient.numerator, var, point, dir, depth + 1U));
         if (numerator_at_point.is_error()) {
             return numerator_at_point;
         }
@@ -290,12 +404,14 @@ private:
         const bool zero_over_zero = limit_is_zero(numerator_at_point.value()) && limit_is_zero(denominator_at_point.value());
         const bool infinity_over_infinity =
             limit_is_infinity(numerator_at_point.value()) && limit_is_infinity(denominator_at_point.value());
+        
         if (!zero_over_zero && !infinity_over_infinity) {
-            return direct.is_ok()
-                ? direct
-                : fail<ExprPtr>(make_error(
-                    CASErrorKind::Unimplemented,
-                    "Il limite non e' una forma indeterminata supportata"));
+            if (limit_is_zero(denominator_at_point.value()) && !limit_is_zero(numerator_at_point.value())) {
+                // Pole: x/0 -> Inf
+                return ok(arena_.make<Constant>(MathConstant::Infinity));
+            }
+            if (direct.is_ok()) return direct;
+            return fail<ExprPtr>(direct.error());
         }
 
         if (zero_over_zero) {
