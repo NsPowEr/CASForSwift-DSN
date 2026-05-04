@@ -22,7 +22,7 @@
 | CAS-P1-002 | Integrazione | Rothstein-Trager / Lazard-Rioboo (log-part) | P1 | Risolta | CAS-P1-001 | Molto alto | Integrazione razionale simbolica completa | — |
 | CAS-P1-003 | Solving | Polynomial solving grado 4 (Ferrari) | P1 | Risolta | Solve gradi 1-3 (presenti), sqrt simbolico | Alto | Radici quartica esatte | — |
 | CAS-P1-004 | Fattorizzazione | Fattorizzazione completa su Q (oltre Rational Root Theorem) | P1 | Risolta | Square-free Yun (presente, P5 done) | Molto alto | Berlekamp/Zassenhaus modular lifting | — |
-| CAS-P1-005 | Assunzioni | Integrazione assumptions engine nel simplifier | P1 | Aperta | Assumptions data struct (dichiarata) | Alto | `sqrt(x^2) → |x|`, `ln(x)` su `x>0` | Collegare `AssumptionSet` a `simplify_functions.cpp` |
+| CAS-P1-005 | Assunzioni | Integrazione assumptions engine nel simplifier | P1 | Risolta | Assumptions data struct (dichiarata) | Alto | `sqrt(x^2) → |x|`, `ln(x)` su `x>0` | — |
 | CAS-P2-001 | Serie | Taylor via derivate successive (algoritmo, non lookup) | P2 | Bloccata | Derivate (presenti), CAS-P0-001 per equivalenza | Alto | `taylor(f, x, a, n)` generalizzato | Attendere P0-001 |
 | CAS-P2-002 | Integrazione | Integrali definiti via FTC simbolico | P2 | Bloccata | CAS-P1-001, CAS-P1-002 | Molto alto | `integrate(f, x, a, b)` esatto | Attendere P1-002 |
 | CAS-P2-003 | Integrazione | Sostituzione trigonometrica (rimuovere Unimplemented) | P2 | Bloccata | CAS-P1-001 | Alto | Integrazione tramite sub trig | Attendere P1-001 |

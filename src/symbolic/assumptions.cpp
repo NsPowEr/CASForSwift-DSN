@@ -426,6 +426,17 @@ bool Assumptions::prove_relation(ExprPtr current, ExprPtr target, bool strict_ne
 
 bool Assumptions::prove_positive_linear(ExprPtr expr) const {
     if (const auto* sum = expr_cast<Sum>(expr)) {
+        // Detect x - y pattern in Sum canonical form: Sum{u, Unary(Neg, v)} → is_greater(u, v)
+        if (sum->terms.size() == 2U) {
+            auto check_sub = [&](ExprPtr pos, ExprPtr neg) -> bool {
+                const auto* neg_node = expr_cast<Unary>(neg);
+                if (neg_node != nullptr && neg_node->op == UnaryOp::Neg)
+                    return is_greater(pos, neg_node->operand);
+                return false;
+            };
+            if (check_sub(sum->terms[0], sum->terms[1]) || check_sub(sum->terms[1], sum->terms[0]))
+                return true;
+        }
         bool has_strict_positive = false;
         for (ExprPtr term : sum->terms) {
             if (is_positive(term)) {
