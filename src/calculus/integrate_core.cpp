@@ -14,7 +14,7 @@ thread_local std::size_t Integrator::depth_ = 0U;
 Integrator::Integrator(symbolic::CASContext& context) noexcept : context_(context), arena_(context.arena()) {}
 
 Result<ExprPtr> Integrator::integrate(ExprPtr expr, const Symbol& var) {
-    if (depth_ >= 16U) {
+    if (depth_ >= context_.max_integration_depth()) {
         return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Integration recursion budget exceeded"));
     }
     DepthGuard guard(depth_);
@@ -364,7 +364,11 @@ Result<ExprPtr> Integrator::integrate_binary(const Binary& binary, const Symbol&
     case BinaryOp::Mod:
         return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Modulo integration is not implemented"));
     case BinaryOp::Equal:
-        return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Equation integration is not implemented"));
+    case BinaryOp::Less:
+    case BinaryOp::Greater:
+    case BinaryOp::LessEqual:
+    case BinaryOp::GreaterEqual:
+        return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Integration of comparison operators is not implemented"));
     }
 
     return fail<ExprPtr>(make_error(CASErrorKind::InternalError, "Unknown binary operator"));

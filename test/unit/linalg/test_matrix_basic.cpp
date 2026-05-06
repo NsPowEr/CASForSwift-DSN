@@ -176,6 +176,32 @@ TEST(MatrixBasicTest, ComputesTwoByTwoInverseExactly) {
     expect_equivalent(result.value()(1U, 1U), "a/(a*d-b*c)");
 }
 
+TEST(MatrixBasicTest, ComputesLargeDiagonalInverseWithDelayedRref) {
+    symbolic::CASContext context;
+    constexpr std::size_t n = 9U;
+    MatrixExpr matrix(n, n);
+    for (std::size_t row = 0; row < n; ++row) {
+        for (std::size_t col = 0; col < n; ++col) {
+            matrix(row, col) = (row == col)
+                ? symbol(context, "d" + std::to_string(row))
+                : integer(context, 0);
+        }
+    }
+
+    auto result = inverse(matrix, context);
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+
+    for (std::size_t row = 0; row < n; ++row) {
+        for (std::size_t col = 0; col < n; ++col) {
+            if (row == col) {
+                expect_equivalent(result.value()(row, col), "1/d" + std::to_string(row));
+            } else {
+                EXPECT_TRUE(is_zero_expr(result.value()(row, col)));
+            }
+        }
+    }
+}
+
 TEST(MatrixBasicTest, RejectsInvalidLinearAlgebraInputs) {
     symbolic::CASContext context;
     MatrixExpr a(1U, 2U, {integer(context, 1), integer(context, 2)});
@@ -505,6 +531,44 @@ TEST(MatrixEigenvalueTest, UpperTriangularFourByFourEigenvalues) {
         }
         EXPECT_TRUE(found) << "Eigenvalue " << expected << " not found";
     }
+}
+
+// L1-17: Bareiss pivot scoring uses assumptions
+TEST(MatrixBareissTest, L1_17_AssumptionBackedPivotPreferredOverStructuralNonzero) {
+    symbolic::CASContext ctx;
+    auto x = ctx.arena().make<Symbol>(Symbol{"x"});
+    auto y = ctx.arena().make<Symbol>(Symbol{"y"});
+    // Assume y > 0 (known positive) but x is unconstrained
+    ctx.assumptions().assume_positive(Symbol{"y"});
+    // Matrix: row0=[x, 1], row1=[y, 2]
+    // Bareiss should prefer y (assumption-backed) over x (unknown) as pivot
+    MatrixExpr mat(2U, 2U, {x, integer(ctx, 1), y, integer(ctx, 2)});
+    auto result = bareiss(mat, ctx);
+    EXPECT_TRUE(result.is_ok()) << result.error().message;
+}
+
+// L1-17: configuring max_integration_depth works
+TEST(MatrixBareissTest, L1_18_MaxIntegrationDepthConfigurable) {
+    symbolic::CASContext ctx;
+    EXPECT_EQ(ctx.max_integration_depth(), 16U);
+    ctx.set_max_integration_depth(32U);
+    EXPECT_EQ(ctx.max_integration_depth(), 32U);
+    ctx.set_max_integration_depth(200U);
+    EXPECT_EQ(ctx.max_integration_depth(), 128U);  // clamped to max
+    ctx.set_max_integration_depth(0U);
+    EXPECT_GE(ctx.max_integration_depth(), 1U);  // min 1
+}
+
+// L1-21: gcd_error_probability configurable
+TEST(MatrixBareissTest, L1_21_GcdErrorProbabilityConfigurable) {
+    symbolic::CASContext ctx;
+    EXPECT_DOUBLE_EQ(ctx.gcd_error_probability(), 0.001);
+    ctx.set_gcd_error_probability(0.01);
+    EXPECT_DOUBLE_EQ(ctx.gcd_error_probability(), 0.01);
+    ctx.set_gcd_error_probability(1e-10);
+    EXPECT_GE(ctx.gcd_error_probability(), 1e-6);  // clamped to min
+    ctx.set_gcd_error_probability(0.5);
+    EXPECT_LE(ctx.gcd_error_probability(), 0.1);   // clamped to max
 }
 
 }  // namespace cas::linalg

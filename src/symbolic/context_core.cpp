@@ -393,6 +393,16 @@ void CASContext::set_max_simplification_depth(int depth) noexcept {
     max_simplification_depth_ = (depth < 10) ? 10 : depth;
 }
 
+void CASContext::set_max_integration_depth(std::size_t depth) noexcept {
+    max_integration_depth_ = (depth < 1U) ? 1U : (depth > 128U) ? 128U : depth;
+}
+
+void CASContext::set_gcd_error_probability(double prob) noexcept {
+    if (prob < 1e-6) prob = 1e-6;
+    if (prob > 0.1)  prob = 0.1;
+    gcd_error_probability_ = prob;
+}
+
 void CASContext::clear_caches() noexcept {
     simplify_cache_.clear();
     diff_cache_.clear();

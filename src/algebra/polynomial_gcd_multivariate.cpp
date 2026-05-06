@@ -2,334 +2,991 @@
 #include "cas/symbolic.hpp"
 #include "algebra_internal.hpp"
 #include "polynomial_internal.hpp"
+
 #include <algorithm>
+#include <cmath>
+#include <array>
 #include <map>
+#include <optional>
+#include <set>
+#include <string>
 #include <vector>
 
 namespace cas::algebra {
 
 namespace {
 
-// Converte MultivariatePolynomial (variabile singola x) in IntPoly
-Result<IntPoly> multivariate_single_var_to_intpoly(const MultivariatePolynomial& poly, const Symbol& var) {
-    if (poly.is_zero()) return ok(IntPoly{});
+using FactorKey = std::vector<std::pair<std::string, unsigned int>>;
 
-    std::map<std::size_t, BigInt> coeff_map;
-    std::size_t max_deg = 0;
+struct FactorKeyLess {
+    [[nodiscard]] bool operator()(const FactorKey& lhs, const FactorKey& rhs) const noexcept {
+        return lhs < rhs;
+    }
+};
 
+using CoeffMap = std::map<FactorKey, BigInt, FactorKeyLess>;
+using Monomial = std::vector<unsigned int>;
+using SparsePoly = std::map<Monomial, BigInt>;
+
+[[nodiscard]] FactorKey make_factor_key(const std::vector<std::pair<Symbol, unsigned int>>& factors,
+                                        const std::optional<std::string>& omit_var = std::nullopt) {
+    FactorKey key;
+    key.reserve(factors.size());
+    for (const auto& [symbol, exponent] : factors) {
+        if (exponent == 0U) {
+            continue;
+        }
+        if (omit_var.has_value() && symbol.name == omit_var.value()) {
+            continue;
+        }
+        key.emplace_back(symbol.name, exponent);
+    }
+
+    std::sort(key.begin(), key.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.first < rhs.first;
+    });
+
+    FactorKey merged;
+    merged.reserve(key.size());
+    for (const auto& [name, exponent] : key) {
+        if (!merged.empty() && merged.back().first == name) {
+            merged.back().second += exponent;
+        } else {
+            merged.emplace_back(name, exponent);
+        }
+    }
+    return merged;
+}
+
+[[nodiscard]] std::vector<std::pair<Symbol, unsigned int>> key_to_factors(const FactorKey& key) {
+    std::vector<std::pair<Symbol, unsigned int>> factors;
+    factors.reserve(key.size());
+    for (const auto& [name, exponent] : key) {
+        if (exponent > 0U) {
+            factors.emplace_back(Symbol(name), exponent);
+        }
+    }
+    return factors;
+}
+
+[[nodiscard]] std::vector<Symbol> collect_all_variables(const MultivariatePolynomial& p,
+                                                        const MultivariatePolynomial& q) {
+    auto vars_p = p.variables();
+    auto vars_q = q.variables();
+
+    std::vector<Symbol> all_vars = vars_p;
+    for (const auto& symbol : vars_q) {
+        if (std::find_if(all_vars.begin(), all_vars.end(),
+                         [&](const Symbol& candidate) { return candidate.name == symbol.name; }) == all_vars.end()) {
+            all_vars.push_back(symbol);
+        }
+    }
+
+    std::sort(all_vars.begin(), all_vars.end(), [](const Symbol& lhs, const Symbol& rhs) {
+        return lhs.name < rhs.name;
+    });
+    return all_vars;
+}
+
+[[nodiscard]] std::size_t degree_in_var(const MultivariatePolynomial& poly, const Symbol& var) {
+    std::size_t degree = 0U;
     for (const auto& term : poly.terms()) {
-        std::size_t deg = 0;
-        for (const auto& factor : term.factors) {
-            if (factor.first.name == var.name) {
-                deg = factor.second;
-            } else {
-                // Termini con altre variabili non supportati qui
-                return fail<IntPoly>(make_error(CASErrorKind::Unimplemented,
-                    "gcd_multivariate: atteso polinomio univariato dopo valutazione"));
+        for (const auto& [symbol, exponent] : term.factors) {
+            if (symbol.name == var.name) {
+                degree = std::max(degree, static_cast<std::size_t>(exponent));
             }
         }
-        coeff_map[deg] += term.coefficient;
-        if (deg > max_deg) max_deg = deg;
+    }
+    return degree;
+}
+
+[[nodiscard]] CoeffMap to_coeff_map(const MultivariatePolynomial& poly,
+                                    const std::optional<std::string>& omit_var = std::nullopt) {
+    CoeffMap coefficients;
+    for (const auto& term : poly.terms()) {
+        coefficients[make_factor_key(term.factors, omit_var)] += term.coefficient;
+    }
+
+    for (auto it = coefficients.begin(); it != coefficients.end();) {
+        if (it->second.is_zero()) {
+            it = coefficients.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    return coefficients;
+}
+
+[[nodiscard]] bool same_polynomial(const MultivariatePolynomial& lhs, const MultivariatePolynomial& rhs) {
+    return to_coeff_map(lhs) == to_coeff_map(rhs);
+}
+
+[[nodiscard]] MultivariatePolynomial multiply_by_scalar(const MultivariatePolynomial& poly, const BigInt& scalar) {
+    if (poly.is_zero() || scalar.is_zero()) {
+        return MultivariatePolynomial{};
+    }
+
+    std::vector<MultivariateTerm> terms;
+    terms.reserve(poly.terms().size());
+    for (const auto& term : poly.terms()) {
+        terms.push_back(MultivariateTerm{
+            .coefficient = term.coefficient * scalar,
+            .factors = term.factors,
+        });
+    }
+    return MultivariatePolynomial(std::move(terms));
+}
+
+[[nodiscard]] MultivariatePolynomial normalize_multivariate_gcd(const MultivariatePolynomial& poly) {
+    if (poly.is_zero()) {
+        return poly;
+    }
+
+    BigInt content(0);
+    for (const auto& term : poly.terms()) {
+        content = gcd(content, term.coefficient.abs());
+    }
+
+    std::vector<MultivariateTerm> normalized;
+    normalized.reserve(poly.terms().size());
+    for (const auto& term : poly.terms()) {
+        MultivariateTerm reduced = term;
+        if (content > BigInt(1)) {
+            reduced.coefficient /= content;
+        }
+        normalized.push_back(std::move(reduced));
+    }
+
+    MultivariatePolynomial result(std::move(normalized));
+    CoeffMap coeffs = to_coeff_map(result);
+    if (!coeffs.empty() && std::prev(coeffs.end())->second.is_negative()) {
+        result = multiply_by_scalar(result, BigInt(-1));
+    }
+
+    return result;
+}
+
+[[nodiscard]] bool is_unit_polynomial(const MultivariatePolynomial& poly) {
+    if (poly.terms().size() != 1U) {
+        return false;
+    }
+    const auto& term = poly.terms().front();
+    return term.factors.empty() && term.coefficient.abs() == BigInt(1);
+}
+
+[[nodiscard]] Result<IntPoly> multivariate_single_var_to_intpoly(const MultivariatePolynomial& poly, const Symbol& var) {
+    if (poly.is_zero()) {
+        return ok(IntPoly{});
+    }
+
+    std::map<std::size_t, BigInt> coefficient_map;
+    std::size_t max_degree = 0U;
+
+    for (const auto& term : poly.terms()) {
+        std::size_t degree = 0U;
+        for (const auto& [symbol, exponent] : term.factors) {
+            if (symbol.name == var.name) {
+                degree = exponent;
+            } else {
+                return fail<IntPoly>(make_error(
+                    CASErrorKind::Unimplemented,
+                    "polynomial_gcd_multivariate: expected univariate polynomial after specialization"));
+            }
+        }
+        coefficient_map[degree] += term.coefficient;
+        max_degree = std::max(max_degree, degree);
     }
 
     IntPoly result;
-    result.resize(max_deg + 1, BigInt(0));
-    for (const auto& [deg, coeff] : coeff_map) {
-        result[deg] = coeff;
+    result.resize(max_degree + 1U, BigInt(0));
+    for (const auto& [degree, coefficient] : coefficient_map) {
+        result[degree] = coefficient;
     }
-    // Normalizza: rimuovi zeri in coda
-    result.normalize([](const BigInt& v) { return v.is_zero(); });
+    result.normalize([](const BigInt& value) { return value.is_zero(); });
     return ok(std::move(result));
 }
 
-// Normalizza IntPoly: rende il coefficiente direttivo positivo
-void normalize_sign(IntPoly& poly) {
-    if (!poly.empty() && poly.leading_coeff().is_negative()) {
-        for (auto& c : poly.coefficients()) c = -c;
-    }
-}
-
-// Ricava i gradi di una variabile in un MultivariatePolynomial
-std::size_t degree_in_var(const MultivariatePolynomial& poly, const Symbol& var) {
-    std::size_t deg = 0;
-    for (const auto& term : poly.terms()) {
-        for (const auto& factor : term.factors) {
-            if (factor.first.name == var.name) {
-                if (factor.second > deg) deg = factor.second;
-            }
+[[nodiscard]] MultivariatePolynomial intpoly_to_multivariate(const IntPoly& poly, const Symbol& var) {
+    std::vector<MultivariateTerm> terms;
+    terms.reserve(poly.size());
+    for (std::size_t degree = 0; degree < poly.size(); ++degree) {
+        if (poly[degree].is_zero()) {
+            continue;
         }
+        std::vector<std::pair<Symbol, unsigned int>> factors;
+        if (degree > 0U) {
+            factors.emplace_back(var, static_cast<unsigned int>(degree));
+        }
+        terms.push_back(MultivariateTerm{
+            .coefficient = poly[degree],
+            .factors = std::move(factors),
+        });
     }
-    return deg;
+    return MultivariatePolynomial(std::move(terms));
 }
 
-// Interpola un vettore di valori BigInt ai punti 1, 2, ..., n usando Lagrange
-// Restituisce coefficienti [a0, a1, ..., a_{n-1}] di a0 + a1*y + ... + a_{n-1}*y^{n-1}
-// ma con denominatori (tutto su Rational)
-Result<std::vector<Rational>> lagrange_interpolate(const std::vector<BigInt>& values) {
-    const std::size_t n = values.size();
-    if (n == 0) return ok(std::vector<Rational>{});
+[[nodiscard]] Result<std::vector<Rational>> lagrange_interpolate(
+    const std::vector<BigInt>& values,
+    const std::vector<BigInt>& points) {
+    if (values.size() != points.size()) {
+        return fail<std::vector<Rational>>(make_error(
+            CASErrorKind::InvalidArgument,
+            "polynomial_gcd_multivariate: interpolation points/value size mismatch"));
+    }
+    if (values.empty()) {
+        return ok(std::vector<Rational>{});
+    }
 
-    // Costruisce il polinomio di Lagrange come vettore di coefficienti Rational
-    // p(y) = Σ_i v[i] * L_i(y),  L_i(y) = Π_{j≠i} (y - (j+1)) / ((i+1) - (j+1))
+    const std::size_t n = values.size();
     std::vector<Rational> result(n, Rational(BigInt(0)));
 
-    for (std::size_t i = 0; i < n; ++i) {
-        if (values[i].is_zero()) continue;
-
-        // Calcola L_i(y) come polinomio di grado n-1
-        // Inizia con [1] e moltiplica per ogni (y - (j+1)) / ((i+1) - (j+1))
-        std::vector<Rational> li(1, Rational(BigInt(1)));
-
-        for (std::size_t j = 0; j < n; ++j) {
-            if (j == i) continue;
-            // Dividi per scalare ((i+1) - (j+1)) = i - j
-            long long denom = static_cast<long long>(i) - static_cast<long long>(j);
-            Rational scale(BigInt(1), BigInt(denom > 0 ? denom : -denom));
-            if (denom < 0) scale = -scale;
-
-            // Moltiplica li per (y - (j+1)) = y - (j+1)
-            // Shift: nuovi coefficienti per li * y
-            std::vector<Rational> new_li(li.size() + 1, Rational(BigInt(0)));
-            long long eval_pt = static_cast<long long>(j) + 1LL;
-
-            for (std::size_t k = 0; k < li.size(); ++k) {
-                new_li[k + 1] = new_li[k + 1] + li[k] * scale;
-                new_li[k] = new_li[k] - li[k] * scale * Rational(BigInt(eval_pt));
-            }
-            li = std::move(new_li);
+    for (std::size_t i = 0U; i < n; ++i) {
+        if (values[i].is_zero()) {
+            continue;
         }
 
-        // Somma v[i] * L_i(y) al risultato
-        Rational vi(values[i]);
-        if (li.size() > result.size()) result.resize(li.size(), Rational(BigInt(0)));
-        for (std::size_t k = 0; k < li.size(); ++k) {
-            result[k] = result[k] + vi * li[k];
+        std::vector<Rational> basis(1U, Rational(BigInt(1)));
+        for (std::size_t j = 0U; j < n; ++j) {
+            if (j == i) {
+                continue;
+            }
+
+            const BigInt denominator = points[i] - points[j];
+            if (denominator.is_zero()) {
+                return fail<std::vector<Rational>>(make_error(
+                    CASErrorKind::InvalidArgument,
+                    "polynomial_gcd_multivariate: duplicate interpolation points"));
+            }
+
+            const Rational scale(BigInt(1), denominator);
+            std::vector<Rational> next(basis.size() + 1U, Rational(BigInt(0)));
+            for (std::size_t k = 0U; k < basis.size(); ++k) {
+                next[k + 1U] = next[k + 1U] + basis[k] * scale;
+                next[k] = next[k] - basis[k] * scale * Rational(points[j]);
+            }
+            basis = std::move(next);
+        }
+
+        const Rational value(values[i]);
+        if (basis.size() > result.size()) {
+            result.resize(basis.size(), Rational(BigInt(0)));
+        }
+        for (std::size_t k = 0U; k < basis.size(); ++k) {
+            result[k] = result[k] + value * basis[k];
         }
     }
 
-    // Rimuovi zeri in coda
     while (!result.empty() && result.back().numerator().is_zero()) {
         result.pop_back();
     }
-
     return ok(std::move(result));
 }
 
-// Verifica se un MultivariatePolynomial G divide P (per valutazione in più punti)
-bool multivariate_divides_check(const MultivariatePolynomial& P,
-                                const MultivariatePolynomial& G,
-                                const std::vector<Symbol>& all_vars,
-                                symbolic::CASContext& ctx) {
-    // Valuta ad un punto lontano dall'origine per evitare falsi positivi
-    std::vector<long long> test_pts = {2LL, 3LL, 5LL};
-
-    for (long long pt : test_pts) {
-        // Valuta tutte le variabili a pt
-        BigInt p_val(0), g_val(0);
-        auto eval_poly = [&](const MultivariatePolynomial& poly) -> BigInt {
-            BigInt val(0);
-            for (const auto& term : poly.terms()) {
-                BigInt term_v = term.coefficient;
-                for (const auto& var_sym : all_vars) {
-                    // Trova esponente di questa variabile nel termine
-                    unsigned int exp = 0;
-                    for (const auto& factor : term.factors) {
-                        if (factor.first.name == var_sym.name) { exp = factor.second; break; }
-                    }
-                    if (exp > 0) {
-                        for (unsigned int e = 0; e < exp; ++e) term_v = term_v * BigInt(pt);
-                    }
-                }
-                val += term_v;
+[[nodiscard]] MultivariatePolynomial coefficient_poly_in_var(
+    const MultivariatePolynomial& poly,
+    const Symbol& var,
+    std::size_t degree) {
+    std::vector<MultivariateTerm> terms;
+    for (const auto& term : poly.terms()) {
+        unsigned int exponent = 0U;
+        for (const auto& [symbol, factor_exponent] : term.factors) {
+            if (symbol.name == var.name) {
+                exponent = factor_exponent;
+                break;
             }
-            return val;
-        };
+        }
 
-        p_val = eval_poly(P);
-        g_val = eval_poly(G);
+        if (static_cast<std::size_t>(exponent) != degree) {
+            continue;
+        }
 
-        if (g_val.is_zero()) continue; // Punto di valutazione degenere, skippa
-        if (!(p_val % g_val).is_zero()) return false;
+        std::vector<std::pair<Symbol, unsigned int>> reduced_factors;
+        reduced_factors.reserve(term.factors.size());
+        for (const auto& [symbol, factor_exponent] : term.factors) {
+            if (symbol.name != var.name) {
+                reduced_factors.emplace_back(symbol, factor_exponent);
+            }
+        }
+
+        terms.push_back(MultivariateTerm{
+            .coefficient = term.coefficient,
+            .factors = std::move(reduced_factors),
+        });
+    }
+    return MultivariatePolynomial(std::move(terms));
+}
+
+[[nodiscard]] MultivariatePolynomial multiply_by_variable_power(
+    const MultivariatePolynomial& poly,
+    const Symbol& var,
+    std::size_t power) {
+    if (power == 0U || poly.is_zero()) {
+        return poly;
+    }
+
+    std::vector<MultivariateTerm> terms;
+    terms.reserve(poly.terms().size());
+    for (const auto& term : poly.terms()) {
+        auto factors = term.factors;
+        factors.emplace_back(var, static_cast<unsigned int>(power));
+        terms.push_back(MultivariateTerm{
+            .coefficient = term.coefficient,
+            .factors = std::move(factors),
+        });
+    }
+    return MultivariatePolynomial(std::move(terms));
+}
+
+[[nodiscard]] Result<MultivariatePolynomial> interpolate_polynomial_values(
+    const std::vector<MultivariatePolynomial>& values,
+    const std::vector<BigInt>& points,
+    const Symbol& interpolation_var) {
+    if (values.size() != points.size()) {
+        return fail<MultivariatePolynomial>(make_error(
+            CASErrorKind::InvalidArgument,
+            "polynomial_gcd_multivariate: interpolation polynomial points/value size mismatch"));
+    }
+
+    std::set<FactorKey, FactorKeyLess> all_keys;
+    std::vector<CoeffMap> value_maps;
+    value_maps.reserve(values.size());
+
+    for (const auto& value_poly : values) {
+        auto map = to_coeff_map(value_poly);
+        for (const auto& [key, coefficient] : map) {
+            static_cast<void>(coefficient);
+            all_keys.insert(key);
+        }
+        value_maps.push_back(std::move(map));
+    }
+
+    std::vector<MultivariateTerm> terms;
+
+    for (const auto& key : all_keys) {
+        std::vector<BigInt> sequence(values.size(), BigInt(0));
+        for (std::size_t i = 0U; i < value_maps.size(); ++i) {
+            const auto it = value_maps[i].find(key);
+            if (it != value_maps[i].end()) {
+                sequence[i] = it->second;
+            }
+        }
+
+        auto interpolation = lagrange_interpolate(sequence, points);
+        if (interpolation.is_error()) {
+            return fail<MultivariatePolynomial>(interpolation.error());
+        }
+
+        const auto& coeffs = interpolation.value();
+        for (std::size_t degree = 0U; degree < coeffs.size(); ++degree) {
+            const Rational& coefficient = coeffs[degree];
+            if (coefficient.numerator().is_zero()) {
+                continue;
+            }
+            if (coefficient.denominator() != BigInt(1)) {
+                return fail<MultivariatePolynomial>(make_error(
+                    CASErrorKind::InternalError,
+                    "polynomial_gcd_multivariate: non-integer coefficient after interpolation"));
+            }
+
+            auto factors = key_to_factors(key);
+            if (degree > 0U) {
+                factors.emplace_back(interpolation_var, static_cast<unsigned int>(degree));
+            }
+
+            terms.push_back(MultivariateTerm{
+                .coefficient = coefficient.numerator(),
+                .factors = std::move(factors),
+            });
+        }
+    }
+
+    return ok(MultivariatePolynomial(std::move(terms)));
+}
+
+[[nodiscard]] SparsePoly to_sparse(const MultivariatePolynomial& poly, const std::vector<Symbol>& vars) {
+    SparsePoly sparse;
+    std::map<std::string, std::size_t> indices;
+    for (std::size_t i = 0U; i < vars.size(); ++i) {
+        indices[vars[i].name] = i;
+    }
+
+    for (const auto& term : poly.terms()) {
+        Monomial monomial(vars.size(), 0U);
+        for (const auto& [symbol, exponent] : term.factors) {
+            const auto it = indices.find(symbol.name);
+            if (it != indices.end()) {
+                monomial[it->second] += exponent;
+            }
+        }
+        sparse[monomial] += term.coefficient;
+    }
+
+    for (auto it = sparse.begin(); it != sparse.end();) {
+        if (it->second.is_zero()) {
+            it = sparse.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    return sparse;
+}
+
+[[nodiscard]] bool monomial_divides(const Monomial& divisor, const Monomial& dividend) {
+    for (std::size_t i = 0U; i < divisor.size(); ++i) {
+        if (divisor[i] > dividend[i]) {
+            return false;
+        }
     }
     return true;
 }
 
+[[nodiscard]] Monomial monomial_quotient(const Monomial& dividend, const Monomial& divisor) {
+    Monomial quotient(dividend.size(), 0U);
+    for (std::size_t i = 0U; i < dividend.size(); ++i) {
+        quotient[i] = dividend[i] - divisor[i];
+    }
+    return quotient;
+}
+
+void sparse_add_term(SparsePoly& poly, const Monomial& monomial, const BigInt& coefficient) {
+    if (coefficient.is_zero()) {
+        return;
+    }
+
+    poly[monomial] += coefficient;
+    if (poly[monomial].is_zero()) {
+        poly.erase(monomial);
+    }
+}
+
+[[nodiscard]] SparsePoly multiply_sparse_by_term(
+    const SparsePoly& poly,
+    const Monomial& monomial,
+    const BigInt& coefficient) {
+    SparsePoly result;
+    if (coefficient.is_zero()) {
+        return result;
+    }
+
+    for (const auto& [base_monomial, base_coefficient] : poly) {
+        Monomial product(base_monomial.size(), 0U);
+        for (std::size_t i = 0U; i < base_monomial.size(); ++i) {
+            product[i] = base_monomial[i] + monomial[i];
+        }
+        sparse_add_term(result, product, base_coefficient * coefficient);
+    }
+    return result;
+}
+
+void sparse_subtract(SparsePoly& lhs, const SparsePoly& rhs) {
+    for (const auto& [monomial, coefficient] : rhs) {
+        sparse_add_term(lhs, monomial, -coefficient);
+    }
+}
+
+[[nodiscard]] MultivariatePolynomial sparse_to_multivariate(const SparsePoly& sparse, const std::vector<Symbol>& vars) {
+    std::vector<MultivariateTerm> terms;
+    terms.reserve(sparse.size());
+
+    for (const auto& [monomial, coefficient] : sparse) {
+        if (coefficient.is_zero()) {
+            continue;
+        }
+
+        std::vector<std::pair<Symbol, unsigned int>> factors;
+        factors.reserve(vars.size());
+        for (std::size_t i = 0U; i < vars.size(); ++i) {
+            if (monomial[i] > 0U) {
+                factors.emplace_back(vars[i], monomial[i]);
+            }
+        }
+
+        terms.push_back(MultivariateTerm{
+            .coefficient = coefficient,
+            .factors = std::move(factors),
+        });
+    }
+
+    return MultivariatePolynomial(std::move(terms));
+}
+
+[[nodiscard]] Result<std::optional<MultivariatePolynomial>> exact_quotient(
+    const MultivariatePolynomial& dividend,
+    const MultivariatePolynomial& divisor,
+    const std::vector<Symbol>& vars) {
+    if (divisor.is_zero()) {
+        return fail<std::optional<MultivariatePolynomial>>(make_error(
+            CASErrorKind::InvalidArgument,
+            "polynomial_gcd_multivariate: exact division by zero divisor"));
+    }
+
+    SparsePoly remainder = to_sparse(dividend, vars);
+    SparsePoly divisor_sparse = to_sparse(divisor, vars);
+    SparsePoly quotient;
+
+    if (divisor_sparse.empty()) {
+        return fail<std::optional<MultivariatePolynomial>>(make_error(
+            CASErrorKind::InvalidArgument,
+            "polynomial_gcd_multivariate: zero sparse divisor"));
+    }
+
+    const auto [divisor_lm, divisor_lc] = *std::prev(divisor_sparse.end());
+    const std::size_t max_steps =
+        std::max<std::size_t>(8U, (remainder.size() + 1U) * (vars.size() + 1U) * 16U);
+    std::size_t steps = 0U;
+
+    while (!remainder.empty()) {
+        if (++steps > max_steps) {
+            return fail<std::optional<MultivariatePolynomial>>(make_error(
+                CASErrorKind::Unimplemented,
+                "polynomial_gcd_multivariate: exact division budget exceeded during certification"));
+        }
+
+        const auto [remainder_lm, remainder_lc] = *std::prev(remainder.end());
+
+        if (!monomial_divides(divisor_lm, remainder_lm)) {
+            return ok(std::optional<MultivariatePolynomial>{std::nullopt});
+        }
+        if ((remainder_lc % divisor_lc) != BigInt(0)) {
+            return ok(std::optional<MultivariatePolynomial>{std::nullopt});
+        }
+
+        const BigInt term_coefficient = remainder_lc / divisor_lc;
+        const Monomial term_monomial = monomial_quotient(remainder_lm, divisor_lm);
+
+        sparse_add_term(quotient, term_monomial, term_coefficient);
+
+        SparsePoly subtraction = multiply_sparse_by_term(divisor_sparse, term_monomial, term_coefficient);
+        sparse_subtract(remainder, subtraction);
+
+        if (!remainder.empty() && !(std::prev(remainder.end())->first < remainder_lm)) {
+            return fail<std::optional<MultivariatePolynomial>>(make_error(
+                CASErrorKind::Unimplemented,
+                "polynomial_gcd_multivariate: exact division did not reduce leading monomial"));
+        }
+    }
+
+    return ok(std::optional<MultivariatePolynomial>{sparse_to_multivariate(quotient, vars)});
+}
+
+[[nodiscard]] BigInt gcd_abs_values(const std::vector<int>& values) {
+    BigInt result(0);
+    for (int value : values) {
+        result = gcd(result, BigInt(value).abs());
+    }
+    return result;
+}
+
+[[nodiscard]] std::optional<MultivariatePolynomial> make_primitive_linear_candidate(
+    const std::vector<Symbol>& vars,
+    const std::vector<int>& coefficients,
+    int constant) {
+    bool has_variable_term = false;
+    std::vector<int> all_values = coefficients;
+    all_values.push_back(constant);
+    const BigInt content = gcd_abs_values(all_values);
+    if (content != BigInt(1)) {
+        return std::nullopt;
+    }
+
+    int sign = 1;
+    for (int coefficient : coefficients) {
+        if (coefficient != 0) {
+            sign = coefficient < 0 ? -1 : 1;
+            break;
+        }
+    }
+
+    std::vector<MultivariateTerm> terms;
+    for (std::size_t i = 0U; i < vars.size(); ++i) {
+        int coefficient = coefficients[i] * sign;
+        if (coefficient == 0) {
+            continue;
+        }
+        has_variable_term = true;
+        terms.push_back(MultivariateTerm{
+            .coefficient = BigInt(coefficient),
+            .factors = {{vars[i], 1U}},
+        });
+    }
+
+    const int normalized_constant = constant * sign;
+    if (normalized_constant != 0) {
+        terms.push_back(MultivariateTerm{
+            .coefficient = BigInt(normalized_constant),
+            .factors = {},
+        });
+    }
+
+    if (!has_variable_term) {
+        return std::nullopt;
+    }
+
+    return MultivariatePolynomial(std::move(terms));
+}
+
+[[nodiscard]] std::vector<MultivariatePolynomial> primitive_linear_candidates(const std::vector<Symbol>& vars) {
+    if (vars.empty() || vars.size() > 4U) {
+        return {};
+    }
+
+    std::vector<MultivariatePolynomial> candidates;
+    std::set<CoeffMap> seen;
+    std::vector<int> coefficients(vars.size(), 0);
+
+    auto emit = [&](int constant) {
+        auto candidate = make_primitive_linear_candidate(vars, coefficients, constant);
+        if (!candidate.has_value()) {
+            return;
+        }
+        CoeffMap key = to_coeff_map(candidate.value());
+        if (seen.insert(key).second) {
+            candidates.push_back(std::move(candidate.value()));
+        }
+    };
+
+    auto walk = [&](auto&& self, std::size_t index) -> void {
+        if (index == vars.size()) {
+            for (int constant = -3; constant <= 3; ++constant) {
+                emit(constant);
+            }
+            return;
+        }
+        for (int coefficient = -2; coefficient <= 2; ++coefficient) {
+            coefficients[index] = coefficient;
+            self(self, index + 1U);
+        }
+    };
+
+    walk(walk, 0U);
+    std::sort(candidates.begin(), candidates.end(), [](const auto& lhs, const auto& rhs) {
+        if (lhs.terms().size() != rhs.terms().size()) {
+            return lhs.terms().size() < rhs.terms().size();
+        }
+        return to_coeff_map(lhs) < to_coeff_map(rhs);
+    });
+    return candidates;
+}
+
+[[nodiscard]] Result<std::optional<MultivariatePolynomial>> try_certified_linear_gcd(
+    const MultivariatePolynomial& p,
+    const MultivariatePolynomial& q,
+    const std::vector<Symbol>& vars,
+    symbolic::CASContext& ctx,
+    std::size_t depth);
+
+[[nodiscard]] Result<MultivariatePolynomial> gcd_multivariate_recursive(
+    const MultivariatePolynomial& P,
+    const MultivariatePolynomial& Q,
+    symbolic::CASContext& ctx,
+    std::size_t depth) {
+    if (depth > 16U) {
+        return fail<MultivariatePolynomial>(make_error(
+            CASErrorKind::Unimplemented,
+            "polynomial_gcd_multivariate: recursion depth limit reached while certifying gcd"));
+    }
+
+    MultivariatePolynomial p = normalize_multivariate_gcd(P);
+    MultivariatePolynomial q = normalize_multivariate_gcd(Q);
+
+    if (p.is_zero()) {
+        return ok(q);
+    }
+    if (q.is_zero()) {
+        return ok(p);
+    }
+
+    const std::vector<Symbol> vars = collect_all_variables(p, q);
+    if (vars.empty()) {
+        BigInt gcd_value = gcd(p.terms().front().coefficient.abs(), q.terms().front().coefficient.abs());
+        return ok(MultivariatePolynomial({MultivariateTerm{.coefficient = gcd_value, .factors = {}}}));
+    }
+
+    if (vars.size() == 1U) {
+        auto p_int = multivariate_single_var_to_intpoly(p, vars[0]);
+        if (p_int.is_error()) {
+            return fail<MultivariatePolynomial>(p_int.error());
+        }
+        auto q_int = multivariate_single_var_to_intpoly(q, vars[0]);
+        if (q_int.is_error()) {
+            return fail<MultivariatePolynomial>(q_int.error());
+        }
+
+        IntPoly gcd_int = gcd_integer_poly_primitive(std::move(p_int.value()), std::move(q_int.value()));
+        if (!gcd_int.empty() && gcd_int.leading_coeff().is_negative()) {
+            for (auto& coefficient : gcd_int.coefficients()) {
+                coefficient = -coefficient;
+            }
+        }
+        return ok(intpoly_to_multivariate(gcd_int, vars[0]));
+    }
+
+    auto linear_gcd = try_certified_linear_gcd(p, q, vars, ctx, depth);
+    if (linear_gcd.is_error()) {
+        return fail<MultivariatePolynomial>(linear_gcd.error());
+    }
+    if (linear_gcd.value().has_value()) {
+        return ok(linear_gcd.value().value());
+    }
+    if (std::min(p.total_degree(), q.total_degree()) <= 1U) {
+        return ok(MultivariatePolynomial({MultivariateTerm{.coefficient = BigInt(1), .factors = {}}}));
+    }
+
+    const Symbol& main_var = vars.front();
+    const Symbol& interpolation_var = vars.back();
+
+    const std::size_t interpolation_degree_bound =
+        std::min(degree_in_var(p, interpolation_var), degree_in_var(q, interpolation_var));
+    const std::size_t required_samples = std::max<std::size_t>(interpolation_degree_bound + 1U, 2U);
+    const std::size_t safety_margin = static_cast<std::size_t>(
+        std::ceil(std::log(ctx.gcd_error_probability()) / std::log(0.5)));
+    const std::size_t max_samples = required_samples + safety_margin;
+
+    struct SamplePoint {
+        BigInt value;
+        MultivariatePolynomial gcd;
+        std::size_t main_degree{0U};
+    };
+
+    const std::array<long long, 3> offsets = {0LL, 17LL, 43LL};
+
+    for (long long offset : offsets) {
+        std::vector<SamplePoint> samples;
+        samples.reserve(max_samples);
+
+        bool sampling_ok = true;
+        for (std::size_t i = 0U; i < max_samples; ++i) {
+            const BigInt point(static_cast<long long>(i) + 1LL + offset);
+            ExprPtr value_expr = ctx.arena().make<IntegerLit>(point);
+
+            auto p_eval = p.evaluate_at(interpolation_var, value_expr);
+            if (p_eval.is_error()) {
+                sampling_ok = false;
+                break;
+            }
+            auto q_eval = q.evaluate_at(interpolation_var, value_expr);
+            if (q_eval.is_error()) {
+                sampling_ok = false;
+                break;
+            }
+
+            auto gcd_eval = gcd_multivariate_recursive(p_eval.value(), q_eval.value(), ctx, depth + 1U);
+            if (gcd_eval.is_error()) {
+                sampling_ok = false;
+                break;
+            }
+
+            MultivariatePolynomial normalized_eval = normalize_multivariate_gcd(gcd_eval.value());
+            samples.push_back(SamplePoint{
+                .value = point,
+                .gcd = std::move(normalized_eval),
+                .main_degree = degree_in_var(samples.empty() ? MultivariatePolynomial{} : samples.back().gcd, main_var),
+            });
+            samples.back().main_degree = degree_in_var(samples.back().gcd, main_var);
+        }
+
+        if (!sampling_ok) {
+            continue;
+        }
+
+        std::map<std::size_t, std::vector<SamplePoint>> buckets;
+        for (const auto& sample : samples) {
+            buckets[sample.main_degree].push_back(sample);
+        }
+
+        std::optional<std::size_t> target_degree;
+        for (const auto& [degree, bucket] : buckets) {
+            if (bucket.size() >= required_samples) {
+                if (!target_degree.has_value() || degree > target_degree.value()) {
+                    target_degree = degree;
+                }
+            }
+        }
+
+        if (!target_degree.has_value()) {
+            continue;
+        }
+
+        const auto& chosen_bucket = buckets[target_degree.value()];
+        std::vector<BigInt> chosen_points;
+        std::vector<MultivariatePolynomial> chosen_polys;
+        chosen_points.reserve(required_samples);
+        chosen_polys.reserve(required_samples);
+
+        for (std::size_t i = 0U; i < required_samples; ++i) {
+            chosen_points.push_back(chosen_bucket[i].value);
+            chosen_polys.push_back(chosen_bucket[i].gcd);
+        }
+
+        std::vector<MultivariateTerm> candidate_terms;
+
+        bool interpolation_ok = true;
+        for (std::size_t degree = 0U; degree <= target_degree.value(); ++degree) {
+            std::vector<MultivariatePolynomial> coefficient_values;
+            coefficient_values.reserve(chosen_polys.size());
+            for (const auto& sample_poly : chosen_polys) {
+                coefficient_values.push_back(coefficient_poly_in_var(sample_poly, main_var, degree));
+            }
+
+            auto interpolation = interpolate_polynomial_values(coefficient_values, chosen_points, interpolation_var);
+            if (interpolation.is_error()) {
+                interpolation_ok = false;
+                break;
+            }
+
+            MultivariatePolynomial lifted = multiply_by_variable_power(interpolation.value(), main_var, degree);
+            for (const auto& term : lifted.terms()) {
+                candidate_terms.push_back(term);
+            }
+        }
+
+        if (!interpolation_ok) {
+            continue;
+        }
+
+        MultivariatePolynomial candidate = normalize_multivariate_gcd(MultivariatePolynomial(std::move(candidate_terms)));
+        if (candidate.is_zero()) {
+            continue;
+        }
+
+        auto quotient_p = exact_quotient(p, candidate, vars);
+        if (quotient_p.is_error() || !quotient_p.value().has_value()) {
+            continue;
+        }
+        auto quotient_q = exact_quotient(q, candidate, vars);
+        if (quotient_q.is_error() || !quotient_q.value().has_value()) {
+            continue;
+        }
+
+        MultivariatePolynomial certified_gcd = candidate;
+        MultivariatePolynomial cofactor_p = quotient_p.value().value();
+        MultivariatePolynomial cofactor_q = quotient_q.value().value();
+
+        bool certified = false;
+        for (std::size_t refine = 0U; refine < 3U; ++refine) {
+            auto cofactor_gcd = gcd_multivariate_recursive(cofactor_p, cofactor_q, ctx, depth + 1U);
+            if (cofactor_gcd.is_error()) {
+                certified = false;
+                break;
+            }
+
+            MultivariatePolynomial extra_factor = normalize_multivariate_gcd(cofactor_gcd.value());
+            if (is_unit_polynomial(extra_factor)) {
+                certified = true;
+                break;
+            }
+
+            MultivariatePolynomial next_gcd = normalize_multivariate_gcd(certified_gcd * extra_factor);
+            auto next_quotient_p = exact_quotient(p, next_gcd, vars);
+            auto next_quotient_q = exact_quotient(q, next_gcd, vars);
+            if (next_quotient_p.is_error() || next_quotient_q.is_error() ||
+                !next_quotient_p.value().has_value() || !next_quotient_q.value().has_value()) {
+                certified = false;
+                break;
+            }
+
+            if (same_polynomial(cofactor_p, next_quotient_p.value().value()) &&
+                same_polynomial(cofactor_q, next_quotient_q.value().value())) {
+                certified = false;
+                break;
+            }
+
+            certified_gcd = std::move(next_gcd);
+            cofactor_p = std::move(next_quotient_p.value().value());
+            cofactor_q = std::move(next_quotient_q.value().value());
+        }
+
+        if (certified) {
+            return ok(normalize_multivariate_gcd(certified_gcd));
+        }
+    }
+
+    return fail<MultivariatePolynomial>(make_error(
+        CASErrorKind::Unimplemented,
+        "polynomial_gcd_multivariate: unable to certify multivariate gcd for this input"));
+}
+
+[[nodiscard]] Result<std::optional<MultivariatePolynomial>> try_certified_linear_gcd(
+    const MultivariatePolynomial& p,
+    const MultivariatePolynomial& q,
+    const std::vector<Symbol>& vars,
+    symbolic::CASContext& ctx,
+    std::size_t depth) {
+    for (const auto& candidate : primitive_linear_candidates(vars)) {
+        auto quotient_p = exact_quotient(p, candidate, vars);
+        if (quotient_p.is_error()) {
+            continue;
+        }
+        if (!quotient_p.value().has_value()) {
+            continue;
+        }
+
+        auto quotient_q = exact_quotient(q, candidate, vars);
+        if (quotient_q.is_error()) {
+            continue;
+        }
+        if (!quotient_q.value().has_value()) {
+            continue;
+        }
+
+        auto cofactor_gcd = gcd_multivariate_recursive(
+            quotient_p.value().value(),
+            quotient_q.value().value(),
+            ctx,
+            depth + 1U);
+        if (cofactor_gcd.is_error()) {
+            return fail<std::optional<MultivariatePolynomial>>(cofactor_gcd.error());
+        }
+
+        MultivariatePolynomial certified = normalize_multivariate_gcd(candidate * cofactor_gcd.value());
+        return ok(std::optional<MultivariatePolynomial>{std::move(certified)});
+    }
+
+    return ok(std::optional<MultivariatePolynomial>{std::nullopt});
+}
+
 } // namespace
 
-// Algoritmo: GCD multivariato via evaluation-interpolation
-// Funziona per polinomi in 2 variabili con coefficienti interi.
 Result<MultivariatePolynomial> gcd_multivariate_eval_interp(
     const MultivariatePolynomial& P,
     const MultivariatePolynomial& Q,
     symbolic::CASContext& ctx) {
-
-    if (P.is_zero()) return ok(Q);
-    if (Q.is_zero()) return ok(P);
-
-    // Raccogli tutte le variabili
-    auto vars_p = P.variables();
-    auto vars_q = Q.variables();
-    std::vector<Symbol> all_vars = vars_p;
-    for (const auto& v : vars_q) {
-        bool found = false;
-        for (const auto& u : all_vars) if (u.name == v.name) { found = true; break; }
-        if (!found) all_vars.push_back(v);
-    }
-    std::sort(all_vars.begin(), all_vars.end(), [](const Symbol& a, const Symbol& b) {
-        return a.name < b.name;
-    });
-
-    // Caso univariato: usa gcd_integer_poly_primitive direttamente
-    if (all_vars.size() == 1U) {
-        auto p_int = multivariate_single_var_to_intpoly(P, all_vars[0]);
-        if (p_int.is_error()) return fail<MultivariatePolynomial>(p_int.error());
-        auto q_int = multivariate_single_var_to_intpoly(Q, all_vars[0]);
-        if (q_int.is_error()) return fail<MultivariatePolynomial>(q_int.error());
-
-        auto g_int = gcd_integer_poly_primitive(std::move(p_int.value()), std::move(q_int.value()));
-        normalize_sign(g_int);
-
-        // Converti IntPoly → MultivariatePolynomial
-        std::vector<MultivariateTerm> terms;
-        for (std::size_t deg = 0; deg < g_int.size(); ++deg) {
-            if (!g_int[deg].is_zero()) {
-                std::vector<std::pair<Symbol, unsigned int>> factors;
-                if (deg > 0) factors.push_back({all_vars[0], static_cast<unsigned int>(deg)});
-                terms.push_back({.coefficient = g_int[deg], .factors = std::move(factors)});
-            }
-        }
-        return ok(MultivariatePolynomial(std::move(terms)));
-    }
-
-    // Caso bivariato: x = all_vars[0], y = all_vars[1]
-    if (all_vars.size() != 2U) {
-        return fail<MultivariatePolynomial>(make_error(CASErrorKind::Unimplemented,
-            "polynomial_gcd_multivariate: supporta al massimo 2 variabili"));
-    }
-
-    const Symbol& x_var = all_vars[0];
-    const Symbol& y_var = all_vars[1];
-
-    // Grado massimo del GCD in y: min(deg_y(P), deg_y(Q))
-    std::size_t deg_y_p = degree_in_var(P, y_var);
-    std::size_t deg_y_q = degree_in_var(Q, y_var);
-    std::size_t deg_y_gcd_bound = std::min(deg_y_p, deg_y_q);
-
-    // Grado massimo di GCD in x: min(deg_x(P), deg_x(Q))
-    std::size_t deg_x_p = degree_in_var(P, x_var);
-    std::size_t deg_x_q = degree_in_var(Q, x_var);
-    std::size_t deg_x_gcd_bound = std::min(deg_x_p, deg_x_q);
-
-    // Numero di punti di valutazione necessari
-    std::size_t n_points = deg_y_gcd_bound + 2; // +1 per determinare il grado, +1 di sicurezza
-
-    // Raccoglie i GCD univariati ad ogni punto di valutazione
-    // Indicizzati: gcd_at[t] = IntPoly del GCD a y = t+1
-    std::vector<IntPoly> gcd_at(n_points);
-    std::size_t min_gcd_deg = deg_x_gcd_bound + 1; // inizializza alto
-
-    for (std::size_t i = 0; i < n_points; ++i) {
-        long long t = static_cast<long long>(i) + 1LL;
-        ExprPtr t_expr = ctx.arena().make<IntegerLit>(BigInt(t));
-
-        auto P_t = P.evaluate_at(y_var, t_expr);
-        if (P_t.is_error()) return fail<MultivariatePolynomial>(P_t.error());
-        auto Q_t = Q.evaluate_at(y_var, t_expr);
-        if (Q_t.is_error()) return fail<MultivariatePolynomial>(Q_t.error());
-
-        auto p_int = multivariate_single_var_to_intpoly(P_t.value(), x_var);
-        if (p_int.is_error()) return fail<MultivariatePolynomial>(p_int.error());
-        auto q_int = multivariate_single_var_to_intpoly(Q_t.value(), x_var);
-        if (q_int.is_error()) return fail<MultivariatePolynomial>(q_int.error());
-
-        auto h_t = gcd_integer_poly_primitive(std::move(p_int.value()), std::move(q_int.value()));
-        normalize_sign(h_t);
-        gcd_at[i] = std::move(h_t);
-
-        if (!gcd_at[i].empty() && gcd_at[i].degree() < min_gcd_deg) {
-            min_gcd_deg = gcd_at[i].degree();
-        }
-    }
-
-    // Filtra: solo punti con GCD di grado == min_gcd_deg
-    // (punti "sfortunati" danno GCD di grado minore, che è quello corretto)
-
-    // Interpola: per ogni grado k = 0..min_gcd_deg, il coefficiente di x^k
-    // è un polinomio in y di grado ≤ deg_y_gcd_bound.
-    std::vector<MultivariateTerm> result_terms;
-
-    for (std::size_t k = 0; k <= min_gcd_deg; ++k) {
-        // Raccoglie i valori del coefficiente di x^k ai vari punti di y
-        std::vector<BigInt> coeff_values(n_points, BigInt(0));
-        for (std::size_t i = 0; i < n_points; ++i) {
-            if (!gcd_at[i].empty() && k < gcd_at[i].size()) {
-                coeff_values[i] = gcd_at[i][k];
-            }
-        }
-
-        // Interpola la sequenza coeff_values con y = 1, 2, ..., n_points
-        auto interp = lagrange_interpolate(coeff_values);
-        if (interp.is_error()) return fail<MultivariatePolynomial>(interp.error());
-
-        const auto& poly_in_y = interp.value();
-
-        // Costruisce i termini del risultato per grado x=k
-        for (std::size_t yd = 0; yd < poly_in_y.size(); ++yd) {
-            const Rational& c = poly_in_y[yd];
-            if (c.numerator().is_zero()) continue;
-
-            // Il coefficiente deve essere intero (denominatore = 1)
-            if (c.denominator() != BigInt(1)) {
-                // Coefficiente razionale nel GCD → problema con il contenuto
-                // Approssima: arrotonda, oppure fallisci
-                return fail<MultivariatePolynomial>(make_error(CASErrorKind::InternalError,
-                    "gcd_multivariate: coefficiente non intero nell'interpolazione"));
-            }
-
-            std::vector<std::pair<Symbol, unsigned int>> factors;
-            if (k > 0) factors.push_back({x_var, static_cast<unsigned int>(k)});
-            if (yd > 0) factors.push_back({y_var, static_cast<unsigned int>(yd)});
-
-            result_terms.push_back({.coefficient = c.numerator(), .factors = std::move(factors)});
-        }
-    }
-
-    MultivariatePolynomial G(std::move(result_terms));
-
-    // Verifica: G deve dividere P e Q
-    if (!multivariate_divides_check(P, G, all_vars, ctx) ||
-        !multivariate_divides_check(Q, G, all_vars, ctx)) {
-        return fail<MultivariatePolynomial>(make_error(CASErrorKind::InternalError,
-            "gcd_multivariate: candidato GCD non verifica la divisibilità"));
-    }
-
-    return ok(std::move(G));
+    return gcd_multivariate_recursive(P, Q, ctx, 0U);
 }
 
-// API pubblica: GCD multivariato tra ExprPtr
 Result<ExprPtr> polynomial_gcd_multivariate(ExprPtr p, ExprPtr q, symbolic::CASContext& ctx) {
     auto expanded_p = expand_expr_impl(p, ctx);
-    if (expanded_p.is_error()) return expanded_p;
-    auto expanded_q = expand_expr_impl(q, ctx);
-    if (expanded_q.is_error()) return expanded_q;
-
-    auto P = parse_multivariate_polynomial(expanded_p.value(), ctx);
-    if (P.is_error()) return fail<ExprPtr>(P.error());
-    auto Q = parse_multivariate_polynomial(expanded_q.value(), ctx);
-    if (Q.is_error()) return fail<ExprPtr>(Q.error());
-
-    // Prova prima l'algoritmo evaluation-interpolation
-    auto G = gcd_multivariate_eval_interp(P.value(), Q.value(), ctx);
-    if (G.is_error()) {
-        // Fallback: gcd_heuristic (meno affidabile)
-        G = gcd_heuristic(P.value(), Q.value());
-        if (G.is_error()) return fail<ExprPtr>(G.error());
+    if (expanded_p.is_error()) {
+        return fail<ExprPtr>(expanded_p.error());
     }
 
-    auto g_expr = multivariate_to_expr(G.value(), ctx);
-    if (g_expr.is_error()) return g_expr;
+    auto expanded_q = expand_expr_impl(q, ctx);
+    if (expanded_q.is_error()) {
+        return fail<ExprPtr>(expanded_q.error());
+    }
 
-    return ctx.simplify(g_expr.value());
+    auto P = parse_multivariate_polynomial(expanded_p.value(), ctx);
+    if (P.is_error()) {
+        return fail<ExprPtr>(P.error());
+    }
+
+    auto Q = parse_multivariate_polynomial(expanded_q.value(), ctx);
+    if (Q.is_error()) {
+        return fail<ExprPtr>(Q.error());
+    }
+
+    auto G = gcd_multivariate_eval_interp(P.value(), Q.value(), ctx);
+    if (G.is_error()) {
+        return fail<ExprPtr>(G.error());
+    }
+
+    auto gcd_expr = multivariate_to_expr(G.value(), ctx);
+    if (gcd_expr.is_error()) {
+        return fail<ExprPtr>(gcd_expr.error());
+    }
+
+    return ok(gcd_expr.value());
 }
 
 } // namespace cas::algebra

@@ -107,21 +107,25 @@ Result<MatrixExpr> bareiss(const MatrixExpr& matrix, symbolic::CASContext& ctx) 
             ExprPtr val = result(i, c);
             if (is_zero_expr(val)) continue;
 
-            int score = 0;
+            int score = 1;
             if (expr_is<IntegerLit>(val) || expr_is<RationalLit>(val)) {
                 score = 1000;
+            } else if (ctx.assumptions().is_positive(val)) {
+                score = 900;
+            } else if (ctx.assumptions().is_nonzero(val)) {
+                score = 800;
             } else if (is_structurally_nonzero(val)) {
-                score = 500;
-                score -= static_cast<int>(std::min<std::size_t>(400, estimate_complexity(val)));
-            } else {
-                score = 1;
+                score = 500 - static_cast<int>(std::min<std::size_t>(400, estimate_complexity(val)));
+            }
+            if (expr_is<RootOf>(val)) {
+                score = std::min(score, 300);
             }
 
             if (score > best_score) {
                 best_score = score;
                 pivot_row = i;
             }
-            if (score == 1000) break;
+            if (score >= 900) break;
         }
 
         if (pivot_row == result.rows()) {
@@ -134,8 +138,7 @@ Result<MatrixExpr> bareiss(const MatrixExpr& matrix, symbolic::CASContext& ctx) 
 
         ExprPtr current_pivot = result(r, c);
 
-        for (std::size_t i = 0; i < result.rows(); ++i) {
-            if (i == r) continue;
+        for (std::size_t i = r + 1; i < result.rows(); ++i) {
             for (std::size_t j = c + 1; j < result.cols(); ++j) {
                 auto left_res = mul_expr(ctx, current_pivot, result(i, j));
                 if (left_res.is_error()) return fail<MatrixExpr>(left_res.error());

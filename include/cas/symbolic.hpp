@@ -243,6 +243,12 @@ public:
     void set_max_simplification_depth(int depth) noexcept;
     [[nodiscard]] int max_simplification_depth() const noexcept { return max_simplification_depth_; }
 
+    void set_max_integration_depth(std::size_t depth) noexcept;
+    [[nodiscard]] std::size_t max_integration_depth() const noexcept { return max_integration_depth_; }
+
+    void set_gcd_error_probability(double prob) noexcept;
+    [[nodiscard]] double gcd_error_probability() const noexcept { return gcd_error_probability_; }
+
     [[nodiscard]] Result<ExprPtr> simplify(ExprPtr expr);
     [[nodiscard]] Result<ExprPtr> substitute(ExprPtr expr, const Symbol& variable, ExprPtr value);
 
@@ -281,6 +287,8 @@ public:
     std::uint64_t ops_count_{0};
     std::uint64_t timeout_check_interval_{1024U};
     int max_simplification_depth_{300};
+    std::size_t max_integration_depth_{16U};
+    double gcd_error_probability_{0.001};
 
 public:
 // Performance Caches
