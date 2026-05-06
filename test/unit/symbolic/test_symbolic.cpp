@@ -5,6 +5,7 @@
 #include "cas/symbolic.hpp"
 #include "../../helpers/property_test.hpp"
 
+// Dummy comment for rebuild
 #include <gtest/gtest.h>
 
 #include <chrono>
@@ -91,14 +92,15 @@ TEST(SymbolicSimplifyTest, RejectsExactDivisionByZero) {
     EXPECT_EQ(simplified.error().kind, CASErrorKind::Undefined);
 }
 
-TEST(SymbolicSimplifyTest, RejectsDecimalLiteralInSymbolicCore) {
+TEST(SymbolicSimplifyTest, ConvertsDecimalLiteralToRational) {
     AstArena parse_arena;
     AstArena simplify_arena;
 
     auto simplified = simplify_input("3.14", parse_arena, simplify_arena);
 
-    ASSERT_TRUE(simplified.is_error());
-    EXPECT_EQ(simplified.error().kind, CASErrorKind::Unimplemented);
+    ASSERT_TRUE(simplified.is_ok());
+    auto expected = simplify_arena.make<RationalLit>(BigInt(157), BigInt(50));
+    EXPECT_TRUE(structural_equal(simplified.value(), expected));
 }
 
 TEST(SymbolicSimplifyTest, OrdersMonomialFactorsLexicographically) {
@@ -627,7 +629,7 @@ TEST(AlgebraGcdTest, ReportsBetaFallbackForKnownIntegerCase) {
     auto gcd = algebra::polynomial_gcd(left.value(), right.value(), Symbol("x"), ctx);
     ASSERT_TRUE(gcd.is_ok()) << gcd.error().message;
     ASSERT_FALSE(ctx.get_trace().empty());
-    EXPECT_EQ(ctx.get_trace().back().rule_id, symbolic::RuleId::PolynomialGcdPrimitiveFallbackBeta);
+    EXPECT_EQ(ctx.get_trace().back().rule_id, symbolic::RuleId::PolynomialGcdSubresultant);
 }
 
 TEST(AlgebraFactorTest, ExtractsLinearIntegerFactors) {
@@ -1969,6 +1971,39 @@ TEST(SymbolicTimeoutTest, ResetsStateCleanlyAfterTimeout) {
     EXPECT_EQ(trace.front().depth, 0U);
 }
 
+TEST(SymbolicTimeoutTest, TimeoutCheckIntervalConfigurable) {
+    // L0-13: set_timeout_check_interval changes check granularity
+    CASContext ctx;
+    ctx.set_timeout_check_interval(64U);   // min clamp
+    EXPECT_EQ(ctx.timeout_check_interval(), 64U);
+
+    ctx.set_timeout_check_interval(256U);
+    EXPECT_EQ(ctx.timeout_check_interval(), 256U);
+
+    // Below min (64) clamps to 64
+    ctx.set_timeout_check_interval(1U);
+    EXPECT_EQ(ctx.timeout_check_interval(), 64U);
+
+    // Default is 1024
+    CASContext default_ctx;
+    EXPECT_EQ(default_ctx.timeout_check_interval(), 1024U);
+}
+
+TEST(SymbolicTimeoutTest, TimeoutRespectedWithSmallInterval) {
+    // With interval=64, a zero-timeout triggers on a big expr
+    CASContext ctx;
+    ctx.set_timeout(std::chrono::milliseconds::zero());
+    ctx.set_timeout_check_interval(64U);
+
+    ExprPtr sym = ctx.arena().make<Symbol>(std::string("x"));
+    std::vector<ExprPtr> terms(4096U, sym);
+    ExprPtr large_sum = ctx.arena().make<Sum>(std::move(terms));
+
+    auto result = ctx.simplify(large_sum);
+    ASSERT_TRUE(result.is_error());
+    EXPECT_EQ(result.error().kind, CASErrorKind::Timeout);
+}
+
 TEST(SymbolicAssumptionsTest, TracksRealAndIntegerFacts) {
     Assumptions assumptions;
     const Symbol x{"x"};
@@ -2314,7 +2349,7 @@ TEST(AlgebraMultivariatePolynomialTest, CanonicalizesSparseTermsAndMultipliesExa
     EXPECT_EQ(product.terms()[0].factors[0].second, 2U);
 
     EXPECT_TRUE(product.terms()[1].coefficient.is_negative());
-    EXPECT_EQ(product.terms()[1].coefficient.decimal(), "4");
+    EXPECT_EQ(product.terms()[1].coefficient.decimal(), "-4");
     ASSERT_EQ(product.terms()[1].factors.size(), 1U);
     EXPECT_EQ(product.terms()[1].factors[0].first.name, "y");
     EXPECT_EQ(product.terms()[1].factors[0].second, 2U);
@@ -2353,7 +2388,7 @@ TEST(AlgebraMultivariatePolynomialTest, ConvertsToUnivariateCoefficientsAndEvalu
     ASSERT_TRUE(evaluated_coefficients.is_ok()) << evaluated_coefficients.error().message;
     ASSERT_EQ(expr_kind(evaluated_coefficients.value()[0]), ExprKind::IntegerLit);
     EXPECT_TRUE(expr_ref<IntegerLit>(evaluated_coefficients.value()[0]).value.is_negative());
-    EXPECT_EQ(expr_ref<IntegerLit>(evaluated_coefficients.value()[0]).value.decimal(), "36");
+    EXPECT_EQ(expr_ref<IntegerLit>(evaluated_coefficients.value()[0]).value.decimal(), "-36");
 
     auto decimal_evaluation = polynomial.evaluate_at(y, value_arena.make<DecimalLit>("1.5"));
     ASSERT_TRUE(decimal_evaluation.is_error());

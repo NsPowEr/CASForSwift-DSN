@@ -7,11 +7,14 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <list>
+#include <iterator>
 
 namespace cas::symbolic {
 class CASContext;
@@ -24,6 +27,86 @@ namespace cas::algebra {
 namespace cas::symbolic {
 
 using MatchMap = std::unordered_map<std::string, ExprPtr>;
+
+struct CacheMetrics {
+    std::uint64_t hits{0};
+    std::uint64_t misses{0};
+    std::uint64_t evictions{0};
+};
+
+template <typename Key, typename Value, typename Hash = std::hash<Key>, typename Equal = std::equal_to<Key>>
+class CacheContainer {
+public:
+    using ListType = std::list<Key>;
+    using MapType = std::unordered_map<Key, std::pair<Value, typename ListType::iterator>, Hash, Equal>;
+
+    explicit CacheContainer(std::size_t max_size = 1000) : max_size_(max_size) {}
+
+    void set_max_size(std::size_t size) {
+        max_size_ = size;
+        evict_if_needed();
+    }
+
+    [[nodiscard]] std::size_t max_size() const noexcept { return max_size_; }
+    [[nodiscard]] std::size_t size() const noexcept { return map_.size(); }
+
+    [[nodiscard]] std::optional<Value> get(const Key& key) {
+        auto it = map_.find(key);
+        if (it == map_.end()) {
+            metrics_.misses++;
+            return std::nullopt;
+        }
+        metrics_.hits++;
+        list_.splice(list_.begin(), list_, it->second.second);
+        return it->second.first;
+    }
+
+    void put(const Key& key, Value value) {
+        if (max_size_ == 0) return;
+
+        auto it = map_.find(key);
+        if (it != map_.end()) {
+            it->second.first = value;
+            list_.splice(list_.begin(), list_, it->second.second);
+            return;
+        }
+
+        list_.push_front(key);
+        map_[key] = {value, list_.begin()};
+        evict_if_needed();
+    }
+
+    void clear() noexcept {
+        map_.clear();
+        list_.clear();
+    }
+
+    [[nodiscard]] CacheMetrics& metrics() noexcept { return metrics_; }
+    [[nodiscard]] const CacheMetrics& metrics() const noexcept { return metrics_; }
+    void reset_metrics() noexcept { metrics_ = {}; }
+
+    [[nodiscard]] auto begin() { return map_.begin(); }
+    [[nodiscard]] auto end() { return map_.end(); }
+    [[nodiscard]] auto begin() const { return map_.begin(); }
+    [[nodiscard]] auto end() const { return map_.end(); }
+    [[nodiscard]] bool empty() const noexcept { return map_.empty(); }
+
+private:
+    void evict_if_needed() {
+        while (map_.size() > max_size_ && !list_.empty()) {
+            Key last = list_.back();
+            list_.pop_back();
+            map_.erase(last);
+            metrics_.evictions++;
+        }
+    }
+
+    std::size_t max_size_;
+    MapType map_;
+    ListType list_;
+    CacheMetrics metrics_;
+};
+
 class Assumptions;
 
 enum class TraversalStrategy {
@@ -71,6 +154,17 @@ struct Relation {
     RelType type;
 };
 
+enum class Domain : std::uint8_t {
+    Complex,
+    Real,
+    Integer,
+    Rational,
+    Natural,     // >= 0
+    Positive,    // > 0
+    Negative,    // < 0
+    NonZero,
+};
+
 class Assumptions {
 public:
     void assume_real(const Symbol& symbol);
@@ -78,6 +172,7 @@ public:
     void assume_integer(const Symbol& symbol);
     void assume_nonzero(const Symbol& symbol);
     void assume_in_range(const Symbol& symbol, ExprPtr lower, ExprPtr upper);
+    void assume_domain(const Symbol& symbol, Domain domain);
 
     // Advanced Assumptions (F9-A4)
     void assume_greater(ExprPtr lhs, ExprPtr rhs);
@@ -98,6 +193,7 @@ public:
     [[nodiscard]] bool could_be_zero(ExprPtr expr) const;
     [[nodiscard]] bool is_integer(const Symbol& symbol) const;
     [[nodiscard]] bool is_integer(ExprPtr expr) const;
+    [[nodiscard]] Domain get_domain(const Symbol& symbol) const;
     [[nodiscard]] std::optional<RangeAssumption> get_range(const Symbol& symbol) const;
     [[nodiscard]] Result<void> check_consistency() const;
 
@@ -106,12 +202,15 @@ public:
 private:
     [[nodiscard]] bool prove_relation(ExprPtr start, ExprPtr end, bool strict, std::unordered_set<const ExprNode*>& visited) const;
     [[nodiscard]] bool prove_positive_linear(ExprPtr expr) const;
+    [[nodiscard]] bool prove_positive_product(const Product& prod) const;
 
     std::unordered_set<std::string> real_symbols_;
     std::unordered_set<std::string> positive_symbols_;
+    std::unordered_set<std::string> negative_symbols_;
     std::unordered_set<std::string> integer_symbols_;
     std::unordered_set<std::string> nonzero_symbols_;
     std::unordered_map<std::string, RangeAssumption> range_symbols_;
+    std::unordered_map<std::string, Domain> symbol_domains_;
 
     // Relation graph for deduction chains
     std::unordered_map<ExprPtr, std::vector<Relation>, ExprHash, ExprEqual> relations_;
@@ -138,13 +237,27 @@ public:
     void enable_trace(bool enabled) noexcept;
     [[nodiscard]] const ComputationTrace& get_trace() const noexcept;
     void set_timeout(std::chrono::milliseconds timeout) noexcept;
+    void set_timeout_check_interval(std::uint64_t interval) noexcept;
+    [[nodiscard]] std::uint64_t timeout_check_interval() const noexcept { return timeout_check_interval_; }
 
     [[nodiscard]] Result<ExprPtr> simplify(ExprPtr expr);
     [[nodiscard]] Result<ExprPtr> substitute(ExprPtr expr, const Symbol& variable, ExprPtr value);
 
     void collect_garbage(const std::vector<ExprPtr*>& external_roots = {});
 
-private:
+    // Caching methods
+    void clear_caches() noexcept;
+    void set_caching_enabled(bool enabled) noexcept;
+    [[nodiscard]] bool is_caching_enabled() const noexcept { return caching_enabled_; }
+
+    void set_cache_limit(std::size_t limit) noexcept;
+    [[nodiscard]] std::size_t get_cache_limit() const noexcept;
+
+    [[nodiscard]] CacheMetrics get_simplify_metrics() const noexcept;
+    [[nodiscard]] CacheMetrics get_diff_metrics() const noexcept;
+    [[nodiscard]] CacheMetrics get_integrate_metrics() const noexcept;
+
+    private:
     friend class Substituter;
     friend Result<ExprPtr> simplify(ExprPtr expr, CASContext& context);
     friend Result<ExprPtr> substitute(ExprPtr expr, const Symbol& variable, ExprPtr value, CASContext& context);
@@ -158,10 +271,52 @@ private:
     bool trace_enabled_{false};
     bool trace_capture_active_{false};
     bool operation_active_{false};
+    bool caching_enabled_{true};
     ComputationTrace trace_;
     std::chrono::milliseconds timeout_{1000};
     std::chrono::steady_clock::time_point operation_started_at_{};
     std::uint64_t ops_count_{0};
+    std::uint64_t timeout_check_interval_{1024U};
+
+public:
+// Performance Caches
+struct DiffKey {
+    ExprPtr expr;
+    std::string var_name;
+    unsigned int order;
+
+    bool operator==(const DiffKey& other) const {
+        return order == other.order && var_name == other.var_name && ExprEqual{}(expr, other.expr);
+    }
+};
+struct DiffHash {
+    std::size_t operator()(const DiffKey& key) const {
+        std::size_t h = ExprHash{}(key.expr);
+        h ^= std::hash<std::string>{}(key.var_name) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        h ^= std::hash<unsigned int>{}(key.order) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        return h;
+    }
+};
+
+struct IntegrateKey {
+    ExprPtr expr;
+    std::string var_name;
+
+    bool operator==(const IntegrateKey& other) const {
+        return var_name == other.var_name && ExprEqual{}(expr, other.expr);
+    }
+};
+struct IntegrateHash {
+    std::size_t operator()(const IntegrateKey& key) const {
+        std::size_t h = ExprHash{}(key.expr);
+        h ^= std::hash<std::string>{}(key.var_name) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        return h;
+    }
+};
+
+CacheContainer<ExprPtr, ExprPtr, ExprHash, ExprEqual> simplify_cache_;
+CacheContainer<DiffKey, ExprPtr, DiffHash> diff_cache_;
+CacheContainer<IntegrateKey, ExprPtr, IntegrateHash> integrate_cache_;
 };
 
 [[nodiscard]] int canonical_compare(ExprPtr lhs, ExprPtr rhs) noexcept;

@@ -21,7 +21,7 @@ public:
         }
 
         ++context_.ops_count_;
-        if ((context_.ops_count_ % kTimeoutCheckInterval) == 0U &&
+        if ((context_.ops_count_ % context_.timeout_check_interval()) == 0U &&
             std::chrono::steady_clock::now() - context_.operation_started_at_ >= context_.timeout_) {
             return fail<ExprPtr>(make_error(CASErrorKind::Timeout, "Symbolic operation timed out"));
         }

@@ -385,7 +385,54 @@ void CASContext::set_timeout(std::chrono::milliseconds timeout) noexcept {
     timeout_ = timeout;
 }
 
+void CASContext::set_timeout_check_interval(std::uint64_t interval) noexcept {
+    timeout_check_interval_ = (interval < 64U) ? 64U : interval;
+}
+
+void CASContext::clear_caches() noexcept {
+    simplify_cache_.clear();
+    diff_cache_.clear();
+    integrate_cache_.clear();
+}
+
+void CASContext::set_caching_enabled(bool enabled) noexcept {
+    caching_enabled_ = enabled;
+    if (!enabled) {
+        clear_caches();
+    }
+}
+
+void CASContext::set_cache_limit(std::size_t limit) noexcept {
+    simplify_cache_.set_max_size(limit);
+    diff_cache_.set_max_size(limit);
+    integrate_cache_.set_max_size(limit);
+}
+
+std::size_t CASContext::get_cache_limit() const noexcept {
+    return simplify_cache_.max_size();
+}
+
+CacheMetrics CASContext::get_simplify_metrics() const noexcept {
+    return simplify_cache_.metrics();
+}
+
+CacheMetrics CASContext::get_diff_metrics() const noexcept {
+    return diff_cache_.metrics();
+}
+
+CacheMetrics CASContext::get_integrate_metrics() const noexcept {
+    return integrate_cache_.metrics();
+}
+
 Result<ExprPtr> CASContext::simplify(ExprPtr expr) {
+    if (!expr) return fail<ExprPtr>(make_error(CASErrorKind::InvalidArgument, "Cannot simplify null expression"));
+
+    if (caching_enabled_ && !trace_enabled_) {
+        if (auto cached = simplify_cache_.get(expr)) {
+            return ok(*cached);
+        }
+    }
+
     const bool owns_operation = !operation_active_;
     if (owns_operation) {
         operation_active_ = true;
@@ -400,6 +447,11 @@ Result<ExprPtr> CASContext::simplify(ExprPtr expr) {
         trace_capture_active_ = false;
         ops_count_ = 0;
     }
+
+    if (caching_enabled_ && !trace_enabled_ && result.is_ok()) {
+        simplify_cache_.put(expr, result.value());
+    }
+
     return result;
 }
 
@@ -439,7 +491,46 @@ void CASContext::collect_garbage(const std::vector<ExprPtr*>& external_roots) {
         }
     }
 
-    // 5. Swap arena
+    // 5. Update caches
+    if (!simplify_cache_.empty()) {
+        CacheContainer<ExprPtr, ExprPtr, ExprHash, ExprEqual> new_simplify_cache(simplify_cache_.max_size());
+        for (auto& it : simplify_cache_) {
+            new_simplify_cache.put(clone_into_arena(it.first, new_arena, cache), clone_into_arena(it.second.first, new_arena, cache));
+        }
+        new_simplify_cache.metrics() = simplify_cache_.metrics();
+        simplify_cache_ = std::move(new_simplify_cache);
+    }
+
+    if (!diff_cache_.empty()) {
+        CacheContainer<DiffKey, ExprPtr, DiffHash> new_diff_cache(diff_cache_.max_size());
+        for (auto& it : diff_cache_) {
+            const auto& key = it.first;
+            DiffKey new_key = {
+                .expr = clone_into_arena(key.expr, new_arena, cache),
+                .var_name = key.var_name,
+                .order = key.order
+            };
+            new_diff_cache.put(new_key, clone_into_arena(it.second.first, new_arena, cache));
+        }
+        new_diff_cache.metrics() = diff_cache_.metrics();
+        diff_cache_ = std::move(new_diff_cache);
+    }
+
+    if (!integrate_cache_.empty()) {
+        CacheContainer<IntegrateKey, ExprPtr, IntegrateHash> new_integrate_cache(integrate_cache_.max_size());
+        for (auto& it : integrate_cache_) {
+            const auto& key = it.first;
+            IntegrateKey new_key = {
+                .expr = clone_into_arena(key.expr, new_arena, cache),
+                .var_name = key.var_name
+            };
+            new_integrate_cache.put(new_key, clone_into_arena(it.second.first, new_arena, cache));
+        }
+        new_integrate_cache.metrics() = integrate_cache_.metrics();
+        integrate_cache_ = std::move(new_integrate_cache);
+    }
+
+    // 6. Swap arena
     arena_ = std::move(new_arena);
 }
 

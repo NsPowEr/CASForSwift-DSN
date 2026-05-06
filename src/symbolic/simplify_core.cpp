@@ -66,7 +66,8 @@ Result<void> Simplifier::check_timeout() {
         return ok();
     }
     ++(*ops_count_);
-    if ((*ops_count_ % 1024U) != 0U) {
+    const std::uint64_t interval = (context_ != nullptr) ? context_->timeout_check_interval() : 1024U;
+    if ((*ops_count_ % interval) != 0U) {
         return ok();
     }
     auto elapsed = std::chrono::steady_clock::now() - *operation_started_at_;
