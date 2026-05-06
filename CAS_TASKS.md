@@ -75,16 +75,16 @@
 | CAS-L1-08 | Algebra | GCD Multivariato | L1 | Parziale | — | Alto | Univariato e bivariato lineare certificati; trivariato lineare ok; modular GCD/Hensel multivariato generale non implementato |
 | CAS-L1-09 | Symbolic | Deduzione Disequazioni da Assunzioni | L1 | Parziale | L0-07, L1-10 | Molto Alto | Solo conflict detection (x>0 + x<0 → contraddizione); deduzione transitiva assente; `x>0,y>0→x*y>0` NON inferito automaticamente |
 | CAS-L1-10 | Symbolic | Domini Globali e Coerenza Assunzioni | L1 | Risolta | L0-07 | Alto | Verificata |
-| CAS-L1-11 | Calculus | Asintoti (vertical/horizontal/oblique) | L1 | Parziale | — | Medio | Verticali/orizzontali/obliqui ok per x→+∞; manca x→-∞; classificazione non robusta su casi degeneri |
+| CAS-L1-11 | Calculus | Asintoti (vertical/horizontal/oblique) | L1 | Risolta | — | Medio | Verificata (x→-∞ aggiunto, deduplicazione simmetrica, test anti-hardcode) |
 | CAS-L1-12 | Symbolic | Semplificazione radicali annidati (denesting) | L1 | Parziale | — | Medio | Denesting singolo `sqrt(a+b*sqrt(c))` ok solo per (a,b,c) razionali; annidamenti >2 livelli assenti |
 | CAS-L1-13 | Symbolic | Semplificazione abs/sign avanzata | L1 | Risolta | L0-07, L1-10, L1-12 | Medio | Verificata |
 | CAS-L1-14 | Calculus | Composizioni Inverse (sqrt∘sqrt, sin∘arcsin) | L1 | Parziale | L1-13 | Medio | Solo `sqrt(sqrt(x))→x^(1/4)` implementato; inverse trig `sin(arcsin(x))→x` ecc. ASSENTI |
-| CAS-L1-15 | Algebra | Resultante e Discriminante | L1 | Parziale | — | Medio | Resultante via Sylvester subresultante ok; discriminante = resultant(p,p') ok; manca normalizzazione canonica output |
+| CAS-L1-15 | Algebra | Resultante e Discriminante | L1 | Risolta | — | Medio | Verificata (normalizzazione via ctx.simplify() applicata, test anti-hardcode L1-15) |
 | CAS-L1-16 | Symbolic | Caching/Memoization Expression | L1 | Parziale | — | Medio | Cache simplify/diff/integrate presenti; migrazione GC via hash ok; manca benchmark gate dedicato e policy eviction adattiva |
 | CAS-L1-17 | LinAlg | Pivot Bareiss Euristica Contestuale | L1 | Risolta | — | Medio | Verificata |
 | CAS-L1-18 | Calculus | Budget Integrazione Configurabile | L1 | Risolta | L1-02 | Alto | Verificata |
-| CAS-L1-19 | Algebra | GCD Euristico Padding Adattivo | L1 | Aperta | L1-08 | Medio | BigInt(100)+BigInt(1000) magic in polynomial_gcd_heuristic.cpp:146-151; per coeff molto grandi il padding non previene collisioni; sostituire con bound Mignotte |
-| CAS-L1-20 | Algebra | Valutazione Multivariata su Q | L1 | Aperta | — | Alto | algebra_core.cpp:311 rifiuta valori non-IntegerLit; blocca eval su razionali e estensioni → prerequisito per GCD/fattorizzazione su Q[x,y,...] |
+| CAS-L1-19 | Algebra | GCD Euristico Padding Adattivo | L1 | Risolta | L1-08 | Medio | Verificata |
+| CAS-L1-20 | Algebra | Valutazione Multivariata su Q | L1 | Risolta | — | Alto | Verificata (evaluate_at_rational, parziale: variabili residue non ancora supportate) |
 | CAS-L1-21 | Algebra | Campioni GCD Confidence-Based | L1 | Risolta | L1-08 | Basso | Verificata |
 | CAS-L2-01 | Calculus | ODE 2° Ordine e Ordine N | L2 | Parziale | L1-02 | Alto | Var. parametri N-esima ok; fast-path n=2 hardcoded; metodo Frobenius ASSENTE; nessun test disomogeneo n>2 |
 | CAS-L2-02 | LinAlg | Autovalori n>3 | L2 | Parziale | L1-05 | Alto | Autovalori via RootOf (Faddeev-Leverrier) ok; autovettori per RootOf non costruibili (nullspace non gestisce RootOf); test tautologico |

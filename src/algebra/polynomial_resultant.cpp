@@ -1,4 +1,5 @@
 #include "cas/algebra.hpp"
+#include "cas/calculus.hpp"
 #include "cas/symbolic.hpp"
 #include "polynomial_internal.hpp"
 #include <algorithm>
@@ -179,12 +180,49 @@ namespace {
     if (poly_degree(g) > 0)
         return ok(poly_make_integer(ctx.arena(), 0));
 
+    ExprPtr raw = S_last;
     if (sign_correction == -1) {
         auto neg = poly_simplify_expr(mul_expr(ctx.arena(), poly_make_integer(ctx.arena(), -1), S_last), ctx);
         if (neg.is_error()) return fail<ExprPtr>(neg.error());
-        return ok(neg.value());
+        raw = neg.value();
     }
-    return ok(S_last);
+    // Normalize: simplify any residual rational factors
+    auto normalized = ctx.simplify(raw);
+    return normalized.is_ok() ? normalized : ok(raw);
+}
+
+[[nodiscard]] Result<ExprPtr> polynomial_discriminant(ExprPtr p, const Symbol& var, symbolic::CASContext& ctx) {
+    if (!p) return fail<ExprPtr>(make_error(CASErrorKind::InvalidArgument, "Discriminant requires non-null polynomial"));
+
+    auto res_f = parse_polynomial(p, var, ctx);
+    if (res_f.is_error()) return fail<ExprPtr>(res_f.error());
+    PolyExpr f = std::move(res_f.value());
+
+    if (is_zero_poly(f)) return ok(poly_make_integer(ctx.arena(), 0));
+    std::size_t n = poly_degree(f);
+    if (n < 2) return ok(poly_make_integer(ctx.arena(), 0));
+
+    // Disc(f) = (-1)^(n(n-1)/2) * (1/an) * Res(f, f')
+    ExprPtr an = leading_coefficient(f);
+    
+    // Compute derivative f'
+    auto deriv_res = cas::calculus::diff(p, var, 1U, ctx);
+    if (deriv_res.is_error()) return fail<ExprPtr>(deriv_res.error());
+    
+    auto res_val = polynomial_resultant(p, deriv_res.value(), var, ctx);
+    if (res_val.is_error()) return res_val;
+
+    // (-1)^(n(n-1)/2)
+    const long long exponent = static_cast<long long>(n * (n - 1) / 2);
+    const int sign = (exponent % 2 == 0) ? 1 : -1;
+
+    auto signed_res = poly_simplify_expr(mul_expr(ctx.arena(), poly_make_integer(ctx.arena(), sign), res_val.value()), ctx);
+    if (signed_res.is_error()) return fail<ExprPtr>(signed_res.error());
+
+    auto disc = poly_simplify_expr(div_expr(ctx.arena(), signed_res.value(), an), ctx);
+    if (disc.is_error()) return fail<ExprPtr>(disc.error());
+
+    return disc;
 }
 
 }  // namespace algebra
