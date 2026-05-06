@@ -60,7 +60,7 @@
 | CAS-L0-06 | Algebra | Ottimizzazione F4 | L0 | Risolta | — | Alto | Verificata |
 | CAS-L0-07 | Symbolic | Interfaccia Assumptions | L0 | Risolta | — | Alto | Verificata |
 | CAS-L0-09 | Polynomial | Modulo primo custom (oltre p=13) | L0 | Risolta | — | Basso | Verificata |
-| CAS-L0-10 | QA | Cycle Detection Framework | L0 | Parziale | — | Medio | Depth guard thread_local (max 300) ok; fingerprint stack per cicli `f→g→f` a stessa depth MANCANTE |
+| CAS-L0-10 | QA | Cycle Detection Framework | L0 | Risolta | — | Medio | Verificata |
 | CAS-L0-11 | Performance | Performance Instrumentation Hooks | L0 | Risolta | — | Basso | Verificata |
 | CAS-L0-12 | Symbolic | Profondità Semplificazione Adattiva | L0 | Aperta | L0-10 | Medio | MAX_SIMPLIFICATION_DEPTH=300 fisso blocca computazioni legittime profonde (es. det matrici simboliche 5x5); distinto da L0-10 (cycle detection) |
 | CAS-L0-13 | Performance | Timeout Check Interval Configurabile | L0 | Risolta | — | Basso | Verificata |

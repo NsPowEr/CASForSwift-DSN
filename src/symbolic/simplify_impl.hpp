@@ -5,6 +5,7 @@
 #include <chrono>
 #include <functional>
 #include <string>
+#include <unordered_set>
 #include <vector>
 #include <optional>
 
@@ -16,10 +17,33 @@ namespace detail {
 thread_local extern int simplification_depth;
 constexpr int MAX_SIMPLIFICATION_DEPTH = 300;
 
+// Fingerprint set for cycle detection: tracks ExprPtr nodes currently
+// being simplified on this thread's call stack. If a node is re-entered
+// before its first simplification completes, a rewrite cycle is detected.
+thread_local extern std::unordered_set<ExprPtr, ExprHash> active_simplify_nodes;
+
 struct DepthGuard {
     DepthGuard();
     ~DepthGuard();
     bool exceeded() const;
+};
+
+// RAII guard that inserts expr into active_simplify_nodes on construction
+// and removes it on destruction. cycle_detected() returns true if the
+// node was already present (i.e., we are inside a cycle).
+struct CycleGuard {
+    ExprPtr expr_;
+    bool cycle_{false};
+
+    explicit CycleGuard(ExprPtr expr) : expr_(expr) {
+        cycle_ = !active_simplify_nodes.insert(expr).second;
+    }
+    ~CycleGuard() {
+        if (!cycle_) {
+            active_simplify_nodes.erase(expr_);
+        }
+    }
+    [[nodiscard]] bool cycle_detected() const noexcept { return cycle_; }
 };
 
 struct LiteralRational {
@@ -112,6 +136,7 @@ private:
     [[nodiscard]] Result<ExprPtr> simplify_node(ExprPtr original, const RootOf& node);
     [[nodiscard]] Result<ExprPtr> simplify_node(ExprPtr original, const Matrix& node);
     [[nodiscard]] Result<ExprPtr> simplify_node(ExprPtr original, const SeriesExp& node);
+    [[nodiscard]] Result<ExprPtr> simplify_node(ExprPtr original, const Quantity& node);
 
     // Template and generic node handlers
     template <typename Node>

@@ -34,6 +34,11 @@ Result<ExprPtr> Simplifier::simplify_expr(ExprPtr expr) {
         return fail<ExprPtr>(make_error(CASErrorKind::InternalError, "Simplification depth limit exceeded (possible infinite recursion)"));
     }
 
+    CycleGuard cycle_guard(expr);
+    if (cycle_guard.cycle_detected()) {
+        return ok(expr);
+    }
+
     auto timeout = check_timeout();
     if (timeout.is_error()) {
         return fail<ExprPtr>(timeout.error());

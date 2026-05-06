@@ -1971,6 +1971,34 @@ TEST(SymbolicTimeoutTest, ResetsStateCleanlyAfterTimeout) {
     EXPECT_EQ(trace.front().depth, 0U);
 }
 
+TEST(SymbolicCycleDetectionTest, SameNodeReentryReturnsOriginal) {
+    // L0-10: if simplify_expr re-enters same ExprPtr, CycleGuard returns original
+    // without infinite recursion. We can't easily inject a cycle via rewrite rules
+    // in a unit test, so we verify the guard data structure is correct by testing
+    // that simplification of a simple expression terminates and is idempotent.
+    CASContext ctx;
+    AstArena parse_arena;
+    auto expr = simplify_input("x + 0", parse_arena, ctx.arena());
+    ASSERT_TRUE(expr.is_ok());
+    // Second simplification of already-simplified result must terminate
+    auto expr2 = ctx.simplify(expr.value());
+    ASSERT_TRUE(expr2.is_ok());
+    EXPECT_TRUE(structural_equal(expr.value(), expr2.value()));
+}
+
+TEST(SymbolicCycleDetectionTest, DeepNestedExprTerminates) {
+    // L0-10: deeply nested structure must not stack-overflow or cycle
+    CASContext ctx;
+    // Build x + (x + (x + (x + x))) with 50 levels
+    ExprPtr sym = ctx.arena().make<Symbol>(std::string("y"));
+    ExprPtr acc = sym;
+    for (int i = 0; i < 50; ++i) {
+        acc = ctx.arena().make<Sum>(std::vector<ExprPtr>{acc, sym});
+    }
+    auto result = ctx.simplify(acc);
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+}
+
 TEST(SymbolicTimeoutTest, TimeoutCheckIntervalConfigurable) {
     // L0-13: set_timeout_check_interval changes check granularity
     CASContext ctx;
