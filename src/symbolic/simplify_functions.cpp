@@ -1,6 +1,8 @@
 #include "simplify_impl.hpp"
 #include "cas/linalg/Matrix.hpp"
 #include "cas/numeric.hpp"
+#include "cas/algebra.hpp"
+#include "../algebra/polynomial_internal.hpp"
 #include <algorithm>
 #include <iomanip>
 #include <limits>
@@ -171,6 +173,52 @@ namespace cas::symbolic::detail {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Extract perfect-square factor from n: returns {k, m} where n = k²·m, m squarefree.
+[[nodiscard]] static std::pair<BigInt, BigInt> extract_square_factor(BigInt n) {
+    BigInt k(1);
+    BigInt i(2);
+    while (i * i <= n) {
+        BigInt i2 = i * i;
+        while ((n % i2).is_zero()) {
+            k = k * i;
+            n = n / i2;
+        }
+        i = i + BigInt(1);
+    }
+    return {k, n};
+}
+
+// Simplify sqrt(r) for rational r: extract perfect-square factors.
+// Returns k*sqrt(m) where k is rational, m is squarefree integer.
+// Requires r >= 0.
+[[nodiscard]] static Result<ExprPtr> simplify_rational_sqrt(const Rational& r, AstArena& arena) {
+    const BigInt& p = r.numerator();
+    const BigInt& q = r.denominator();
+    if (p.is_zero()) return ok(arena.make<IntegerLit>(BigInt(0)));
+    // r must be normalized and positive (caller ensures this)
+    auto [p_out, p_rem] = extract_square_factor(p);
+    auto [q_out, q_rem] = extract_square_factor(q);
+    // sqrt(r) = (p_out/q_out) * sqrt(p_rem/q_rem)
+    //         = (p_out/(q_out*q_rem)) * sqrt(p_rem*q_rem)
+    // Since r is normalized, gcd(p,q)=1 => gcd(p_rem,q_rem)=1 => p_rem*q_rem is squarefree.
+    BigInt final_radicand = p_rem * q_rem;
+    Rational coeff(p_out, q_out * q_rem);
+
+    ExprPtr coeff_expr;
+    if (coeff.denominator() == BigInt(1)) {
+        coeff_expr = arena.make<IntegerLit>(coeff.numerator());
+    } else {
+        coeff_expr = arena.make<RationalLit>(coeff.numerator(), coeff.denominator());
+    }
+
+    if (final_radicand == BigInt(1)) return ok(coeff_expr);
+
+    ExprPtr sqrt_expr = arena.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{arena.make<IntegerLit>(final_radicand)});
+    if (coeff.numerator() == BigInt(1) && coeff.denominator() == BigInt(1))
+        return ok(sqrt_expr);
+    return ok(arena.make<Binary>(BinaryOp::Mul, coeff_expr, sqrt_expr));
+}
+
 [[nodiscard]] static BigInt integer_sqrt(const BigInt& n) {
     if (n.is_zero()) return BigInt(0);
     static const BigInt one(1);
@@ -220,6 +268,12 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const FuncCall& node
     if (node.func_id == BuiltinOp::Sin && args.size() == 1U) {
         if (is_zero_expr(args.front())) return traced_result(RuleId::SimplifySinZero, target_before, make_integer(arena_, BigInt(0)));
         if (is_constant_expr(args.front(), MathConstant::Pi)) return traced_result(RuleId::SimplifySinPi, target_before, make_integer(arena_, BigInt(0)));
+        
+        // sin(asin(x)) -> x
+        if (const auto* call = expr_cast<FuncCall>(args.front()); call && call->func_id == BuiltinOp::Asin) {
+            return ok(call->args[0]);
+        }
+        
         // P2-005: sin(r*π) exact for r = k/12
         if (auto coeff = try_extract_pi_coefficient(args.front())) {
             if (ExprPtr val = trig_exact_at_pi_multiple(BuiltinOp::Sin, *coeff, arena_)) {
@@ -231,6 +285,12 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const FuncCall& node
     if (node.func_id == BuiltinOp::Cos && args.size() == 1U) {
         if (is_zero_expr(args.front())) return traced_result(RuleId::SimplifyCosZero, target_before, make_integer(arena_, BigInt(1)));
         if (is_constant_expr(args.front(), MathConstant::Pi)) return traced_result(RuleId::SimplifyCosPi, target_before, make_integer(arena_, BigInt(-1)));
+
+        // cos(acos(x)) -> x
+        if (const auto* call = expr_cast<FuncCall>(args.front()); call && call->func_id == BuiltinOp::Acos) {
+            return ok(call->args[0]);
+        }
+
         // P2-005: cos(r*π) exact for r = k/12
         if (auto coeff = try_extract_pi_coefficient(args.front())) {
             if (ExprPtr val = trig_exact_at_pi_multiple(BuiltinOp::Cos, *coeff, arena_)) {
@@ -239,21 +299,22 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const FuncCall& node
             }
         }
     }
-
-    // Regola per Test 3: sin(x)^2 -> 1 - cos(x)^2
-    if (node.func_id == BuiltinOp::Sin && args.size() == 1U && expr_is<Binary>(original) && expr_cast<Binary>(original)->op == BinaryOp::Pow) {
-        if (auto exp = try_get_integer_exponent(expr_cast<Binary>(original)->right); exp.has_value() && (*exp == BigInt(2) || *exp == BigInt(4))) {
-             // Applicata solo se aiuta la cancellazione (qui la applichiamo sempre per semplicità del test)
-             ExprPtr cos2 = arena_.make<Binary>(BinaryOp::Pow, arena_.make<FuncCall>(BuiltinOp::Cos, args), make_integer(arena_, BigInt(2)));
-             ExprPtr one_minus_cos2 = arena_.make<Binary>(BinaryOp::Sub, make_integer(arena_, BigInt(1)), cos2);
-             if (*exp == BigInt(2)) return simplify_expr(one_minus_cos2);
-             return simplify_expr(arena_.make<Binary>(BinaryOp::Pow, one_minus_cos2, make_integer(arena_, BigInt(2))));
+    if (node.func_id == BuiltinOp::Tan && args.size() == 1U) {
+        // tan(atan(x)) -> x
+        if (const auto* call = expr_cast<FuncCall>(args.front()); call && call->func_id == BuiltinOp::Atan) {
+            return ok(call->args[0]);
         }
     }
 
     if (node.func_id == BuiltinOp::Exp && args.size() == 1U) {
         if (is_zero_expr(args.front())) return traced_result(RuleId::SimplifyExpZero, target_before, make_integer(arena_, BigInt(1)));
         if (is_one_expr(args.front())) return traced_result(RuleId::SimplifyExpOne, target_before, make_constant(arena_, MathConstant::E));
+        
+        // exp(ln(x)) -> x
+        if (const auto* ln_call = expr_cast<FuncCall>(args.front()); ln_call && ln_call->func_id == BuiltinOp::Ln && ln_call->args.size() == 1U) {
+            return ok(ln_call->args[0]);
+        }
+
         if (is_constant_expr(args.front(), MathConstant::Infinity)) return traced_result(RuleId::Unknown, target_before, make_constant(arena_, MathConstant::Infinity));
         if (expr_is<Unary>(args.front()) && expr_ref<Unary>(args.front()).op == UnaryOp::Neg && is_constant_expr(expr_ref<Unary>(args.front()).operand, MathConstant::Infinity)) {
             return traced_result(RuleId::Unknown, target_before, make_integer(arena_, BigInt(0)));
@@ -265,12 +326,35 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const FuncCall& node
             if (rewritten.is_ok()) { append_trace(RuleId::SimplifyExpSum, target_before, rewritten.value()); return rewritten; }
         }
     }
+
     if (node.func_id == BuiltinOp::Ln && args.size() == 1U) {
+        if (is_zero_expr(args.front())) return fail<ExprPtr>(make_error(CASErrorKind::Undefined, "ln(0) is undefined"));
         if (is_one_expr(args.front())) return traced_result(RuleId::SimplifyLnOne, target_before, make_integer(arena_, BigInt(0)));
         if (is_constant_expr(args.front(), MathConstant::E)) return traced_result(RuleId::SimplifyLnE, target_before, make_integer(arena_, BigInt(1)));
         if (is_constant_expr(args.front(), MathConstant::Infinity)) return traced_result(RuleId::Unknown, target_before, make_constant(arena_, MathConstant::Infinity));
+        
+        // ln(e^x) -> x
         if (const auto* power = expr_cast<Binary>(args.front()); power != nullptr && power->op == BinaryOp::Pow && is_constant_expr(power->left, MathConstant::E)) {
             return traced_result(RuleId::SimplifyLnExp, target_before, power->right);
+        }
+        // ln(exp(x)) -> x
+        if (const auto* exp_call = expr_cast<FuncCall>(args.front()); exp_call && exp_call->func_id == BuiltinOp::Exp && exp_call->args.size() == 1U) {
+            return traced_result(RuleId::SimplifyLnExp, target_before, exp_call->args[0]);
+        }
+
+        // ln(a*b) -> ln(a) + ln(b) for a,b > 0
+        if (const auto* prod = expr_cast<Product>(args.front())) {
+            bool all_pos = true;
+            for (auto f : prod->factors) if (!is_known_positive(f)) { all_pos = false; break; }
+            if (all_pos) {
+                std::vector<ExprPtr> ln_factors;
+                for (auto f : prod->factors) {
+                    auto res = simplify_expr(arena_.make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{f}));
+                    if (res.is_error()) return res;
+                    ln_factors.push_back(res.value());
+                }
+                return simplify_expr(arena_.make<Sum>(std::move(ln_factors)));
+            }
         }
         // ln(sqrt(x)) = (1/2)*ln(x)  — valido per x > 0, identità esatta
         if (const auto* sqrt_call = expr_cast<FuncCall>(args.front());
@@ -306,7 +390,118 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const FuncCall& node
             }
         }
     }
+    if (node.func_id == BuiltinOp::Asin && args.size() == 1U) {
+        // asin(sin(x)) -> x if -pi/2 <= x <= pi/2
+        if (const auto* call = expr_cast<FuncCall>(args.front()); call && call->func_id == BuiltinOp::Sin) {
+            ExprPtr x = call->args[0];
+            if (assumptions_) {
+                ExprPtr pi_2 = arena_.make<Binary>(BinaryOp::Div, arena_.make<Constant>(MathConstant::Pi), make_integer(arena_, 2));
+                ExprPtr neg_pi_2 = arena_.make<Unary>(UnaryOp::Neg, pi_2);
+                if (assumptions_->is_greater_equal(x, neg_pi_2) && assumptions_->is_greater_equal(pi_2, x)) {
+                    return ok(x);
+                }
+            }
+        }
+    }
+    if (node.func_id == BuiltinOp::Acos && args.size() == 1U) {
+        // acos(cos(x)) -> x if 0 <= x <= pi
+        if (const auto* call = expr_cast<FuncCall>(args.front()); call && call->func_id == BuiltinOp::Cos) {
+            ExprPtr x = call->args[0];
+            if (assumptions_) {
+                ExprPtr pi = arena_.make<Constant>(MathConstant::Pi);
+                ExprPtr zero = make_integer(arena_, 0);
+                if (assumptions_->is_greater_equal(x, zero) && assumptions_->is_greater_equal(pi, x)) {
+                    return ok(x);
+                }
+            }
+        }
+    }
+    if (node.func_id == BuiltinOp::Atan && args.size() == 1U) {
+        // atan(tan(x)) -> x if -pi/2 < x < pi/2
+        if (const auto* call = expr_cast<FuncCall>(args.front()); call && call->func_id == BuiltinOp::Tan) {
+            ExprPtr x = call->args[0];
+            if (assumptions_) {
+                ExprPtr pi_2 = arena_.make<Binary>(BinaryOp::Div, arena_.make<Constant>(MathConstant::Pi), make_integer(arena_, 2));
+                ExprPtr neg_pi_2 = arena_.make<Unary>(UnaryOp::Neg, pi_2);
+                if (assumptions_->is_greater(x, neg_pi_2) && assumptions_->is_greater(pi_2, x)) {
+                    return ok(x);
+                }
+            }
+        }
+    }
     if (node.func_id == BuiltinOp::Sqrt && args.size() == 1U) {
+        // Denesting sqrt(a + b*sqrt(c))
+        if (const auto* sum = expr_cast<Sum>(args.front()); sum && sum->terms.size() == 2) {
+            LiteralRational rat_a, rat_b, rat_c;
+            ExprPtr a_ptr = nullptr, b_ptr = nullptr, c_ptr = nullptr;
+            
+            // Try to find 'a' and 'b*sqrt(c)'
+            for (auto term : sum->terms) {
+                if (auto ex = try_get_exact_rational(term, rat_a); ex.is_ok() && ex.value()) {
+                    a_ptr = term;
+                } else if (const auto* prod = expr_cast<Product>(term)) {
+                    // Look for rational coefficient and a single sqrt factor
+                    Rational b_coeff(1);
+                    ExprPtr c_val = nullptr;
+                    bool found_sqrt = false;
+                    for (ExprPtr f : prod->factors) {
+                        LiteralRational lr;
+                        if (auto ex = try_get_exact_rational(f, lr); ex.is_ok() && ex.value()) {
+                            b_coeff *= lr.value;
+                        } else if (const auto* sqrt_c = expr_cast<FuncCall>(f); sqrt_c && sqrt_c->func_id == BuiltinOp::Sqrt && !found_sqrt) {
+                            c_val = sqrt_c->args[0];
+                            found_sqrt = true;
+                        } else {
+                            // Other factors found, not a simple b*sqrt(c)
+                            found_sqrt = false;
+                            break;
+                        }
+                    }
+                    if (found_sqrt && c_val) {
+                        LiteralRational lr_c;
+                        if (auto ex_c = try_get_exact_rational(c_val, lr_c); ex_c.is_ok() && ex_c.value()) {
+                            rat_b.value = b_coeff;
+                            rat_c.value = lr_c.value;
+                            b_ptr = make_rational(arena_, b_coeff);
+                            c_ptr = c_val;
+                        }
+                    }
+                }
+            }
+
+            if (a_ptr && b_ptr && c_ptr) {
+                // sqrt(a + b*sqrt(c)) = sqrt((a + sqrt(a^2 - b^2*c))/2) + sign(b)*sqrt((a - sqrt(a^2 - b^2*c))/2)
+                Rational a = rat_a.value;
+                Rational b = rat_b.value;
+                Rational c = rat_c.value;
+                Rational discriminant = a*a - b*b*c;
+                if (discriminant >= Rational(0)) {
+                    BigInt d_num = discriminant.numerator();
+                    BigInt d_den = discriminant.denominator();
+                    BigInt s_num = integer_sqrt(d_num);
+                    BigInt s_den = integer_sqrt(d_den);
+                    if (s_num * s_num == d_num && s_den * s_den == d_den) {
+                        Rational s(s_num, s_den);
+                        Rational x = (a + s) / Rational(2);
+                        Rational y = (a - s) / Rational(2);
+                        
+                        auto sqrt_x = simplify_expr(arena_.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{make_rational(arena_, x)}));
+                        auto sqrt_y = simplify_expr(arena_.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{make_rational(arena_, y)}));
+                        
+                        if (sqrt_x.is_ok() && sqrt_y.is_ok()) {
+                            ExprPtr res;
+                            if (b >= Rational(0)) {
+                                res = arena_.make<Sum>(std::vector<ExprPtr>{sqrt_x.value(), sqrt_y.value()});
+                            } else {
+                                res = arena_.make<Binary>(BinaryOp::Sub, sqrt_x.value(), sqrt_y.value());
+                            }
+                            return simplify_expr(res);
+                        }
+                    }
+                }
+            }
+        }
+
         LiteralRational rat;
         auto exact = try_get_exact_rational(args.front(), rat);
         if (exact.is_error()) return fail<ExprPtr>(exact.error());
@@ -323,6 +518,11 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const FuncCall& node
             auto den_sqrt = integer_sqrt(rat.value.denominator());
             if (num_sqrt * num_sqrt == rat.value.numerator() && den_sqrt * den_sqrt == rat.value.denominator()) {
                 return traced_result(RuleId::Unknown, target_before, make_rational(arena_, Rational(num_sqrt, den_sqrt)));
+            }
+            // Estrazione fattori quadrati parziali: sqrt(k²·m) → k·sqrt(m)
+            auto denested = simplify_rational_sqrt(rat.value, arena_);
+            if (denested.is_ok()) {
+                return traced_result(RuleId::Unknown, target_before, denested.value());
             }
         }
         if (exact.is_ok() && exact.value() && rat.value.numerator().is_negative()) {
@@ -353,11 +553,107 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const FuncCall& node
                 return traced_result(RuleId::SimplifySqrtSquare, target_before, arena_.make<FuncCall>(BuiltinOp::Abs, std::vector<ExprPtr>{power->left}));
             }
         }
+        // sqrt(sqrt(x)) -> x^(1/4)
+        if (const auto* inner = expr_cast<FuncCall>(args.front()); inner && inner->func_id == BuiltinOp::Sqrt) {
+            return simplify_expr(arena_.make<Binary>(BinaryOp::Pow, inner->args[0], make_rational(arena_, Rational(BigInt(1), BigInt(4)))));
+        }
     }
 
     if (node.func_id == BuiltinOp::Sin || node.func_id == BuiltinOp::Cos) {
     }
 
+
+    if (node.func_id == BuiltinOp::Gamma && args.size() == 1U) {
+        // Gamma(n) = (n-1)! for positive integers n >= 1
+        if (const auto* il = expr_cast<IntegerLit>(args.front())) {
+            if (il->value > BigInt(0)) {
+                BigInt n = il->value;
+                BigInt result(1);
+                for (BigInt k(1); k < n; k += BigInt(1)) {
+                    result *= k;
+                }
+                return ok(make_integer(arena_, result));
+            }
+        }
+    }
+
+    // P3-005: Re, Im, Conj over a + b*I form
+    // Returns {real_part, imag_part} from Sum/Product containing Constant(I)
+    auto extract_complex = [&](ExprPtr expr) -> std::optional<std::pair<ExprPtr, ExprPtr>> {
+        ExprPtr real_part = nullptr;
+        ExprPtr imag_part = nullptr;
+        ExprPtr zero = make_integer(arena_, BigInt(0));
+
+        auto is_imaginary_unit = [](ExprPtr e) {
+            const auto* c = expr_cast<Constant>(e);
+            return c != nullptr && c->value == MathConstant::I;
+        };
+
+        auto extract_imag_factor = [&](ExprPtr e) -> ExprPtr {
+            // e = I  → imag factor = 1
+            if (is_imaginary_unit(e)) return make_integer(arena_, BigInt(1));
+            // e = -I → imag factor = -1
+            if (const auto* u = expr_cast<Unary>(e); u && u->op == UnaryOp::Neg && is_imaginary_unit(u->operand))
+                return make_integer(arena_, BigInt(-1));
+            // e = Product{..., I} → imag factor = Product{remaining}
+            if (const auto* prod = expr_cast<Product>(e)) {
+                std::vector<ExprPtr> non_i;
+                bool found_i = false;
+                for (ExprPtr f : prod->factors) {
+                    if (!found_i && is_imaginary_unit(f)) { found_i = true; continue; }
+                    non_i.push_back(f);
+                }
+                if (found_i) {
+                    if (non_i.size() == 1U) return non_i[0];
+                    if (non_i.empty()) return make_integer(arena_, BigInt(1));
+                    return arena_.make<Product>(std::move(non_i));
+                }
+            }
+            return nullptr;
+        };
+
+        if (const auto* sum = expr_cast<Sum>(expr)) {
+            for (ExprPtr term : sum->terms) {
+                ExprPtr maybe_b = extract_imag_factor(term);
+                if (maybe_b) {
+                    imag_part = maybe_b;
+                } else {
+                    real_part = term;
+                }
+            }
+            if (!real_part) real_part = zero;
+            if (!imag_part) return std::nullopt;
+            return std::make_pair(real_part, imag_part);
+        }
+        // bare I
+        ExprPtr maybe_b = extract_imag_factor(expr);
+        if (maybe_b) return std::make_pair(zero, maybe_b);
+        return std::nullopt;
+    };
+
+    if (args.size() == 1U) {
+        auto parts = extract_complex(args.front());
+
+        if (node.func_id == BuiltinOp::Re) {
+            if (parts) return ok(parts->first);
+            // Re(real) = real if no imaginary component detected
+        }
+
+        if (node.func_id == BuiltinOp::Im) {
+            if (parts) return ok(parts->second);
+        }
+
+        if (node.func_id == BuiltinOp::Conj && parts) {
+            // conj(a + b*I) = a - b*I
+            ExprPtr neg_b_i = arena_.make<Product>(std::vector<ExprPtr>{
+                arena_.make<Unary>(UnaryOp::Neg, parts->second),
+                arena_.make<Constant>(MathConstant::I)
+            });
+            auto conj_expr = arena_.make<Sum>(std::vector<ExprPtr>{parts->first, neg_b_i});
+            auto simp = simplify_expr(conj_expr);
+            if (simp.is_ok()) return simp;
+        }
+    }
 
     if (node.func_id == BuiltinOp::Erf && args.size() == 1U) {
         if (is_zero_expr(args.front())) return traced_result(RuleId::SimplifyErfZero, target_before, make_integer(arena_, BigInt(0)));
@@ -365,6 +661,30 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const FuncCall& node
     if (node.func_id == BuiltinOp::Abs && args.size() == 1U) {
         if (is_known_nonnegative(args.front())) {
             return traced_result(RuleId::SimplifyAbsPositive, target_before, args.front());
+        }
+        if (is_known_negative(args.front())) {
+            auto neg = arena_.make<Unary>(UnaryOp::Neg, args.front());
+            auto simplified = simplify_expr(neg);
+            if (simplified.is_ok()) return traced_result(RuleId::SimplifyAbsNegative, target_before, simplified.value());
+        }
+        // abs(abs(x)) -> abs(x)
+        if (const auto* inner = expr_cast<FuncCall>(args.front()); inner && inner->func_id == BuiltinOp::Abs) {
+            return traced_result(RuleId::SimplifyAbsAbs, target_before, args.front());
+        }
+        // abs(-x) -> abs(x)
+        if (const auto* unary = expr_cast<Unary>(args.front()); unary && unary->op == UnaryOp::Neg) {
+            return simplify_expr(arena_.make<FuncCall>(BuiltinOp::Abs, std::vector<ExprPtr>{unary->operand}));
+        }
+    }
+    if (node.func_id == BuiltinOp::Sign && args.size() == 1U) {
+        if (is_known_positive(args.front())) {
+            return traced_result(RuleId::SimplifySignPositive, target_before, make_integer(arena_, BigInt(1)));
+        }
+        if (is_known_negative(args.front())) {
+            return traced_result(RuleId::SimplifySignNegative, target_before, make_integer(arena_, BigInt(-1)));
+        }
+        if (is_zero_expr(args.front())) {
+            return traced_result(RuleId::SimplifySignZero, target_before, make_integer(arena_, BigInt(0)));
         }
     }
 
@@ -421,7 +741,30 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const FuncCall& node
 Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const Integral& node) { return simplify_passthrough(original, node); }
 Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const Derivative& node) { return simplify_passthrough(original, node); }
 Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const Limit& node) { return simplify_passthrough(original, node); }
-Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const RootOf& node) { return simplify_passthrough(original, node); }
+
+Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const RootOf& node) {
+    auto simplified_poly = simplify_expr(node.polynomial);
+    if (simplified_poly.is_error()) return simplified_poly;
+
+    if (context_) {
+        // Solo per gradi bassi (<= 2) risolviamo esplicitamente per evitare swell (es. Cardano)
+        auto poly_res = cas::algebra::parse_polynomial(simplified_poly.value(), node.variable, *context_);
+        if (poly_res.is_ok() && cas::algebra::poly_degree(poly_res.value()) <= 2U) {
+            auto roots_res = cas::algebra::solve_polynomial(simplified_poly.value(), node.variable, *context_);
+            if (roots_res.is_ok()) {
+                const auto& roots = roots_res.value();
+                if (roots.size() == 1) {
+                    if (roots[0]->kind != ExprKind::RootOf) return ok(roots[0]);
+                } else if (node.root_index.has_value() && *node.root_index < roots.size()) {
+                    if (roots[*node.root_index]->kind != ExprKind::RootOf) return ok(roots[*node.root_index]);
+                }
+            }
+        }
+    }
+
+    if (simplified_poly.value() == node.polynomial) return ok(original);
+    return ok(arena_.make<RootOf>(simplified_poly.value(), node.variable, node.root_index));
+}
 
 Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const Matrix& node) {
     std::vector<ExprPtr> elements;
@@ -484,6 +827,13 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const SeriesExp& nod
 
     if (!changed) return ok(original);
     return ok(arena_.make<SeriesExp>(node.var, simplified_point.value(), std::move(simplified_terms), node.order));
+}
+
+Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const Quantity& node) {
+    auto res = simplify_expr(node.value);
+    if (res.is_error()) return res;
+    if (res.value() == node.value) return ok(original);
+    return ok(arena_.make<Quantity>(res.value(), node.dimensions));
 }
 
 template <typename Node>

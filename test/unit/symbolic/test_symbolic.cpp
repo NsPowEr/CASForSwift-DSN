@@ -2577,5 +2577,61 @@ TEST(SymbolicNormalFormTest, L1_07_LnExpCancels) {
     EXPECT_FALSE(has_transcendental) << "ln(exp(x)) must cancel to x";
 }
 
+// L1-12: sqrt(n) must extract partial square factors for any n (no fixed table)
+TEST(SymbolicSqrtDenestTest, L1_12_SqrtExtracts2FromSqrt12) {
+    // sqrt(12) = 2*sqrt(3) — must not return unevaluated sqrt(12)
+    CASContext ctx;
+    auto e = parse_expr("sqrt(12)", ctx.arena());
+    ASSERT_TRUE(e.is_ok());
+    auto res = ctx.simplify(e.value());
+    ASSERT_TRUE(res.is_ok());
+    // Result must contain IntegerLit(2) as a factor, not a bare sqrt(12)
+    bool has_12 = false;
+    bool has_2_factor = false;
+    std::function<void(ExprPtr)> check = [&](ExprPtr n) {
+        if (!n) return;
+        if (auto* i = expr_cast<IntegerLit>(n); i && i->value == BigInt(12)) has_12 = true;
+        if (auto* i = expr_cast<IntegerLit>(n); i && i->value == BigInt(2)) has_2_factor = true;
+        if (auto* b = expr_cast<Binary>(n)) { check(b->left); check(b->right); }
+        if (auto* p = expr_cast<Product>(n)) for (auto f : p->factors) check(f);
+    };
+    check(res.value());
+    EXPECT_FALSE(has_12) << "sqrt(12) must not return unevaluated sqrt(12)";
+    EXPECT_TRUE(has_2_factor) << "sqrt(12) must produce coefficient 2";
+}
+
+TEST(SymbolicSqrtDenestTest, L1_12_SqrtExtracts3FromSqrt75) {
+    // sqrt(75) = 5*sqrt(3)
+    CASContext ctx;
+    auto e = parse_expr("sqrt(75)", ctx.arena());
+    ASSERT_TRUE(e.is_ok());
+    auto res = ctx.simplify(e.value());
+    ASSERT_TRUE(res.is_ok());
+    bool has_75 = false;
+    bool has_5_factor = false;
+    std::function<void(ExprPtr)> check = [&](ExprPtr n) {
+        if (!n) return;
+        if (auto* i = expr_cast<IntegerLit>(n); i && i->value == BigInt(75)) has_75 = true;
+        if (auto* i = expr_cast<IntegerLit>(n); i && i->value == BigInt(5)) has_5_factor = true;
+        if (auto* b = expr_cast<Binary>(n)) { check(b->left); check(b->right); }
+        if (auto* p = expr_cast<Product>(n)) for (auto f : p->factors) check(f);
+    };
+    check(res.value());
+    EXPECT_FALSE(has_75) << "sqrt(75) must not return unevaluated sqrt(75)";
+    EXPECT_TRUE(has_5_factor) << "sqrt(75) must produce coefficient 5";
+}
+
+TEST(SymbolicSqrtDenestTest, L1_12_PerfectSquareNormalized) {
+    // sqrt(144) = 12 — must be IntegerLit(12)
+    CASContext ctx;
+    auto e = parse_expr("sqrt(144)", ctx.arena());
+    ASSERT_TRUE(e.is_ok());
+    auto res = ctx.simplify(e.value());
+    ASSERT_TRUE(res.is_ok());
+    const auto* i = expr_cast<IntegerLit>(res.value());
+    ASSERT_NE(i, nullptr) << "sqrt(144) must be IntegerLit";
+    EXPECT_EQ(i->value, BigInt(12));
+}
+
 }  // namespace
 }  // namespace cas::symbolic
