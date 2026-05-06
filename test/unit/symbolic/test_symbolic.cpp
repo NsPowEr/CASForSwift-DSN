@@ -1971,6 +1971,35 @@ TEST(SymbolicTimeoutTest, ResetsStateCleanlyAfterTimeout) {
     EXPECT_EQ(trace.front().depth, 0U);
 }
 
+TEST(SymbolicDepthTest, MaxDepthConfigurable) {
+    // L0-12: set_max_simplification_depth allows deeper legitimate computations
+    CASContext ctx;
+    ctx.set_max_simplification_depth(500);
+    EXPECT_EQ(ctx.max_simplification_depth(), 500);
+
+    // Min clamp: below 10 → 10
+    ctx.set_max_simplification_depth(1);
+    EXPECT_EQ(ctx.max_simplification_depth(), 10);
+
+    // Default is 300
+    CASContext default_ctx;
+    EXPECT_EQ(default_ctx.max_simplification_depth(), 300);
+}
+
+TEST(SymbolicDepthTest, IncreasedDepthAllowsDeeperNesting) {
+    // L0-12: increasing depth allows computation that would fail at 300
+    CASContext ctx;
+    ctx.set_max_simplification_depth(1000);
+
+    // Build a sum with 350 terms: requires depth > 300 with default limit
+    ExprPtr sym = ctx.arena().make<Symbol>(std::string("z"));
+    std::vector<ExprPtr> terms(350U, sym);
+    ExprPtr deep_sum = ctx.arena().make<Sum>(std::move(terms));
+
+    auto result = ctx.simplify(deep_sum);
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+}
+
 TEST(SymbolicCycleDetectionTest, SameNodeReentryReturnsOriginal) {
     // L0-10: if simplify_expr re-enters same ExprPtr, CycleGuard returns original
     // without infinite recursion. We can't easily inject a cycle via rewrite rules

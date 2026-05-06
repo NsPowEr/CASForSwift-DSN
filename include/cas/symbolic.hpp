@@ -240,6 +240,9 @@ public:
     void set_timeout_check_interval(std::uint64_t interval) noexcept;
     [[nodiscard]] std::uint64_t timeout_check_interval() const noexcept { return timeout_check_interval_; }
 
+    void set_max_simplification_depth(int depth) noexcept;
+    [[nodiscard]] int max_simplification_depth() const noexcept { return max_simplification_depth_; }
+
     [[nodiscard]] Result<ExprPtr> simplify(ExprPtr expr);
     [[nodiscard]] Result<ExprPtr> substitute(ExprPtr expr, const Symbol& variable, ExprPtr value);
 
@@ -277,6 +280,7 @@ public:
     std::chrono::steady_clock::time_point operation_started_at_{};
     std::uint64_t ops_count_{0};
     std::uint64_t timeout_check_interval_{1024U};
+    int max_simplification_depth_{300};
 
 public:
 // Performance Caches

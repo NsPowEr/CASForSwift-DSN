@@ -62,7 +62,7 @@
 | CAS-L0-09 | Polynomial | Modulo primo custom (oltre p=13) | L0 | Risolta | — | Basso | Verificata |
 | CAS-L0-10 | QA | Cycle Detection Framework | L0 | Risolta | — | Medio | Verificata |
 | CAS-L0-11 | Performance | Performance Instrumentation Hooks | L0 | Risolta | — | Basso | Verificata |
-| CAS-L0-12 | Symbolic | Profondità Semplificazione Adattiva | L0 | Aperta | L0-10 | Medio | MAX_SIMPLIFICATION_DEPTH=300 fisso blocca computazioni legittime profonde (es. det matrici simboliche 5x5); distinto da L0-10 (cycle detection) |
+| CAS-L0-12 | Symbolic | Profondità Semplificazione Adattiva | L0 | Risolta | L0-10 | Medio | Verificata |
 | CAS-L0-13 | Performance | Timeout Check Interval Configurabile | L0 | Risolta | — | Basso | Verificata |
 | CAS-L0-14 | Parser | Conversione Automatica DecimalLit→Rational | L0 | Risolta | — | Medio | Verificata |
 | CAS-L1-01 | Calculus | Gruntz MRV Completo | L1 | Parziale | L0-01 | Molto Alto | Supporto FuncCall (exp/ln) e rank di crescita migliorato; CancellationTower richiede ancora serie di Taylor/Laurent |

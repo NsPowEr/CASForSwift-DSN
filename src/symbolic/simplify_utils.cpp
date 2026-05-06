@@ -12,9 +12,9 @@ namespace detail {
 thread_local int simplification_depth = 0;
 thread_local std::unordered_set<ExprPtr, ExprHash> active_simplify_nodes;
 
-DepthGuard::DepthGuard() { ++simplification_depth; }
+DepthGuard::DepthGuard(int max_depth) : max_depth_(max_depth) { ++simplification_depth; }
 DepthGuard::~DepthGuard() { --simplification_depth; }
-bool DepthGuard::exceeded() const { return simplification_depth > MAX_SIMPLIFICATION_DEPTH; }
+bool DepthGuard::exceeded() const { return simplification_depth > max_depth_; }
 
 [[nodiscard]] bool is_odd_parity_function(BuiltinOp op) {
     return op == BuiltinOp::Sin || op == BuiltinOp::Tan || op == BuiltinOp::Cot || op == BuiltinOp::Csc ||

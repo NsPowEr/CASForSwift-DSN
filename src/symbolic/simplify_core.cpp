@@ -29,7 +29,8 @@ Result<ExprPtr> Simplifier::simplify_expr(ExprPtr expr) {
         return fail<ExprPtr>(make_error(CASErrorKind::InvalidArgument, "Cannot simplify null expression"));
     }
 
-    DepthGuard guard;
+    const int max_depth = (context_ != nullptr) ? context_->max_simplification_depth() : MAX_SIMPLIFICATION_DEPTH;
+    DepthGuard guard(max_depth);
     if (guard.exceeded()) {
         return fail<ExprPtr>(make_error(CASErrorKind::InternalError, "Simplification depth limit exceeded (possible infinite recursion)"));
     }

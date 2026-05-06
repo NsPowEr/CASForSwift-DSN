@@ -23,9 +23,11 @@ constexpr int MAX_SIMPLIFICATION_DEPTH = 300;
 thread_local extern std::unordered_set<ExprPtr, ExprHash> active_simplify_nodes;
 
 struct DepthGuard {
-    DepthGuard();
+    explicit DepthGuard(int max_depth = MAX_SIMPLIFICATION_DEPTH);
     ~DepthGuard();
     bool exceeded() const;
+private:
+    int max_depth_;
 };
 
 // RAII guard that inserts expr into active_simplify_nodes on construction

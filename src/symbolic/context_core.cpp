@@ -389,6 +389,10 @@ void CASContext::set_timeout_check_interval(std::uint64_t interval) noexcept {
     timeout_check_interval_ = (interval < 64U) ? 64U : interval;
 }
 
+void CASContext::set_max_simplification_depth(int depth) noexcept {
+    max_simplification_depth_ = (depth < 10) ? 10 : depth;
+}
+
 void CASContext::clear_caches() noexcept {
     simplify_cache_.clear();
     diff_cache_.clear();
