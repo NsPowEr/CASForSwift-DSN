@@ -73,12 +73,12 @@
 | CAS-L1-06 | Calculus | Singolarità Definiti | L1 | Parziale | — | Alto | Poli razionali finiti interni/endpoint rifiutati ok; rimovibili cancellabili ok; mancano radici algebriche, singolarità trascendenti, impropri/PV |
 | CAS-L1-07 | Symbolic | Normal Form Trascendente | L1 | Risolta | — | Alto | Verificata (transcendental_normal_form: ln Product/Binary/Div/Pow expand + exp/ln inv. cancellazioni, 5 test anti-hardcode) |
 | CAS-L1-08 | Algebra | GCD Multivariato | L1 | Parziale | — | Alto | Univariato e bivariato lineare certificati; trivariato lineare ok; modular GCD/Hensel multivariato generale non implementato |
-| CAS-L1-09 | Symbolic | Deduzione Disequazioni da Assunzioni | L1 | Parziale | L0-07, L1-10 | Molto Alto | Solo conflict detection (x>0 + x<0 → contraddizione); deduzione transitiva assente; `x>0,y>0→x*y>0` NON inferito automaticamente |
+| CAS-L1-09 | Symbolic | Deduzione Disequazioni da Assunzioni | L1 | Risolta | L0-07, L1-10 | Molto Alto | Verificata (is_nonzero deriva da grafo relazionale, x*y>0 inferito, transitività 3-hop, 6 test anti-hardcode) |
 | CAS-L1-10 | Symbolic | Domini Globali e Coerenza Assunzioni | L1 | Risolta | L0-07 | Alto | Verificata |
 | CAS-L1-11 | Calculus | Asintoti (vertical/horizontal/oblique) | L1 | Risolta | — | Medio | Verificata (x→-∞ aggiunto, deduplicazione simmetrica, test anti-hardcode) |
 | CAS-L1-12 | Symbolic | Semplificazione radicali annidati (denesting) | L1 | Parziale | — | Medio | Denesting singolo `sqrt(a+b*sqrt(c))` ok solo per (a,b,c) razionali; annidamenti >2 livelli assenti |
 | CAS-L1-13 | Symbolic | Semplificazione abs/sign avanzata | L1 | Risolta | L0-07, L1-10, L1-12 | Medio | Verificata |
-| CAS-L1-14 | Calculus | Composizioni Inverse (sqrt∘sqrt, sin∘arcsin) | L1 | Parziale | L1-13 | Medio | Solo `sqrt(sqrt(x))→x^(1/4)` implementato; inverse trig `sin(arcsin(x))→x` ecc. ASSENTI |
+| CAS-L1-14 | Calculus | Composizioni Inverse (sqrt∘sqrt, sin∘arcsin) | L1 | Risolta | L1-13 | Medio | Verificata (sin/cos/tan(arc*) + arc*(sin/cos/tan) con assumptions, sqrt∘sqrt, test_compositions.cpp 3/3) |
 | CAS-L1-15 | Algebra | Resultante e Discriminante | L1 | Risolta | — | Medio | Verificata (normalizzazione via ctx.simplify() applicata, test anti-hardcode L1-15) |
 | CAS-L1-16 | Symbolic | Caching/Memoization Expression | L1 | Parziale | — | Medio | Cache simplify/diff/integrate presenti; migrazione GC via hash ok; manca benchmark gate dedicato e policy eviction adattiva |
 | CAS-L1-17 | LinAlg | Pivot Bareiss Euristica Contestuale | L1 | Risolta | — | Medio | Verificata |
