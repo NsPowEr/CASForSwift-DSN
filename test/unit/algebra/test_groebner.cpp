@@ -1,0 +1,296 @@
+#include "cas/algebra.hpp"
+#include "cas/ast.hpp"
+#include "cas/lexer.hpp"
+#include "cas/parser.hpp"
+#include "cas/symbolic.hpp"
+#include "../../../src/algebra/polynomial_groebner_f4.hpp"
+
+#include <gtest/gtest.h>
+
+using namespace cas;
+using namespace cas::algebra;
+
+namespace {
+
+[[nodiscard]] Result<ExprPtr> parse_expr(const std::string& input, symbolic::CASContext& ctx) {
+    auto tokens = Lexer(input).tokenize();
+    if (tokens.is_error()) return fail<ExprPtr>(tokens.error());
+    Parser parser(tokens.value(), ctx.arena());
+    return parser.parse();
+}
+
+[[nodiscard]] bool divides_monomial(const Monomial& divisor, const Monomial& value) {
+    if (divisor.size() != value.size()) return false;
+    for (std::size_t i = 0; i < divisor.size(); ++i) {
+        if (divisor[i] > value[i]) return false;
+    }
+    return true;
+}
+
+[[nodiscard]] Monomial lcm_monomial(const Monomial& lhs, const Monomial& rhs) {
+    Monomial result(lhs.size(), 0);
+    for (std::size_t i = 0; i < lhs.size(); ++i) result[i] = std::max(lhs[i], rhs[i]);
+    return result;
+}
+
+[[nodiscard]] PolyF4 multiply_by_monomial(const PolyF4& poly, const Monomial& shift, const Rational& factor) {
+    PolyF4 result;
+    for (const auto& [mon, coeff] : poly.terms) {
+        Monomial shifted(mon.size(), 0);
+        for (std::size_t i = 0; i < mon.size(); ++i) shifted[i] = mon[i] + shift[i];
+        result.terms[shifted] = result.terms[shifted] + coeff * factor;
+        if (result.terms[shifted].numerator().is_zero()) result.terms.erase(shifted);
+    }
+    return result;
+}
+
+void subtract_into(PolyF4& lhs, const PolyF4& rhs) {
+    for (const auto& [mon, coeff] : rhs.terms) {
+        lhs.terms[mon] = lhs.terms[mon] - coeff;
+        if (lhs.terms[mon].numerator().is_zero()) lhs.terms.erase(mon);
+    }
+}
+
+[[nodiscard]] PolyF4 reduce_poly(PolyF4 poly, const std::vector<PolyF4>& basis, MonomialOrder order) {
+    constexpr std::size_t kMaxReductionSteps = 4096;
+    for (std::size_t step = 0; step < kMaxReductionSteps && !poly.is_zero(); ++step) {
+        const Monomial lm = poly.leading_monomial(order);
+        const Rational lc = poly.leading_coefficient(order);
+        bool reduced = false;
+        for (const PolyF4& g : basis) {
+            const Monomial lm_g = g.leading_monomial(order);
+            if (lm_g.empty() || !divides_monomial(lm_g, lm)) continue;
+            Monomial shift(lm.size(), 0);
+            for (std::size_t i = 0; i < lm.size(); ++i) shift[i] = lm[i] - lm_g[i];
+            subtract_into(poly, multiply_by_monomial(g, shift, lc / g.leading_coefficient(order)));
+            reduced = true;
+            break;
+        }
+        if (!reduced) break;
+    }
+    return poly;
+}
+
+[[nodiscard]] PolyF4 s_polynomial(const PolyF4& lhs, const PolyF4& rhs, MonomialOrder order) {
+    const Monomial lm_l = lhs.leading_monomial(order);
+    const Monomial lm_r = rhs.leading_monomial(order);
+    const Monomial common = lcm_monomial(lm_l, lm_r);
+    Monomial shift_l(common.size(), 0);
+    Monomial shift_r(common.size(), 0);
+    for (std::size_t i = 0; i < common.size(); ++i) {
+        shift_l[i] = common[i] - lm_l[i];
+        shift_r[i] = common[i] - lm_r[i];
+    }
+    PolyF4 result = multiply_by_monomial(lhs, shift_l, Rational(1) / lhs.leading_coefficient(order));
+    subtract_into(result, multiply_by_monomial(rhs, shift_r, Rational(1) / rhs.leading_coefficient(order)));
+    return result;
+}
+
+[[nodiscard]] std::vector<PolyF4> to_f4_basis(
+    const std::vector<ExprPtr>& basis,
+    const std::vector<Symbol>& vars,
+    symbolic::CASContext& ctx) {
+    std::vector<PolyF4> converted;
+    for (ExprPtr expr : basis) {
+        auto poly = expr_to_f4(expr, vars, ctx);
+        EXPECT_TRUE(poly.is_ok());
+        if (poly.is_ok() && !poly.value().is_zero()) converted.push_back(poly.value());
+    }
+    return converted;
+}
+
+void expect_groebner_basis_for(
+    const std::vector<ExprPtr>& generators,
+    const std::vector<ExprPtr>& basis_exprs,
+    const std::vector<Symbol>& vars,
+    symbolic::CASContext& ctx) {
+    constexpr MonomialOrder order = MonomialOrder::GRevLex;
+    const std::vector<PolyF4> basis = to_f4_basis(basis_exprs, vars, ctx);
+    ASSERT_FALSE(basis.empty());
+
+    for (ExprPtr generator : generators) {
+        auto poly = expr_to_f4(generator, vars, ctx);
+        ASSERT_TRUE(poly.is_ok());
+        EXPECT_TRUE(reduce_poly(poly.value(), basis, order).is_zero());
+    }
+
+    for (std::size_t i = 0; i < basis.size(); ++i) {
+        for (std::size_t j = i + 1; j < basis.size(); ++j) {
+            EXPECT_TRUE(reduce_poly(s_polynomial(basis[i], basis[j], order), basis, order).is_zero());
+        }
+    }
+}
+
+} // namespace
+
+// P3-002: Gröbner basis
+
+TEST(GroebnerTest, EmptyInputReturnsEmpty) {
+    symbolic::CASContext ctx;
+    std::vector<ExprPtr> eqs;
+    std::vector<Symbol> vars = {Symbol("x"), Symbol("y")};
+
+    auto result = polynomial_groebner(eqs, vars, ctx);
+    ASSERT_TRUE(result.is_ok());
+    EXPECT_TRUE(result.value().empty());
+}
+
+TEST(GroebnerTest, SinglePolynomialReturnsSelf) {
+    symbolic::CASContext ctx;
+    auto x_expr = parse_expr("x^2 - 1", ctx);
+    ASSERT_TRUE(x_expr.is_ok());
+
+    std::vector<Symbol> vars = {Symbol("x")};
+    auto result = polynomial_groebner({x_expr.value()}, vars, ctx);
+    ASSERT_TRUE(result.is_ok());
+    EXPECT_FALSE(result.value().empty());
+    expect_groebner_basis_for({x_expr.value()}, result.value(), vars, ctx);
+}
+
+TEST(GroebnerTest, LinearSystemTwoVariables) {
+    // x + y - 3 = 0, x - y - 1 = 0
+    // Solution: x=2, y=1
+    // Reduced Gröbner should eliminate one variable
+    symbolic::CASContext ctx;
+
+    auto eq1 = parse_expr("x + y - 3", ctx);
+    auto eq2 = parse_expr("x - y - 1", ctx);
+    ASSERT_TRUE(eq1.is_ok());
+    ASSERT_TRUE(eq2.is_ok());
+
+    std::vector<Symbol> vars = {Symbol("x"), Symbol("y")};
+    auto result = polynomial_groebner({eq1.value(), eq2.value()}, vars, ctx);
+    ASSERT_TRUE(result.is_ok());
+    // Basis must be non-empty
+    EXPECT_FALSE(result.value().empty());
+    // Basis has at most 2 elements for this linear system
+    EXPECT_LE(result.value().size(), 2U);
+    expect_groebner_basis_for({eq1.value(), eq2.value()}, result.value(), vars, ctx);
+}
+
+TEST(GroebnerTest, ZeroPolynomialFiltered) {
+    // Single zero polynomial should give empty basis
+    symbolic::CASContext ctx;
+    auto zero = parse_expr("0", ctx);
+    ASSERT_TRUE(zero.is_ok());
+
+    std::vector<Symbol> vars = {Symbol("x")};
+    auto result = polynomial_groebner({zero.value()}, vars, ctx);
+    ASSERT_TRUE(result.is_ok());
+    EXPECT_TRUE(result.value().empty());
+}
+
+TEST(GroebnerTest, QuadraticSystemReduces) {
+    // x^2 - 1, x - 1
+    // GCD = x - 1, Gröbner = {x - 1}
+    symbolic::CASContext ctx;
+
+    auto eq1 = parse_expr("x^2 - 1", ctx);
+    auto eq2 = parse_expr("x - 1", ctx);
+    ASSERT_TRUE(eq1.is_ok());
+    ASSERT_TRUE(eq2.is_ok());
+
+    std::vector<Symbol> vars = {Symbol("x")};
+    auto result = polynomial_groebner({eq1.value(), eq2.value()}, vars, ctx);
+    ASSERT_TRUE(result.is_ok());
+    EXPECT_FALSE(result.value().empty());
+    // The reduced basis should be {x - 1}
+    EXPECT_EQ(result.value().size(), 1U);
+    expect_groebner_basis_for({eq1.value(), eq2.value()}, result.value(), vars, ctx);
+}
+
+TEST(GroebnerTest, IndependentVariablesPreserved) {
+    // Ideal generated by {x - 1, y - 2}: no cross-terms
+    symbolic::CASContext ctx;
+
+    auto eq1 = parse_expr("x - 1", ctx);
+    auto eq2 = parse_expr("y - 2", ctx);
+    ASSERT_TRUE(eq1.is_ok());
+    ASSERT_TRUE(eq2.is_ok());
+
+    std::vector<Symbol> vars = {Symbol("x"), Symbol("y")};
+    auto result = polynomial_groebner({eq1.value(), eq2.value()}, vars, ctx);
+    ASSERT_TRUE(result.is_ok());
+    EXPECT_EQ(result.value().size(), 2U);
+    expect_groebner_basis_for({eq1.value(), eq2.value()}, result.value(), vars, ctx);
+}
+
+TEST(GroebnerTest, HardNonlinearSystemSatisfiesBuchbergerCriterion) {
+    symbolic::CASContext ctx;
+
+    auto eq1 = parse_expr("x*y - 1", ctx);
+    auto eq2 = parse_expr("y^2 - x", ctx);
+    ASSERT_TRUE(eq1.is_ok());
+    ASSERT_TRUE(eq2.is_ok());
+
+    std::vector<Symbol> vars = {Symbol("x"), Symbol("y")};
+    auto result = polynomial_groebner({eq1.value(), eq2.value()}, vars, ctx);
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+    expect_groebner_basis_for({eq1.value(), eq2.value()}, result.value(), vars, ctx);
+}
+
+TEST(GroebnerTest, HardNonlinearSystemUsesVariableListNotXHardcode) {
+    symbolic::CASContext ctx;
+
+    auto eq1 = parse_expr("z*t - 1", ctx);
+    auto eq2 = parse_expr("t^2 - z", ctx);
+    ASSERT_TRUE(eq1.is_ok());
+    ASSERT_TRUE(eq2.is_ok());
+
+    std::vector<Symbol> vars = {Symbol("z"), Symbol("t")};
+    auto result = polynomial_groebner({eq1.value(), eq2.value()}, vars, ctx);
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+    expect_groebner_basis_for({eq1.value(), eq2.value()}, result.value(), vars, ctx);
+}
+
+TEST(GroebnerTest, ThreeVariableTriangularSystemSatisfiesBuchbergerCriterion) {
+    symbolic::CASContext ctx;
+
+    auto eq1 = parse_expr("x^2 - y", ctx);
+    auto eq2 = parse_expr("y^2 - z", ctx);
+    auto eq3 = parse_expr("z^2 - 1", ctx);
+    ASSERT_TRUE(eq1.is_ok());
+    ASSERT_TRUE(eq2.is_ok());
+    ASSERT_TRUE(eq3.is_ok());
+
+    std::vector<Symbol> vars = {Symbol("x"), Symbol("y"), Symbol("z")};
+    auto result = polynomial_groebner({eq1.value(), eq2.value(), eq3.value()}, vars, ctx);
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+    expect_groebner_basis_for({eq1.value(), eq2.value(), eq3.value()}, result.value(), vars, ctx);
+}
+
+TEST(GroebnerTest, CoupledQuadraticSystemSatisfiesBuchbergerCriterion) {
+    symbolic::CASContext ctx;
+
+    auto eq1 = parse_expr("x^2 + y^2 - 1", ctx);
+    auto eq2 = parse_expr("x - y", ctx);
+    ASSERT_TRUE(eq1.is_ok());
+    ASSERT_TRUE(eq2.is_ok());
+
+    std::vector<Symbol> vars = {Symbol("x"), Symbol("y")};
+    auto result = polynomial_groebner({eq1.value(), eq2.value()}, vars, ctx);
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+    expect_groebner_basis_for({eq1.value(), eq2.value()}, result.value(), vars, ctx);
+}
+
+TEST(GroebnerTest, AcceptsDecimalConvertedToRationalForExactConversion) {
+    symbolic::CASContext ctx;
+    // Parser converts 1.5 → RationalLit(3,2); Groebner handles rationals
+    auto expr = parse_expr("x + 1.5", ctx);
+    ASSERT_TRUE(expr.is_ok());
+
+    std::vector<Symbol> vars = {Symbol("x")};
+    auto result = polynomial_groebner({expr.value()}, vars, ctx);
+    ASSERT_TRUE(result.is_ok());
+}
+
+TEST(GroebnerTest, OversizedExponentReturnsErrorNotException) {
+    symbolic::CASContext ctx;
+    auto expr = parse_expr("x^1000000000000000000000000", ctx);
+    ASSERT_TRUE(expr.is_ok());
+
+    std::vector<Symbol> vars = {Symbol("x")};
+    auto result = polynomial_groebner({expr.value()}, vars, ctx);
+    ASSERT_TRUE(result.is_error());
+    EXPECT_EQ(result.error().kind, CASErrorKind::Overflow);
+}

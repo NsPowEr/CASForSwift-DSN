@@ -553,6 +553,57 @@ TEST(CalculusIntegrateTest, ComputesDefiniteIntegralViaTfc) {
     expect_equivalent(result.value(), expected.value());
 }
 
+TEST(CalculusIntegrateTest, RejectsDefiniteIntegralWithInteriorRationalPole) {
+    symbolic::CASContext context;
+    AstArena parse_arena;
+
+    auto expr = parse_expr("1/(x-2)", parse_arena);
+    auto lower = parse_expr("0", parse_arena);
+    auto upper = parse_expr("5", parse_arena);
+    ASSERT_TRUE(expr.is_ok()) << expr.error().message;
+    ASSERT_TRUE(lower.is_ok()) << lower.error().message;
+    ASSERT_TRUE(upper.is_ok()) << upper.error().message;
+
+    auto result = definite_integral(expr.value(), Symbol("x"), lower.value(), upper.value(), context);
+    ASSERT_TRUE(result.is_error());
+    EXPECT_EQ(result.error().kind, CASErrorKind::Undefined);
+}
+
+TEST(CalculusIntegrateTest, RejectsDefiniteIntegralWithEndpointRationalPole) {
+    symbolic::CASContext context;
+    AstArena parse_arena;
+
+    auto expr = parse_expr("1/(u+1)", parse_arena);
+    auto lower = parse_expr("-1", parse_arena);
+    auto upper = parse_expr("3", parse_arena);
+    ASSERT_TRUE(expr.is_ok()) << expr.error().message;
+    ASSERT_TRUE(lower.is_ok()) << lower.error().message;
+    ASSERT_TRUE(upper.is_ok()) << upper.error().message;
+
+    auto result = definite_integral(expr.value(), Symbol("u"), lower.value(), upper.value(), context);
+    ASSERT_TRUE(result.is_error());
+    EXPECT_EQ(result.error().kind, CASErrorKind::Undefined);
+}
+
+TEST(CalculusIntegrateTest, AllowsRemovableRationalSingularityAfterExactCancellation) {
+    symbolic::CASContext context;
+    AstArena parse_arena;
+    AstArena expected_arena;
+
+    auto expr = parse_expr("(v^2-1)/(v-1)", parse_arena);
+    auto lower = parse_expr("0", parse_arena);
+    auto upper = parse_expr("2", parse_arena);
+    auto expected = parse_expr("4", expected_arena);
+    ASSERT_TRUE(expr.is_ok()) << expr.error().message;
+    ASSERT_TRUE(lower.is_ok()) << lower.error().message;
+    ASSERT_TRUE(upper.is_ok()) << upper.error().message;
+    ASSERT_TRUE(expected.is_ok()) << expected.error().message;
+
+    auto result = definite_integral(expr.value(), Symbol("v"), lower.value(), upper.value(), context);
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+    expect_equivalent(result.value(), expected.value());
+}
+
 TEST(CalculusIntegrateTest, RejectsNonElementaryCaseForNow) {
     symbolic::CASContext context;
     auto integrated = integrate_input("exp(-x^2)", "x", context);
@@ -1001,6 +1052,169 @@ TEST(P2_004_LHopital, ExponentialMinusOneOverX) {
     auto expected = parse_expr("1", ctx.arena());
     ASSERT_TRUE(expected.is_ok());
     expect_equivalent(r.value(), expected.value());
+}
+
+// P3-004: Special functions — Gamma(n) = (n-1)!
+
+TEST(P3_004_SpecialFunctions, GammaOne) {
+    // Gamma(1) = 0! = 1
+    symbolic::CASContext ctx;
+    auto& arena = ctx.arena();
+    auto arg = arena.make<IntegerLit>(BigInt(1));
+    auto gamma_1 = arena.make<FuncCall>(BuiltinOp::Gamma, std::vector<ExprPtr>{arg});
+    auto result = ctx.simplify(gamma_1);
+    ASSERT_TRUE(result.is_ok());
+    const auto* il = expr_cast<IntegerLit>(result.value());
+    ASSERT_NE(il, nullptr);
+    EXPECT_EQ(il->value, BigInt(1));
+}
+
+TEST(P3_004_SpecialFunctions, GammaTwo) {
+    // Gamma(2) = 1! = 1
+    symbolic::CASContext ctx;
+    auto& arena = ctx.arena();
+    auto arg = arena.make<IntegerLit>(BigInt(2));
+    auto gamma_2 = arena.make<FuncCall>(BuiltinOp::Gamma, std::vector<ExprPtr>{arg});
+    auto result = ctx.simplify(gamma_2);
+    ASSERT_TRUE(result.is_ok());
+    const auto* il = expr_cast<IntegerLit>(result.value());
+    ASSERT_NE(il, nullptr);
+    EXPECT_EQ(il->value, BigInt(1));
+}
+
+TEST(P3_004_SpecialFunctions, GammaFive) {
+    // Gamma(5) = 4! = 24
+    symbolic::CASContext ctx;
+    auto& arena = ctx.arena();
+    auto arg = arena.make<IntegerLit>(BigInt(5));
+    auto gamma_5 = arena.make<FuncCall>(BuiltinOp::Gamma, std::vector<ExprPtr>{arg});
+    auto result = ctx.simplify(gamma_5);
+    ASSERT_TRUE(result.is_ok());
+    const auto* il = expr_cast<IntegerLit>(result.value());
+    ASSERT_NE(il, nullptr);
+    EXPECT_EQ(il->value, BigInt(24));
+}
+
+TEST(P3_004_SpecialFunctions, GammaLargeInteger) {
+    // Gamma(10) = 9! = 362880
+    symbolic::CASContext ctx;
+    auto& arena = ctx.arena();
+    auto arg = arena.make<IntegerLit>(BigInt(10));
+    auto gamma_10 = arena.make<FuncCall>(BuiltinOp::Gamma, std::vector<ExprPtr>{arg});
+    auto result = ctx.simplify(gamma_10);
+    ASSERT_TRUE(result.is_ok());
+    const auto* il = expr_cast<IntegerLit>(result.value());
+    ASSERT_NE(il, nullptr);
+    EXPECT_EQ(il->value, BigInt(362880LL));
+}
+
+TEST(P3_004_SpecialFunctions, GammaSymbolicNotReduced) {
+    // Gamma(x) stays as gamma(x) — not a concrete integer
+    symbolic::CASContext ctx;
+    auto& arena = ctx.arena();
+    auto x = arena.make<Symbol>("x");
+    auto gamma_x = arena.make<FuncCall>(BuiltinOp::Gamma, std::vector<ExprPtr>{x});
+    auto result = ctx.simplify(gamma_x);
+    ASSERT_TRUE(result.is_ok());
+    const auto* fc = expr_cast<FuncCall>(result.value());
+    ASSERT_NE(fc, nullptr);
+    EXPECT_EQ(fc->func_id, BuiltinOp::Gamma);
+}
+
+// P3-005: Complex symbolic — Re, Im, Conj
+
+TEST(P3_005_Complex, ReOfNumericComplex) {
+    // Re(3 + 4*i) = 3
+    symbolic::CASContext ctx;
+    auto expr = parse_expr("re(3 + 4*i)", ctx.arena());
+    ASSERT_TRUE(expr.is_ok());
+    auto simp = ctx.simplify(expr.value());
+    ASSERT_TRUE(simp.is_ok());
+    const auto* il = expr_cast<IntegerLit>(simp.value());
+    ASSERT_NE(il, nullptr) << "Expected IntegerLit";
+    EXPECT_EQ(il->value, BigInt(3));
+}
+
+TEST(P3_005_Complex, ImOfNumericComplex) {
+    // Im(3 + 4*i) = 4
+    symbolic::CASContext ctx;
+    auto expr = parse_expr("im(3 + 4*i)", ctx.arena());
+    ASSERT_TRUE(expr.is_ok());
+    auto simp = ctx.simplify(expr.value());
+    ASSERT_TRUE(simp.is_ok());
+    const auto* il = expr_cast<IntegerLit>(simp.value());
+    ASSERT_NE(il, nullptr) << "Expected IntegerLit";
+    EXPECT_EQ(il->value, BigInt(4));
+}
+
+TEST(P3_005_Complex, ConjOfNumericComplex) {
+    // Conj(3 + 4*i) = 3 - 4*i → simplified should contain I
+    symbolic::CASContext ctx;
+    auto expr = parse_expr("conj(3 + 4*i)", ctx.arena());
+    ASSERT_TRUE(expr.is_ok());
+    auto simp = ctx.simplify(expr.value());
+    ASSERT_TRUE(simp.is_ok());
+    // Result should not be a bare FuncCall(Conj) — it should be simplified
+    const auto* fc = expr_cast<FuncCall>(simp.value());
+    if (fc != nullptr) {
+        EXPECT_NE(fc->func_id, BuiltinOp::Conj) << "Conj should have been reduced";
+    }
+}
+
+TEST(P3_005_Complex, ReOfPureImaginary) {
+    // Re(i) = 0
+    symbolic::CASContext ctx;
+    auto expr = parse_expr("re(i)", ctx.arena());
+    ASSERT_TRUE(expr.is_ok());
+    auto simp = ctx.simplify(expr.value());
+    ASSERT_TRUE(simp.is_ok());
+    const auto* il = expr_cast<IntegerLit>(simp.value());
+    ASSERT_NE(il, nullptr);
+    EXPECT_EQ(il->value, BigInt(0));
+}
+
+TEST(P3_005_Complex, ImOfPureImaginary) {
+    // Im(5*i) = 5
+    symbolic::CASContext ctx;
+    auto expr = parse_expr("im(5*i)", ctx.arena());
+    ASSERT_TRUE(expr.is_ok());
+    auto simp = ctx.simplify(expr.value());
+    ASSERT_TRUE(simp.is_ok());
+    const auto* il = expr_cast<IntegerLit>(simp.value());
+    ASSERT_NE(il, nullptr);
+    EXPECT_EQ(il->value, BigInt(5));
+}
+
+// CAS-L0-14: decimal literals converted to rational at parse boundary
+TEST(L0_14_DecimalToRational, DiffHalfXSquared) {
+    // diff(0.5*x^2, x) = x   (0.5 parsed as 1/2)
+    symbolic::CASContext ctx;
+    auto result = differentiate_input("0.5*x^2", "x", 1, ctx);
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+    auto simp = ctx.simplify(result.value());
+    ASSERT_TRUE(simp.is_ok());
+    // Expect x (i.e. 1/2 * 2 * x = x)
+    EXPECT_EQ(expr_kind(simp.value()), ExprKind::Symbol)
+        << "diff(0.5*x^2, x) must simplify to x";
+    EXPECT_EQ(expr_ref<Symbol>(simp.value()).name, "x");
+}
+
+TEST(L0_14_DecimalToRational, IntegrateQuarterX) {
+    // integrate(0.25*x, x) = x^2/8  (0.25 parsed as 1/4)
+    symbolic::CASContext ctx;
+    auto result = integrate_input("0.25*x", "x", ctx);
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+    auto simp = ctx.simplify(result.value());
+    ASSERT_TRUE(simp.is_ok()) << "integrate(0.25*x, x) must not fail";
+}
+
+TEST(L0_14_DecimalToRational, DiffWithVariableCoeff) {
+    // diff(0.1*t^3, t) = 3/10 * t^2
+    symbolic::CASContext ctx;
+    auto result = differentiate_input("0.1*t^3", "t", 1, ctx);
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+    auto simp = ctx.simplify(result.value());
+    ASSERT_TRUE(simp.is_ok()) << "diff(0.1*t^3, t) must not fail";
 }
 
 }  // namespace

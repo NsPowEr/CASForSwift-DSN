@@ -30,7 +30,7 @@ INSTANTIATE_TEST_SUITE_P(
         ParserRootCase{"0", ExprKind::IntegerLit},
         ParserRootCase{"42", ExprKind::IntegerLit},
         ParserRootCase{"3/4", ExprKind::RationalLit},
-        ParserRootCase{"3.14", ExprKind::DecimalLit},
+        ParserRootCase{"3.14", ExprKind::RationalLit},
         ParserRootCase{"x", ExprKind::Symbol},
         ParserRootCase{"pi", ExprKind::Constant},
         ParserRootCase{"∞", ExprKind::Constant},
@@ -123,13 +123,45 @@ TEST(ParserTest, ParsesSingleSymbol) {
     EXPECT_EQ(expr_ref<Symbol>(result.value()).name, "x");
 }
 
-TEST(ParserTest, ParsesDecimalAsDecimalLiteral) {
+TEST(ParserTest, ParsesDecimalAsRationalLiteral) {
     AstArena arena;
     auto result = parse_input("3.14", arena);
 
     ASSERT_TRUE(result.is_ok());
-    ASSERT_EQ(expr_kind(result.value()), ExprKind::DecimalLit);
-    EXPECT_EQ(expr_ref<DecimalLit>(result.value()).text, "3.14");
+    ASSERT_EQ(expr_kind(result.value()), ExprKind::RationalLit);
+    const auto& rat = expr_ref<RationalLit>(result.value());
+    EXPECT_EQ(rat.numerator.decimal(), "157");
+    EXPECT_EQ(rat.denominator.decimal(), "50");
+}
+
+TEST(ParserTest, ParsesHalfDecimalAsRational) {
+    AstArena arena;
+    auto result = parse_input("0.5", arena);
+    ASSERT_TRUE(result.is_ok());
+    ASSERT_EQ(expr_kind(result.value()), ExprKind::RationalLit);
+    const auto& rat = expr_ref<RationalLit>(result.value());
+    EXPECT_EQ(rat.numerator.decimal(), "1");
+    EXPECT_EQ(rat.denominator.decimal(), "2");
+}
+
+TEST(ParserTest, ParsesQuarterDecimalAsRational) {
+    AstArena arena;
+    auto result = parse_input("0.25", arena);
+    ASSERT_TRUE(result.is_ok());
+    ASSERT_EQ(expr_kind(result.value()), ExprKind::RationalLit);
+    const auto& rat = expr_ref<RationalLit>(result.value());
+    EXPECT_EQ(rat.numerator.decimal(), "1");
+    EXPECT_EQ(rat.denominator.decimal(), "4");
+}
+
+TEST(ParserTest, ParsesOnePointZeroAsRational) {
+    AstArena arena;
+    auto result = parse_input("1.0", arena);
+    ASSERT_TRUE(result.is_ok());
+    ASSERT_EQ(expr_kind(result.value()), ExprKind::RationalLit);
+    const auto& rat = expr_ref<RationalLit>(result.value());
+    EXPECT_EQ(rat.numerator.decimal(), "1");
+    EXPECT_EQ(rat.denominator.decimal(), "1");
 }
 
 TEST(ParserTest, ParsesRationalLiteral) {

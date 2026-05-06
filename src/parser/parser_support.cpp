@@ -153,8 +153,37 @@ Result<ExprPtr> Parser::parse_number_token(const Token& token) {
             std::move(numerator.value()),
             std::move(denominator.value())));
     }
-    case TokenKind::Float:
-        return Result<ExprPtr>(arena_.make<DecimalLit>(std::string(token.text)));
+    case TokenKind::Float: {
+        const std::string_view text = token.text;
+        const auto dot_pos = text.find('.');
+        if (dot_pos == std::string_view::npos) {
+            return Result<ExprPtr>(arena_.make<DecimalLit>(std::string(text)));
+        }
+
+        const std::string_view int_part = text.substr(0U, dot_pos);
+        const std::string_view frac_part = text.substr(dot_pos + 1U);
+        const std::size_t k = frac_part.size();
+
+        const std::string num_str = std::string(int_part) + std::string(frac_part);
+        auto numerator = BigInt::parse(num_str);
+        if (numerator.is_error()) {
+            return Result<ExprPtr>(make_parse_error(ParseError::InvalidNumber, token, numerator.error().message));
+        }
+
+        BigInt denominator(1);
+        const BigInt ten(10);
+        for (std::size_t i = 0U; i < k; ++i) {
+            denominator *= ten;
+        }
+
+        BigInt g = gcd(numerator.value().abs(), denominator);
+        BigInt num_reduced = numerator.value() / g;
+        BigInt den_reduced = denominator / g;
+
+        return Result<ExprPtr>(arena_.make<RationalLit>(
+            std::move(num_reduced),
+            std::move(den_reduced)));
+    }
     default:
         return Result<ExprPtr>(make_parse_error(ParseError::InvalidNumber, token, "Unexpected numeric token"));
     }
@@ -174,6 +203,12 @@ Result<ExprPtr> Parser::parse_identifier_or_call(const Token& token) {
 
 int Parser::infix_precedence(TokenKind kind) const noexcept {
     switch (kind) {
+    case TokenKind::Less:
+    case TokenKind::Greater:
+    case TokenKind::LessEqual:
+    case TokenKind::GreaterEqual:
+    case TokenKind::DoubleEqual:
+        return 5;
     case TokenKind::Plus:
     case TokenKind::Minus:
         return 10;
