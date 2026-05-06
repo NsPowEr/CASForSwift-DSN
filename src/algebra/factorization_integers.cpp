@@ -228,6 +228,39 @@ void append_factor_with_multiplicity(
     return ok(std::move(factors));
 }
 
+[[nodiscard]] static std::size_t poly_hash_fnv1a(const IntPoly& f) {
+    constexpr std::size_t kFnvPrime = 0x00000100000001B3ULL;
+    constexpr std::size_t kFnvBasis = 0xcbf29ce484222325ULL;
+    std::size_t h = kFnvBasis;
+    for (std::size_t i = 0; i < f.size(); ++i) {
+        const std::string& dec = f[i].decimal();
+        for (unsigned char c : dec) {
+            h ^= static_cast<std::size_t>(c);
+            h *= kFnvPrime;
+        }
+        h ^= 0xABU;
+        h *= kFnvPrime;
+    }
+    return h;
+}
+
+[[nodiscard]] static BigInt select_factorization_prime(const IntPoly& f) {
+    static constexpr int kPool[] = {
+        13, 17, 19, 23, 29, 31, 37, 41, 43, 47,
+        53, 59, 61, 67, 71, 73, 79, 83, 89, 97
+    };
+    static constexpr std::size_t kPoolSize = sizeof(kPool) / sizeof(kPool[0]);
+    BigInt lc = f.leading_coeff();
+    const std::size_t start = poly_hash_fnv1a(f) % kPoolSize;
+    for (std::size_t i = 0; i < kPoolSize; ++i) {
+        const int p_val = kPool[(start + i) % kPoolSize];
+        BigInt bp(p_val);
+        if (!(lc % bp).is_zero()) return bp;
+    }
+    // All pool primes divide lc (astronomically rare); fall back to 101
+    return BigInt(101);
+}
+
 [[nodiscard]] Result<void> append_integer_factor_component(
     Factorization& factorization,
     const IntPoly& component,
@@ -273,7 +306,7 @@ void append_factor_with_multiplicity(
     }
 
     if (remaining.size() > 7U) {
-        BigInt p(13); 
+        BigInt p = select_factorization_prime(remaining);
         auto mod_factors_res = factor_polynomial_mod_p(remaining, p);
         if (mod_factors_res.is_ok() && mod_factors_res.value().size() > 1) {
             auto mod_factors = mod_factors_res.value();

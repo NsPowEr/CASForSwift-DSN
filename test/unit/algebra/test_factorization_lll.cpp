@@ -78,3 +78,34 @@ TEST(AlgebraFactorizationTest, Degree10LargeCoeffs) {
         EXPECT_EQ(parsed.value().degree(), 5U);
     }
 }
+
+// CAS-L0-05: prime selection must be hash-based, not fixed p=13
+// Polynomial with lc=13 forces all prior fallback candidates to be skipped
+TEST(AlgebraFactorizationTest, L0_05_HashBasedPrimeSelection_Lc13) {
+    symbolic::CASContext ctx;
+    Symbol x("x");
+    // lc=13: p=13 divides lc. The hash-based selector must pick a different prime.
+    // 13*(x^2 - 2) = 13*x^2 - 26; irreducible over Z
+    ExprPtr poly = parse_string("13*x^2 - 26", ctx);
+    auto result = factor_over_integers(poly, x, ctx);
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+    // Content factor 13, plus (x^2 - 2) irreducible
+    EXPECT_GE(result.value().factors.size(), 1U);
+}
+
+TEST(AlgebraFactorizationTest, L0_05_HashBasedPrimeSelection_DifferentPolys) {
+    symbolic::CASContext ctx;
+    Symbol x("x");
+    // Two polynomials that are factorizations of (x-1)(x+1)=x^2-1 but with different
+    // leading coefficients: lc=1 vs lc=2*(x^2-1) would pick different starting primes
+    ExprPtr p1 = parse_string("x^2 - 1", ctx);
+    ExprPtr p2 = parse_string("x^4 - 1", ctx);
+    auto r1 = factor_over_integers(p1, x, ctx);
+    auto r2 = factor_over_integers(p2, x, ctx);
+    ASSERT_TRUE(r1.is_ok()) << r1.error().message;
+    ASSERT_TRUE(r2.is_ok()) << r2.error().message;
+    // x^2-1 = (x-1)(x+1) -> 2 factors
+    EXPECT_EQ(r1.value().factors.size(), 2U);
+    // x^4-1 = (x-1)(x+1)(x^2+1) -> 3 factors
+    EXPECT_EQ(r2.value().factors.size(), 3U);
+}

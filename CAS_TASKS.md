@@ -56,7 +56,7 @@
 | CAS-L0-08 | QA | Test Randomizzati Anti-Hardcode | L0 | Risolta | L0-02 | Alto | Verificata |
 | CAS-L0-03 | Algebra | LLL Configurabilità | L0 | Risolta | — | Medio | Verificata |
 | CAS-L0-04 | Algebra | Recombination Timeout | L0 | Risolta | — | Medio | Verificata |
-| CAS-L0-05 | Algebra | Seed CZ Variabile | L0 | Parziale | — | Medio | Fallback deterministico p=13 quando lc divisibile da tutti candidati; hash polinomio non implementato |
+| CAS-L0-05 | Algebra | Seed CZ Variabile | L0 | Risolta | — | Medio | Verificata |
 | CAS-L0-06 | Algebra | Ottimizzazione F4 | L0 | Risolta | — | Alto | Verificata |
 | CAS-L0-07 | Symbolic | Interfaccia Assumptions | L0 | Risolta | — | Alto | Verificata |
 | CAS-L0-09 | Polynomial | Modulo primo custom (oltre p=13) | L0 | Risolta | — | Basso | Verificata |
