@@ -39,7 +39,7 @@ struct Monomial {
 
 [[nodiscard]] Result<ExprPtr> polynomial_normal_form(ExprPtr expr, CASContext& ctx);
 
-[[nodiscard]] Result<ExprPtr> transcendental_normal_form(ExprPtr expr, CASContext& ctx);
+[[nodiscard]] Result<ExprPtr> transcendental_normal_form(ExprPtr expr, CASContext& ctx, int depth = -1);
 
 } // namespace symbolic
 } // namespace cas

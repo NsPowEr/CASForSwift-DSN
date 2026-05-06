@@ -139,11 +139,16 @@ Result<ExprPtr> polynomial_normal_form(ExprPtr expr, CASContext& ctx) {
     }
 }
 
-Result<ExprPtr> transcendental_normal_form(ExprPtr expr, CASContext& ctx) {
+Result<ExprPtr> transcendental_normal_form(ExprPtr expr, CASContext& ctx, int depth) {
     if (!expr) return ok(expr);
+    if (depth < 0) depth = ctx.max_simplification_depth();
+    if (depth == 0)
+        return fail<ExprPtr>(CASError{.kind = CASErrorKind::Unimplemented,
+            .message = "transcendental_normal_form: max recursion depth reached",
+            .hint = std::nullopt});
 
     auto recurse = [&](ExprPtr e) -> Result<ExprPtr> {
-        return transcendental_normal_form(e, ctx);
+        return transcendental_normal_form(e, ctx, depth - 1);
     };
 
     if (auto* f = expr_cast<FuncCall>(expr)) {

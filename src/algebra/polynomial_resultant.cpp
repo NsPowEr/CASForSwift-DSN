@@ -212,9 +212,8 @@ namespace {
     auto res_val = polynomial_resultant(p, deriv_res.value(), var, ctx);
     if (res_val.is_error()) return res_val;
 
-    // (-1)^(n(n-1)/2)
-    const long long exponent = static_cast<long long>(n * (n - 1) / 2);
-    const int sign = (exponent % 2 == 0) ? 1 : -1;
+    // (-1)^(n(n-1)/2): parity from (n mod 4): sign flips when n≡2 or n≡3 (mod 4)
+    const int sign = ((n % 4U == 2U) || (n % 4U == 3U)) ? -1 : 1;
 
     auto signed_res = poly_simplify_expr(mul_expr(ctx.arena(), poly_make_integer(ctx.arena(), sign), res_val.value()), ctx);
     if (signed_res.is_error()) return fail<ExprPtr>(signed_res.error());
