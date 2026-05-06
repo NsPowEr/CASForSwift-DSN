@@ -2,6 +2,7 @@
 #include "cas/rational.hpp"
 #include "symbolic_internal.hpp"
 #include <unordered_set>
+#include <algorithm>
 
 namespace cas::symbolic {
 
@@ -21,17 +22,59 @@ namespace cas::symbolic {
     return scalar.has_value() && scalar->numerator() < BigInt(0);
 }
 
+void Assumptions::assume_domain(const Symbol& symbol, Domain domain) {
+    symbol_domains_[symbol.name] = domain;
+    switch (domain) {
+        case Domain::Positive:
+            assume_positive(symbol);
+            break;
+        case Domain::Negative:
+            real_symbols_.insert(symbol.name);
+            negative_symbols_.insert(symbol.name);
+            nonzero_symbols_.insert(symbol.name);
+            break;
+        case Domain::Natural:
+            real_symbols_.insert(symbol.name);
+            integer_symbols_.insert(symbol.name);
+            break;
+        case Domain::NonZero:
+            assume_nonzero(symbol);
+            break;
+        case Domain::Integer:
+            assume_integer(symbol);
+            break;
+        case Domain::Real:
+            assume_real(symbol);
+            break;
+        case Domain::Rational:
+            real_symbols_.insert(symbol.name);
+            break;
+        default:
+            break;
+    }
+}
+
+Domain Assumptions::get_domain(const Symbol& symbol) const {
+    auto it = symbol_domains_.find(symbol.name);
+    if (it != symbol_domains_.end()) return it->second;
+    
+    if (positive_symbols_.contains(symbol.name)) return Domain::Positive;
+    if (negative_symbols_.contains(symbol.name)) return Domain::Negative;
+    if (integer_symbols_.contains(symbol.name)) return Domain::Integer;
+    if (real_symbols_.contains(symbol.name)) return Domain::Real;
+    if (nonzero_symbols_.contains(symbol.name)) return Domain::NonZero;
+    
+    return Domain::Complex;
+}
+
 void Assumptions::assume_positive(const Symbol& symbol) {
     real_symbols_.insert(symbol.name);
     positive_symbols_.insert(symbol.name);
     nonzero_symbols_.insert(symbol.name);
-    
-    // Also add to relation graph conceptually: 0 < symbol
-    // We'll use a null ExprPtr or a special internal zero node if needed, 
-    // but for now let's just use the set as a primary source for symbols.
 }
 
 Result<void> Assumptions::check_consistency() const {
+    // 1. Check Range vs Domain
     for (const auto& [name, range] : range_symbols_) {
         if (positive_symbols_.contains(name)) {
             const auto exact_upper = exact_scalar_from_expr(range.upper);
@@ -51,6 +94,40 @@ Result<void> Assumptions::check_consistency() const {
             }
         }
     }
+
+    // 2. Check Positive vs Negative
+    for (const auto& name : positive_symbols_) {
+        if (negative_symbols_.contains(name)) {
+            return fail<void>(make_error(
+                CASErrorKind::InvalidArgument,
+                "Symbol '" + name + "' cannot be both positive and negative"));
+        }
+    }
+
+    // 3. Check for x > x or x < x in relation graph
+    for (auto const& [node, rels] : relations_) {
+        std::unordered_set<const ExprNode*> visited;
+        if (prove_relation(node, node, true, visited)) {
+            return fail<void>(make_error(
+                CASErrorKind::InvalidArgument,
+                "Contradiction detected in relation graph (strict self-loop)"));
+        }
+    }
+
+    // 4. Check x > y and y > x
+    for (auto const& [lhs, rels] : relations_) {
+        for (const auto& rel : rels) {
+            if (rel.type == RelType::Less) { // lhs < rel.target
+                std::unordered_set<const ExprNode*> visited;
+                if (prove_relation(rel.target, lhs, false, visited)) {
+                    return fail<void>(make_error(
+                        CASErrorKind::InvalidArgument,
+                        "Contradiction: cyclic strict inequality"));
+                }
+            }
+        }
+    }
+
     return ok();
 }
 
@@ -90,19 +167,63 @@ void Assumptions::assume_greater_equal(ExprPtr lhs, ExprPtr rhs) {
 }
 
 void Assumptions::assume(ExprPtr condition) {
-    if (const auto* bin = expr_cast<Binary>(condition)) {
-        if ([[maybe_unused]] const auto* func = expr_cast<FuncCall>(bin->left)) {
-             // Handle some special cases if needed
+    if (!condition) return;
+
+    if (const auto* fc = expr_cast<FuncCall>(condition)) {
+        const std::string& name = fc->name;
+        if (name == "greater" && fc->args.size() == 2U) {
+            assume_greater(fc->args[0], fc->args[1]);
+        } else if (name == "greater_equal" && fc->args.size() == 2U) {
+            assume_greater_equal(fc->args[0], fc->args[1]);
+        } else if (name == "less" && fc->args.size() == 2U) {
+            assume_greater(fc->args[1], fc->args[0]);
+        } else if (name == "less_equal" && fc->args.size() == 2U) {
+            assume_greater_equal(fc->args[1], fc->args[0]);
+        } else if (name == "positive" && fc->args.size() == 1U) {
+            if (const auto* sym = expr_cast<Symbol>(fc->args[0])) {
+                assume_positive(*sym);
+            } else {
+                assume_greater(fc->args[0], nullptr);
+            }
+        } else if (name == "real" && fc->args.size() == 1U) {
+            if (const auto* sym = expr_cast<Symbol>(fc->args[0]))
+                assume_real(*sym);
+        } else if (name == "nonzero" && fc->args.size() == 1U) {
+            if (const auto* sym = expr_cast<Symbol>(fc->args[0]))
+                assume_nonzero(*sym);
+        } else if (name == "integer" && fc->args.size() == 1U) {
+            if (const auto* sym = expr_cast<Symbol>(fc->args[0]))
+                assume_integer(*sym);
+        } else if ((name == "nonneg" || name == "nonnegative") && fc->args.size() == 1U) {
+            assume_greater_equal(fc->args[0], nullptr);
+        } else if (name == "negative" && fc->args.size() == 1U) {
+            if (const auto* sym = expr_cast<Symbol>(fc->args[0]))
+                assume_domain(*sym, Domain::Negative);
+            else
+                assume_greater(nullptr, fc->args[0]);
         }
-        
-        // Note: The parser usually produces Binary nodes for > and >= if implemented as such,
-        // but often CAS uses a custom node kind for relations. 
-        // Assuming Binary for now as per usual pattern if not specialized.
-        // Wait, ExprKind doesn't have Comparison. 
-        // Let's check if BinaryOp has GT/GE.
+        return;
     }
-    // If we receive a raw relation, we might need to handle it.
-    // For the task, we assume the caller passes the right ExprPtrs to assume_greater etc.
+
+    if (const auto* bin = expr_cast<Binary>(condition)) {
+        if (bin->op == BinaryOp::Equal) {
+            assume_greater_equal(bin->left, bin->right);
+            assume_greater_equal(bin->right, bin->left);
+        } else if (bin->op == BinaryOp::Less) {
+            assume_greater(bin->right, bin->left);
+        } else if (bin->op == BinaryOp::Greater) {
+            assume_greater(bin->left, bin->right);
+        } else if (bin->op == BinaryOp::LessEqual) {
+            assume_greater_equal(bin->right, bin->left);
+        } else if (bin->op == BinaryOp::GreaterEqual) {
+            assume_greater_equal(bin->left, bin->right);
+        }
+        return;
+    }
+
+    if (const auto* sym = expr_cast<Symbol>(condition)) {
+        assume_nonzero(*sym);
+    }
 }
 
 bool Assumptions::is_real(const Symbol& symbol) const {
@@ -126,10 +247,7 @@ bool Assumptions::is_real(ExprPtr expr) const {
         return true;
     }
     if (const auto* bin = expr_cast<Binary>(expr)) {
-        // Most binary ops preserve realness if both operands are real
-        // except possibly Pow and Div (division by zero is not real, but we usually treat it as undefined/complex)
         if (bin->op == BinaryOp::Pow) {
-            // x^y is real if x > 0 and y is real, or x < 0 and y is integer
             if (is_positive(bin->left) && is_real(bin->right)) return true;
             if (is_negative(bin->left) && is_integer(bin->right)) return true;
             return false;
@@ -157,39 +275,24 @@ bool Assumptions::is_real(ExprPtr expr) const {
 
 bool Assumptions::is_positive(const Symbol& symbol) const {
     if (positive_symbols_.contains(symbol.name)) return true;
-    return is_greater(ExprPtr(&symbol), ExprPtr());
+    return false;
 }
 
 bool Assumptions::is_positive(ExprPtr expr) const {
     if (!expr) return false;
-
-    // 1. Exact scalar check
     if (is_positive_scalar(expr)) return true;
-
-    // 2. Symbol check
     if (const auto* sym = expr_cast<Symbol>(expr)) {
         if (positive_symbols_.contains(sym->name)) return true;
     }
-
-    // 3. Graph proof (Deduction chains)
     if (is_greater(expr, ExprPtr())) return true;
 
-    // 4. Builtin functions
     if (const auto* func = expr_cast<FuncCall>(expr)) {
-        if (func->func_id == BuiltinOp::Exp) {
-            // exp(x) is always positive for real x
-            // In our CAS we treat it as positive in the real branch context
-            return is_real(func->args[0]);
-        }
-        if (func->func_id == BuiltinOp::Abs) {
-            return is_nonzero(func->args[0]);
-        }
-        if (func->func_id == BuiltinOp::Sqrt) {
-            return is_positive(func->args[0]);
-        }
+        if (func->func_id == BuiltinOp::Exp) return is_real(func->args[0]);
+        if (func->func_id == BuiltinOp::Abs) return is_nonzero(func->args[0]);
+        if (func->func_id == BuiltinOp::Sqrt) return is_positive(func->args[0]);
     }
 
-    // 5. Linear combination check (Simple solver)
+    if (const auto* prod = expr_cast<Product>(expr)) return prove_positive_product(*prod);
     if (prove_positive_linear(expr)) return true;
 
     return false;
@@ -208,7 +311,6 @@ bool Assumptions::is_nonnegative(ExprPtr expr) const {
 
     if (const auto* bin = expr_cast<Binary>(expr)) {
         if (bin->op == BinaryOp::Pow) {
-            // x^n is nonnegative if n is even and x is real
             if (auto scalar = exact_scalar_from_expr(bin->right)) {
                 if (scalar->is_integer() && scalar->numerator() > BigInt(0)) {
                     if (scalar->numerator() % BigInt(2) == BigInt(0)) {
@@ -221,7 +323,6 @@ bool Assumptions::is_nonnegative(ExprPtr expr) const {
             return is_nonnegative(bin->left) && is_nonnegative(bin->right);
         }
         if (bin->op == BinaryOp::Mul) {
-            // Re-use product logic or implement here
             if (is_positive(bin->left) && is_positive(bin->right)) return true;
             if (is_negative(bin->left) && is_negative(bin->right)) return true;
             if (is_zero_expr(bin->left) || is_zero_expr(bin->right)) return true;
@@ -237,20 +338,17 @@ bool Assumptions::is_nonnegative(ExprPtr expr) const {
     }
     
     if (const auto* prod = expr_cast<Product>(expr)) {
-        bool could_be_zero_val = false;
         int negative_count = 0;
         for (ExprPtr factor : prod->factors) {
             if (is_zero_expr(factor)) return true;
-            if (could_be_zero(factor)) could_be_zero_val = true;
 
             if (is_positive(factor)) continue;
             if (is_negative(factor)) {
                 negative_count++;
                 continue;
             }
-            return false; // Unknown sign
+            return false; 
         }
-        if (could_be_zero_val) return (negative_count % 2 == 0); // If even negatives, it's >= 0
         return (negative_count % 2 == 0);
     }
 
@@ -259,16 +357,11 @@ bool Assumptions::is_nonnegative(ExprPtr expr) const {
 
 bool Assumptions::is_negative(ExprPtr expr) const {
     if (!expr) return false;
-
-    // 1. Exact scalar check
     if (is_negative_scalar(expr)) return true;
-
-    // 2. Graph proof: 0 > expr
     if (is_greater(ExprPtr(), expr)) return true;
-
-    // 3. Negation of positive check
-    // if (-expr) is positive, then expr is negative.
-    // This is useful for things like -x where x > 0.
+    if (const auto* sym = expr_cast<Symbol>(expr)) {
+        if (negative_symbols_.contains(sym->name)) return true;
+    }
     if (const auto* unary = expr_cast<Unary>(expr); unary != nullptr && unary->op == UnaryOp::Neg) {
         if (is_positive(unary->operand)) return true;
     }
@@ -278,42 +371,173 @@ bool Assumptions::is_negative(ExprPtr expr) const {
 
 bool Assumptions::is_greater(ExprPtr lhs, ExprPtr rhs) const {
     if (lhs == rhs) return false;
+
+    if (is_zero_expr(rhs)) {
+        if (const auto* lhs_symbol = expr_cast<Symbol>(lhs)) {
+            if (positive_symbols_.contains(lhs_symbol->name)) return true;
+        }
+    }
+
+    if (is_zero_expr(lhs)) {
+        if (const auto* rhs_symbol = expr_cast<Symbol>(rhs)) {
+            if (negative_symbols_.contains(rhs_symbol->name)) return true;
+        }
+    }
+    
+    // 1. Scalar comparison
+    auto l_scalar = exact_scalar_from_expr(lhs);
+    auto r_scalar = exact_scalar_from_expr(rhs);
+    if (l_scalar && r_scalar) return compare_exact_scalars(*l_scalar, *r_scalar) > 0;
+
+    // 2. Direct graph proof
     ExprPtr l = is_zero_expr(lhs) ? nullptr : lhs;
     ExprPtr r = is_zero_expr(rhs) ? nullptr : rhs;
-    if (l == r) return false;
-    std::unordered_set<const ExprNode*> visited;
-    return prove_relation(r, l, true, visited);
+    if (l != r) {
+        std::unordered_set<const ExprNode*> visited;
+        if (prove_relation(r, l, true, visited)) return true;
+    }
+
+    // Helper to extract terms from Sum or Binary Add/Sub
+    auto get_terms = [](ExprPtr e) -> std::vector<ExprPtr> {
+        if (const auto* s = expr_cast<Sum>(e)) return s->terms;
+        if (const auto* b = expr_cast<Binary>(e)) {
+            if (b->op == BinaryOp::Add) return {b->left, b->right};
+            if (b->op == BinaryOp::Sub) return {b->left, ExprPtr()}; // simplified
+        }
+        return {e};
+    };
+
+    // 3. Decompose sums: (a + b) > (c + d) if a > c and b >= d
+    auto l_terms = get_terms(lhs);
+    auto r_terms = get_terms(rhs);
+    
+    if (l_terms.size() > 1 || r_terms.size() > 1) {
+        if (l_terms.size() == r_terms.size()) {
+            bool all_ge = true;
+            bool one_gt = false;
+            for (size_t i = 0; i < l_terms.size(); ++i) {
+                if (is_greater(l_terms[i], r_terms[i])) {
+                    one_gt = true;
+                } else if (!is_greater_equal(l_terms[i], r_terms[i])) {
+                    all_ge = false;
+                    break;
+                }
+            }
+            if (all_ge && one_gt) return true;
+        }
+        
+        // (a + b) > c if a > c and b >= 0
+        if (l_terms.size() > 1 && r_terms.size() == 1) {
+            for (size_t i = 0; i < l_terms.size(); ++i) {
+                bool others_nonnegative = true;
+                for (size_t j = 0; j < l_terms.size(); ++j) {
+                    if (i == j) continue;
+                    if (!is_nonnegative(l_terms[j])) { others_nonnegative = false; break; }
+                }
+                if (others_nonnegative && is_greater(l_terms[i], rhs)) return true;
+            }
+        }
+    }
+
+    // 4. Linear combination: x - y > 0
+    if ((expr_is<Sum>(lhs) || expr_is<Binary>(lhs)) && is_zero_expr(rhs)) {
+        if (prove_positive_linear(lhs)) return true;
+    }
+
+    return false;
 }
 
 bool Assumptions::is_greater_equal(ExprPtr lhs, ExprPtr rhs) const {
     if (lhs == rhs) return true;
+
+    if (is_zero_expr(rhs)) {
+        if (const auto* lhs_symbol = expr_cast<Symbol>(lhs)) {
+            if (positive_symbols_.contains(lhs_symbol->name)) return true;
+        }
+    }
+
+    if (is_zero_expr(lhs)) {
+        if (const auto* rhs_symbol = expr_cast<Symbol>(rhs)) {
+            if (negative_symbols_.contains(rhs_symbol->name)) return true;
+        }
+    }
+    
+    // 1. Scalar comparison
+    auto l_scalar = exact_scalar_from_expr(lhs);
+    auto r_scalar = exact_scalar_from_expr(rhs);
+    if (l_scalar && r_scalar) return compare_exact_scalars(*l_scalar, *r_scalar) >= 0;
+
+    // 2. Direct graph proof
     ExprPtr l = is_zero_expr(lhs) ? nullptr : lhs;
     ExprPtr r = is_zero_expr(rhs) ? nullptr : rhs;
     if (l == r) return true;
     std::unordered_set<const ExprNode*> visited;
-    return prove_relation(r, l, false, visited);
+    if (prove_relation(r, l, false, visited)) return true;
+
+    auto get_terms = [](ExprPtr e) -> std::vector<ExprPtr> {
+        if (const auto* s = expr_cast<Sum>(e)) return s->terms;
+        if (const auto* b = expr_cast<Binary>(e)) {
+            if (b->op == BinaryOp::Add) return {b->left, b->right};
+        }
+        return {e};
+    };
+
+    // 3. Decompose sums: (a + b) >= (c + d) if a >= c and b >= d
+    auto l_terms = get_terms(lhs);
+    auto r_terms = get_terms(rhs);
+
+    if (l_terms.size() > 1 || r_terms.size() > 1) {
+        if (l_terms.size() == r_terms.size()) {
+            bool all_ge = true;
+            for (size_t i = 0; i < l_terms.size(); ++i) {
+                if (!is_greater_equal(l_terms[i], r_terms[i])) {
+                    all_ge = false;
+                    break;
+                }
+            }
+            if (all_ge) return true;
+        }
+        
+        if (l_terms.size() > 1 && r_terms.size() == 1) {
+            for (size_t i = 0; i < l_terms.size(); ++i) {
+                bool others_nonnegative = true;
+                for (size_t j = 0; j < l_terms.size(); ++j) {
+                    if (i == j) continue;
+                    if (!is_nonnegative(l_terms[j])) { others_nonnegative = false; break; }
+                }
+                if (others_nonnegative && is_greater_equal(l_terms[i], rhs)) return true;
+            }
+        }
+    }
+
+    if (is_greater(lhs, rhs)) return true;
+
+    return false;
 }
 
 bool Assumptions::is_nonzero(const Symbol& symbol) const {
     if (nonzero_symbols_.contains(symbol.name)) return true;
     if (positive_symbols_.contains(symbol.name)) return true;
-    // Check if x > 0 or x < 0 via graph
-    return is_greater(ExprPtr(&symbol), ExprPtr()) || is_greater(ExprPtr(), ExprPtr(&symbol));
+    if (negative_symbols_.contains(symbol.name)) return true;
+    return false;
 }
 
 bool Assumptions::is_nonzero(ExprPtr expr) const {
     if (!expr) return false;
     if (is_positive_scalar(expr) || is_negative_scalar(expr)) return true;
-    if (const auto* sym = expr_cast<Symbol>(expr)) return is_nonzero(*sym);
+    if (const auto* sym = expr_cast<Symbol>(expr)) {
+        if (is_nonzero(*sym)) return true;
+        // derive nonzero from relational graph: x>0 or 0>x stored as relations
+        return is_greater(expr, ExprPtr()) || is_greater(ExprPtr(), expr);
+    }
+    if (is_positive(expr) || is_negative(expr)) return true;
     return is_greater(expr, ExprPtr()) || is_greater(ExprPtr(), expr);
 }
 
 bool Assumptions::could_be_zero(const Symbol& symbol) const {
     if (is_nonzero(symbol)) return false;
-
     const auto found = range_symbols_.find(symbol.name);
     if (found == range_symbols_.end()) return true;
-
     return !exact_range_excludes_zero(found->second.lower, found->second.upper);
 }
 
@@ -348,7 +572,6 @@ void Assumptions::update_roots(AstArena& target, std::unordered_map<ExprPtr, Exp
         range.upper = clone_into_arena(range.upper, target, cache);
     }
     
-    // Also update relation graph
     std::unordered_map<ExprPtr, std::vector<Relation>, ExprHash, ExprEqual> new_relations;
     for (auto& [key, rels] : relations_) {
         ExprPtr new_key = key ? clone_into_arena(key, target, cache) : key;
@@ -364,47 +587,29 @@ void Assumptions::update_roots(AstArena& target, std::unordered_map<ExprPtr, Exp
 bool Assumptions::prove_relation(ExprPtr current, ExprPtr target, bool strict_needed, std::unordered_set<const ExprNode*>& visited) const {
     struct State {
         ExprPtr current;
-        bool strict_needed;
+        bool strict_met;
     };
     
     std::vector<State> stack;
-    stack.push_back({current, strict_needed});
+    stack.push_back({current, false});
     
+    auto target_scalar = exact_scalar_from_expr(target);
+
     while (!stack.empty()) {
-        auto [curr, strict] = stack.back();
+        auto [curr, strict_so_far] = stack.back();
         stack.pop_back();
 
-        // Conceptual target NULL means we are looking for 0
-        if (!target) {
-            if (is_zero_expr(curr)) {
-                if (!strict) return true;
-            }
-        } else if (curr == target) {
-            if (!strict) return true;
+        if (curr == target) {
+            if (!strict_needed || strict_so_far) return true;
         }
 
-        // Check symbol sets for positive/negative facts not in relation graph
-        if (!curr) {
-            if (const auto* sym = expr_cast<Symbol>(target)) {
-                if (positive_symbols_.contains(sym->name)) return true;
+        // If we reached a scalar and target is a scalar, we can bridge the gap
+        if (target_scalar) {
+            if (auto curr_scalar = exact_scalar_from_expr(curr)) {
+                int cmp = compare_exact_scalars(*curr_scalar, *target_scalar);
+                if (cmp < 0) return true; // strict gap found
+                if (cmp == 0 && (!strict_needed || strict_so_far)) return true;
             }
-        } else if (!target) {
-            if ([[maybe_unused]] const auto* sym = expr_cast<Symbol>(curr)) {
-                // if we need curr < 0 and we know curr is negative... (todo: negative_symbols_)
-            }
-        }
-
-        // Also check if curr is a scalar and we can compare directly if target is a scalar
-        auto current_scalar = exact_scalar_from_expr(curr);
-        auto target_scalar = target ? exact_scalar_from_expr(target) : std::make_optional(Rational(0));
-        if (current_scalar && target_scalar) {
-            int cmp = compare_exact_scalars(*current_scalar, *target_scalar);
-            if (strict) {
-                if (cmp < 0) return true;
-            } else {
-                if (cmp <= 0) return true;
-            }
-            continue; // Scalar, no edges to follow
         }
 
         if (visited.contains(curr.get())) continue;
@@ -413,10 +618,8 @@ bool Assumptions::prove_relation(ExprPtr current, ExprPtr target, bool strict_ne
         auto it = relations_.find(curr);
         if (it != relations_.end()) {
             for (const auto& rel : it->second) {
-                // Edge is curr < rel.target or curr <= rel.target
-                bool edge_strict = (rel.type == RelType::Less);
-                bool next_strict_needed = strict && !edge_strict;
-                stack.push_back({rel.target, next_strict_needed});
+                bool new_strict = strict_so_far || (rel.type == RelType::Less);
+                stack.push_back({rel.target, new_strict});
             }
         }
     }
@@ -424,9 +627,22 @@ bool Assumptions::prove_relation(ExprPtr current, ExprPtr target, bool strict_ne
     return false;
 }
 
+bool Assumptions::prove_positive_product(const Product& prod) const {
+    if (prod.factors.empty()) return false;
+    int negative_count = 0;
+    for (ExprPtr factor : prod.factors) {
+        if (is_positive(factor)) continue;
+        if (is_negative(factor)) {
+            negative_count++;
+            continue;
+        }
+        return false;
+    }
+    return (negative_count % 2 == 0);
+}
+
 bool Assumptions::prove_positive_linear(ExprPtr expr) const {
     if (const auto* sum = expr_cast<Sum>(expr)) {
-        // Detect x - y pattern in Sum canonical form: Sum{u, Unary(Neg, v)} → is_greater(u, v)
         if (sum->terms.size() == 2U) {
             auto check_sub = [&](ExprPtr pos, ExprPtr neg) -> bool {
                 const auto* neg_node = expr_cast<Unary>(neg);
@@ -448,25 +664,8 @@ bool Assumptions::prove_positive_linear(ExprPtr expr) const {
         return has_strict_positive;
     }
     
-    if (const auto* prod = expr_cast<Product>(expr)) {
-        if (prod->factors.empty()) return false;
-        int negative_count = 0;
-        for (ExprPtr factor : prod->factors) {
-            if (is_positive(factor)) {
-                // OK
-            } else if (is_negative(factor)) {
-                negative_count++;
-            } else {
-                return false;
-            }
-        }
-        return (negative_count % 2 == 0);
-    }
-    
     if (const auto* bin = expr_cast<Binary>(expr)) {
-        if (bin->op == BinaryOp::Sub) {
-            return is_greater(bin->left, bin->right);
-        }
+        if (bin->op == BinaryOp::Sub) return is_greater(bin->left, bin->right);
         if (bin->op == BinaryOp::Add) {
             return (is_positive(bin->left) && is_nonnegative(bin->right)) ||
                    (is_nonnegative(bin->left) && is_positive(bin->right));

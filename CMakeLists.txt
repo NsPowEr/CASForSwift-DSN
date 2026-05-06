@@ -358,10 +358,10 @@ if(CAS_ENABLE_TESTING)
         # test/unit/symbolic/test_quantity.cpp
         # test/unit/symbolic/test_assumptions_advanced.cpp
         # test/unit/symbolic/test_assumptions_advanced_new.cpp
-        # test/unit/symbolic/test_assumptions_relational.cpp
+        test/unit/symbolic/test_assumptions_relational.cpp
         # test/unit/symbolic/test_simplification_advanced.cpp
         # test/unit/calculus/test_integration_advanced.cpp
-        # test/unit/calculus/test_asymptotes_rootsum.cpp
+        test/unit/calculus/test_asymptotes_rootsum.cpp
         test/unit/symbolic/test_assumptions_stability.cpp
         test/unit/symbolic/test_caching.cpp
         test/unit/symbolic/test_gruntz.cpp
