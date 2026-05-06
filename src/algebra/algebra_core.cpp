@@ -337,6 +337,32 @@ Result<MultivariatePolynomial> MultivariatePolynomial::evaluate_at(const Symbol&
     return ok(MultivariatePolynomial(std::move(evaluated_terms)));
 }
 
+Result<ExprPtr> MultivariatePolynomial::evaluate_at_rational(
+    const Symbol& var, const Rational& value, AstArena& arena) const {
+    Rational result(BigInt(0));
+    for (const auto& term : terms_) {
+        bool has_other_vars = false;
+        for (const auto& factor : term.factors) {
+            if (factor.first.name != var.name) { has_other_vars = true; break; }
+        }
+        if (has_other_vars) {
+            return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
+                "evaluate_at_rational: remaining symbolic variables not yet supported"));
+        }
+        unsigned int exponent = 0;
+        for (const auto& factor : term.factors) {
+            if (factor.first.name == var.name) { exponent = factor.second; break; }
+        }
+        Rational contrib(term.coefficient);
+        for (unsigned int i = 0; i < exponent; ++i) contrib = contrib * value;
+        result = result + contrib;
+    }
+    if (result.denominator() == BigInt(1)) {
+        return ok(static_cast<ExprPtr>(arena.make<IntegerLit>(result.numerator())));
+    }
+    return ok(static_cast<ExprPtr>(arena.make<RationalLit>(result.numerator(), result.denominator())));
+}
+
 Result<std::vector<ExprPtr>> MultivariatePolynomial::to_univariate_coefficients(const Symbol& var, symbolic::CASContext& ctx) const {
     // Raggruppa i termini per grado della variabile target
     std::map<std::size_t, std::vector<MultivariateTerm>> groups;

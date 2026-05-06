@@ -81,11 +81,11 @@
 | CAS-L1-14 | Calculus | Composizioni Inverse (sqrt∘sqrt, sin∘arcsin) | L1 | Parziale | L1-13 | Medio | Solo `sqrt(sqrt(x))→x^(1/4)` implementato; inverse trig `sin(arcsin(x))→x` ecc. ASSENTI |
 | CAS-L1-15 | Algebra | Resultante e Discriminante | L1 | Parziale | — | Medio | Resultante via Sylvester subresultante ok; discriminante = resultant(p,p') ok; manca normalizzazione canonica output |
 | CAS-L1-16 | Symbolic | Caching/Memoization Expression | L1 | Parziale | — | Medio | Cache simplify/diff/integrate presenti; migrazione GC via hash ok; manca benchmark gate dedicato e policy eviction adattiva |
-| CAS-L1-17 | LinAlg | Pivot Bareiss Euristica Contestuale | L1 | Aperta | — | Medio | Score magico 1000/500/min(400,cplx) in matrix_bareiss.cpp:110-115 non tiene conto di assumptions; expr complesse ma known_positive potrebbero essere pivot migliori |
-| CAS-L1-18 | Calculus | Budget Integrazione Configurabile | L1 | Aperta | L1-02 | Alto | depth>=16 → Unimplemented in integrate_core.cpp:17-18; blocca ∫x^n*exp(x)dx con n>15; distinto da L1-02 (algoritmo), questo è il limite di ricorsione |
+| CAS-L1-17 | LinAlg | Pivot Bareiss Euristica Contestuale | L1 | Risolta | — | Medio | Verificata |
+| CAS-L1-18 | Calculus | Budget Integrazione Configurabile | L1 | Risolta | L1-02 | Alto | Verificata |
 | CAS-L1-19 | Algebra | GCD Euristico Padding Adattivo | L1 | Aperta | L1-08 | Medio | BigInt(100)+BigInt(1000) magic in polynomial_gcd_heuristic.cpp:146-151; per coeff molto grandi il padding non previene collisioni; sostituire con bound Mignotte |
 | CAS-L1-20 | Algebra | Valutazione Multivariata su Q | L1 | Aperta | — | Alto | algebra_core.cpp:311 rifiuta valori non-IntegerLit; blocca eval su razionali e estensioni → prerequisito per GCD/fattorizzazione su Q[x,y,...] |
-| CAS-L1-21 | Algebra | Campioni GCD Confidence-Based | L1 | Aperta | L1-08 | Basso | required_samples+8U magic in polynomial_gcd_multivariate.cpp:741; sostituire con formula probabilistica ceil(log(δ)/log(1-p_hit)) con δ configurabile |
+| CAS-L1-21 | Algebra | Campioni GCD Confidence-Based | L1 | Risolta | L1-08 | Basso | Verificata |
 | CAS-L2-01 | Calculus | ODE 2° Ordine e Ordine N | L2 | Parziale | L1-02 | Alto | Var. parametri N-esima ok; fast-path n=2 hardcoded; metodo Frobenius ASSENTE; nessun test disomogeneo n>2 |
 | CAS-L2-02 | LinAlg | Autovalori n>3 | L2 | Parziale | L1-05 | Alto | Autovalori via RootOf (Faddeev-Leverrier) ok; autovettori per RootOf non costruibili (nullspace non gestisce RootOf); test tautologico |
 | CAS-L2-03 | LinAlg | Jordan Form | L2 | Risolta | — | Medio | jordan_normal_form() implementata in matrix_jordan.cpp; extend_basis definita (righe 80-92); catene di Jordan via kernel iterato |

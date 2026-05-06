@@ -140,15 +140,12 @@ Result<MultivariatePolynomial> gcd_heuristic(const MultivariatePolynomial& P, co
     for (const auto& t : P.terms()) max_coeff = std::max(max_coeff, t.coefficient.abs());
     for (const auto& t : Q.terms()) max_coeff = std::max(max_coeff, t.coefficient.abs());
 
-    // Choose base B. 
-    // A safe B is something like 2 * max_coeff * (D+1)^num_vars or similar.
-    // Here we use a simpler heuristic B = 10^some_power
-    BigInt B = BigInt(2) * max_coeff + BigInt(100); 
-    // Ensure B is large enough to avoid overlap. 
-    // A better bound would be based on the height of the GCD, but we don't know it.
-    
-    // Increase B to be safe
-    B = B * BigInt(1000);
+    // Mignotte bound: B > 2^(D+1) * max_coeff prevents Kronecker image collision.
+    // GCD coefficients are bounded by sqrt(n+1) * 2^n * max_coeff (Mignotte);
+    // using 2^(D+2) * (max_coeff+1) is safe and adapts to coefficient magnitude.
+    BigInt B = max_coeff + BigInt(1);
+    for (std::size_t i = 0; i <= D + 1; ++i) B = B * BigInt(2);
+    if (B < BigInt(1000)) B = BigInt(1000);
 
     std::size_t D_plus_1 = D + 1;
     

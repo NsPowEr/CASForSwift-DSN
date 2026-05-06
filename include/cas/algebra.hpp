@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cas/ast.hpp"
+#include "cas/rational.hpp"
 #include "cas/result.hpp"
 #include "cas/symbolic.hpp"
 
@@ -47,6 +48,11 @@ public:
     [[nodiscard]] Result<MultivariatePolynomial> evaluate_at(
         const Symbol& var,
         ExprPtr value) const;
+
+    [[nodiscard]] Result<ExprPtr> evaluate_at_rational(
+        const Symbol& var,
+        const Rational& value,
+        AstArena& arena) const;
 
     [[nodiscard]] Result<std::vector<ExprPtr>> to_univariate_coefficients(
         const Symbol& main_var,
@@ -100,10 +106,19 @@ struct SquareFreeFactorization {
     ExprPtr q,
     const Symbol& var,
     symbolic::CASContext& ctx);
+[[nodiscard]] Result<ExprPtr> polynomial_discriminant(
+    ExprPtr p,
+    const Symbol& var,
+    symbolic::CASContext& ctx);
 [[nodiscard]] Result<ExprPtr> integrate_rational_lrt(
     ExprPtr P,
     ExprPtr Q,
     const Symbol& var,
+    symbolic::CASContext& ctx);
+
+[[nodiscard]] Result<std::vector<ExprPtr>> polynomial_groebner(
+    const std::vector<ExprPtr>& equations,
+    const std::vector<Symbol>& variables,
     symbolic::CASContext& ctx);
 
 }  // namespace algebra

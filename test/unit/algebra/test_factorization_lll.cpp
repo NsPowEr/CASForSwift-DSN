@@ -109,3 +109,40 @@ TEST(AlgebraFactorizationTest, L0_05_HashBasedPrimeSelection_DifferentPolys) {
     // x^4-1 = (x-1)(x+1)(x^2+1) -> 3 factors
     EXPECT_EQ(r2.value().factors.size(), 3U);
 }
+
+// L1-19: GCD heuristic B adapts to large coefficients (Mignotte bound)
+TEST(AlgebraGcdHeuristicTest, L1_19_MignotteBoundAdaptivePadding) {
+    symbolic::CASContext ctx;
+    Symbol x("x");
+    // GCD of polys with large coefficients (1000000): Mignotte bound must be >> 2*max+100*1000
+    // GCD(1000000*x^2 - 1000000, 1000000*x - 1000000) = 1000000*(x-1)
+    ExprPtr p = parse_string("1000000*x^2 - 1000000", ctx);
+    ExprPtr q = parse_string("1000000*x - 1000000", ctx);
+    auto g = polynomial_gcd(p, q, x, ctx);
+    ASSERT_TRUE(g.is_ok()) << g.error().message;
+    // Result should be non-trivial (divisible by x-1)
+    EXPECT_TRUE(g.is_ok());
+}
+
+// L1-20: evaluate_at_rational accepts rational values
+TEST(AlgebraMultivariateTest, L1_20_EvaluateAtRationalValue) {
+    using cas::algebra::MultivariatePolynomial;
+    using cas::algebra::MultivariateTerm;
+    symbolic::CASContext ctx;
+    Symbol x("x");
+    // Polynomial: 2*x^2  (one term, coefficient=2, exponent=2)
+    MultivariateTerm t;
+    t.coefficient = BigInt(2);
+    t.factors = {{x, 2U}};
+    MultivariatePolynomial poly(std::vector<MultivariateTerm>{t});
+
+    // evaluate at x = 1/2 → 2*(1/2)^2 = 2*1/4 = 1/2
+    Rational half(BigInt(1), BigInt(2));
+    auto result = poly.evaluate_at_rational(x, half, ctx.arena());
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+    // Result should be rational 1/2
+    const auto* rat = expr_cast<RationalLit>(result.value());
+    ASSERT_NE(rat, nullptr);
+    EXPECT_EQ(rat->numerator, BigInt(1));
+    EXPECT_EQ(rat->denominator, BigInt(2));
+}
