@@ -68,10 +68,10 @@
 | CAS-L1-01 | Calculus | Gruntz MRV Completo | L1 | Parziale | L0-01 | Molto Alto | Supporto FuncCall (exp/ln) e rank di crescita migliorato; CancellationTower richiede ancora serie di Taylor/Laurent |
 | CAS-L1-02 | Calculus | Risch Trascendente | L1 | Parziale | L1-01 | Molto Alto | Solo pattern matching (exp/ln hardcoded); DifferentialField sottodimensionato; copertura <20% Risch teorico; estensioni composte non gestite |
 | CAS-L1-03 | Calculus | RootSum in LRT | L1 | Risolta | L1-05 | Alto | Verificata |
-| CAS-L1-04 | Algebra | EDF p=2 | L1 | Aperta | — | Medio | REGRESSIONE CRITICA: Berlekamp GF(2) ASSENTE; zero code per fattorizzazione su campi finiti; grep "berlekamp/GF2" → nessun match |
+| CAS-L1-04 | Algebra | EDF p=2 | L1 | Risolta | — | Medio | Verificata (trace polynomial branch in equal_degree_factorization per p=2, test FactorPolynomialP2 × 3) |
 | CAS-L1-05 | Symbolic | RootOf Algebra/Eval | L1 | Parziale | — | Alto | Struttura AST presente; eval numerica mancante; algebra simbolica su RootOf non funzionante; usato solo in pattern matching |
 | CAS-L1-06 | Calculus | Singolarità Definiti | L1 | Parziale | — | Alto | Poli razionali finiti interni/endpoint rifiutati ok; rimovibili cancellabili ok; mancano radici algebriche, singolarità trascendenti, impropri/PV |
-| CAS-L1-07 | Symbolic | Normal Form Trascendente | L1 | Aperta | — | Alto | REGRESSIONE CRITICA: normal_form.cpp implementa solo forma normale polinomiale; zero logica log/exp/trig; `log(a*b)→log(a)+log(b)` non implementato |
+| CAS-L1-07 | Symbolic | Normal Form Trascendente | L1 | Risolta | — | Alto | Verificata (transcendental_normal_form: ln Product/Binary/Div/Pow expand + exp/ln inv. cancellazioni, 5 test anti-hardcode) |
 | CAS-L1-08 | Algebra | GCD Multivariato | L1 | Parziale | — | Alto | Univariato e bivariato lineare certificati; trivariato lineare ok; modular GCD/Hensel multivariato generale non implementato |
 | CAS-L1-09 | Symbolic | Deduzione Disequazioni da Assunzioni | L1 | Parziale | L0-07, L1-10 | Molto Alto | Solo conflict detection (x>0 + x<0 → contraddizione); deduzione transitiva assente; `x>0,y>0→x*y>0` NON inferito automaticamente |
 | CAS-L1-10 | Symbolic | Domini Globali e Coerenza Assunzioni | L1 | Risolta | L0-07 | Alto | Verificata |

@@ -1,6 +1,7 @@
 #include "cas/ast.hpp"
 #include "cas/algebra.hpp"
 #include "cas/lexer.hpp"
+#include "cas/normal_form.hpp"
 #include "cas/parser.hpp"
 #include "cas/symbolic.hpp"
 #include "../../helpers/property_test.hpp"
@@ -2482,6 +2483,98 @@ TEST(SymbolicRewriteTest, LnDecompositionOverDivisionIsOriented) {
     };
 
     EXPECT_TRUE(rewrite_rule_is_oriented(rule));
+}
+
+// L1-07: transcendental_normal_form must expand log products/quotients/powers
+// and cancel inverse pairs without hardcoded special cases
+TEST(SymbolicNormalFormTest, L1_07_LnProductExpands) {
+    CASContext ctx;
+    auto e = parse_expr("ln(x * y)", ctx.arena());
+    ASSERT_TRUE(e.is_ok());
+    auto res = transcendental_normal_form(e.value(), ctx);
+    ASSERT_TRUE(res.is_ok());
+    // must contain two ln subexpressions
+    int ln_count = 0;
+    std::function<void(ExprPtr)> count_ln = [&](ExprPtr n) {
+        if (!n) return;
+        if (auto* f = expr_cast<FuncCall>(n); f && f->func_id == BuiltinOp::Ln) ln_count++;
+        if (auto* b = expr_cast<Binary>(n)) { count_ln(b->left); count_ln(b->right); }
+        if (auto* s = expr_cast<Sum>(n)) for (auto t : s->terms) count_ln(t);
+        if (auto* p = expr_cast<Product>(n)) for (auto f2 : p->factors) count_ln(f2);
+    };
+    count_ln(res.value());
+    EXPECT_EQ(ln_count, 2) << "ln(x*y) must expand to ln(x)+ln(y)";
+}
+
+TEST(SymbolicNormalFormTest, L1_07_LnDivisionExpands) {
+    CASContext ctx;
+    auto e = parse_expr("ln(x / y)", ctx.arena());
+    ASSERT_TRUE(e.is_ok());
+    auto res = transcendental_normal_form(e.value(), ctx);
+    ASSERT_TRUE(res.is_ok());
+    int ln_count = 0;
+    std::function<void(ExprPtr)> count_ln = [&](ExprPtr n) {
+        if (!n) return;
+        if (auto* f = expr_cast<FuncCall>(n); f && f->func_id == BuiltinOp::Ln) ln_count++;
+        if (auto* b = expr_cast<Binary>(n)) { count_ln(b->left); count_ln(b->right); }
+        if (auto* s = expr_cast<Sum>(n)) for (auto t : s->terms) count_ln(t);
+    };
+    count_ln(res.value());
+    EXPECT_EQ(ln_count, 2) << "ln(x/y) must expand to ln(x)-ln(y)";
+}
+
+TEST(SymbolicNormalFormTest, L1_07_LnPowerExpands) {
+    CASContext ctx;
+    auto e = parse_expr("ln(x^3)", ctx.arena());
+    ASSERT_TRUE(e.is_ok());
+    auto res = transcendental_normal_form(e.value(), ctx);
+    ASSERT_TRUE(res.is_ok());
+    // result must contain Mul with IntegerLit(3) and ln(x)
+    bool has_coeff3 = false;
+    std::function<void(ExprPtr)> find_3 = [&](ExprPtr n) {
+        if (!n) return;
+        if (auto* i = expr_cast<IntegerLit>(n); i && i->value == BigInt(3)) has_coeff3 = true;
+        if (auto* b = expr_cast<Binary>(n)) { find_3(b->left); find_3(b->right); }
+    };
+    find_3(res.value());
+    EXPECT_TRUE(has_coeff3) << "ln(x^3) must expand to 3*ln(x)";
+}
+
+TEST(SymbolicNormalFormTest, L1_07_ExpLnCancels) {
+    CASContext ctx;
+    auto e = parse_expr("exp(ln(x))", ctx.arena());
+    ASSERT_TRUE(e.is_ok());
+    auto res = transcendental_normal_form(e.value(), ctx);
+    ASSERT_TRUE(res.is_ok());
+    // must not contain exp or ln nodes
+    bool has_transcendental = false;
+    std::function<void(ExprPtr)> check = [&](ExprPtr n) {
+        if (!n) return;
+        if (auto* f = expr_cast<FuncCall>(n)) {
+            if (f->func_id == BuiltinOp::Exp || f->func_id == BuiltinOp::Ln) has_transcendental = true;
+        }
+        if (auto* b = expr_cast<Binary>(n)) { check(b->left); check(b->right); }
+    };
+    check(res.value());
+    EXPECT_FALSE(has_transcendental) << "exp(ln(x)) must cancel to x";
+}
+
+TEST(SymbolicNormalFormTest, L1_07_LnExpCancels) {
+    CASContext ctx;
+    auto e = parse_expr("ln(exp(x))", ctx.arena());
+    ASSERT_TRUE(e.is_ok());
+    auto res = transcendental_normal_form(e.value(), ctx);
+    ASSERT_TRUE(res.is_ok());
+    bool has_transcendental = false;
+    std::function<void(ExprPtr)> check = [&](ExprPtr n) {
+        if (!n) return;
+        if (auto* f = expr_cast<FuncCall>(n)) {
+            if (f->func_id == BuiltinOp::Exp || f->func_id == BuiltinOp::Ln) has_transcendental = true;
+        }
+        if (auto* b = expr_cast<Binary>(n)) { check(b->left); check(b->right); }
+    };
+    check(res.value());
+    EXPECT_FALSE(has_transcendental) << "ln(exp(x)) must cancel to x";
 }
 
 }  // namespace
