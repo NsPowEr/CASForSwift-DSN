@@ -314,7 +314,13 @@ Result<std::vector<Eigenpair>> eigenvectors(
         }
 
         if (build_ok) {
-            auto kernel = null_space(shifted, ctx);
+            // Dispatch: if the eigenvalue is a RootOf with rational minimal
+            // polynomial, compute the kernel over the algebraic extension
+            // Q(eigenval); otherwise use the structural null_space.
+            Result<std::vector<std::vector<ExprPtr>>> kernel =
+                expr_is<RootOf>(eigenval)
+                    ? null_space_over_extension(shifted, eigenval, ctx)
+                    : null_space(shifted, ctx);
             if (kernel.is_ok()) {
                 for (auto& vec : kernel.value()) {
                     result.push_back(Eigenpair{.eigenvalue = eigenval, .eigenvector = std::move(vec)});

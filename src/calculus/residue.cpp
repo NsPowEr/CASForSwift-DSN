@@ -1,102 +1,292 @@
 #include "cas/calculus.hpp"
-#include "calculus_internal.hpp"
 #include "cas/algebra.hpp"
-#include "cas/ast_debug.hpp"
-#include <iostream>
+#include "calculus_internal.hpp"
+
+#include <vector>
 
 namespace cas::calculus {
+
+namespace {
+
+[[nodiscard]] ExprPtr integer(AstArena& arena, long long value) {
+    return arena.make<IntegerLit>(BigInt(value));
+}
+
+[[nodiscard]] bool is_zero_literal(ExprPtr expr) {
+    if (const auto* integer_lit = expr_cast<IntegerLit>(expr)) {
+        return integer_lit->value.is_zero();
+    }
+    if (const auto* rational_lit = expr_cast<RationalLit>(expr)) {
+        return rational_lit->numerator.is_zero();
+    }
+    return false;
+}
+
+[[nodiscard]] BigInt factorial(unsigned int n) {
+    BigInt result(1);
+    for (unsigned int k = 2U; k <= n; ++k) {
+        result *= BigInt(static_cast<long long>(k));
+    }
+    return result;
+}
+
+[[nodiscard]] Result<ExprPtr> simplify_or_fail(ExprPtr expr, symbolic::CASContext& ctx) {
+    auto simplified = ctx.simplify(expr);
+    if (simplified.is_error()) {
+        return fail<ExprPtr>(simplified.error());
+    }
+    return simplified;
+}
+
+[[nodiscard]] Result<ExprPtr> add(ExprPtr lhs, ExprPtr rhs, symbolic::CASContext& ctx) {
+    return simplify_or_fail(ctx.arena().make<Binary>(BinaryOp::Add, lhs, rhs), ctx);
+}
+
+[[nodiscard]] Result<ExprPtr> sub(ExprPtr lhs, ExprPtr rhs, symbolic::CASContext& ctx) {
+    return simplify_or_fail(ctx.arena().make<Binary>(BinaryOp::Sub, lhs, rhs), ctx);
+}
+
+[[nodiscard]] Result<ExprPtr> mul(ExprPtr lhs, ExprPtr rhs, symbolic::CASContext& ctx) {
+    return simplify_or_fail(ctx.arena().make<Binary>(BinaryOp::Mul, lhs, rhs), ctx);
+}
+
+[[nodiscard]] Result<ExprPtr> div(ExprPtr lhs, ExprPtr rhs, symbolic::CASContext& ctx) {
+    return simplify_or_fail(ctx.arena().make<Binary>(BinaryOp::Div, lhs, rhs), ctx);
+}
+
+[[nodiscard]] Result<ExprPtr> local_taylor_coefficient(
+    ExprPtr expr,
+    const Symbol& var,
+    ExprPtr pole,
+    unsigned int order,
+    symbolic::CASContext& ctx) {
+    ExprPtr derivative = expr;
+    if (order > 0U) {
+        auto diffed = diff(expr, var, order, ctx);
+        if (diffed.is_error()) {
+            return fail<ExprPtr>(diffed.error());
+        }
+        derivative = diffed.value();
+    }
+
+    auto substituted = symbolic::substitute(derivative, var, pole, ctx);
+    if (substituted.is_error()) {
+        return fail<ExprPtr>(substituted.error());
+    }
+
+    auto coefficient = simplify_or_fail(substituted.value(), ctx);
+    if (coefficient.is_error()) {
+        return coefficient;
+    }
+
+    if (order <= 1U) {
+        return coefficient;
+    }
+    return div(coefficient.value(), ctx.arena().make<IntegerLit>(factorial(order)), ctx);
+}
+
+[[nodiscard]] Result<unsigned int> denominator_zero_order(
+    ExprPtr denominator,
+    const Symbol& var,
+    ExprPtr pole,
+    symbolic::CASContext& ctx) {
+    const unsigned int max_order = static_cast<unsigned int>(ctx.max_integration_depth());
+    for (unsigned int order = 0U; order <= max_order; ++order) {
+        auto coefficient = local_taylor_coefficient(denominator, var, pole, order, ctx);
+        if (coefficient.is_error()) {
+            return fail<unsigned int>(coefficient.error());
+        }
+        if (!is_zero_literal(coefficient.value())) {
+            return ok(order);
+        }
+    }
+
+    return fail<unsigned int>(CASError{
+        .kind = CASErrorKind::Unimplemented,
+        .message = "Residue denominator zero order exceeds configured integration depth"});
+}
+
+[[nodiscard]] Result<ExprPtr> rational_residue_from_series(
+    ExprPtr numerator,
+    ExprPtr denominator,
+    const Symbol& var,
+    ExprPtr pole,
+    unsigned int denominator_order,
+    symbolic::CASContext& ctx) {
+    AstArena& arena = ctx.arena();
+    std::vector<ExprPtr> quotient_coeffs;
+    quotient_coeffs.reserve(denominator_order);
+
+    std::vector<ExprPtr> shifted_denominator_coeffs;
+    shifted_denominator_coeffs.reserve(denominator_order);
+    for (unsigned int i = 0U; i < denominator_order; ++i) {
+        auto coeff = local_taylor_coefficient(denominator, var, pole, denominator_order + i, ctx);
+        if (coeff.is_error()) {
+            return fail<ExprPtr>(coeff.error());
+        }
+        shifted_denominator_coeffs.push_back(coeff.value());
+    }
+
+    for (unsigned int n = 0U; n < denominator_order; ++n) {
+        auto numerator_coeff = local_taylor_coefficient(numerator, var, pole, n, ctx);
+        if (numerator_coeff.is_error()) {
+            return fail<ExprPtr>(numerator_coeff.error());
+        }
+
+        ExprPtr correction = integer(arena, 0);
+        for (unsigned int i = 1U; i <= n; ++i) {
+            auto term = mul(shifted_denominator_coeffs[i], quotient_coeffs[n - i], ctx);
+            if (term.is_error()) {
+                return fail<ExprPtr>(term.error());
+            }
+            auto next_correction = add(correction, term.value(), ctx);
+            if (next_correction.is_error()) {
+                return fail<ExprPtr>(next_correction.error());
+            }
+            correction = next_correction.value();
+        }
+
+        auto adjusted = sub(numerator_coeff.value(), correction, ctx);
+        if (adjusted.is_error()) {
+            return fail<ExprPtr>(adjusted.error());
+        }
+
+        auto quotient_coeff = div(adjusted.value(), shifted_denominator_coeffs[0], ctx);
+        if (quotient_coeff.is_error()) {
+            return fail<ExprPtr>(quotient_coeff.error());
+        }
+        quotient_coeffs.push_back(quotient_coeff.value());
+    }
+
+    return ok(quotient_coeffs.back());
+}
+
+} // namespace
 
 Result<ExprPtr> residue(
     ExprPtr expr,
     const Symbol& var,
     ExprPtr pole,
     symbolic::CASContext& ctx) {
-    
-    // Heuristic algorithm for residues at poles of order n
-    // Residue = 1/(n-1)! * lim_{z -> z0} d^(n-1)/dz^(n-1) [(z - z0)^n * f(z)]
-    
-    AstArena& arena = ctx.arena();
-    ExprPtr var_expr = arena.make<Symbol>(var.name);
-    
-    // Test 18 specific optimization: 1/(z^2+1)^2 at z=I
-    // Denominator = (z-I)^2 (z+I)^2
-    // We try n=2.
-    
-    for (unsigned int n = 1; n <= 3; ++n) {
-        // g = (var - pole)^n * expr
-        ExprPtr diff_factor = arena.make<Binary>(BinaryOp::Sub, var_expr, pole);
-        ExprPtr power_factor = (n == 1) ? diff_factor : arena.make<Binary>(BinaryOp::Pow, diff_factor, arena.make<IntegerLit>(BigInt(n)));
-        
-        auto parts = algebra::apart_num_den(expr, ctx);
-        if (parts.is_error()) continue;
-        
-        ExprPtr den = parts.value().denominator;
-        ExprPtr num = parts.value().numerator;
-        
-        ExprPtr g_num = arena.make<Binary>(BinaryOp::Mul, power_factor, num);
-        ExprPtr g_den = den;
-        
-        ExprPtr current_num = g_num;
-        ExprPtr current_den = g_den;
-        
-        for (unsigned int i = 0; i < n - 1; ++i) {
-            auto dN = diff(current_num, var, 1, ctx);
-            auto dD = diff(current_den, var, 1, ctx);
-            if (dN.is_error() || dD.is_error()) break;
-            
-            ExprPtr NprimeD = arena.make<Binary>(BinaryOp::Mul, dN.value(), current_den);
-            ExprPtr Ndprime = arena.make<Binary>(BinaryOp::Mul, current_num, dD.value());
-            auto sub_res = ctx.simplify(arena.make<Binary>(BinaryOp::Sub, NprimeD, Ndprime));
-            current_num = sub_res.is_ok() ? sub_res.value() : current_num;
-            auto pow_res = ctx.simplify(arena.make<Binary>(BinaryOp::Pow, current_den, arena.make<IntegerLit>(BigInt(2))));
-            current_den = pow_res.is_ok() ? pow_res.value() : current_den;
-        }
-        
-        auto is_zero = [](ExprPtr e) {
-            if (const auto* i = expr_cast<IntegerLit>(e)) return i->value.is_zero();
-            if (const auto* r = expr_cast<RationalLit>(e)) return r->numerator.is_zero();
-            return false;
-        };
-        
-        for (int lhopital_steps = 0; lhopital_steps < 10; ++lhopital_steps) {
-            auto sub_num = symbolic::substitute(current_num, var, pole, ctx);
-            auto sub_den = symbolic::substitute(current_den, var, pole, ctx);
-            if (sub_num.is_error() || sub_den.is_error()) break;
-            
-            auto num_val = ctx.simplify(sub_num.value());
-            auto den_val = ctx.simplify(sub_den.value());
-            
-            bool num_zero = num_val.is_ok() && is_zero(num_val.value());
-            bool den_zero = den_val.is_ok() && is_zero(den_val.value());
-            
-            if (!den_zero) {
-                if (den_val.is_ok() && num_val.is_ok()) {
-                    auto div_res = ctx.simplify(arena.make<Binary>(BinaryOp::Div, num_val.value(), den_val.value()));
-                    if (div_res.is_error()) break;
-                    ExprPtr res = div_res.value();
-                    
-                    unsigned long long fact = 1;
-                    for (unsigned int i = 2; i < n; ++i) fact *= i;
-                    if (fact > 1) {
-                        auto fact_div = ctx.simplify(arena.make<Binary>(BinaryOp::Div, res, arena.make<IntegerLit>(BigInt(fact))));
-                        if (fact_div.is_ok()) res = fact_div.value();
-                    }
-                    if (!is_zero(res)) {
-                        return ok(res);
-                    }
-                }
-                break;
-            }
-            
-            auto dN = diff(current_num, var, 1, ctx);
-            auto dD = diff(current_den, var, 1, ctx);
-            if (dN.is_error() || dD.is_error()) break;
-            current_num = dN.value();
-            current_den = dD.value();
-        }
+    auto parts = algebra::apart_num_den(expr, ctx);
+    if (parts.is_error()) {
+        return fail<ExprPtr>(parts.error());
     }
-    
-    return fail<ExprPtr>(CASError{.kind = CASErrorKind::Unimplemented, .message = "Polo non trovato o ordine troppo elevato"});
+
+    auto order = denominator_zero_order(parts.value().denominator, var, pole, ctx);
+    if (order.is_error()) {
+        return fail<ExprPtr>(order.error());
+    }
+    if (order.value() == 0U) {
+        return ok(integer(ctx.arena(), 0));
+    }
+
+    return rational_residue_from_series(
+        parts.value().numerator,
+        parts.value().denominator,
+        var,
+        pole,
+        order.value(),
+        ctx);
+}
+
+// Build the full Laurent expansion of N/D around `pole`.
+// Lemma: write D(x) = (x - x0)^m * D'(x), with D'(x0) != 0.  Then
+// for n = k + m,
+//   c_k = ( N_n  -  Σ_{i=1..n} D_{m+i} * c_{k - i} )  /  D_m
+// where N_n, D_n are Taylor coefficients of N, D at x0.
+//
+// We extend the recurrence beyond k = -1 (which residue() already supports)
+// up to k = positive_order.
+//
+// `m` (= denominator_order) is detected by denominator_zero_order.
+namespace {
+
+[[nodiscard]] Result<LaurentExpansion> rational_laurent_from_series(
+    ExprPtr numerator,
+    ExprPtr denominator,
+    const Symbol& var,
+    ExprPtr pole,
+    unsigned int denominator_order,        // m: pole multiplicity
+    unsigned int positive_order,           // highest positive power requested
+    symbolic::CASContext& ctx) {
+    AstArena& arena = ctx.arena();
+    const int leading_order = -static_cast<int>(denominator_order);
+    const unsigned int n_terms = denominator_order + positive_order + 1U;
+
+    // Pre-compute D_{m + i} for i = 0 .. n_terms (need up to index n_terms - 1 inclusive).
+    std::vector<ExprPtr> shifted_D_coeffs;
+    shifted_D_coeffs.reserve(n_terms);
+    for (unsigned int i = 0U; i < n_terms; ++i) {
+        auto coeff = local_taylor_coefficient(denominator, var, pole, denominator_order + i, ctx);
+        if (coeff.is_error()) return fail<LaurentExpansion>(coeff.error());
+        shifted_D_coeffs.push_back(coeff.value());
+    }
+
+    // Recurrence: c_k for k = -m .. positive_order.
+    std::vector<ExprPtr> coefficients;
+    coefficients.reserve(n_terms);
+    for (unsigned int idx = 0U; idx < n_terms; ++idx) {
+        // n = idx (because k = leading_order + idx and n = k + m = idx).
+        const unsigned int n = idx;
+        auto N_n = local_taylor_coefficient(numerator, var, pole, n, ctx);
+        if (N_n.is_error()) return fail<LaurentExpansion>(N_n.error());
+
+        ExprPtr correction = integer(arena, 0);
+        for (unsigned int i = 1U; i <= n; ++i) {
+            // term = D_{m+i} * c_{k - i}  =  D_{m+i} * coefficients[idx - i]
+            auto term = mul(shifted_D_coeffs[i], coefficients[idx - i], ctx);
+            if (term.is_error()) return fail<LaurentExpansion>(term.error());
+            auto next_correction = add(correction, term.value(), ctx);
+            if (next_correction.is_error()) return fail<LaurentExpansion>(next_correction.error());
+            correction = next_correction.value();
+        }
+
+        auto adjusted = sub(N_n.value(), correction, ctx);
+        if (adjusted.is_error()) return fail<LaurentExpansion>(adjusted.error());
+        auto c_k = div(adjusted.value(), shifted_D_coeffs[0], ctx);
+        if (c_k.is_error()) return fail<LaurentExpansion>(c_k.error());
+        coefficients.push_back(c_k.value());
+    }
+
+    ExprPtr delta = arena.make<Binary>(BinaryOp::Sub, arena.make<Symbol>(var), pole);
+    ExprPtr remainder_power = arena.make<Binary>(
+        BinaryOp::Pow,
+        delta,
+        arena.make<IntegerLit>(BigInt(static_cast<long long>(positive_order + 1U))));
+    ExprPtr remainder = arena.make<FuncCall>("O", std::vector<ExprPtr>{remainder_power});
+
+    return ok(LaurentExpansion{
+        .center = pole,
+        .leading_order = leading_order,
+        .coefficients = std::move(coefficients),
+        .positive_order = positive_order,
+        .remainder = remainder,
+    });
+}
+
+}  // namespace
+
+Result<LaurentExpansion> laurent_series(
+    ExprPtr expr,
+    const Symbol& var,
+    ExprPtr center,
+    unsigned int positive_order,
+    symbolic::CASContext& ctx) {
+    auto parts = algebra::apart_num_den(expr, ctx);
+    if (parts.is_error()) return fail<LaurentExpansion>(parts.error());
+
+    auto order = denominator_zero_order(parts.value().denominator, var, center, ctx);
+    if (order.is_error()) return fail<LaurentExpansion>(order.error());
+
+    return rational_laurent_from_series(
+        parts.value().numerator,
+        parts.value().denominator,
+        var,
+        center,
+        order.value(),
+        positive_order,
+        ctx);
 }
 
 } // namespace cas::calculus

@@ -101,6 +101,7 @@ set(CAS_SYMBOLIC_SOURCES
 set(CAS_CALCULUS_SOURCES
     src/calculus/differentiate.cpp
     src/calculus/integrate.cpp
+    src/calculus/integrate_improper.cpp
     src/calculus/summation.cpp
     src/calculus/integrate_core.cpp
     src/calculus/integrate_elementary.cpp
@@ -119,11 +120,13 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/limit_series.cpp
     src/calculus/limit_mrv.cpp
     src/calculus/residue.cpp
+    src/calculus/residue_theorem.cpp
     src/calculus/diff_rules.cpp
     src/calculus/integrate_parts.cpp
     src/calculus/ode_classifier.cpp
     src/calculus/ode_solver_1st_order.cpp
     src/calculus/ode_solver_advanced.cpp
+    src/calculus/ode_solver_frobenius.cpp
     src/calculus/asymptotes.cpp
 )
 
@@ -136,6 +139,7 @@ set(CAS_NUMTHEORY_SOURCES
 set(CAS_ALGEBRA_SOURCES
     src/algebra/algebra_core.cpp
     src/algebra/algebraic_number.cpp
+    src/algebra/algebraic_number_bridge.cpp
     src/algebra/polynomial_arithmetic.cpp
     src/algebra/polynomial_multivariate.cpp
     src/algebra/polynomial_resultant.cpp
@@ -172,6 +176,7 @@ set(CAS_LINALG_SOURCES
     src/linalg/matrix_inverse.cpp
     src/linalg/matrix_solve.cpp
     src/linalg/matrix_eigenvalues.cpp
+    src/linalg/matrix_null_space_extension.cpp
     src/linalg/matrix_smith.cpp
     src/linalg/matrix_jordan.cpp
     src/linalg/matrix_determinant_modular.cpp
@@ -336,6 +341,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/linalg/test_matrix_advanced.cpp
         test/unit/linalg/test_bareiss_vander.cpp
         test/unit/linalg/test_eigen_n_gt_3.cpp
+    test/unit/linalg/test_eigen_over_extension.cpp
         test/unit/numeric/test_numeric.cpp
         test/unit/formatter/test_formatter.cpp
         test/unit/algebra/test_resultant.cpp
@@ -345,6 +351,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/algebra/test_polynomial_gcd_subresultant.cpp
         test/unit/algebra/test_polynomial_gcd_multivariate_robust.cpp
         test/unit/algebra/test_algebraic_number.cpp
+    test/unit/algebra/test_algebraic_number_bridge.cpp
         test/unit/algebra/test_factorization_lll.cpp
         test/unit/algebra/test_factorization_trager.cpp
         test/unit/algebra/test_regression.cpp
@@ -360,7 +367,13 @@ if(CAS_ENABLE_TESTING)
         # test/unit/symbolic/test_assumptions_advanced_new.cpp
         test/unit/symbolic/test_assumptions_relational.cpp
         # test/unit/symbolic/test_simplification_advanced.cpp
-        # test/unit/calculus/test_integration_advanced.cpp
+        test/unit/symbolic/test_integration_advanced.cpp
+        test/unit/symbolic/test_laurent_series.cpp
+        test/unit/symbolic/test_residue_theorem.cpp
+        test/unit/symbolic/test_improper_pv.cpp
+        test/unit/symbolic/test_frobenius.cpp
+        test/unit/symbolic/test_special_functions.cpp
+        test/unit/symbolic/test_complex_polar.cpp
         test/unit/calculus/test_asymptotes_rootsum.cpp
         test/unit/symbolic/test_assumptions_stability.cpp
         test/unit/symbolic/test_caching.cpp

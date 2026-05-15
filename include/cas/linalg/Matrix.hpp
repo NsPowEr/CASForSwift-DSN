@@ -46,6 +46,18 @@ Result<std::vector<ExprPtr>> eigenvalues(const MatrixExpr& matrix, symbolic::CAS
 Result<std::vector<Eigenpair>> eigenvectors(const MatrixExpr& matrix, symbolic::CASContext& ctx);
 Result<std::vector<std::vector<ExprPtr>>> null_space(const MatrixExpr& matrix, symbolic::CASContext& ctx);
 
+// Compute null space of `matrix` treating `alpha_expr` (a RootOf with rational
+// minimal polynomial) as an algebraic generator.  Each matrix entry is reduced
+// in Q(alpha) before RREF, allowing exact kernel computation when the entries
+// are polynomial expressions in alpha that ordinary symbolic RREF cannot pivot
+// on (because zero-equivalence cannot be decided structurally).
+// Falls back to ordinary null_space() when entries are not in Q(alpha) or the
+// supplied minimal polynomial is reducible.
+Result<std::vector<std::vector<ExprPtr>>> null_space_over_extension(
+    const MatrixExpr& matrix,
+    ExprPtr alpha_expr,
+    symbolic::CASContext& ctx);
+
 struct JordanDecomposition {
     MatrixExpr J; // Jordan Normal Form matrix
     MatrixExpr P; // Transformation matrix such that A = P*J*P^-1

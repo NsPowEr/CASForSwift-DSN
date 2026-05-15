@@ -861,6 +861,38 @@ TEST(CalculusTaylorTest, BuildsStandardSeriesForGeneralizedBinomial) {
     expect_equivalent(expansion.value().polynomial, expected.value());
 }
 
+// L2-27: verify the general taylor fallback handles functions without a
+// closed-form Maclaurin entry in limit_series.cpp.  These pass through
+// repeated symbolic differentiation rather than the fast-path table.
+TEST(CalculusTaylorTest, GeneralFallbackTangent) {
+    // tan(x) at x=0, order 5:  x + x^3/3 + 2/15 * x^5
+    symbolic::CASContext context;
+    AstArena expected_arena;
+    auto expansion = taylor_input("tan(x)", "x", "0", 5U, context);
+    auto expected = parse_expr("x + (1/3)*x^3 + (2/15)*x^5", expected_arena);
+    ASSERT_TRUE(expansion.is_ok()) << expansion.error().message;
+    ASSERT_TRUE(expected.is_ok()) << expected.error().message;
+    EXPECT_EQ(expansion.value().computed_order, 5U);
+    expect_equivalent(expansion.value().polynomial, expected.value());
+}
+
+// NOTE: composition Taylor of exp(sin(x)) at higher orders currently degrades
+// because the simplifier cannot fully reduce d^k/dx^k[exp(sin(x))] at x=0.
+// This is a separate gap from L2-27 (general fallback exists & works for
+// tan(x) and rationals); the simplifier limitation is its own task.
+
+TEST(CalculusTaylorTest, GeneralFallbackRationalNotInTable) {
+    // 1/(1 - x^2) at x=0, order 6:  1 + x^2 + x^4 + x^6
+    symbolic::CASContext context;
+    AstArena expected_arena;
+    auto expansion = taylor_input("1/(1 - x^2)", "x", "0", 6U, context);
+    auto expected = parse_expr("1 + x^2 + x^4 + x^6", expected_arena);
+    ASSERT_TRUE(expansion.is_ok()) << expansion.error().message;
+    ASSERT_TRUE(expected.is_ok()) << expected.error().message;
+    EXPECT_EQ(expansion.value().computed_order, 6U);
+    expect_equivalent(expansion.value().polynomial, expected.value());
+}
+
 TEST(CalculusTaylorTest, BuildsTaylorSeriesAroundNonZeroPointForPolynomial) {
     symbolic::CASContext context;
     AstArena expected_arena;

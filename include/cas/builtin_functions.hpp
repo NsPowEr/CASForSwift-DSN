@@ -26,6 +26,7 @@ enum class BuiltinOp : std::uint16_t {
     Tanh,
     Coth,
     Abs,
+    Sign,
     Gamma,
     Zeta,
     Erf,
@@ -46,6 +47,11 @@ enum class BuiltinOp : std::uint16_t {
     BesselK,
     Binomial,
     SumFunc,
+    RootSum,
+    Re,
+    Im,
+    Conj,
+    Arg,
 };
 
 [[nodiscard]] constexpr BuiltinOp get_builtin_op(std::string_view name) noexcept {
@@ -69,6 +75,7 @@ enum class BuiltinOp : std::uint16_t {
     if (name == "tanh") return BuiltinOp::Tanh;
     if (name == "coth") return BuiltinOp::Coth;
     if (name == "abs") return BuiltinOp::Abs;
+    if (name == "sign") return BuiltinOp::Sign;
     if (name == "gamma") return BuiltinOp::Gamma;
     if (name == "zeta") return BuiltinOp::Zeta;
     if (name == "erf") return BuiltinOp::Erf;
@@ -89,6 +96,11 @@ enum class BuiltinOp : std::uint16_t {
     if (name == "BesselK") return BuiltinOp::BesselK;
     if (name == "binomial") return BuiltinOp::Binomial;
     if (name == "sum") return BuiltinOp::SumFunc;
+    if (name == "RootSum" || name == "rootsum") return BuiltinOp::RootSum;
+    if (name == "re" || name == "Re") return BuiltinOp::Re;
+    if (name == "im" || name == "Im") return BuiltinOp::Im;
+    if (name == "conj" || name == "conjugate") return BuiltinOp::Conj;
+    if (name == "arg") return BuiltinOp::Arg;
     return BuiltinOp::Unknown;
 }
 
@@ -113,6 +125,7 @@ enum class BuiltinOp : std::uint16_t {
         case BuiltinOp::Tanh: return "tanh";
         case BuiltinOp::Coth: return "coth";
         case BuiltinOp::Abs: return "abs";
+        case BuiltinOp::Sign: return "sign";
         case BuiltinOp::Gamma: return "gamma";
         case BuiltinOp::Zeta: return "zeta";
         case BuiltinOp::Erf: return "erf";
@@ -133,6 +146,11 @@ enum class BuiltinOp : std::uint16_t {
         case BuiltinOp::BesselK: return "BesselK";
         case BuiltinOp::Binomial: return "binomial";
         case BuiltinOp::SumFunc: return "sum";
+        case BuiltinOp::RootSum: return "RootSum";
+        case BuiltinOp::Re: return "re";
+        case BuiltinOp::Im: return "im";
+        case BuiltinOp::Conj: return "conj";
+        case BuiltinOp::Arg: return "arg";
         case BuiltinOp::Unknown: return "unknown";
     }
     return "unknown";
