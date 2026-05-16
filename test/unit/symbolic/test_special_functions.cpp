@@ -187,6 +187,37 @@ TEST_F(SpecialFunctionsTest, LegendreP_AtOne_Equals_One) {
 
 // HC-004: fresh symbol generator never collides with itself nor with
 // user-defined names.
+// L3-04: Beta function via Gamma identity.
+TEST_F(SpecialFunctionsTest, BetaIntegerArgsReducesToRational) {
+    // B(2, 3) = Γ(2)Γ(3)/Γ(5) = 1·2/24 = 1/12.
+    expect_simplify_equiv("Beta(2, 3)", "1/12");
+}
+
+TEST_F(SpecialFunctionsTest, BetaHalfIntegerProducesPi) {
+    // B(1/2, 1/2) = Γ(1/2)^2 / Γ(1) = π.
+    expect_simplify_equiv("Beta(1/2, 1/2)", "pi");
+}
+
+TEST_F(SpecialFunctionsTest, BetaSymmetryUnderSwap) {
+    // B(x, 1-x) ↔ Γ(x)Γ(1-x)/Γ(1) = π/sin(πx) (Gamma reflection composition).
+    expect_simplify_equiv("Beta(x, 1-x)", "pi/sin(pi*x)");
+}
+
+// L3-04: Pochhammer (rising factorial).
+TEST_F(SpecialFunctionsTest, PochhammerIntegerNonNegative) {
+    // (x)_0 = 1
+    expect_simplify_equiv("Pochhammer(x, 0)", "1");
+    // (x)_3 = x*(x+1)*(x+2)
+    expect_simplify_equiv("Pochhammer(x, 3)", "x*(x+1)*(x+2)");
+    // (1)_n = n!  → (1)_5 = 120
+    expect_simplify_equiv("Pochhammer(1, 5)", "120");
+}
+
+TEST_F(SpecialFunctionsTest, PochhammerNegativeIndex) {
+    // (x)_(-2) = 1 / ((x-1)*(x-2))
+    expect_simplify_equiv("Pochhammer(x, -2)", "1/((x-1)*(x-2))");
+}
+
 TEST_F(SpecialFunctionsTest, MakeFreshSymbol_UniqueAndAvoidsUserScope) {
     // Pre-populate context with user-defined variables that look like
     // fresh-symbol candidates.

@@ -706,6 +706,66 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const FuncCall& node
         }
     }
 
+    // L3-04: Beta function B(x, y) = Gamma(x)*Gamma(y)/Gamma(x+y).
+    // Pure identity expansion; the simplifier then picks up Gamma
+    // reductions (integer/half-integer values, reflection on the product).
+    if (node.func_id == BuiltinOp::Beta && args.size() == 2U) {
+        ExprPtr x_arg = args[0];
+        ExprPtr y_arg = args[1];
+        ExprPtr gx = arena_.make<FuncCall>(BuiltinOp::Gamma, std::vector<ExprPtr>{x_arg});
+        ExprPtr gy = arena_.make<FuncCall>(BuiltinOp::Gamma, std::vector<ExprPtr>{y_arg});
+        ExprPtr sum_xy = arena_.make<Sum>(std::vector<ExprPtr>{x_arg, y_arg});
+        ExprPtr gxy = arena_.make<FuncCall>(BuiltinOp::Gamma, std::vector<ExprPtr>{sum_xy});
+        ExprPtr num = arena_.make<Product>(std::vector<ExprPtr>{gx, gy});
+        return simplify_expr(arena_.make<Binary>(BinaryOp::Div, num, gxy));
+    }
+
+    // L3-04: Pochhammer (rising factorial)  (x)_n
+    //   integer n >= 0:  (x)_n = x*(x+1)*...*(x+n-1),   (x)_0 = 1.
+    //   integer n <  0:  (x)_n = 1 / [(x-1)*(x-2)*...*(x+n)]
+    //   symbolic n:      leave inert (formal identity).
+    if (node.func_id == BuiltinOp::Pochhammer && args.size() == 2U) {
+        ExprPtr x_arg = args[0];
+        if (const auto* il = expr_cast<IntegerLit>(args[1])) {
+            if (il->value.bit_length() > 16) {
+                return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
+                    "Pochhammer: degree too large for symbolic expansion"));
+            }
+            if (il->value.is_zero()) return ok(make_integer(arena_, BigInt(1)));
+            if (!il->value.is_negative()) {
+                const std::uint64_t n = il->value.to_u64();
+                std::vector<ExprPtr> factors;
+                factors.reserve(n);
+                for (std::uint64_t k = 0U; k < n; ++k) {
+                    ExprPtr term = k == 0U
+                        ? x_arg
+                        : static_cast<ExprPtr>(arena_.make<Sum>(std::vector<ExprPtr>{
+                              x_arg, make_integer(arena_, BigInt(static_cast<std::int64_t>(k)))}));
+                    factors.push_back(term);
+                }
+                ExprPtr prod = factors.size() == 1U
+                    ? factors.front()
+                    : static_cast<ExprPtr>(arena_.make<Product>(std::move(factors)));
+                return simplify_expr(prod);
+            }
+            // n < 0:  (x)_(-m) = 1 / ((x-1)*(x-2)*...*(x-m))
+            BigInt mag = -il->value;
+            const std::uint64_t m = mag.to_u64();
+            std::vector<ExprPtr> denom_factors;
+            denom_factors.reserve(m);
+            for (std::uint64_t k = 1U; k <= m; ++k) {
+                ExprPtr neg_k = arena_.make<Unary>(UnaryOp::Neg,
+                    make_integer(arena_, BigInt(static_cast<std::int64_t>(k))));
+                denom_factors.push_back(arena_.make<Sum>(std::vector<ExprPtr>{x_arg, neg_k}));
+            }
+            ExprPtr denom = denom_factors.size() == 1U
+                ? denom_factors.front()
+                : static_cast<ExprPtr>(arena_.make<Product>(std::move(denom_factors)));
+            return simplify_expr(arena_.make<Binary>(BinaryOp::Div,
+                make_integer(arena_, BigInt(1)), denom));
+        }
+    }
+
     // L3-04: Legendre polynomial P_n(x) via Bonnet recurrence.
     //   P_0(x) = 1
     //   P_1(x) = x
