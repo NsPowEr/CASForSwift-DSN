@@ -130,5 +130,26 @@ TEST(IntegrationAdvancedTest, RischDE_Rational_ExpReciprocal) {
     expect_integration_oracle("exp(1/x)/x^2", "x");
 }
 
+// Rational-coefficient Risch DE: higher-degree denominator forces
+// y itself to be a *rational function* (not polynomial), namely
+// y = (x-1)/x.  Exercises the y = P/D ansatz substitution path.
+// ∫ exp(1/x)/x^3 dx = ((x-1)/x) · exp(1/x).
+TEST(IntegrationAdvancedTest, RischDE_Rational_ExpReciprocalCubic) {
+    expect_integration_oracle("exp(1/x)/x^3", "x");
+}
+
+// Rational-g logarithmic-extension branch (Risch log poly part with
+// rational coefficient).  ∫ ln(x)/x² dx = -ln(x)/x - 1/x.
+TEST(IntegrationAdvancedTest, RischDE_Rational_LogOverXSquared) {
+    expect_integration_oracle("ln(x)/x^2", "x");
+}
+
+// Anti-hardcode: still higher-degree denominator x^4, again with a
+// rational-function y = (x²-x+1)/x²·...  exercises larger ansatz.
+// ∫ exp(1/x) · (1 + 2x) / x^4 dx — elementary (oracle verifies).
+TEST(IntegrationAdvancedTest, RischDE_Rational_ExpReciprocalQuartic) {
+    expect_integration_oracle("exp(1/x)*(1 + 2*x)/x^4", "x");
+}
+
 } // namespace
 } // namespace cas::calculus

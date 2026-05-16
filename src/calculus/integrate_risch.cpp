@@ -245,7 +245,9 @@ risch_extract_rational_coeffs(const algebra::PolyExpr& poly) {
         return fail<ExprPtr>(CASError{CASErrorKind::Unimplemented, msg, std::nullopt});
     };
 
-    // Decompose into num/den.
+    // ----- Stage 1: decompose f and g into num/den and build LCM-scaled
+    //                polynomial coefficients (D, F_n, G_n) for the
+    //                multiplied form  D · y' + F_n · y = G_n.
     auto f_parts = algebra::apart_num_den(f_expr, ctx);
     auto g_parts = algebra::apart_num_den(g_expr, ctx);
     if (f_parts.is_error()) return fail_unimpl("Risch DE rational: cannot split f into num/den");
@@ -256,25 +258,21 @@ risch_extract_rational_coeffs(const algebra::PolyExpr& poly) {
     ExprPtr gn = g_parts.value().numerator;
     ExprPtr gd = g_parts.value().denominator;
 
-    // Compute D = lcm(fd, gd) via D = fd · gd / gcd(fd, gd).
+    // D = lcm(fd, gd) = fd · gd / gcd(fd, gd).
     auto gcd_fd_gd = algebra::polynomial_gcd(fd, gd, var, ctx);
     ExprPtr D_expr;
     if (gcd_fd_gd.is_ok()) {
-        ExprPtr prod = ctx.arena().make<Binary>(BinaryOp::Mul, fd, gd);
-        auto prod_simp = ctx.simplify(prod);
+        auto prod_simp = ctx.simplify(arena.make<Binary>(BinaryOp::Mul, fd, gd));
         if (prod_simp.is_error()) return prod_simp;
         auto D_div = ctx.simplify(arena.make<Binary>(BinaryOp::Div, prod_simp.value(), gcd_fd_gd.value()));
         if (D_div.is_error()) return D_div;
         D_expr = D_div.value();
     } else {
-        // Fallback to product (over-shoots, still correct).
         auto prod_simp = ctx.simplify(arena.make<Binary>(BinaryOp::Mul, fd, gd));
         if (prod_simp.is_error()) return prod_simp;
         D_expr = prod_simp.value();
     }
 
-    // Scale: f_n_full = fn · (D / fd),  g_n_full = gn · (D / gd).  Both
-    // must reduce to polynomials in var with rational coefficients.
     auto D_over_fd = ctx.simplify(arena.make<Binary>(BinaryOp::Div, D_expr, fd));
     if (D_over_fd.is_error()) return D_over_fd;
     auto D_over_gd = ctx.simplify(arena.make<Binary>(BinaryOp::Div, D_expr, gd));
@@ -307,80 +305,114 @@ risch_extract_rational_coeffs(const algebra::PolyExpr& poly) {
 
     if (D.empty()) return fail_unimpl("Risch DE rational: zero denominator");
 
-    if (Gn.empty()) {
-        // g ≡ 0  ⇒  y = 0 is a solution.
+    if (Gn.empty()) return ok(arena.make<IntegerLit>(BigInt(0)));
+
+    // ----- Stage 2: ansatz  y = P(x) / D(x)  with P polynomial.
+    // Substituting y = P/D into  D·y' + F_n·y = G_n  gives the
+    // polynomial identity
+    //
+    //     D · P' + (F_n − D') · P  =  G_n · D                       (*)
+    //
+    // (See Bronstein, Symbolic Integration I, §6.1; this is the
+    // "denominator over-bound" reduction: the true denominator of y
+    // always divides D, hence P = y·D is polynomial whenever y is
+    // rational-with-denominator-dividing-D, which covers every
+    // elementary integral whose Risch DE arises from rational f, g.)
+    //
+    // Build the new coefficient vectors H = F_n − D'  and  Gd = G_n · D
+    // and search for polynomial P of degree ≤ M_bound via a Q-linear
+    // system on its coefficients.
+
+    // D'.
+    std::vector<Rational> Dprime;
+    if (D.size() >= 2) {
+        Dprime.resize(D.size() - 1U, Rational(BigInt(0)));
+        for (std::size_t k = 1; k < D.size(); ++k) {
+            Dprime[k - 1U] = Rational(BigInt(static_cast<std::int64_t>(k))) * D[k];
+        }
+    }
+
+    // H = F_n − D'.
+    std::vector<Rational> H(std::max(Fn.size(), Dprime.size()), Rational(BigInt(0)));
+    for (std::size_t i = 0; i < Fn.size(); ++i) H[i] = H[i] + Fn[i];
+    for (std::size_t i = 0; i < Dprime.size(); ++i) H[i] = H[i] - Dprime[i];
+    strip_trailing(H);
+
+    // Gd = G_n · D.
+    std::vector<Rational> Gd(Gn.size() + D.size() - 1U, Rational(BigInt(0)));
+    for (std::size_t i = 0; i < Gn.size(); ++i) {
+        for (std::size_t j = 0; j < D.size(); ++j) {
+            Gd[i + j] = Gd[i + j] + Gn[i] * D[j];
+        }
+    }
+    strip_trailing(Gd);
+
+    if (Gd.empty()) {
+        // Trivially y = 0.
         return ok(arena.make<IntegerLit>(BigInt(0)));
     }
 
     const int deg_D = static_cast<int>(D.size()) - 1;
-    const int deg_fn = Fn.empty() ? -1 : static_cast<int>(Fn.size()) - 1;
-    const int deg_gn = static_cast<int>(Gn.size()) - 1;
+    const int deg_H = H.empty() ? -1 : static_cast<int>(H.size()) - 1;
+    const int deg_Gd = static_cast<int>(Gd.size()) - 1;
 
-    // Degree bound for y.
-    int e_max = 0;
-    if (Fn.empty()) {
-        // f ≡ 0:  D·y' = g_n.  Solve as quadrature with denominator D.
-        // Degree of y: y' has degree e-1; D·y' has degree deg_D + e - 1 = deg_gn
-        //   ⇒  e = deg_gn − deg_D + 1.
-        e_max = deg_gn - deg_D + 1;
-        if (e_max < 0) {
-            // Try e = 0 (constant y): D · 0 = g_n ⇒ g_n ≡ 0, already handled.
-            return fail_unimpl("Risch DE rational: f≡0 and deg(g_n) < deg(D)−1");
-        }
-    } else if (deg_D - 1 > deg_fn) {
-        e_max = deg_gn - deg_D + 1;
-    } else if (deg_fn > deg_D - 1) {
-        e_max = deg_gn - deg_fn;
+    // Degree bound for P from the dominant-degree analysis of (*):
+    //   deg(D · P')     = deg_D + (deg_P − 1)   for deg_P ≥ 1
+    //   deg(H · P)      = deg_H + deg_P
+    //   deg(G_n · D)    = deg_Gd
+    // M_dom = max attainable contribution → equate to deg_Gd.
+    int M_bound;
+    if (deg_H >= deg_D - 1) {
+        // H · P term dominates (or ties).
+        M_bound = deg_Gd - deg_H;
     } else {
-        // Same dominant degree on both sides; take the larger room.
-        e_max = std::max(deg_gn - deg_fn, deg_gn - deg_D + 1);
+        // D · P' term dominates.
+        M_bound = deg_Gd - deg_D + 1;
     }
-    // Always allow at least the constant case.
-    if (e_max < 0) e_max = 0;
-    // Safety cap.
-    if (e_max > 256) return fail_unimpl("Risch DE rational: degree bound too large");
+    // Cancellation case (M_bound = deg_D) loses leading coefficient → allow extra slack.
+    if (M_bound < deg_D) M_bound = deg_D;
+    // Always allow degenerate constant solutions.
+    if (M_bound < 0) M_bound = 0;
+    // Safety cap (config knob; conservative for now).
+    if (M_bound > 256) return fail_unimpl("Risch DE rational: degree bound for P too large");
 
-    const std::size_t n_unk = static_cast<std::size_t>(e_max) + 1U;
-    // Number of equations: highest x-degree of (D·y' + f_n·y − g_n)
-    //   ≤ max(deg_D + e_max − 1, deg_fn + e_max, deg_gn).
-    int max_eq_deg = std::max({deg_gn,
-        deg_D + e_max - 1,
-        (deg_fn >= 0 ? deg_fn + e_max : -1)});
+    const std::size_t n_unk = static_cast<std::size_t>(M_bound) + 1U;
+    int max_eq_deg = std::max({deg_Gd,
+        deg_D + M_bound - 1,
+        (deg_H >= 0 ? deg_H + M_bound : -1)});
     if (max_eq_deg < 0) max_eq_deg = 0;
     const std::size_t n_eq = static_cast<std::size_t>(max_eq_deg) + 1U;
 
     std::vector<std::vector<Rational>> M(n_eq,
         std::vector<Rational>(n_unk + 1U, Rational(BigInt(0))));
     for (std::size_t j = 0; j < n_eq; ++j) {
-        // RHS: g_n[j].
-        if (j < Gn.size()) M[j][n_unk] = Gn[j];
-        // D · y' term:  coefficient of x^j in  Σ_p D_p x^p · Σ_k k·y_k x^{k-1}
-        //   = Σ_{p,k: p+k-1=j, k≥1} k · D_p · y_k.
-        for (std::size_t k = 1; k <= static_cast<std::size_t>(e_max); ++k) {
-            std::size_t p_needed_signed = j + 1U;
-            if (p_needed_signed < k) continue;
-            std::size_t p = p_needed_signed - k;
+        // RHS column.
+        if (j < Gd.size()) M[j][n_unk] = Gd[j];
+        // D · P' contribution: Σ_{p+k-1=j, k≥1} k · D_p · P_k.
+        for (std::size_t k = 1; k <= static_cast<std::size_t>(M_bound); ++k) {
+            std::size_t p_needed = j + 1U;
+            if (p_needed < k) continue;
+            std::size_t p = p_needed - k;
             if (p >= D.size()) continue;
             Rational add = Rational(BigInt(static_cast<std::int64_t>(k))) * D[p];
             M[j][k] = M[j][k] + add;
         }
-        // f_n · y term:  coefficient of x^j in  Σ_p Fn_p x^p · Σ_k y_k x^k
-        //   = Σ_{p,k: p+k=j} Fn_p · y_k.
-        for (std::size_t k = 0; k <= static_cast<std::size_t>(e_max); ++k) {
+        // H · P contribution: Σ_{p+k=j} H_p · P_k.
+        for (std::size_t k = 0; k <= static_cast<std::size_t>(M_bound); ++k) {
             if (k > j) break;
             std::size_t p = j - k;
-            if (p >= Fn.size()) continue;
-            M[j][k] = M[j][k] + Fn[p];
+            if (p >= H.size()) continue;
+            M[j][k] = M[j][k] + H[p];
         }
     }
 
-    // Gaussian elimination over Q with partial pivoting.
+    // Gaussian elimination over Q with partial pivoting (full RREF on pivot rows).
     const std::size_t cols = n_unk + 1U;
     std::size_t pivot_row = 0;
     for (std::size_t col = 0; col < n_unk && pivot_row < n_eq; ++col) {
         std::size_t best = pivot_row;
         while (best < n_eq && M[best][col].numerator().is_zero()) ++best;
-        if (best == n_eq) continue; // column without pivot → free variable
+        if (best == n_eq) continue;
         if (best != pivot_row) std::swap(M[best], M[pivot_row]);
         Rational pivot = M[pivot_row][col];
         for (std::size_t c = col; c < cols; ++c) M[pivot_row][c] = M[pivot_row][c] / pivot;
@@ -395,26 +427,33 @@ risch_extract_rational_coeffs(const algebra::PolyExpr& poly) {
         ++pivot_row;
     }
 
-    // Verify residual rows are zero.
     for (std::size_t r = pivot_row; r < n_eq; ++r) {
         if (!M[r][n_unk].numerator().is_zero()) {
             return fail_unimpl("Risch DE rational: inconsistent linear system");
         }
     }
 
-    // Read solution.  Pivot column k has y_k = RHS; non-pivot columns
-    // (free variables) default to 0.  Need to determine pivot columns
-    // by scanning each row's leading non-zero entry.
-    std::vector<Rational> y(n_unk, Rational(BigInt(0)));
+    std::vector<Rational> P(n_unk, Rational(BigInt(0)));
     for (std::size_t r = 0; r < pivot_row; ++r) {
-        std::size_t leading = n_unk; // sentinel = none
+        std::size_t leading = n_unk;
         for (std::size_t c = 0; c < n_unk; ++c) {
             if (!M[r][c].numerator().is_zero()) { leading = c; break; }
         }
-        if (leading < n_unk) y[leading] = M[r][n_unk];
+        if (leading < n_unk) P[leading] = M[r][n_unk];
     }
 
-    return ok(risch_build_poly_expr(arena, y, var));
+    // Build y = P(x) / D(x) and simplify.
+    ExprPtr P_expr = risch_build_poly_expr(arena, P, var);
+    // Fast path: P ≡ 0 ⇒ y = 0.
+    bool all_zero = true;
+    for (const auto& c : P) if (!c.numerator().is_zero()) { all_zero = false; break; }
+    if (all_zero) return ok(arena.make<IntegerLit>(BigInt(0)));
+
+    auto y_expr = ctx.simplify(arena.make<Binary>(BinaryOp::Div, P_expr, D_expr));
+    if (y_expr.is_error()) return y_expr;
+    auto y_together = algebra::together(y_expr.value(), ctx);
+    if (y_together.is_ok()) y_expr = ctx.simplify(y_together.value());
+    return y_expr;
 }
 
 // Dispatch: try polynomial-fast path first; if either f or g has a
