@@ -187,6 +187,46 @@ TEST_F(SpecialFunctionsTest, LegendreP_AtOne_Equals_One) {
 
 // HC-004: fresh symbol generator never collides with itself nor with
 // user-defined names.
+// L2-10 step: closed-form trig at n=5 / n=10 (Fermat prime 5).
+TEST_F(SpecialFunctionsTest, CosPiOverFive) {
+    expect_simplify_equiv("cos(pi/5)", "(1 + sqrt(5))/4");
+}
+TEST_F(SpecialFunctionsTest, CosTwoPiOverFive) {
+    expect_simplify_equiv("cos(2*pi/5)", "(sqrt(5) - 1)/4");
+}
+TEST_F(SpecialFunctionsTest, SinPiOverFive) {
+    expect_simplify_equiv("sin(pi/5)", "sqrt(10 - 2*sqrt(5))/4");
+}
+TEST_F(SpecialFunctionsTest, SinPiOverTen_EqualsCosTwoPiOverFive) {
+    // sin(π/10) and cos(2π/5) share the same closed form.
+    expect_simplify_equiv("sin(pi/10)", "(sqrt(5) - 1)/4");
+}
+TEST_F(SpecialFunctionsTest, GoldenRatioIdentityFromCosPiOverFive) {
+    // 2*cos(π/5) = golden ratio φ = (1 + sqrt(5))/2.
+    expect_simplify_equiv("2*cos(pi/5)", "(1 + sqrt(5))/2");
+}
+
+// L1-12: nested radical denesting sqrt(a + b·sqrt(c)).
+TEST_F(SpecialFunctionsTest, DenestSqrt_5_plus_2sqrt6) {
+    // sqrt(5 + 2*sqrt(6)) = sqrt(2) + sqrt(3).
+    expect_simplify_equiv("sqrt(5 + 2*sqrt(6))", "sqrt(2) + sqrt(3)");
+}
+
+TEST_F(SpecialFunctionsTest, DenestSqrt_7_minus_4sqrt3) {
+    // sqrt(7 - 4*sqrt(3)) = 2 - sqrt(3).
+    expect_simplify_equiv("sqrt(7 - 4*sqrt(3))", "2 - sqrt(3)");
+}
+
+TEST_F(SpecialFunctionsTest, DenestSqrt_3_plus_2sqrt2) {
+    // sqrt(3 + 2*sqrt(2)) = 1 + sqrt(2).
+    expect_simplify_equiv("sqrt(3 + 2*sqrt(2))", "1 + sqrt(2)");
+}
+
+TEST_F(SpecialFunctionsTest, DenestSqrt_9_plus_4sqrt5) {
+    // sqrt(9 + 4*sqrt(5)) = sqrt(5) + 2.  (a=9, b=4, c=5, disc=81-80=1).
+    expect_simplify_equiv("sqrt(9 + 4*sqrt(5))", "sqrt(5) + 2");
+}
+
 // L3-04: Beta function via Gamma identity.
 TEST_F(SpecialFunctionsTest, BetaIntegerArgsReducesToRational) {
     // B(2, 3) = Γ(2)Γ(3)/Γ(5) = 1·2/24 = 1/12.

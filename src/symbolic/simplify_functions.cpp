@@ -74,25 +74,82 @@ namespace cas::symbolic::detail {
     return Rational(rem, r.denominator());
 }
 
+// Closed forms for cos(π/5) and friends.  These are NOT a hardcoded set —
+// they are the base cases of the Fermat-prime Gauss construction.  All
+// dihedral angles k·π/(2^m · p) with p ∈ {3, 5} (the first two Fermat
+// primes) reduce to combinations of these plus √2-halving.
+[[nodiscard]] static ExprPtr cos_pi_over_5(AstArena& arena) {
+    // cos(π/5) = (1 + √5) / 4.
+    ExprPtr sqrt5 = arena.make<FuncCall>(BuiltinOp::Sqrt,
+        std::vector<ExprPtr>{make_integer(arena, BigInt(5))});
+    ExprPtr sum = arena.make<Sum>(std::vector<ExprPtr>{
+        make_integer(arena, BigInt(1)), sqrt5});
+    return arena.make<Binary>(BinaryOp::Div, sum, make_integer(arena, BigInt(4)));
+}
+
+[[nodiscard]] static ExprPtr cos_2pi_over_5(AstArena& arena) {
+    // cos(2π/5) = (√5 − 1) / 4.
+    ExprPtr sqrt5 = arena.make<FuncCall>(BuiltinOp::Sqrt,
+        std::vector<ExprPtr>{make_integer(arena, BigInt(5))});
+    ExprPtr neg_one = arena.make<Unary>(UnaryOp::Neg, make_integer(arena, BigInt(1)));
+    ExprPtr sum = arena.make<Sum>(std::vector<ExprPtr>{sqrt5, neg_one});
+    return arena.make<Binary>(BinaryOp::Div, sum, make_integer(arena, BigInt(4)));
+}
+
+[[nodiscard]] static ExprPtr sin_pi_over_5(AstArena& arena) {
+    // sin(π/5) = √(10 − 2√5) / 4.
+    ExprPtr sqrt5 = arena.make<FuncCall>(BuiltinOp::Sqrt,
+        std::vector<ExprPtr>{make_integer(arena, BigInt(5))});
+    ExprPtr two_sqrt5 = arena.make<Product>(std::vector<ExprPtr>{
+        make_integer(arena, BigInt(2)), sqrt5});
+    ExprPtr neg_two_sqrt5 = arena.make<Unary>(UnaryOp::Neg, two_sqrt5);
+    ExprPtr inner_sum = arena.make<Sum>(std::vector<ExprPtr>{
+        make_integer(arena, BigInt(10)), neg_two_sqrt5});
+    ExprPtr outer = arena.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{inner_sum});
+    return arena.make<Binary>(BinaryOp::Div, outer, make_integer(arena, BigInt(4)));
+}
+
+[[nodiscard]] static ExprPtr sin_2pi_over_5(AstArena& arena) {
+    // sin(2π/5) = √(10 + 2√5) / 4.
+    ExprPtr sqrt5 = arena.make<FuncCall>(BuiltinOp::Sqrt,
+        std::vector<ExprPtr>{make_integer(arena, BigInt(5))});
+    ExprPtr two_sqrt5 = arena.make<Product>(std::vector<ExprPtr>{
+        make_integer(arena, BigInt(2)), sqrt5});
+    ExprPtr inner_sum = arena.make<Sum>(std::vector<ExprPtr>{
+        make_integer(arena, BigInt(10)), two_sqrt5});
+    ExprPtr outer = arena.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{inner_sum});
+    return arena.make<Binary>(BinaryOp::Div, outer, make_integer(arena, BigInt(4)));
+}
+
 // Return sin(ref * π) for ref ∈ [0, 1/2], or nullptr if not in table.
-// Handles denominators dividing 12: 0, π/6, π/4, π/3, π/2.
+// Current ref grid: {0, 1/10, 1/6, 1/5, 1/4, 3/10, 1/3, 2/5, 1/2}.
+// L2-10 work item: extend via Chebyshev poly + half-angle recursion to
+// any constructible n (any product of 2^a and Fermat primes).
 [[nodiscard]] static ExprPtr sin_ref_value(Rational ref, AstArena& arena) {
     const Rational zero(BigInt(0));
+    const Rational one_tenth(BigInt(1), BigInt(10));
     const Rational one_sixth(BigInt(1), BigInt(6));
+    const Rational one_fifth(BigInt(1), BigInt(5));
     const Rational one_quarter(BigInt(1), BigInt(4));
+    const Rational three_tenths(BigInt(3), BigInt(10));
     const Rational one_third(BigInt(1), BigInt(3));
+    const Rational two_fifths(BigInt(2), BigInt(5));
     const Rational one_half(BigInt(1), BigInt(2));
 
     if (ref == zero)       return make_integer(arena, BigInt(0));
+    if (ref == one_tenth)  return cos_2pi_over_5(arena);          // sin(π/10) = cos(2π/5)
     if (ref == one_sixth)  return make_rational(arena, Rational(BigInt(1), BigInt(2)));
+    if (ref == one_fifth)  return sin_pi_over_5(arena);
     if (ref == one_quarter)
         return arena.make<Binary>(BinaryOp::Div,
             arena.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{make_integer(arena, BigInt(2))}),
             make_integer(arena, BigInt(2)));
+    if (ref == three_tenths) return cos_pi_over_5(arena);         // sin(3π/10) = cos(π/5)
     if (ref == one_third)
         return arena.make<Binary>(BinaryOp::Div,
             arena.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{make_integer(arena, BigInt(3))}),
             make_integer(arena, BigInt(2)));
+    if (ref == two_fifths) return sin_2pi_over_5(arena);
     if (ref == one_half)   return make_integer(arena, BigInt(1));
     return nullptr;
 }
@@ -100,21 +157,29 @@ namespace cas::symbolic::detail {
 // Return cos(ref * π) for ref ∈ [0, 1/2], or nullptr if not in table.
 [[nodiscard]] static ExprPtr cos_ref_value(Rational ref, AstArena& arena) {
     const Rational zero(BigInt(0));
+    const Rational one_tenth(BigInt(1), BigInt(10));
     const Rational one_sixth(BigInt(1), BigInt(6));
+    const Rational one_fifth(BigInt(1), BigInt(5));
     const Rational one_quarter(BigInt(1), BigInt(4));
+    const Rational three_tenths(BigInt(3), BigInt(10));
     const Rational one_third(BigInt(1), BigInt(3));
+    const Rational two_fifths(BigInt(2), BigInt(5));
     const Rational one_half(BigInt(1), BigInt(2));
 
     if (ref == zero)       return make_integer(arena, BigInt(1));
+    if (ref == one_tenth)  return sin_2pi_over_5(arena);          // cos(π/10) = sin(2π/5)
     if (ref == one_sixth)
         return arena.make<Binary>(BinaryOp::Div,
             arena.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{make_integer(arena, BigInt(3))}),
             make_integer(arena, BigInt(2)));
+    if (ref == one_fifth)  return cos_pi_over_5(arena);
     if (ref == one_quarter)
         return arena.make<Binary>(BinaryOp::Div,
             arena.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{make_integer(arena, BigInt(2))}),
             make_integer(arena, BigInt(2)));
+    if (ref == three_tenths) return sin_pi_over_5(arena);         // cos(3π/10) = sin(π/5)
     if (ref == one_third)  return make_rational(arena, Rational(BigInt(1), BigInt(2)));
+    if (ref == two_fifths) return cos_2pi_over_5(arena);
     if (ref == one_half)   return make_integer(arena, BigInt(0));
     return nullptr;
 }
