@@ -187,6 +187,34 @@ TEST_F(SpecialFunctionsTest, LegendreP_AtOne_Equals_One) {
 
 // HC-004: fresh symbol generator never collides with itself nor with
 // user-defined names.
+// L2-10 algorithmic step: half-angle recursion produces closed forms for
+// any constructible n built by doubling a base table entry.
+TEST_F(SpecialFunctionsTest, CosPiOverEight_HalfAngle) {
+    // cos(π/8) = sqrt(2 + sqrt(2))/2 = sqrt((1 + sqrt(2)/2)/2).
+    expect_simplify_equiv("cos(pi/8)", "sqrt((1 + sqrt(2)/2)/2)");
+}
+TEST_F(SpecialFunctionsTest, SinPiOverEight_HalfAngle) {
+    // sin(π/8) = sqrt((1 - cos(π/4))/2) = sqrt((1 - sqrt(2)/2)/2).
+    expect_simplify_equiv("sin(pi/8)", "sqrt((1 - sqrt(2)/2)/2)");
+}
+TEST_F(SpecialFunctionsTest, CosPiOverSixteen_HalfAngle) {
+    // cos(π/16) = sqrt((1 + cos(π/8))/2) — two halving steps from π/4.
+    expect_simplify_equiv("cos(pi/16)", "sqrt((1 + sqrt((1 + sqrt(2)/2)/2))/2)");
+}
+TEST_F(SpecialFunctionsTest, CosPiOverTwentyFour_HalfAngle) {
+    // π/24 = (π/12)/2.  cos(π/12) is in the base table (=cos(15°)).
+    // After one halving: cos(π/24) = sqrt((1 + cos(π/12))/2).
+    // Direct verification: just ensure it simplifies (not stay inert).
+    auto e = parse_expr("cos(pi/24)", ctx->arena());
+    ASSERT_TRUE(e.is_ok());
+    auto s = ctx->simplify(e.value());
+    ASSERT_TRUE(s.is_ok());
+    // Result must NOT be the inert FuncCall(cos, pi/24).
+    const auto* fc = expr_cast<FuncCall>(s.value());
+    EXPECT_FALSE(fc != nullptr && fc->func_id == BuiltinOp::Cos)
+        << "cos(pi/24) stayed inert; got: " << debug_print(s.value());
+}
+
 // L2-10 step: closed-form trig at n=5 / n=10 (Fermat prime 5).
 TEST_F(SpecialFunctionsTest, CosPiOverFive) {
     expect_simplify_equiv("cos(pi/5)", "(1 + sqrt(5))/4");

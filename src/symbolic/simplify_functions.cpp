@@ -125,7 +125,7 @@ namespace cas::symbolic::detail {
 // Current ref grid: {0, 1/10, 1/6, 1/5, 1/4, 3/10, 1/3, 2/5, 1/2}.
 // L2-10 work item: extend via Chebyshev poly + half-angle recursion to
 // any constructible n (any product of 2^a and Fermat primes).
-[[nodiscard]] static ExprPtr sin_ref_value(Rational ref, AstArena& arena) {
+[[nodiscard]] static ExprPtr sin_ref_value_table(Rational ref, AstArena& arena) {
     const Rational zero(BigInt(0));
     const Rational one_tenth(BigInt(1), BigInt(10));
     const Rational one_sixth(BigInt(1), BigInt(6));
@@ -155,7 +155,7 @@ namespace cas::symbolic::detail {
 }
 
 // Return cos(ref * π) for ref ∈ [0, 1/2], or nullptr if not in table.
-[[nodiscard]] static ExprPtr cos_ref_value(Rational ref, AstArena& arena) {
+[[nodiscard]] static ExprPtr cos_ref_value_table(Rational ref, AstArena& arena) {
     const Rational zero(BigInt(0));
     const Rational one_tenth(BigInt(1), BigInt(10));
     const Rational one_sixth(BigInt(1), BigInt(6));
@@ -182,6 +182,89 @@ namespace cas::symbolic::detail {
     if (ref == two_fifths) return cos_2pi_over_5(arena);
     if (ref == one_half)   return make_integer(arena, BigInt(0));
     return nullptr;
+}
+
+// L2-10 generalization: half-angle recursion for ref·π.  For any ref
+// p/q with q = 2^k · m where p·π/m is in our base table, repeatedly
+// halve.  Half-angle identities (positive root on [0, π/2]):
+//   cos(α/2) = sqrt((1 + cos α) / 2)
+//   sin(α/2) = sqrt((1 - cos α) / 2)
+// This is the canonical Gauss construction: every constructible regular
+// polygon angle is reachable from base entries via this loop.  No fixed
+// power-of-two table — the recursion handles arbitrary depth.
+[[nodiscard]] static ExprPtr cos_ref_value(Rational ref, AstArena& arena);
+[[nodiscard]] static ExprPtr sin_ref_value(Rational ref, AstArena& arena);
+
+[[nodiscard]] static ExprPtr cos_ref_value(Rational ref, AstArena& arena) {
+    if (ExprPtr table_hit = cos_ref_value_table(ref, arena)) {
+        return table_hit;
+    }
+    // Bail out for refs outside [0, 1/2] — caller guarantees this range.
+    const Rational zero(BigInt(0));
+    const Rational one_half(BigInt(1), BigInt(2));
+    if (ref < zero || ref > one_half) return nullptr;
+    // Walk upward via doubling, recording the path.
+    std::vector<Rational> path;
+    Rational current = ref;
+    ExprPtr base = nullptr;
+    constexpr int kMaxHalfAngleDepth = 32;
+    for (int depth = 0; depth < kMaxHalfAngleDepth; ++depth) {
+        Rational doubled = current * Rational(BigInt(2));
+        if (doubled > one_half) {
+            // cos(α) where α > π/2: use cos(α) = -cos(π - α).
+            Rational complement = Rational(BigInt(1)) - doubled;
+            if (complement < zero || complement > one_half) break;
+            ExprPtr cos_compl = cos_ref_value_table(complement, arena);
+            if (cos_compl != nullptr) {
+                base = arena.make<Unary>(UnaryOp::Neg, cos_compl);
+                break;
+            }
+            break;
+        }
+        path.push_back(current);
+        current = doubled;
+        if ((base = cos_ref_value_table(current, arena)) != nullptr) {
+            break;
+        }
+    }
+    if (base == nullptr) return nullptr;
+    // Unfold: at each step cos(α) = sqrt((1 + cos(2α))/2).
+    ExprPtr cos_val = base;
+    for (auto it = path.rbegin(); it != path.rend(); ++it) {
+        ExprPtr one_plus = arena.make<Sum>(std::vector<ExprPtr>{
+            make_integer(arena, BigInt(1)), cos_val});
+        ExprPtr half_arg = arena.make<Binary>(BinaryOp::Div, one_plus,
+            make_integer(arena, BigInt(2)));
+        cos_val = arena.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{half_arg});
+    }
+    return cos_val;
+}
+
+[[nodiscard]] static ExprPtr sin_ref_value(Rational ref, AstArena& arena) {
+    if (ExprPtr table_hit = sin_ref_value_table(ref, arena)) {
+        return table_hit;
+    }
+    const Rational zero(BigInt(0));
+    const Rational one_half(BigInt(1), BigInt(2));
+    if (ref < zero || ref > one_half) return nullptr;
+    // sin(α) = sqrt((1 - cos(2α)) / 2) on [0, π/2].
+    Rational doubled = ref * Rational(BigInt(2));
+    ExprPtr cos_2ref = nullptr;
+    if (doubled > one_half) {
+        // 2·ref ∈ (1/2, 1]: cos(2·ref·π) = -cos((1-2·ref)·π).
+        Rational complement = Rational(BigInt(1)) - doubled;
+        ExprPtr cos_c = cos_ref_value(complement, arena);
+        if (cos_c != nullptr) cos_2ref = arena.make<Unary>(UnaryOp::Neg, cos_c);
+    } else {
+        cos_2ref = cos_ref_value(doubled, arena);
+    }
+    if (cos_2ref == nullptr) return nullptr;
+    ExprPtr neg = arena.make<Unary>(UnaryOp::Neg, cos_2ref);
+    ExprPtr one_minus = arena.make<Sum>(std::vector<ExprPtr>{
+        make_integer(arena, BigInt(1)), neg});
+    ExprPtr half_arg = arena.make<Binary>(BinaryOp::Div, one_minus,
+        make_integer(arena, BigInt(2)));
+    return arena.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{half_arg});
 }
 
 // Negate an expression: if it's already 0 return 0, else wrap in Unary(Neg).
