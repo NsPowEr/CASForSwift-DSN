@@ -146,6 +146,7 @@ bool DepthGuard::exceeded() const { return simplification_depth > max_depth_; }
     switch (value) {
     case MathConstant::Pi:
     case MathConstant::E:
+    case MathConstant::EulerGamma:
     case MathConstant::Infinity: return true;
     default: return false;
     }

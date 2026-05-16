@@ -55,6 +55,8 @@ enum class BuiltinOp : std::uint16_t {
     LegendreP,
     Beta,
     Pochhammer,
+    Digamma,
+    Polygamma,
 };
 
 [[nodiscard]] constexpr BuiltinOp get_builtin_op(std::string_view name) noexcept {
@@ -107,6 +109,8 @@ enum class BuiltinOp : std::uint16_t {
     if (name == "LegendreP" || name == "legendreP") return BuiltinOp::LegendreP;
     if (name == "Beta" || name == "beta") return BuiltinOp::Beta;
     if (name == "Pochhammer" || name == "pochhammer") return BuiltinOp::Pochhammer;
+    if (name == "digamma" || name == "Digamma" || name == "psi") return BuiltinOp::Digamma;
+    if (name == "polygamma" || name == "Polygamma") return BuiltinOp::Polygamma;
     return BuiltinOp::Unknown;
 }
 
@@ -160,6 +164,8 @@ enum class BuiltinOp : std::uint16_t {
         case BuiltinOp::LegendreP: return "LegendreP";
         case BuiltinOp::Beta: return "Beta";
         case BuiltinOp::Pochhammer: return "Pochhammer";
+        case BuiltinOp::Digamma: return "digamma";
+        case BuiltinOp::Polygamma: return "polygamma";
         case BuiltinOp::Unknown: return "unknown";
     }
     return "unknown";

@@ -32,6 +32,8 @@ void count_occurrences(ExprPtr expr, std::unordered_map<ExprPtr, int>& counts) {
             count_occurrences(node.polynomial, counts);
         } else if constexpr (std::is_same_v<NodeT, Matrix>) {
             for (auto elem : node.elements) count_occurrences(elem, counts);
+        } else if constexpr (std::is_same_v<NodeT, Quantity>) {
+            count_occurrences(node.value, counts);
         }
     });
 }
@@ -56,7 +58,8 @@ int TextFormatter::precedence(ExprPtr expr) {
         using NodeT = std::decay_t<decltype(node)>;
         if constexpr (std::is_same_v<NodeT, IntegerLit> || std::is_same_v<NodeT, DecimalLit> || 
                       std::is_same_v<NodeT, Symbol> || std::is_same_v<NodeT, Constant> || 
-                      std::is_same_v<NodeT, FuncCall> || std::is_same_v<NodeT, Matrix>) {
+                      std::is_same_v<NodeT, FuncCall> || std::is_same_v<NodeT, Matrix> ||
+                      std::is_same_v<NodeT, Quantity>) {
             return 100; // Atomici
         } else if constexpr (std::is_same_v<NodeT, Unary>) {
             return 80;
@@ -120,6 +123,7 @@ std::string TextFormatter::format_internal(ExprPtr expr, std::unordered_map<Expr
                 case MathConstant::E: return "e";
                 case MathConstant::I: return "I";
                 case MathConstant::Infinity: return "inf";
+                case MathConstant::EulerGamma: return "EulerGamma";
                 default: return "const";
             }
         } else if constexpr (std::is_same_v<NodeT, Unary>) {
@@ -186,6 +190,29 @@ std::string TextFormatter::format_internal(ExprPtr expr, std::unordered_map<Expr
                 if (r < node.rows - 1) s += ", ";
             }
             return s + "]";
+        } else if constexpr (std::is_same_v<NodeT, Quantity>) {
+            std::string s = format_internal(node.value, cse_map);
+            if (node.dimensions.is_dimensionless()) return s;
+            
+            std::string unit_str;
+            auto append_unit = [&](const char* name, int16_t exp) {
+                if (exp == 0) return;
+                if (!unit_str.empty()) unit_str += "*";
+                unit_str += name;
+                if (exp != 1) {
+                    unit_str += "^" + std::to_string(exp);
+                }
+            };
+
+            append_unit("m", node.dimensions.m);
+            append_unit("kg", node.dimensions.kg);
+            append_unit("s", node.dimensions.s);
+            append_unit("A", node.dimensions.A);
+            append_unit("K", node.dimensions.K);
+            append_unit("mol", node.dimensions.mol);
+            append_unit("cd", node.dimensions.cd);
+
+            return s + "[" + unit_str + "]";
         }
         return "?";
     });

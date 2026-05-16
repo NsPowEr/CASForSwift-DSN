@@ -21,6 +21,9 @@ std::optional<MathConstant> parse_math_constant(std::string_view text) {
     if (text == "nan") {
         return MathConstant::NaN;
     }
+    if (text == "EulerGamma" || text == "eulergamma") {
+        return MathConstant::EulerGamma;
+    }
     return std::nullopt;
 }
 

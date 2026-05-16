@@ -41,6 +41,7 @@ enum class ExprKind : std::uint8_t {
     RootOf,
     Matrix,
     SeriesExp,
+    Quantity,
 };
 
 struct ExprNode {
@@ -84,6 +85,48 @@ public:
 
 private:
     const ExprNode* node_{nullptr};
+};
+
+struct SIDimensions {
+    int16_t m = 0;
+    int16_t kg = 0;
+    int16_t s = 0;
+    int16_t A = 0;
+    int16_t K = 0;
+    int16_t mol = 0;
+    int16_t cd = 0;
+
+    [[nodiscard]] constexpr bool operator==(const SIDimensions& other) const noexcept {
+        return m == other.m && kg == other.kg && s == other.s && A == other.A &&
+               K == other.K && mol == other.mol && cd == other.cd;
+    }
+
+    [[nodiscard]] constexpr bool operator!=(const SIDimensions& other) const noexcept {
+        return !(*this == other);
+    }
+
+    [[nodiscard]] constexpr bool operator<(const SIDimensions& other) const noexcept {
+        if (m != other.m) return m < other.m;
+        if (kg != other.kg) return kg < other.kg;
+        if (s != other.s) return s < other.s;
+        if (A != other.A) return A < other.A;
+        if (K != other.K) return K < other.K;
+        if (mol != other.mol) return mol < other.mol;
+        return cd < other.cd;
+    }
+
+    [[nodiscard]] constexpr bool is_dimensionless() const noexcept {
+        return m == 0 && kg == 0 && s == 0 && A == 0 && K == 0 && mol == 0 && cd == 0;
+    }
+};
+
+struct Quantity : ExprNode {
+    static constexpr ExprKind KIND = ExprKind::Quantity;
+
+    Quantity(ExprPtr val, SIDimensions dims) : ExprNode(KIND), value(val), dimensions(dims) {}
+
+    ExprPtr value;
+    SIDimensions dimensions;
 };
 
 [[nodiscard]] inline bool is_equal(ExprPtr lhs, ExprPtr rhs) noexcept {
@@ -139,6 +182,7 @@ enum class MathConstant : std::uint8_t {
     I,
     Infinity,
     NaN,
+    EulerGamma,
 };
 
 struct Constant : ExprNode {
@@ -172,6 +216,10 @@ enum class BinaryOp : std::uint8_t {
     Pow,
     Mod,
     Equal,
+    Less,
+    Greater,
+    LessEqual,
+    GreaterEqual,
 };
 
 struct Binary : ExprNode {
@@ -466,6 +514,8 @@ decltype(auto) visit_expr(ExprPtr expr, Visitor&& visitor) {
         return std::forward<Visitor>(visitor)(expr_ref<Matrix>(expr));
     case ExprKind::SeriesExp:
         return std::forward<Visitor>(visitor)(expr_ref<SeriesExp>(expr));
+    case ExprKind::Quantity:
+        return std::forward<Visitor>(visitor)(expr_ref<Quantity>(expr));
     case ExprKind::Null:
         std::abort();
     }

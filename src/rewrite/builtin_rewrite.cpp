@@ -78,6 +78,7 @@ namespace {
         switch (constant->value) {
             case MathConstant::Pi:
             case MathConstant::E:
+            case MathConstant::EulerGamma:
             case MathConstant::Infinity:
                 return true;
             case MathConstant::I:

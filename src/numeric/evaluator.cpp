@@ -41,6 +41,7 @@ Result<double> NumericEvaluator::evaluate(ExprPtr expr) {
                     case MathConstant::Pi: return ok(std::numbers::pi);
                     case MathConstant::E: return ok(std::numbers::e);
                     case MathConstant::Infinity: return ok(static_cast<double>(INFINITY));
+                    case MathConstant::EulerGamma: return ok(0.5772156649015328606);
                     default: return fail<double>(make_error(CASErrorKind::Unimplemented, "Constant not supported in numeric evaluator"));
                 }
             } else if constexpr (std::is_same_v<NodeT, Unary>) {
@@ -115,6 +116,66 @@ Result<double> NumericEvaluator::evaluate(ExprPtr expr) {
                 if (node.name == "atan2") return ok(std::atan2(args[0], args[1]));
                 
                 return fail<double>(make_error(CASErrorKind::Unimplemented, "Function '" + node.name + "' not supported in numeric evaluator"));
+            } else if constexpr (std::is_same_v<NodeT, RootOf>) {
+                // Newton-Raphson per trovare una radice numerica del polinomio P(x) = 0
+                const std::string& var_name = node.variable.name;
+                
+                // Salvataggio ambiente
+                auto old_it = env_.find(var_name);
+                std::optional<double> old_val;
+                if (old_it != env_.end()) old_val = old_it->second;
+
+                auto f = [&](double val) -> Result<double> {
+                    env_[var_name] = val;
+                    return evaluate(node.polynomial);
+                };
+
+                auto df = [&](double val) -> Result<double> {
+                    const double h = 1e-7;
+                    auto f1 = f(val + h);
+                    if (f1.is_error()) return f1;
+                    auto f2 = f(val - h);
+                    if (f2.is_error()) return f2;
+                    return ok((f1.value() - f2.value()) / (2.0 * h));
+                };
+
+                // Guess iniziale: usiamo l'indice per diversificare i punti di partenza
+                double x = 0.0;
+                if (node.root_index.has_value()) {
+                    // Mappa 0 -> 1.0, 1 -> -1.0, 2 -> 2.0, 3 -> -2.0, etc.
+                    // Questo aiuta a trovare radici diverse per indici diversi
+                    double idx = static_cast<double>(*node.root_index);
+                    if (*node.root_index % 2 == 0) x = (idx / 2.0) + 1.0;
+                    else x = -((idx + 1.0) / 2.0);
+                }
+                
+                bool found = false;
+                for (int attempt = 0; attempt < 10 && !found; ++attempt) {
+                    if (attempt > 0) {
+                        // Se il primo tentativo fallisce, proviamo una spirale
+                        x = (attempt % 2 == 0) ? static_cast<double>(attempt) : -static_cast<double>(attempt);
+                    }
+                    
+                    for (int i = 0; i < 50; ++i) {
+                        auto fx = f(x);
+                        if (fx.is_error()) break;
+                        if (std::abs(fx.value()) < 1e-10) { found = true; break; }
+
+                        auto dfx = df(x);
+                        if (dfx.is_error() || std::abs(dfx.value()) < 1e-15) break;
+
+                        double next_x = x - fx.value() / dfx.value();
+                        if (std::abs(next_x - x) < 1e-12) { found = true; x = next_x; break; }
+                        x = next_x;
+                    }
+                }
+
+                // Ripristino ambiente
+                if (old_val) env_[var_name] = *old_val;
+                else env_.erase(var_name);
+
+                if (found) return ok(x);
+                return fail<double>(make_error(CASErrorKind::Undefined, "Newton-Raphson failed to converge for RootOf"));
             } else {
                 return fail<double>(make_error(CASErrorKind::Unimplemented, "Node type not supported in numeric evaluator"));
             }

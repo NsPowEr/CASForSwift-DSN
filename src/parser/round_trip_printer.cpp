@@ -24,6 +24,8 @@ enum class ExprPrecedence : int {
     }
 
     switch (expr_kind(expr)) {
+    case ExprKind::RationalLit:
+        return static_cast<int>(ExprPrecedence::Product);
     case ExprKind::Sum:
         return static_cast<int>(ExprPrecedence::Sum);
     case ExprKind::Product:
@@ -41,7 +43,11 @@ enum class ExprPrecedence : int {
         case BinaryOp::Pow:
             return static_cast<int>(ExprPrecedence::Power);
         case BinaryOp::Equal:
-            return 10; // Lowest precedence for equality
+        case BinaryOp::Less:
+        case BinaryOp::Greater:
+        case BinaryOp::LessEqual:
+        case BinaryOp::GreaterEqual:
+            return 5; 
         }
     }
     case ExprKind::Unary: {
@@ -75,6 +81,8 @@ enum class ExprPrecedence : int {
         return ok(std::string("inf"));
     case MathConstant::NaN:
         return ok(std::string("nan"));
+    case MathConstant::EulerGamma:
+        return ok(std::string("EulerGamma"));
     }
     return fail<std::string>(make_round_trip_error(CASErrorKind::InternalError, "unknown constant"));
 }
@@ -122,7 +130,7 @@ private:
     }
 
     [[nodiscard]] Result<std::string> print_node(const IntegerLit& value, int) const {
-        return ok(value.value.is_negative() ? "-" + value.value.decimal() : value.value.decimal());
+        return ok(value.value.decimal());
     }
 
     [[nodiscard]] Result<std::string> print_node(const RationalLit& value, int) const {
@@ -190,7 +198,19 @@ private:
             op = "%";
             break;
         case BinaryOp::Equal:
-            op = "=";
+            op = "==";
+            break;
+        case BinaryOp::Less:
+            op = "<";
+            break;
+        case BinaryOp::Greater:
+            op = ">";
+            break;
+        case BinaryOp::LessEqual:
+            op = "<=";
+            break;
+        case BinaryOp::GreaterEqual:
+            op = ">=";
             break;
         }
 
@@ -362,6 +382,31 @@ private:
             out << "(" << value.terms[i].first << "," << coeff.value() << ")";
         }
         out << "]," << value.order << ")";
+        return ok(std::move(out).str());
+    }
+
+    [[nodiscard]] Result<std::string> print_node(const Quantity& value, int) const {
+        auto val_str = print_expr(value.value, static_cast<int>(ExprPrecedence::Lowest));
+        if (val_str.is_error()) return val_str;
+
+        std::ostringstream out;
+        out << "unit(" << val_str.value() << ",\"";
+        bool first = true;
+        auto append = [&](const char* name, int16_t exp) {
+            if (exp == 0) return;
+            if (!first) out << "*";
+            out << name;
+            if (exp != 1) out << "^" << exp;
+            first = false;
+        };
+        append("m", value.dimensions.m);
+        append("kg", value.dimensions.kg);
+        append("s", value.dimensions.s);
+        append("A", value.dimensions.A);
+        append("K", value.dimensions.K);
+        append("mol", value.dimensions.mol);
+        append("cd", value.dimensions.cd);
+        out << "\")";
         return ok(std::move(out).str());
     }
 };

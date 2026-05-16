@@ -187,6 +187,36 @@ TEST_F(SpecialFunctionsTest, LegendreP_AtOne_Equals_One) {
 
 // HC-004: fresh symbol generator never collides with itself nor with
 // user-defined names.
+// L3-04 step: Digamma / Polygamma closed forms.
+TEST_F(SpecialFunctionsTest, DigammaOne_NegativeEulerGamma) {
+    expect_simplify_equiv("digamma(1)", "-EulerGamma");
+}
+TEST_F(SpecialFunctionsTest, DigammaPositiveInteger_HarmonicSum) {
+    // ψ(4) = -γ + 1 + 1/2 + 1/3 = -γ + 11/6.
+    expect_simplify_equiv("digamma(4)", "-EulerGamma + 11/6");
+}
+TEST_F(SpecialFunctionsTest, DigammaOneHalf) {
+    // ψ(1/2) = -γ - 2·ln(2).
+    expect_simplify_equiv("digamma(1/2)", "-EulerGamma - 2*ln(2)");
+}
+TEST_F(SpecialFunctionsTest, DigammaThreeHalves_FunctionalEquation) {
+    // ψ(3/2) = -γ - 2 ln 2 + 2.
+    expect_simplify_equiv("digamma(3/2)", "-EulerGamma - 2*ln(2) + 2");
+}
+TEST_F(SpecialFunctionsTest, DigammaFunctionalEquationOnSymbol) {
+    // ψ(x+1) = ψ(x) + 1/x.
+    expect_simplify_equiv("digamma(x+1)", "digamma(x) + 1/x");
+}
+TEST_F(SpecialFunctionsTest, PolygammaZeroIsDigamma) {
+    expect_simplify_equiv("polygamma(0, 1)", "-EulerGamma");
+}
+TEST_F(SpecialFunctionsTest, PolygammaAtOne_AntiHardcode) {
+    // ψ'(1) = ζ(2) = π²/6.   ψ''(1) = -2·ζ(3).
+    expect_simplify_equiv("polygamma(1, 1)", "(pi^2)/6");
+    // Test for n=3:  ψ'''(1) = 6·ζ(4) = 6·π^4/90 = π^4/15.
+    expect_simplify_equiv("polygamma(3, 1)", "(pi^4)/15");
+}
+
 // L2-10 algorithmic step: half-angle recursion produces closed forms for
 // any constructible n built by doubling a base table entry.
 TEST_F(SpecialFunctionsTest, CosPiOverEight_HalfAngle) {

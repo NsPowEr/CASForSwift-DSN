@@ -34,6 +34,14 @@ namespace {
         return "Mod";
     case BinaryOp::Equal:
         return "Equal";
+    case BinaryOp::Less:
+        return "Less";
+    case BinaryOp::Greater:
+        return "Greater";
+    case BinaryOp::LessEqual:
+        return "LessEqual";
+    case BinaryOp::GreaterEqual:
+        return "GreaterEqual";
     }
 
     return "UnknownBinary";
@@ -51,6 +59,8 @@ namespace {
         return "Infinity";
     case MathConstant::NaN:
         return "NaN";
+    case MathConstant::EulerGamma:
+        return "EulerGamma";
     }
 
     return "UnknownConstant";
@@ -176,6 +186,27 @@ struct DebugPrintVisitor {
             out << "(" << value.terms[i].first << ", " << debug_print_impl(value.terms[i].second) << ")";
         }
         out << "], order=" << value.order << ")";
+        return std::move(out).str();
+    }
+
+    [[nodiscard]] std::string operator()(const Quantity& value) const {
+        std::ostringstream out;
+        out << "Quantity(" << debug_print_impl(value.value) << ", SI(";
+        bool first = true;
+        auto append = [&](const char* name, int16_t exp) {
+            if (exp == 0) return;
+            if (!first) out << ", ";
+            out << name << ":" << exp;
+            first = false;
+        };
+        append("m", value.dimensions.m);
+        append("kg", value.dimensions.kg);
+        append("s", value.dimensions.s);
+        append("A", value.dimensions.A);
+        append("K", value.dimensions.K);
+        append("mol", value.dimensions.mol);
+        append("cd", value.dimensions.cd);
+        out << "))";
         return std::move(out).str();
     }
 };
