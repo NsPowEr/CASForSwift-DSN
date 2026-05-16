@@ -1062,6 +1062,126 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const FuncCall& node
         }
     }
 
+    // L3-04: Chebyshev polynomial of the first kind T_n(x) via the standard
+    // three-term recurrence.  Algorithm scales to any non-negative integer n.
+    //   T_0 = 1,  T_1 = x,  T_{n+1} = 2x·T_n − T_{n−1}.
+    if (node.func_id == BuiltinOp::ChebyshevT && args.size() == 2U) {
+        if (const auto* il = expr_cast<IntegerLit>(args[0]); il != nullptr && !il->value.is_negative()) {
+            if (il->value.bit_length() > 16) {
+                return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
+                    "ChebyshevT: degree too large"));
+            }
+            const std::uint64_t n = il->value.to_u64();
+            ExprPtr x = args[1];
+            if (n == 0U) return ok(make_integer(arena_, BigInt(1)));
+            if (n == 1U) return ok(x);
+            ExprPtr t_prev = make_integer(arena_, BigInt(1));
+            ExprPtr t_curr = x;
+            for (std::uint64_t k = 1U; k < n; ++k) {
+                ExprPtr two_x_tk = arena_.make<Product>(std::vector<ExprPtr>{
+                    make_integer(arena_, BigInt(2)), x, t_curr});
+                ExprPtr neg_prev = arena_.make<Unary>(UnaryOp::Neg, t_prev);
+                ExprPtr next = arena_.make<Sum>(std::vector<ExprPtr>{two_x_tk, neg_prev});
+                auto s = simplify_expr(next);
+                if (s.is_error()) return s;
+                t_prev = t_curr;
+                t_curr = s.value();
+            }
+            return ok(t_curr);
+        }
+    }
+
+    // L3-04: Chebyshev polynomial of the second kind U_n(x).
+    //   U_0 = 1,  U_1 = 2x,  U_{n+1} = 2x·U_n − U_{n−1}.
+    if (node.func_id == BuiltinOp::ChebyshevU && args.size() == 2U) {
+        if (const auto* il = expr_cast<IntegerLit>(args[0]); il != nullptr && !il->value.is_negative()) {
+            if (il->value.bit_length() > 16) {
+                return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
+                    "ChebyshevU: degree too large"));
+            }
+            const std::uint64_t n = il->value.to_u64();
+            ExprPtr x = args[1];
+            if (n == 0U) return ok(make_integer(arena_, BigInt(1)));
+            ExprPtr two_x = arena_.make<Product>(std::vector<ExprPtr>{
+                make_integer(arena_, BigInt(2)), x});
+            if (n == 1U) return simplify_expr(two_x);
+            ExprPtr u_prev = make_integer(arena_, BigInt(1));
+            ExprPtr u_curr = two_x;
+            for (std::uint64_t k = 1U; k < n; ++k) {
+                ExprPtr two_x_uk = arena_.make<Product>(std::vector<ExprPtr>{
+                    make_integer(arena_, BigInt(2)), x, u_curr});
+                ExprPtr neg_prev = arena_.make<Unary>(UnaryOp::Neg, u_prev);
+                ExprPtr next = arena_.make<Sum>(std::vector<ExprPtr>{two_x_uk, neg_prev});
+                auto s = simplify_expr(next);
+                if (s.is_error()) return s;
+                u_prev = u_curr;
+                u_curr = s.value();
+            }
+            return ok(u_curr);
+        }
+    }
+
+    // L3-04: Hermite polynomial H_n(x) (physicist's convention).
+    //   H_0 = 1,  H_1 = 2x,  H_{n+1} = 2x·H_n − 2n·H_{n−1}.
+    if (node.func_id == BuiltinOp::HermiteH && args.size() == 2U) {
+        if (const auto* il = expr_cast<IntegerLit>(args[0]); il != nullptr && !il->value.is_negative()) {
+            if (il->value.bit_length() > 16) {
+                return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
+                    "HermiteH: degree too large"));
+            }
+            const std::uint64_t n = il->value.to_u64();
+            ExprPtr x = args[1];
+            if (n == 0U) return ok(make_integer(arena_, BigInt(1)));
+            ExprPtr two_x = arena_.make<Product>(std::vector<ExprPtr>{
+                make_integer(arena_, BigInt(2)), x});
+            if (n == 1U) return simplify_expr(two_x);
+            ExprPtr h_prev = make_integer(arena_, BigInt(1));
+            ExprPtr h_curr = two_x;
+            for (std::uint64_t k = 1U; k < n; ++k) {
+                ExprPtr two_x_hk = arena_.make<Product>(std::vector<ExprPtr>{
+                    make_integer(arena_, BigInt(2)), x, h_curr});
+                ExprPtr two_k = make_integer(arena_, BigInt(static_cast<std::int64_t>(2U * k)));
+                ExprPtr two_k_hprev = arena_.make<Product>(std::vector<ExprPtr>{two_k, h_prev});
+                ExprPtr neg = arena_.make<Unary>(UnaryOp::Neg, two_k_hprev);
+                ExprPtr next = arena_.make<Sum>(std::vector<ExprPtr>{two_x_hk, neg});
+                auto s = simplify_expr(next);
+                if (s.is_error()) return s;
+                h_prev = h_curr;
+                h_curr = s.value();
+            }
+            return ok(h_curr);
+        }
+    }
+
+    // L3-04: Hermite polynomial He_n(x) (probabilist's convention).
+    //   He_0 = 1,  He_1 = x,  He_{n+1} = x·He_n − n·He_{n−1}.
+    if (node.func_id == BuiltinOp::HermiteHe && args.size() == 2U) {
+        if (const auto* il = expr_cast<IntegerLit>(args[0]); il != nullptr && !il->value.is_negative()) {
+            if (il->value.bit_length() > 16) {
+                return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
+                    "HermiteHe: degree too large"));
+            }
+            const std::uint64_t n = il->value.to_u64();
+            ExprPtr x = args[1];
+            if (n == 0U) return ok(make_integer(arena_, BigInt(1)));
+            if (n == 1U) return ok(x);
+            ExprPtr h_prev = make_integer(arena_, BigInt(1));
+            ExprPtr h_curr = x;
+            for (std::uint64_t k = 1U; k < n; ++k) {
+                ExprPtr x_hk = arena_.make<Product>(std::vector<ExprPtr>{x, h_curr});
+                ExprPtr k_const = make_integer(arena_, BigInt(static_cast<std::int64_t>(k)));
+                ExprPtr k_hprev = arena_.make<Product>(std::vector<ExprPtr>{k_const, h_prev});
+                ExprPtr neg = arena_.make<Unary>(UnaryOp::Neg, k_hprev);
+                ExprPtr next = arena_.make<Sum>(std::vector<ExprPtr>{x_hk, neg});
+                auto s = simplify_expr(next);
+                if (s.is_error()) return s;
+                h_prev = h_curr;
+                h_curr = s.value();
+            }
+            return ok(h_curr);
+        }
+    }
+
     // L3-04: Legendre polynomial P_n(x) via Bonnet recurrence.
     //   P_0(x) = 1
     //   P_1(x) = x

@@ -57,6 +57,10 @@ enum class BuiltinOp : std::uint16_t {
     Pochhammer,
     Digamma,
     Polygamma,
+    ChebyshevT,
+    ChebyshevU,
+    HermiteH,
+    HermiteHe,
 };
 
 [[nodiscard]] constexpr BuiltinOp get_builtin_op(std::string_view name) noexcept {
@@ -111,6 +115,10 @@ enum class BuiltinOp : std::uint16_t {
     if (name == "Pochhammer" || name == "pochhammer") return BuiltinOp::Pochhammer;
     if (name == "digamma" || name == "Digamma" || name == "psi") return BuiltinOp::Digamma;
     if (name == "polygamma" || name == "Polygamma") return BuiltinOp::Polygamma;
+    if (name == "ChebyshevT" || name == "chebyshevT") return BuiltinOp::ChebyshevT;
+    if (name == "ChebyshevU" || name == "chebyshevU") return BuiltinOp::ChebyshevU;
+    if (name == "HermiteH" || name == "hermiteH") return BuiltinOp::HermiteH;
+    if (name == "HermiteHe" || name == "hermiteHe") return BuiltinOp::HermiteHe;
     return BuiltinOp::Unknown;
 }
 
@@ -166,6 +174,10 @@ enum class BuiltinOp : std::uint16_t {
         case BuiltinOp::Pochhammer: return "Pochhammer";
         case BuiltinOp::Digamma: return "digamma";
         case BuiltinOp::Polygamma: return "polygamma";
+        case BuiltinOp::ChebyshevT: return "ChebyshevT";
+        case BuiltinOp::ChebyshevU: return "ChebyshevU";
+        case BuiltinOp::HermiteH: return "HermiteH";
+        case BuiltinOp::HermiteHe: return "HermiteHe";
         case BuiltinOp::Unknown: return "unknown";
     }
     return "unknown";

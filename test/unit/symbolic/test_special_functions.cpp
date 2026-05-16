@@ -187,6 +187,39 @@ TEST_F(SpecialFunctionsTest, LegendreP_AtOne_Equals_One) {
 
 // HC-004: fresh symbol generator never collides with itself nor with
 // user-defined names.
+// L3-04: Chebyshev polynomials of the first / second kind.
+TEST_F(SpecialFunctionsTest, ChebyshevT_smallDegrees) {
+    expect_simplify_equiv("ChebyshevT(0, x)", "1");
+    expect_simplify_equiv("ChebyshevT(1, x)", "x");
+    expect_simplify_equiv("ChebyshevT(2, x)", "2*x^2 - 1");
+    expect_simplify_equiv("ChebyshevT(3, x)", "4*x^3 - 3*x");
+}
+TEST_F(SpecialFunctionsTest, ChebyshevU_smallDegrees) {
+    expect_simplify_equiv("ChebyshevU(0, x)", "1");
+    expect_simplify_equiv("ChebyshevU(1, x)", "2*x");
+    expect_simplify_equiv("ChebyshevU(2, x)", "4*x^2 - 1");
+    expect_simplify_equiv("ChebyshevU(3, x)", "8*x^3 - 4*x");
+}
+TEST_F(SpecialFunctionsTest, ChebyshevT_HighDegree_AntiHardcode) {
+    // T_5(x) = 16x^5 − 20x^3 + 5x.
+    expect_simplify_equiv("ChebyshevT(5, x)", "16*x^5 - 20*x^3 + 5*x");
+}
+
+// L3-04: Hermite polynomials (both conventions).
+TEST_F(SpecialFunctionsTest, HermiteH_PhysicistConvention) {
+    expect_simplify_equiv("HermiteH(0, x)", "1");
+    expect_simplify_equiv("HermiteH(1, x)", "2*x");
+    expect_simplify_equiv("HermiteH(2, x)", "4*x^2 - 2");
+    expect_simplify_equiv("HermiteH(3, x)", "8*x^3 - 12*x");
+    expect_simplify_equiv("HermiteH(4, x)", "16*x^4 - 48*x^2 + 12");
+}
+TEST_F(SpecialFunctionsTest, HermiteHe_ProbabilistConvention) {
+    expect_simplify_equiv("HermiteHe(0, x)", "1");
+    expect_simplify_equiv("HermiteHe(1, x)", "x");
+    expect_simplify_equiv("HermiteHe(2, x)", "x^2 - 1");
+    expect_simplify_equiv("HermiteHe(3, x)", "x^3 - 3*x");
+}
+
 // L3-04 step: Digamma / Polygamma closed forms.
 TEST_F(SpecialFunctionsTest, DigammaOne_NegativeEulerGamma) {
     expect_simplify_equiv("digamma(1)", "-EulerGamma");
