@@ -50,6 +50,8 @@ namespace {
 // order.  Needed because `laurent_series` reports leading_order = -m where m
 // is the pole order of the denominator: when the numerator also vanishes at
 // the center, the true effective order is larger.
+// HARDCODE-OF-PASSAGE: HC-006 — Scan window fissa = 8 per Laurent leading-order rescan.
+// Fix: esporre ctx.improper_leading_order_scan(). Vedi HARDCODE_LEDGER.md.
 [[nodiscard]] Result<int> effective_leading_order(
     ExprPtr expr,
     const Symbol& var,

@@ -617,6 +617,8 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const FuncCall& node
                 Rational factor(BigInt(1));
                 bool ok_chain = true;
                 int safety = 0;
+                // HARDCODE-OF-PASSAGE: HC-002 — Gamma half-integer recursion bound.
+                // Fix: esporre ctx.max_gamma_recursion(). Vedi HARDCODE_LEDGER.md.
                 const int safety_max = 1024;
                 while (z != half && safety++ < safety_max) {
                     if (z > half) {
@@ -817,6 +819,11 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const FuncCall& node
                 if (magu == 7U) return ok(arena_.make<RationalLit>(BigInt(1), BigInt(240)));
             }
             // Positive even integers: closed form via pi-power.
+            // HARDCODE-OF-PASSAGE: HC-003 — Zeta lookup table per nu in {2,4,6,8,10,12}.
+            // Viola REGOLA ZERO: scelta deliberata di lookup invece di Bernoulli generale.
+            // Fix: esporre bernoulli_numbers() (oggi static in summation.cpp:63) come API
+            // pubblica e usare formula closed-form ζ(2n) = (-1)^(n+1)·(2π)^(2n)·B_{2n}/(2(2n)!)
+            // per nu arbitrario. Vedi HARDCODE_LEDGER.md.
             if (n > BigInt(0)) {
                 std::uint64_t nu = n.to_u64();
                 if (nu % 2U == 0U && nu <= 12U) {

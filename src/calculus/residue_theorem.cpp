@@ -103,9 +103,9 @@ namespace {
         if (!r->numerator().is_zero()) {
             last_nonzero = k;
         }
-        // Heuristic stop: if we've seen k > current best + 8 zero coefficients,
-        // assume polynomial has terminated.  Polynomials over Q have finitely
-        // many nonzero terms; max_deg is the configured ceiling.
+        // HARDCODE-OF-PASSAGE: HC-005 — Early-exit fisso a 8 zeri consecutivi.
+        // Fix: usare algebra::parse_polynomial(expr, var, ctx) per ottenere
+        // direttamente size/degree esatti. Vedi HARDCODE_LEDGER.md.
         if (last_nonzero.has_value() && k > *last_nonzero + 8U) {
             return ok(last_nonzero);
         }

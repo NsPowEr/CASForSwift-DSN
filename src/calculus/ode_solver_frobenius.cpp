@@ -381,7 +381,9 @@ Result<ExprPtr> solve_ode_frobenius_at_zero(
     }
 
     // General solution: C1 * y_1 + C2 * y_2  (or single y_1 with C1 if only one root).
-    // TODO: replace with ctx.make_fresh_symbol("C") once that API exists.
+    // HARDCODE-OF-PASSAGE: HC-004 — Nomi costanti integrazione fissi "_C1_"/"_C2_".
+    // Fix: implementare CASContext::make_fresh_symbol("C") che ritorna simboli
+    // univoci tracciati da counter interno. Vedi HARDCODE_LEDGER.md.
     ExprPtr C1 = arena.make<Symbol>("_C1_");
     ExprPtr C2 = arena.make<Symbol>("_C2_");
 
