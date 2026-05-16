@@ -231,6 +231,27 @@ TEST_F(SpecialFunctionsTest, CosPiOverSixteen_HalfAngle) {
     // cos(π/16) = sqrt((1 + cos(π/8))/2) — two halving steps from π/4.
     expect_simplify_equiv("cos(pi/16)", "sqrt((1 + sqrt((1 + sqrt(2)/2)/2))/2)");
 }
+// Chebyshev T_p generalizes cos(p·π/q) for arbitrary p ≥ 2.
+TEST_F(SpecialFunctionsTest, CosThreePiOverSeven_Chebyshev_NonInert) {
+    // cos(3π/16) — q=16 reachable via half-angle, p=3 via T_3.
+    auto e = parse_expr("cos(3*pi/16)", ctx->arena());
+    ASSERT_TRUE(e.is_ok());
+    auto s = ctx->simplify(e.value());
+    ASSERT_TRUE(s.is_ok());
+    const auto* fc = expr_cast<FuncCall>(s.value());
+    EXPECT_FALSE(fc != nullptr && fc->func_id == BuiltinOp::Cos)
+        << "cos(3π/16) stayed inert; got: " << debug_print(s.value());
+}
+TEST_F(SpecialFunctionsTest, CosSevenPiOverSixteen_NonInert) {
+    auto e = parse_expr("cos(7*pi/16)", ctx->arena());
+    ASSERT_TRUE(e.is_ok());
+    auto s = ctx->simplify(e.value());
+    ASSERT_TRUE(s.is_ok());
+    const auto* fc = expr_cast<FuncCall>(s.value());
+    EXPECT_FALSE(fc != nullptr && fc->func_id == BuiltinOp::Cos)
+        << "cos(7π/16) stayed inert; got: " << debug_print(s.value());
+}
+
 TEST_F(SpecialFunctionsTest, CosPiOverTwentyFour_HalfAngle) {
     // π/24 = (π/12)/2.  cos(π/12) is in the base table (=cos(15°)).
     // After one halving: cos(π/24) = sqrt((1 + cos(π/12))/2).

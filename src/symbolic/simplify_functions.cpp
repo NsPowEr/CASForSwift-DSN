@@ -195,14 +195,12 @@ namespace cas::symbolic::detail {
 [[nodiscard]] static ExprPtr cos_ref_value(Rational ref, AstArena& arena);
 [[nodiscard]] static ExprPtr sin_ref_value(Rational ref, AstArena& arena);
 
-[[nodiscard]] static ExprPtr cos_ref_value(Rational ref, AstArena& arena) {
-    if (ExprPtr table_hit = cos_ref_value_table(ref, arena)) {
-        return table_hit;
-    }
+[[nodiscard]] static ExprPtr cos_ref_value_half_angle(Rational ref, AstArena& arena) {
     // Bail out for refs outside [0, 1/2] — caller guarantees this range.
     const Rational zero(BigInt(0));
     const Rational one_half(BigInt(1), BigInt(2));
     if (ref < zero || ref > one_half) return nullptr;
+    if (ExprPtr table_hit = cos_ref_value_table(ref, arena)) return table_hit;
     // Walk upward via doubling, recording the path.
     std::vector<Rational> path;
     Rational current = ref;
@@ -238,6 +236,37 @@ namespace cas::symbolic::detail {
         cos_val = arena.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{half_arg});
     }
     return cos_val;
+}
+
+[[nodiscard]] static ExprPtr cos_ref_value(Rational ref, AstArena& arena) {
+    // Step 1: half-angle / table dispatch handles ref = 1/q' (and refs in
+    // the base table directly).  Step 2 below applies T_p Chebyshev for
+    // ref = p/q with p > 1 — this completes L2-10 algorithmically.
+    if (ExprPtr direct = cos_ref_value_half_angle(ref, arena)) {
+        return direct;
+    }
+    // Step 2: Chebyshev T_p applied to cos(π/q).
+    //   cos(p · π / q) = T_p(cos(π/q)),   T_0 = 1,  T_1 = x,
+    //                                     T_{n+1} = 2x · T_n − T_{n−1}.
+    const BigInt& p = ref.numerator();
+    const BigInt& q = ref.denominator();
+    if (p <= BigInt(1) || q <= BigInt(1)) return nullptr;
+    if (p.bit_length() > 16) return nullptr;
+    Rational one_over_q(BigInt(1), q);
+    ExprPtr cos_q = cos_ref_value_half_angle(one_over_q, arena);
+    if (cos_q == nullptr) return nullptr;
+    const std::uint64_t p_u = p.to_u64();
+    ExprPtr T_prev = make_integer(arena, BigInt(1));   // T_0
+    ExprPtr T_curr = cos_q;                             // T_1
+    for (std::uint64_t k = 1U; k < p_u; ++k) {
+        ExprPtr two_x_Tk = arena.make<Product>(std::vector<ExprPtr>{
+            make_integer(arena, BigInt(2)), cos_q, T_curr});
+        ExprPtr neg_prev = arena.make<Unary>(UnaryOp::Neg, T_prev);
+        ExprPtr next = arena.make<Sum>(std::vector<ExprPtr>{two_x_Tk, neg_prev});
+        T_prev = T_curr;
+        T_curr = next;
+    }
+    return T_curr;
 }
 
 [[nodiscard]] static ExprPtr sin_ref_value(Rational ref, AstArena& arena) {
