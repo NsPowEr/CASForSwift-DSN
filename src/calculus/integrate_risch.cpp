@@ -14,6 +14,209 @@ namespace cas::calculus {
 
 namespace {
 
+// Extract a Rational from an expression that simplifies to a rational literal.
+[[nodiscard]] std::optional<Rational> risch_as_rational(ExprPtr e) {
+    if (const auto* lit = expr_cast<IntegerLit>(e)) return Rational(lit->value);
+    if (const auto* lit = expr_cast<RationalLit>(e)) {
+        return Rational(lit->numerator, lit->denominator);
+    }
+    if (const auto* un = expr_cast<Unary>(e); un && un->op == UnaryOp::Neg) {
+        if (auto inner = risch_as_rational(un->operand)) return -*inner;
+    }
+    return std::nullopt;
+}
+
+// Convert a PolyExpr (ExprPtr coefficients) to a vector<Rational> when every
+// coefficient is a literal rational.  Returns std::nullopt if any coefficient
+// depends on a symbol, on transcendentals, or on extensions.
+[[nodiscard]] std::optional<std::vector<Rational>>
+risch_extract_rational_coeffs(const algebra::PolyExpr& poly) {
+    std::vector<Rational> out;
+    out.reserve(poly.size());
+    for (ExprPtr c : poly.coefficients()) {
+        if (auto r = risch_as_rational(c)) {
+            out.push_back(*r);
+        } else {
+            return std::nullopt;
+        }
+    }
+    return out;
+}
+
+// Build an ExprPtr representing Σ_k c_k · var^k from rational coefficients.
+[[nodiscard]] ExprPtr risch_build_poly_expr(
+    AstArena& arena, const std::vector<Rational>& coeffs, const Symbol& var) {
+    std::vector<ExprPtr> terms;
+    terms.reserve(coeffs.size());
+    ExprPtr var_sym = arena.make<Symbol>(var);
+    for (std::size_t k = 0; k < coeffs.size(); ++k) {
+        const Rational& c = coeffs[k];
+        if (c.numerator().is_zero()) continue;
+        ExprPtr c_expr = (c.denominator() == BigInt(1))
+            ? static_cast<ExprPtr>(arena.make<IntegerLit>(c.numerator()))
+            : static_cast<ExprPtr>(arena.make<RationalLit>(c.numerator(), c.denominator()));
+        if (k == 0U) { terms.push_back(c_expr); continue; }
+        ExprPtr xk = (k == 1U)
+            ? var_sym
+            : static_cast<ExprPtr>(arena.make<Binary>(BinaryOp::Pow,
+                  var_sym,
+                  arena.make<IntegerLit>(BigInt(static_cast<std::int64_t>(k)))));
+        if (c.numerator() == BigInt(1) && c.denominator() == BigInt(1)) {
+            terms.push_back(xk);
+        } else {
+            terms.push_back(arena.make<Product>(std::vector<ExprPtr>{c_expr, xk}));
+        }
+    }
+    if (terms.empty()) return arena.make<IntegerLit>(BigInt(0));
+    if (terms.size() == 1U) return terms.front();
+    return arena.make<Sum>(std::move(terms));
+}
+
+// Solve  y' + f · y = g  for  y ∈ Q[var]
+// (Risch differential equation, polynomial-coefficient case).
+//
+// Given f, g polynomials in `var` with rational coefficients, returns the
+// unique polynomial solution y (if one exists), or CASErrorKind::Unimplemented
+// otherwise.  This generalises the previous "f must be a constant" inline
+// solver to arbitrary polynomial f via degree-bound + linear-system inversion,
+// following the standard Bronstein degree analysis (Symbolic Integration I,
+// §5.6).
+//
+// Degree analysis:
+//   deg(y')      = deg(y) − 1
+//   deg(f · y)   = deg(f) + deg(y)
+// The right-hand side g of degree d must therefore match the dominant
+// term on the left:
+//   • If deg(f) ≥ 1,   deg(f · y) > deg(y'),
+//                      so  d = deg(f) + deg(y)  ⇒  deg(y) = d − deg(f).
+//     If d < deg(f), no polynomial solution exists for nonzero g.
+//   • If deg(f) = 0 with f ≠ 0,  deg(y) = d (constant f case).
+//   • If f ≡ 0,        deg(y) = d + 1 (pure quadrature).
+//
+// With the degree e fixed, the e+1 unknown coefficients y_0..y_e are
+// determined by a square linear system over Q (one equation per power of
+// `var` in the identity y' + f·y = g).  Gaussian elimination over the
+// rationals returns the solution exactly.  Inconsistency or singular
+// system ⇒ Unimplemented (no polynomial y).
+[[nodiscard]] Result<ExprPtr> solve_risch_de_poly_q(
+    ExprPtr f_expr, ExprPtr g_expr, const Symbol& var, symbolic::CASContext& ctx) {
+    AstArena& arena = ctx.arena();
+    auto fail_unimpl = [&](const char* msg) {
+        return fail<ExprPtr>(CASError{CASErrorKind::Unimplemented, msg, std::nullopt});
+    };
+
+    auto f_poly_res = algebra::parse_polynomial(f_expr, var, ctx);
+    auto g_poly_res = algebra::parse_polynomial(g_expr, var, ctx);
+    if (f_poly_res.is_error()) return fail_unimpl("Risch DE: f is not a polynomial in the base variable");
+    if (g_poly_res.is_error()) return fail_unimpl("Risch DE: g is not a polynomial in the base variable");
+
+    auto f_opt = risch_extract_rational_coeffs(f_poly_res.value());
+    auto g_opt = risch_extract_rational_coeffs(g_poly_res.value());
+    if (!f_opt.has_value()) return fail_unimpl("Risch DE: f has non-rational coefficients");
+    if (!g_opt.has_value()) return fail_unimpl("Risch DE: g has non-rational coefficients");
+
+    std::vector<Rational> f = std::move(*f_opt);
+    std::vector<Rational> g = std::move(*g_opt);
+
+    auto strip_trailing_zeros = [](std::vector<Rational>& v) {
+        while (!v.empty() && v.back().numerator().is_zero()) v.pop_back();
+    };
+    strip_trailing_zeros(f);
+    strip_trailing_zeros(g);
+
+    if (g.empty()) {
+        // g ≡ 0: y = 0 is a solution.
+        return ok(arena.make<IntegerLit>(BigInt(0)));
+    }
+
+    const int deg_g = static_cast<int>(g.size()) - 1;
+    int deg_f = static_cast<int>(f.size()) - 1; // -1 when f ≡ 0.
+    int e;
+    if (f.empty()) {
+        // f ≡ 0:  y' = g  ⇒  y_{k+1} = g_k / (k+1) ; y_0 free, take 0.
+        std::vector<Rational> y(g.size() + 1, Rational(BigInt(0)));
+        for (std::size_t k = 0; k < g.size(); ++k) {
+            y[k + 1] = g[k] / Rational(BigInt(static_cast<std::int64_t>(k + 1)));
+        }
+        return ok(risch_build_poly_expr(arena, y, var));
+    }
+    if (deg_f == 0) {
+        e = deg_g;
+    } else {
+        if (deg_g < deg_f) return fail_unimpl("Risch DE: no polynomial solution (deg g < deg f)");
+        e = deg_g - deg_f;
+    }
+    if (e < 0) return fail_unimpl("Risch DE: negative degree bound");
+
+    // Build dense linear system M · y_vec = g_vec over Q.
+    // Equation index j ∈ [0, deg_g] picks out coefficient of var^j of
+    // y' + f·y - g.  Unknown vector y_vec = (y_0, …, y_e).
+    const std::size_t n_unk = static_cast<std::size_t>(e) + 1U;
+    const std::size_t n_eq = static_cast<std::size_t>(deg_g) + 1U;
+    std::vector<std::vector<Rational>> M(n_eq,
+        std::vector<Rational>(n_unk + 1U, Rational(BigInt(0))));
+    for (std::size_t j = 0; j < n_eq; ++j) {
+        // RHS: g[j].
+        M[j][n_unk] = (j < g.size()) ? g[j] : Rational(BigInt(0));
+        // y' contribution: coefficient of var^j of y' is (j+1)·y_{j+1}.
+        if (j + 1U <= static_cast<std::size_t>(e)) {
+            M[j][j + 1U] = M[j][j + 1U] + Rational(BigInt(static_cast<std::int64_t>(j + 1U)));
+        }
+        // f·y contribution: coefficient of var^j is Σ_k f_k · y_{j-k}.
+        for (std::size_t k = 0; k <= static_cast<std::size_t>(deg_f); ++k) {
+            if (k > j) break;
+            std::size_t idx = j - k;
+            if (idx > static_cast<std::size_t>(e)) continue;
+            M[j][idx] = M[j][idx] + f[k];
+        }
+    }
+
+    // Gaussian elimination with partial pivoting over Q.
+    auto sysop_timeout = ctx.timeout_check_interval(); (void)sysop_timeout;
+    const std::size_t cols = n_unk + 1U;
+    std::size_t pivot_row = 0;
+    for (std::size_t col = 0; col < n_unk && pivot_row < n_eq; ++col) {
+        std::size_t best = pivot_row;
+        while (best < n_eq && M[best][col].numerator().is_zero()) ++best;
+        if (best == n_eq) {
+            // No pivot in this column — unknown stays free.  Force to zero
+            // by recording no constraint; we still need a unique answer, so
+            // declare Unimplemented if any equation in lower rows depends
+            // on this unknown.  Detection happens by full RREF in a future
+            // generalisation; here we treat singular as Unimplemented.
+            return fail_unimpl("Risch DE: singular linear system (free variable in y)");
+        }
+        if (best != pivot_row) std::swap(M[best], M[pivot_row]);
+        Rational pivot = M[pivot_row][col];
+        for (std::size_t c = col; c < cols; ++c) M[pivot_row][c] = M[pivot_row][c] / pivot;
+        for (std::size_t r = 0; r < n_eq; ++r) {
+            if (r == pivot_row) continue;
+            Rational factor = M[r][col];
+            if (factor.numerator().is_zero()) continue;
+            for (std::size_t c = col; c < cols; ++c) {
+                M[r][c] = M[r][c] - factor * M[pivot_row][c];
+            }
+        }
+        ++pivot_row;
+    }
+
+    // Check residual equations beyond pivot_row: must all be zero for
+    // consistency.
+    for (std::size_t r = pivot_row; r < n_eq; ++r) {
+        if (!M[r][n_unk].numerator().is_zero()) {
+            return fail_unimpl("Risch DE: inconsistent linear system (no polynomial solution)");
+        }
+    }
+
+    // Read solution: row r has pivot in column r (after RREF on pivot rows).
+    std::vector<Rational> y(n_unk, Rational(BigInt(0)));
+    for (std::size_t r = 0; r < std::min(pivot_row, n_unk); ++r) {
+        y[r] = M[r][n_unk];
+    }
+
+    return ok(risch_build_poly_expr(arena, y, var));
+}
+
 // Integrate the polynomial-in-t part of a single logarithmic extension
 // tower:  ∫ Σ_{k=0..n} a_k(x) * t^k dx,   where t = ln(u(x)),  Dt = u'/u.
 //
@@ -199,35 +402,14 @@ Result<ExprPtr> integrate_risch(ExprPtr expr, const Symbol& var, symbolic::CASCo
                                 if (du_res.is_error()) return fail<ExprPtr>(du_res.error());
                                 ExprPtr du = du_res.value();
                                 
-                                auto solve_risch_de = [&](ExprPtr f, ExprPtr g) -> Result<ExprPtr> {
-                                    auto g_poly = algebra::parse_polynomial(g, var, context);
-                                    if (g_poly.is_ok()) {
-                                        std::vector<ExprPtr> y_coeffs(g_poly.value().size());
-                                        for (int i = static_cast<int>(g_poly.value().size()) - 1; i >= 0; --i) {
-                                            ExprPtr rhs = g_poly.value()[i];
-                                            if (i < static_cast<int>(g_poly.value().size()) - 1) {
-                                                ExprPtr next_c = arena.make<Binary>(BinaryOp::Mul,
-                                                    arena.make<IntegerLit>(BigInt(i + 1)), y_coeffs[i+1]);
-                                                auto rhs_sub = context.simplify(arena.make<Binary>(BinaryOp::Sub, rhs, next_c));
-                                                if (rhs_sub.is_error()) return fail<ExprPtr>(rhs_sub.error());
-                                                rhs = rhs_sub.value();
-                                            }
-                                            auto div_res_coeff = context.simplify(arena.make<Binary>(BinaryOp::Div, rhs, f));
-                                            if (div_res_coeff.is_error()) return fail<ExprPtr>(div_res_coeff.error());
-                                            // Verify result is polynomial: Risch DE has polynomial solution only if each coeff is polynomial
-                                            auto poly_check = algebra::parse_polynomial(div_res_coeff.value(), var, context);
-                                            if (poly_check.is_error()) {
-                                                return fail<ExprPtr>(CASError{CASErrorKind::Unimplemented,
-                                                    "Risch DE: no polynomial solution (coefficient is not polynomial)", std::nullopt});
-                                            }
-                                            y_coeffs[i] = div_res_coeff.value();
-                                        }
-                                        return algebra::polynomial_to_expr(algebra::PolyExpr(y_coeffs), var, context);
-                                    }
-                                    return fail<ExprPtr>(CASError{CASErrorKind::Unimplemented, "Risch DE: non-poly g", std::nullopt});
-                                };
-
-                                auto y_res = solve_risch_de(arena.make<Binary>(BinaryOp::Mul, arena.make<IntegerLit>(BigInt(k)), du), coeff);
+                                // Risch DE for the exponential extension at level k:
+                                //   y' + k · u' · y = a_k        (a_k = `coeff`)
+                                // Solved exactly over Q[var] via the polynomial-coefficient
+                                // engine `solve_risch_de_poly_q` (degree-bound + linear
+                                // system).  Handles every polynomial u, not just linear.
+                                ExprPtr f_expr = arena.make<Binary>(BinaryOp::Mul,
+                                    arena.make<IntegerLit>(BigInt(static_cast<std::int64_t>(k))), du);
+                                auto y_res = solve_risch_de_poly_q(f_expr, coeff, var, context);
                                 if (y_res.is_ok()) {
                                     ExprPtr t_pow = (k == 1) ? arena.make<Symbol>(t_top) : arena.make<Binary>(BinaryOp::Pow, arena.make<Symbol>(t_top), arena.make<IntegerLit>(BigInt(k)));
                                     int_terms.push_back(arena.make<Binary>(BinaryOp::Mul, y_res.value(), t_pow));
@@ -288,12 +470,21 @@ Result<ExprPtr> integrate_risch(ExprPtr expr, const Symbol& var, symbolic::CASCo
         auto back_res = field.from_field_generators(total_gen, context);
         if (back_res.is_error()) return back_res;
 
-        // Add polynomial integral part
-        bool poly_zero = expr_is<IntegerLit>(poly_integral_part) && expr_ref<IntegerLit>(poly_integral_part).value.is_zero();
+        // The polynomial integral part is also expressed in field generators
+        // (t_k symbols).  Mapping it back through from_field_generators is
+        // mandatory; otherwise high-degree polynomial Risch DE solutions like
+        //   ∫ (3x^3 + x) exp(x^2) dx  =  ((3/2) x^2 − 1) exp(x^2)
+        // would leak the t_0 symbol into the final result.
+        auto poly_back_res = field.from_field_generators(poly_integral_part, context);
+        if (poly_back_res.is_error()) return poly_back_res;
+        bool poly_zero = expr_is<IntegerLit>(poly_back_res.value())
+            && expr_ref<IntegerLit>(poly_back_res.value()).value.is_zero();
         if (poly_zero) return back_res;
-        bool back_zero = expr_is<IntegerLit>(back_res.value()) && expr_ref<IntegerLit>(back_res.value()).value.is_zero();
-        if (back_zero) return ok(poly_integral_part);
-        return context.simplify(arena.make<Sum>(std::vector<ExprPtr>{poly_integral_part, back_res.value()}));
+        bool back_zero = expr_is<IntegerLit>(back_res.value())
+            && expr_ref<IntegerLit>(back_res.value()).value.is_zero();
+        if (back_zero) return context.simplify(poly_back_res.value());
+        return context.simplify(arena.make<Sum>(std::vector<ExprPtr>{
+            poly_back_res.value(), back_res.value()}));
     }
 
     // Fallback to simpler cases if full Risch fails

@@ -97,5 +97,29 @@ TEST(IntegrationAdvancedTest, LnCubedAntiHardcode) {
     expect_integration_oracle("ln(x)^3", "x");
 }
 
+// Risch DE engine: polynomial-f case via the new linear-system solver.
+// Each integrand below produces an exp Risch DE  y' + n·u'·y = a_n  where
+// u is a non-linear polynomial (u = x^2, u = x^3 + x, …).  Previously the
+// solver required f to be constant; now any polynomial f works.
+TEST(IntegrationAdvancedTest, RischDE_ExpQuadraticArg_Constant) {
+    // ∫ x · exp(x^2) dx = exp(x^2) / 2.  u = x^2 → u' = 2x, f = 2x · k.
+    expect_integration_oracle("x*exp(x^2)", "x");
+}
+
+TEST(IntegrationAdvancedTest, RischDE_ExpQuadraticArg_HigherDegree) {
+    // ∫ (3x^3 + x) · exp(x^2) dx — non-trivial polynomial-f Risch DE.
+    expect_integration_oracle("(3*x^3 + x)*exp(x^2)", "x");
+}
+
+TEST(IntegrationAdvancedTest, RischDE_ExpCubicArg) {
+    // ∫ x^2 · exp(x^3) dx = exp(x^3) / 3.  Cubic argument u = x^3.
+    expect_integration_oracle("x^2*exp(x^3)", "x");
+}
+
+TEST(IntegrationAdvancedTest, RischDE_ExpQuarticArg_AntiHardcode) {
+    // ∫ x^3 · exp(x^4) dx = exp(x^4) / 4.  Quartic argument.
+    expect_integration_oracle("x^3*exp(x^4)", "x");
+}
+
 } // namespace
 } // namespace cas::calculus
