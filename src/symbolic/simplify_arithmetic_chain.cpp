@@ -241,65 +241,126 @@ Result<ExprPtr> Simplifier::simplify_product_factors(const std::vector<ExprPtr>&
     if (coefficient.numerator().is_zero()) return traced_result(RuleId::SimplifyMultiplyByZero, target_before, make_integer(arena_, BigInt(0)));
     merge_symbolic_factors(symbolic);
 
-    // GAP #4: Branch Cuts / Sqrt Product Merging
-    std::vector<ExprPtr> sqrt_args;
-    std::vector<std::pair<ExprPtr, BigInt>> other_symbolic;
-    for (auto& factor : symbolic) {
-        if (factor.second == BigInt(1)) {
-            if (const auto* call = expr_cast<FuncCall>(factor.first);
-                call != nullptr && call->func_id == BuiltinOp::Sqrt && call->args.size() == 1U) {
-                sqrt_args.push_back(call->args.front());
-                continue;
+    // L3-04 Gamma reflection identity (and 0-sum variant):
+    //   Γ(z) · Γ(1 − z) = π / sin(π z)
+    //   Γ(z) · Γ(−z)    = −π / (z · sin(π z))     (derived: Γ(z+1)=z·Γ(z) +
+    //                                              reflection on (z+1, −z))
+    // Scan symbolic factors (exponent 1) for pairs of Gamma calls whose
+    // argument sum is an integer m ∈ {0, 1} and rewrite via the
+    // corresponding closed form.  Pure algorithmic identity, no lookup.
+    {
+        auto gamma_arg = [](const std::pair<ExprPtr, BigInt>& p) -> ExprPtr {
+            if (p.second != BigInt(1)) return nullptr;
+            const auto* fc = expr_cast<FuncCall>(p.first);
+            if (fc == nullptr || fc->func_id != BuiltinOp::Gamma || fc->args.size() != 1U) {
+                return nullptr;
+            }
+            return fc->args[0];
+        };
+        bool reflected_any = false;
+        bool keep_scanning = true;
+        while (keep_scanning) {
+            keep_scanning = false;
+            std::vector<std::size_t> gamma_idx;
+            for (std::size_t i = 0; i < symbolic.size(); ++i) {
+                if (gamma_arg(symbolic[i]) != nullptr) gamma_idx.push_back(i);
+            }
+            for (std::size_t a = 0; a < gamma_idx.size() && !keep_scanning; ++a) {
+                for (std::size_t b = a + 1; b < gamma_idx.size() && !keep_scanning; ++b) {
+                    ExprPtr za = gamma_arg(symbolic[gamma_idx[a]]);
+                    ExprPtr zb = gamma_arg(symbolic[gamma_idx[b]]);
+                    if (za == nullptr || zb == nullptr) continue;
+                    ExprPtr sum_zz = arena_.make<Sum>(std::vector<ExprPtr>{za, zb});
+                    auto sum_simp = simplify_expr(sum_zz);
+                    if (sum_simp.is_error()) continue;
+                    const auto* m_lit = expr_cast<IntegerLit>(sum_simp.value());
+                    if (m_lit == nullptr) continue;
+                    // Only m ∈ {0, 1} have a closed form via reflection
+                    // alone — higher |m| would need a finite descending
+                    // chain via the functional equation, leave inert.
+                    const bool m_is_one = (m_lit->value == BigInt(1));
+                    const bool m_is_zero = m_lit->value.is_zero();
+                    if (!m_is_one && !m_is_zero) continue;
+                    ExprPtr pi_const = arena_.make<Constant>(MathConstant::Pi);
+                    ExprPtr pi_z = arena_.make<Product>(std::vector<ExprPtr>{pi_const, za});
+                    auto pi_z_simp = simplify_expr(pi_z);
+                    if (pi_z_simp.is_error()) continue;
+                    ExprPtr sin_call = arena_.make<FuncCall>(
+                        BuiltinOp::Sin, std::vector<ExprPtr>{pi_z_simp.value()});
+                    auto sin_simp = simplify_expr(sin_call);
+                    if (sin_simp.is_error()) continue;
+                    std::size_t ia = gamma_idx[a];
+                    std::size_t ib = gamma_idx[b];
+                    if (ia > ib) std::swap(ia, ib);
+                    symbolic.erase(symbolic.begin() + ib);
+                    symbolic.erase(symbolic.begin() + ia);
+                    symbolic.push_back({pi_const, BigInt(1)});
+                    symbolic.push_back({sin_simp.value(), BigInt(-1)});
+                    if (m_is_zero) {
+                        // Extra factor: -1 / z_a.
+                        coefficient *= Rational(BigInt(-1));
+                        symbolic.push_back({za, BigInt(-1)});
+                    }
+                    reflected_any = true;
+                    keep_scanning = true;
+                }
             }
         }
-        other_symbolic.push_back(std::move(factor));
+        if (reflected_any) merge_symbolic_factors(symbolic);
     }
 
-    if (sqrt_args.size() >= 2U) {
-        std::size_t known_nonnegative_count = 0;
-        for (const auto& arg : sqrt_args) if (is_known_nonnegative(arg)) known_nonnegative_count++;
-        if (known_nonnegative_count >= sqrt_args.size() - 1) {
-            auto inner_res = simplify_product_factors(sqrt_args, ExprPtr{}, true);
-            if (inner_res.is_ok()) {
-                ExprPtr merged_sqrt = arena_.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{inner_res.value()});
-                other_symbolic.push_back({merged_sqrt, BigInt(1)});
-            }
-        } else {
-            for (ExprPtr arg : sqrt_args) other_symbolic.push_back({arena_.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{arg}), BigInt(1)});
+    // Distribute over Sum
+    ExprPtr sum_factor = nullptr;
+    std::size_t sum_idx = 0;
+    bool found_sum = false;
+    for (std::size_t i = 0; i < symbolic.size(); ++i) {
+        if (symbolic[i].second == BigInt(1) && expr_is<Sum>(symbolic[i].first)) {
+            sum_factor = symbolic[i].first;
+            sum_idx = i;
+            found_sum = true;
+            break;
         }
-    } else if (!sqrt_args.empty()) {
-        other_symbolic.push_back({arena_.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{sqrt_args.front()}), BigInt(1)});
     }
-    symbolic = std::move(other_symbolic);
-    merge_symbolic_factors(symbolic);
 
-    // GAP #5: exp(a)*exp(b) -> exp(a+b)
-    std::vector<ExprPtr> exp_args;
-    std::vector<std::pair<ExprPtr, BigInt>> other_symbolic_exp;
-    for (auto& factor : symbolic) {
-        if (factor.second == BigInt(1)) {
-            if (const auto* call = expr_cast<FuncCall>(factor.first);
-                call != nullptr && call->func_id == BuiltinOp::Exp && call->args.size() == 1U) {
-                exp_args.push_back(call->args.front());
-                continue;
+    if (found_sum || (!(coefficient == Rational(BigInt(1))) && std::any_of(symbolic.begin(), symbolic.end(), [](const auto& p) { return expr_is<Sum>(p.first) && p.second == BigInt(1); }))) {
+        // Re-find if we only found it via coefficient check
+        if (!found_sum) {
+            for (std::size_t i = 0; i < symbolic.size(); ++i) {
+                if (symbolic[i].second == BigInt(1) && expr_is<Sum>(symbolic[i].first)) {
+                    sum_factor = symbolic[i].first;
+                    sum_idx = i;
+                    found_sum = true;
+                    break;
+                }
             }
         }
-        other_symbolic_exp.push_back(std::move(factor));
-    }
 
-    if (exp_args.size() >= 2U) {
-        auto inner_res = simplify_sum_terms(exp_args, ExprPtr{}, true);
-        if (inner_res.is_ok()) {
-            ExprPtr merged_exp = arena_.make<FuncCall>(BuiltinOp::Exp, std::vector<ExprPtr>{inner_res.value()});
-            other_symbolic_exp.push_back({merged_exp, BigInt(1)});
+        if (found_sum) {
+            const auto* sum = expr_cast<Sum>(sum_factor);
+            std::vector<std::pair<ExprPtr, BigInt>> other_symbolic = symbolic;
+            other_symbolic.erase(other_symbolic.begin() + sum_idx);
+            
+            std::vector<ExprPtr> distributed_terms;
+            for (ExprPtr term : sum->terms) {
+                std::vector<ExprPtr> factors_for_term;
+                if (!(coefficient == Rational(BigInt(1)))) {
+                    factors_for_term.push_back(make_rational(arena_, coefficient));
+                }
+                factors_for_term.push_back(term);
+                for (const auto& [base, exp] : other_symbolic) {
+                    factors_for_term.push_back(exp == BigInt(1) ? base : arena_.make<Binary>(BinaryOp::Pow, base, make_integer(arena_, exp)));
+                }
+                
+                auto prod = simplify_product_factors(factors_for_term, ExprPtr{}, false);
+                if (prod.is_error()) return prod;
+                distributed_terms.push_back(prod.value());
+            }
+            return simplify_sum_terms(distributed_terms, target_before, true);
         }
-    } else if (!exp_args.empty()) {
-        other_symbolic_exp.push_back({arena_.make<FuncCall>(BuiltinOp::Exp, std::vector<ExprPtr>{exp_args.front()}), BigInt(1)});
     }
-    symbolic = std::move(other_symbolic_exp);
-    merge_symbolic_factors(symbolic);
 
     std::vector<ExprPtr> normalized;
+
     bool is_neg = (coefficient == Rational(BigInt(-1)));
     if (!is_neg && (!(coefficient == Rational(BigInt(1))) || symbolic.empty())) normalized.push_back(make_rational(arena_, coefficient));
     for (const auto& [base, exp] : symbolic) {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cas/bigint.hpp"
+#include "cas/rational.hpp"
 #include "cas/result.hpp"
 
 #include <tuple>
@@ -40,5 +41,13 @@ struct IntegerFactorization {
     const Integer& a,
     const Integer& b,
     const Integer& c);
+
+// Bernoulli numbers B_0..B_n via Akiyama–Tanigawa.
+// B_0 = 1, B_1 = -1/2 (convention with B_1 negative), B_{2k+1} = 0 for k >= 1.
+// Returns vector of size (max_index + 1).
+[[nodiscard]] std::vector<Rational> bernoulli_numbers(unsigned int max_index);
+
+// Single Bernoulli number B_n. Convenience wrapper over bernoulli_numbers.
+[[nodiscard]] Rational bernoulli_number(unsigned int n);
 
 }  // namespace cas::numtheory

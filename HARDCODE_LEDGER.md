@@ -43,29 +43,6 @@
 - **Introdotto**: commit 42c5d62 (2026-05-15)
 - **Stato**: aperto
 
-### HC-003 — Zeta closed-form lookup table
-
-- **File**: `src/symbolic/simplify_functions.cpp`
-- **Riga**: switch sui valori `nu ∈ {2, 4, 6, 8, 10, 12}` con denominatori
-  hardcoded `6, 90, 945, 9450, 93555, 638512875` e numeratore speciale 691 per
-  `nu=12`.
-- **Categoria CLAUDE.md**: Cat 3 (Set finito che esclude input matematicamente
-  validi oltre la soglia) — È il caso classico vietato dalla REGOLA ZERO.
-- **Descrizione**: `zeta(2k)` per k ∈ {1..6} computato via lookup invece che via
-  formula generale `ζ(2n) = (-1)^(n+1) · (2π)^(2n) · B_{2n} / (2 (2n)!)`.
-  Conseguenza: `zeta(14)`, `zeta(16)`, ... non vengono semplificati anche se la
-  formula è esatta. **Scelta deliberata di passaggio per velocità — viola REGOLA
-  ZERO**.
-- **Fix corretto**: 
-  1. Esporre `bernoulli_numbers(n)` come API pubblica (attualmente
-     `static` in `src/calculus/summation.cpp:63`). Spostare in
-     `src/numtheory/bernoulli.cpp` con header `cas/numtheory.hpp`.
-  2. Sostituire lookup con loop generale che calcola `B_{2k}` e applica la
-     formula closed-form per qualsiasi `2k`.
-- **Blocking dependency**: nessuna (Bernoulli già implementato, solo da esporre).
-- **Introdotto**: commit 42c5d62 (2026-05-15)
-- **Stato**: aperto — **priorità alta** (viola direttamente REGOLA ZERO)
-
 ### HC-004 — Frobenius integration constants
 
 - **File**: `src/calculus/ode_solver_frobenius.cpp`
@@ -116,7 +93,29 @@
 
 ## Storico (risolti)
 
-_(nessuno per il momento — questo file è stato istituito al commit 42c5d62)_
+### HC-003 — Zeta closed-form lookup table — RISOLTO 2026-05-16
+
+- **File**: `src/symbolic/simplify_functions.cpp` (zeta block) + nuovo
+  `src/numtheory/bernoulli.cpp` + `include/cas/numtheory.hpp`.
+- **Categoria CLAUDE.md**: Cat 3 — REGOLA ZERO violation.
+- **Fix applicato**:
+  1. Esposto `cas::numtheory::bernoulli_numbers(unsigned)` e
+     `bernoulli_number(unsigned)` come API pubblica in
+     `include/cas/numtheory.hpp`. Implementazione spostata in
+     `src/numtheory/bernoulli.cpp` (Akiyama–Tanigawa).
+  2. `summation.cpp` ora consuma `cas::numtheory::bernoulli_numbers`
+     (rimossa la funzione `static` locale).
+  3. `cas_symbolic` linka `cas_numtheory` (CMake aggiornato).
+  4. `simplify_functions.cpp` zeta block: lookup `{2,4,6,8,10,12}` rimpiazzato
+     con formula generale `ζ(2k) = (-1)^(k+1) · 2^(2k-1) · π^(2k) · B_{2k}/(2k)!`
+     per qualsiasi `2k`. Negativi dispari `ζ(-(2k-1)) = -B_{2k}/(2k)` idem.
+  5. Test anti-hardcode aggiunti in
+     `test/unit/symbolic/test_special_functions.cpp`:
+     `ZetaFourteenViaBernoulli_AntiHardcode`,
+     `ZetaSixteenViaBernoulli_AntiHardcode`,
+     `ZetaNegativeNineViaBernoulli_AntiHardcode`,
+     `ZetaNegativeElevenViaBernoulli_AntiHardcode`. Tutti i test zeta
+     esistenti continuano a passare (10/10 verde).
 
 ---
 

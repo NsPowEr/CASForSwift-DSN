@@ -132,6 +132,7 @@ set(CAS_CALCULUS_SOURCES
 
 set(CAS_NUMTHEORY_SOURCES
     src/numtheory/arithmetic_functions.cpp
+    src/numtheory/bernoulli.cpp
     src/numtheory/modular.cpp
     src/numtheory/primality.cpp
 )
@@ -230,6 +231,8 @@ add_library(cas_numtheory STATIC ${CAS_NUMTHEORY_SOURCES})
 target_include_directories(cas_numtheory PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(cas_numtheory PUBLIC cas_foundation)
 target_compile_features(cas_numtheory PUBLIC cxx_std_20)
+
+target_link_libraries(cas_symbolic PUBLIC cas_numtheory)
 
 add_library(cas_algebra STATIC ${CAS_ALGEBRA_SOURCES})
 target_include_directories(cas_algebra PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

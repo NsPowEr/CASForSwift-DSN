@@ -2,6 +2,7 @@
 #include "cas/linalg/Matrix.hpp"
 #include "cas/numeric.hpp"
 #include "cas/algebra.hpp"
+#include "cas/numtheory.hpp"
 #include "../algebra/polynomial_internal.hpp"
 #include <algorithm>
 #include <iomanip>
@@ -704,6 +705,45 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const FuncCall& node
         }
     }
 
+    // L3-04: Legendre polynomial P_n(x) via Bonnet recurrence.
+    //   P_0(x) = 1
+    //   P_1(x) = x
+    //   (n+1) * P_{n+1}(x) = (2n+1) * x * P_n(x) - n * P_{n-1}(x)
+    // Pure algorithm — no hardcoded polynomial table, scales to any n.
+    if (node.func_id == BuiltinOp::LegendreP && args.size() == 2U) {
+        if (const auto* il = expr_cast<IntegerLit>(args[0]); il != nullptr && il->value >= BigInt(0)) {
+            if (il->value.bit_length() > 16) {
+                return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
+                    "LegendreP: degree too large for symbolic expansion"));
+            }
+            const std::uint64_t n = il->value.to_u64();
+            ExprPtr x = args[1];
+            if (n == 0U) return ok(make_integer(arena_, BigInt(1)));
+            if (n == 1U) return ok(x);
+            ExprPtr p_prev = make_integer(arena_, BigInt(1));
+            ExprPtr p_curr = x;
+            for (std::uint64_t k = 1U; k < n; ++k) {
+                // P_{k+1}(x) = a*x*P_k(x) - b*P_{k-1}(x),
+                // with  a = (2k+1)/(k+1),  b = k/(k+1).
+                Rational a(BigInt(static_cast<std::int64_t>(2U * k + 1U)),
+                           BigInt(static_cast<std::int64_t>(k + 1U)));
+                Rational b(BigInt(static_cast<std::int64_t>(k)),
+                           BigInt(static_cast<std::int64_t>(k + 1U)));
+                ExprPtr a_expr = make_rational(arena_, a);
+                ExprPtr b_expr = make_rational(arena_, b);
+                ExprPtr term1 = arena_.make<Product>(std::vector<ExprPtr>{a_expr, x, p_curr});
+                ExprPtr term2 = arena_.make<Product>(std::vector<ExprPtr>{b_expr, p_prev});
+                ExprPtr neg_term2 = arena_.make<Unary>(UnaryOp::Neg, term2);
+                ExprPtr next = arena_.make<Sum>(std::vector<ExprPtr>{term1, neg_term2});
+                auto simp = simplify_expr(next);
+                if (simp.is_error()) return simp;
+                p_prev = p_curr;
+                p_curr = simp.value();
+            }
+            return ok(p_curr);
+        }
+    }
+
     // P3-005: Re, Im, Conj over a + b*I form
     // Returns {real_part, imag_part} from Sum/Product containing Constant(I)
     auto extract_complex = [&](ExprPtr expr) -> std::optional<std::pair<ExprPtr, ExprPtr>> {
@@ -792,74 +832,84 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const FuncCall& node
             return simplify_expr(neg);
         }
     }
-    // Zeta special values:
-    //   zeta(0) = -1/2,  zeta(-2n) = 0 for n >= 1 (trivial zeros),
-    //   zeta(-1) = -1/12, zeta(-3) = 1/120, zeta(-5) = -1/252  (via Bernoulli),
-    //   zeta(2) = pi^2/6, zeta(4) = pi^4/90, zeta(6) = pi^6/945,
-    //   zeta(8) = pi^8/9450, zeta(10) = pi^10/93555.
-    // (Closed-form: zeta(2n) = (-1)^(n+1) * (2pi)^(2n) * B_{2n} / (2 (2n)!))
+    // Zeta closed-form values:
+    //   zeta(0) = -1/2
+    //   zeta(-2k) = 0  for k >= 1  (trivial zeros)
+    //   zeta(-(2k-1)) = -B_{2k} / (2k)            via Bernoulli, k >= 1
+    //   zeta(2k)      = (-1)^(k+1) · 2^(2k-1) · π^(2k) · B_{2k} / (2k)!   for k >= 1
+    //
+    // HC-003 resolved (2026-05-16): closed-form via cas::numtheory::bernoulli_numbers
+    // for arbitrary 2k, no more lookup. REGOLA ZERO satisfied.
     if (node.func_id == BuiltinOp::Zeta && args.size() == 1U) {
         if (const auto* il = expr_cast<IntegerLit>(args.front())) {
             const BigInt& n = il->value;
             if (n.is_zero()) {
                 return ok(arena_.make<RationalLit>(BigInt(-1), BigInt(2)));
             }
-            // Negative even integers: trivial zeros.
+            // Negative integers.
             if (n.is_negative()) {
                 BigInt mag = -n;
-                bool is_even = (mag.to_u64() % 2U) == 0U;
-                if (is_even) {
+                // bit_length guard: bound below context max_bigint_limbs implicit; here
+                // we only need to fit 2k in unsigned. Cap to avoid pathological inputs.
+                if (mag.bit_length() > 30) {
+                    return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
+                        "zeta: negative integer magnitude too large"));
+                }
+                const std::uint64_t magu = mag.to_u64();
+                if (magu % 2U == 0U) {
+                    // zeta(-2k) = 0
                     return ok(make_integer(arena_, BigInt(0)));
                 }
-                // Negative odd: zeta(-(2k-1)) = -B_{2k} / (2k).  We only do small cases.
-                std::uint64_t magu = mag.to_u64();
-                if (magu == 1U) return ok(arena_.make<RationalLit>(BigInt(-1), BigInt(12)));
-                if (magu == 3U) return ok(arena_.make<RationalLit>(BigInt(1), BigInt(120)));
-                if (magu == 5U) return ok(arena_.make<RationalLit>(BigInt(-1), BigInt(252)));
-                if (magu == 7U) return ok(arena_.make<RationalLit>(BigInt(1), BigInt(240)));
-            }
-            // Positive even integers: closed form via pi-power.
-            // HARDCODE-OF-PASSAGE: HC-003 — Zeta lookup table per nu in {2,4,6,8,10,12}.
-            // Viola REGOLA ZERO: scelta deliberata di lookup invece di Bernoulli generale.
-            // Fix: esporre bernoulli_numbers() (oggi static in summation.cpp:63) come API
-            // pubblica e usare formula closed-form ζ(2n) = (-1)^(n+1)·(2π)^(2n)·B_{2n}/(2(2n)!)
-            // per nu arbitrario. Vedi HARDCODE_LEDGER.md.
-            if (n > BigInt(0)) {
-                std::uint64_t nu = n.to_u64();
-                if (nu % 2U == 0U && nu <= 12U) {
-                    // Small lookup of even-zeta denominators (numerator = 1).
-                    BigInt denom;
-                    switch (nu) {
-                        case 2U:  denom = BigInt(6); break;
-                        case 4U:  denom = BigInt(90); break;
-                        case 6U:  denom = BigInt(945); break;
-                        case 8U:  denom = BigInt(9450); break;
-                        case 10U: denom = BigInt(93555); break;
-                        case 12U: denom = BigInt::parse("638512875").value(); break;
-                        default: denom = BigInt(0);
-                    }
-                    if (!denom.is_zero()) {
-                        ExprPtr pi_pow = arena_.make<Binary>(
-                            BinaryOp::Pow,
-                            arena_.make<Constant>(MathConstant::Pi),
-                            arena_.make<IntegerLit>(n));
-                        // For zeta(12) the numerator differs; recheck:
-                        //   zeta(2) = pi^2/6        num=1
-                        //   zeta(4) = pi^4/90       num=1
-                        //   zeta(6) = pi^6/945      num=1
-                        //   zeta(8) = pi^8/9450     num=1
-                        //   zeta(10) = pi^10/93555  num=1
-                        //   zeta(12) = 691*pi^12/638512875   num=691
-                        if (nu == 12U) {
-                            ExprPtr num = arena_.make<IntegerLit>(BigInt(691));
-                            ExprPtr prod = arena_.make<Product>(std::vector<ExprPtr>{num, pi_pow});
-                            return simplify_expr(arena_.make<Binary>(
-                                BinaryOp::Div, prod, arena_.make<IntegerLit>(denom)));
-                        }
-                        return simplify_expr(arena_.make<Binary>(
-                            BinaryOp::Div, pi_pow, arena_.make<IntegerLit>(denom)));
-                    }
+                // zeta(-(2k-1)) = -B_{2k} / (2k)
+                const unsigned int two_k = static_cast<unsigned int>(magu + 1U);
+                Rational b2k = cas::numtheory::bernoulli_number(two_k);
+                Rational result = -b2k / Rational(BigInt(static_cast<std::int64_t>(two_k)));
+                if (result.denominator() == BigInt(1)) {
+                    return ok(make_integer(arena_, result.numerator()));
                 }
+                return ok(arena_.make<RationalLit>(result.numerator(), result.denominator()));
+            }
+            // Positive integers.
+            if (n > BigInt(0)) {
+                if (n.bit_length() > 30) {
+                    return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
+                        "zeta: positive integer magnitude too large"));
+                }
+                const std::uint64_t nu = n.to_u64();
+                if (nu % 2U != 0U) {
+                    // zeta(odd positive) has no closed form in pi-powers — leave inert.
+                    return ok(target_before);
+                }
+                const unsigned int two_k = static_cast<unsigned int>(nu);
+                const unsigned int k = two_k / 2U;
+                // Compute 2^(2k-1) and (2k)! as BigInt.
+                BigInt two_pow(1);
+                for (unsigned int i = 0U; i < two_k - 1U; ++i) two_pow *= BigInt(2);
+                BigInt fact(1);
+                for (unsigned int i = 2U; i <= two_k; ++i) {
+                    fact *= BigInt(static_cast<std::int64_t>(i));
+                }
+                Rational b2k = cas::numtheory::bernoulli_number(two_k);
+                Rational coeff = b2k * Rational(two_pow, fact);
+                // Sign: (-1)^(k+1).  Equivalent to flipping when k is even
+                // (because B_{2k} already alternates sign starting at B_2 = +1/6).
+                if ((k % 2U) == 0U) {
+                    coeff = -coeff;
+                }
+                ExprPtr pi_pow = arena_.make<Binary>(
+                    BinaryOp::Pow,
+                    arena_.make<Constant>(MathConstant::Pi),
+                    arena_.make<IntegerLit>(n));
+                ExprPtr coeff_expr;
+                if (coeff.denominator() == BigInt(1)) {
+                    if (coeff.numerator() == BigInt(1)) {
+                        return simplify_expr(pi_pow);
+                    }
+                    coeff_expr = make_integer(arena_, coeff.numerator());
+                } else {
+                    coeff_expr = arena_.make<RationalLit>(coeff.numerator(), coeff.denominator());
+                }
+                return simplify_expr(arena_.make<Binary>(BinaryOp::Mul, coeff_expr, pi_pow));
             }
         }
     }

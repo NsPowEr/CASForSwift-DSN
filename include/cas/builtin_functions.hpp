@@ -52,6 +52,7 @@ enum class BuiltinOp : std::uint16_t {
     Im,
     Conj,
     Arg,
+    LegendreP,
 };
 
 [[nodiscard]] constexpr BuiltinOp get_builtin_op(std::string_view name) noexcept {
@@ -101,6 +102,7 @@ enum class BuiltinOp : std::uint16_t {
     if (name == "im" || name == "Im") return BuiltinOp::Im;
     if (name == "conj" || name == "conjugate") return BuiltinOp::Conj;
     if (name == "arg") return BuiltinOp::Arg;
+    if (name == "LegendreP" || name == "legendreP") return BuiltinOp::LegendreP;
     return BuiltinOp::Unknown;
 }
 
@@ -151,6 +153,7 @@ enum class BuiltinOp : std::uint16_t {
         case BuiltinOp::Im: return "im";
         case BuiltinOp::Conj: return "conj";
         case BuiltinOp::Arg: return "arg";
+        case BuiltinOp::LegendreP: return "LegendreP";
         case BuiltinOp::Unknown: return "unknown";
     }
     return "unknown";
