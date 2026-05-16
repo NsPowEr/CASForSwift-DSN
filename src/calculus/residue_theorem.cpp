@@ -12,6 +12,7 @@
 #include "cas/bigint.hpp"
 #include "cas/calculus.hpp"
 #include "cas/rational.hpp"
+#include "../algebra/polynomial_internal.hpp"
 
 #include <optional>
 #include <string>
@@ -85,32 +86,30 @@ namespace {
     return simplify_or_fail(div, ctx);
 }
 
-// Determine the degree of `f` in `var` by scanning Taylor coefficients
-// up to a soft cap (max_integration_depth).  Returns the highest index k
-// for which the coefficient is nonzero literal.  Returns nullopt if no
-// rational coefficient could be extracted.
+// Determine the degree of `f` in `var` using the algebra layer's exact
+// polynomial parser.  HC-005 closed: replaces the Taylor-coefficient scan
+// + "8 trailing zeros" early-exit with a deterministic structural parse.
+// Returns nullopt if `f` cannot be parsed as a polynomial in `var` with
+// rational coefficients (e.g. coefficients depend on other symbols).
 [[nodiscard]] Result<std::optional<std::size_t>> poly_degree_rational(
     ExprPtr f, const Symbol& var, symbolic::CASContext& ctx) {
-    const std::size_t max_deg = static_cast<std::size_t>(ctx.max_integration_depth());
-    std::optional<std::size_t> last_nonzero;
-    for (std::size_t k = 0U; k <= max_deg; ++k) {
-        auto c = poly_coeff_at_zero(f, var, static_cast<unsigned int>(k), ctx);
-        if (c.is_error()) return fail<std::optional<std::size_t>>(c.error());
-        auto r = as_rational(c.value());
+    auto parsed = algebra::parse_polynomial(f, var, ctx);
+    if (parsed.is_error()) {
+        return ok(std::optional<std::size_t>{});
+    }
+    const auto& poly = parsed.value();
+    if (poly.is_zero()) {
+        return ok(std::optional<std::size_t>{static_cast<std::size_t>(0U)});
+    }
+    // Verify every coefficient is a rational literal — required by the
+    // downstream extract_rational_coeffs contract.
+    for (const ExprPtr& c : poly.coefficients()) {
+        auto r = as_rational(c);
         if (!r.has_value()) {
             return ok(std::optional<std::size_t>{});
         }
-        if (!r->numerator().is_zero()) {
-            last_nonzero = k;
-        }
-        // HARDCODE-OF-PASSAGE: HC-005 — Early-exit fisso a 8 zeri consecutivi.
-        // Fix: usare algebra::parse_polynomial(expr, var, ctx) per ottenere
-        // direttamente size/degree esatti. Vedi HARDCODE_LEDGER.md.
-        if (last_nonzero.has_value() && k > *last_nonzero + 8U) {
-            return ok(last_nonzero);
-        }
     }
-    return ok(last_nonzero);
+    return ok(std::optional<std::size_t>{poly.degree()});
 }
 
 // Collect rational coefficients of a polynomial f in var, indices 0..degree.

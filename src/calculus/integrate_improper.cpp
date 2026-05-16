@@ -49,15 +49,17 @@ namespace {
 // expansion to find the first non-zero one and return the effective leading
 // order.  Needed because `laurent_series` reports leading_order = -m where m
 // is the pole order of the denominator: when the numerator also vanishes at
-// the center, the true effective order is larger.
-// HARDCODE-OF-PASSAGE: HC-006 — Scan window fissa = 8 per Laurent leading-order rescan.
-// Fix: esporre ctx.improper_leading_order_scan(). Vedi HARDCODE_LEDGER.md.
+// the center, the true effective order is larger.  HC-006 closed: window is
+// configurable via ctx.improper_leading_order_scan() (default 8).
 [[nodiscard]] Result<int> effective_leading_order(
     ExprPtr expr,
     const Symbol& var,
     ExprPtr center,
     symbolic::CASContext& ctx,
-    unsigned int scan_window = 8U) {
+    unsigned int scan_window = 0U) {
+    if (scan_window == 0U) {
+        scan_window = static_cast<unsigned int>(ctx.improper_leading_order_scan());
+    }
     auto laurent = laurent_series(expr, var, center, scan_window, ctx);
     if (laurent.is_error()) {
         return fail<int>(laurent.error());

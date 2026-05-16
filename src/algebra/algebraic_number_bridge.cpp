@@ -88,18 +88,15 @@ namespace {
 }
 
 // Recursion depth limit prevents accidental runaway on adversarial trees.
-// Real Q(alpha) expressions are shallow; 256 is more than ample.
-// HARDCODE-OF-PASSAGE: HC-001 — Bridge depth limit non configurabile.
-// Fix: esporre `ctx.max_q_alpha_bridge_depth()` in CASContext. Vedi HARDCODE_LEDGER.md.
-constexpr unsigned int kMaxBridgeDepth = 256U;
-
+// Real Q(alpha) expressions are shallow; configurable via
+// ctx.max_q_alpha_bridge_depth() (default 256).  HC-001 closed.
 [[nodiscard]] Result<std::optional<AlgebraicNumber>> express_recursive(
     ExprPtr e,
     ExprPtr alpha_expr,
     const AlgebraicNumber::CoeffVec& min_poly,
     symbolic::CASContext& ctx,
     unsigned int depth) {
-    if (depth > kMaxBridgeDepth) {
+    if (static_cast<std::size_t>(depth) > ctx.max_q_alpha_bridge_depth()) {
         return ok(std::optional<AlgebraicNumber>{});
     }
     if (!e) {

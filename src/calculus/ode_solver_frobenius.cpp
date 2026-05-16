@@ -380,12 +380,14 @@ Result<ExprPtr> solve_ode_frobenius_at_zero(
         series_solutions.push_back(y_res.value());
     }
 
-    // General solution: C1 * y_1 + C2 * y_2  (or single y_1 with C1 if only one root).
-    // HARDCODE-OF-PASSAGE: HC-004 — Nomi costanti integrazione fissi "_C1_"/"_C2_".
-    // Fix: implementare CASContext::make_fresh_symbol("C") che ritorna simboli
-    // univoci tracciati da counter interno. Vedi HARDCODE_LEDGER.md.
-    ExprPtr C1 = arena.make<Symbol>("_C1_");
-    ExprPtr C2 = arena.make<Symbol>("_C2_");
+    // General solution: C_1 * y_1 + C_2 * y_2  (or single y_1 with C_1 if
+    // only one root).  Constants generated through ctx.make_fresh_symbol
+    // (HC-004 closed): names are guaranteed not to collide with user
+    // symbols, no fixed "_C1_"/"_C2_" literal anywhere.
+    Symbol c1_sym = ctx.make_fresh_symbol("C");
+    Symbol c2_sym = ctx.make_fresh_symbol("C");
+    ExprPtr C1 = arena.make<Symbol>(c1_sym);
+    ExprPtr C2 = arena.make<Symbol>(c2_sym);
 
     if (series_solutions.size() == 1U) {
         ExprPtr total = arena.make<Binary>(BinaryOp::Mul, C1, series_solutions[0]);

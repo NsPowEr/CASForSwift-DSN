@@ -185,6 +185,27 @@ TEST_F(SpecialFunctionsTest, LegendreP_AtOne_Equals_One) {
     expect_simplify_equiv("LegendreP(5, 1)", "1");
 }
 
+// HC-004: fresh symbol generator never collides with itself nor with
+// user-defined names.
+TEST_F(SpecialFunctionsTest, MakeFreshSymbol_UniqueAndAvoidsUserScope) {
+    // Pre-populate context with user-defined variables that look like
+    // fresh-symbol candidates.
+    ctx->define(Symbol("C_1"), ctx->arena().make<IntegerLit>(BigInt(0)));
+    ctx->define(Symbol("C_2"), ctx->arena().make<IntegerLit>(BigInt(0)));
+    Symbol a = ctx->make_fresh_symbol("C");
+    Symbol b = ctx->make_fresh_symbol("C");
+    Symbol c = ctx->make_fresh_symbol("C");
+    EXPECT_NE(a.name, b.name);
+    EXPECT_NE(b.name, c.name);
+    EXPECT_NE(a.name, c.name);
+    EXPECT_NE(a.name, std::string("C_1"));
+    EXPECT_NE(a.name, std::string("C_2"));
+    EXPECT_NE(b.name, std::string("C_1"));
+    EXPECT_NE(b.name, std::string("C_2"));
+    EXPECT_NE(c.name, std::string("C_1"));
+    EXPECT_NE(c.name, std::string("C_2"));
+}
+
 TEST_F(SpecialFunctionsTest, DerivativeOfErfPreserved) {
     // d/dx erf(x) = 2/sqrt(pi) * exp(-x^2).  Regression check: ensure the
     // derivative survives (mathematically_equal across Pow(-1)/Div forms is

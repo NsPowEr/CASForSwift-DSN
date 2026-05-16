@@ -403,6 +403,49 @@ void CASContext::set_gcd_error_probability(double prob) noexcept {
     gcd_error_probability_ = prob;
 }
 
+void CASContext::set_max_rootof_explicit_degree(std::size_t deg) noexcept {
+    max_rootof_explicit_degree_ = (deg < 1U) ? 1U : deg;
+}
+
+void CASContext::set_max_gcd_recursion_depth(std::size_t depth) noexcept {
+    max_gcd_recursion_depth_ = (depth < 4U) ? 4U : depth;
+}
+
+void CASContext::set_min_gcd_division_steps(std::size_t steps) noexcept {
+    min_gcd_division_steps_ = (steps < 1U) ? 1U : steps;
+}
+
+void CASContext::set_max_cyclotomic_n(int n) noexcept {
+    max_cyclotomic_n_ = n;
+}
+
+void CASContext::set_max_q_alpha_bridge_depth(std::size_t depth) noexcept {
+    max_q_alpha_bridge_depth_ = (depth < 8U) ? 8U : depth;
+}
+
+void CASContext::set_max_gamma_recursion(std::size_t iters) noexcept {
+    max_gamma_recursion_ = (iters < 16U) ? 16U : iters;
+}
+
+void CASContext::set_improper_leading_order_scan(std::size_t window) noexcept {
+    improper_leading_order_scan_ = (window < 1U) ? 1U : window;
+}
+
+Symbol CASContext::make_fresh_symbol(const std::string& prefix) {
+    // Probe candidate names of the form "<prefix>_<n>" with monotonically
+    // increasing n until the name is not present in the user-defined
+    // variable map.  The internal counter guarantees we never return
+    // the same name twice from one context.
+    std::string base = prefix.empty() ? std::string("_g") : prefix;
+    while (true) {
+        ++fresh_symbol_counter_;
+        std::string candidate = base + "_" + std::to_string(fresh_symbol_counter_);
+        if (variables_.find(candidate) == variables_.end()) {
+            return Symbol(candidate);
+        }
+    }
+}
+
 void CASContext::clear_caches() noexcept {
     simplify_cache_.clear();
     diff_cache_.clear();

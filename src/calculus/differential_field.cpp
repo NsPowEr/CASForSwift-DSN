@@ -368,7 +368,7 @@ Result<ExprPtr> integrate_rothstein_trager(
     ExprPtr dQ = dQ_res.value();
 
     // t must be a fresh variable not appearing in P or Q.
-    const Symbol t_fresh("_rt_t_");
+    const Symbol t_fresh = ctx.make_fresh_symbol("rt_t");
     ExprPtr t_sym = arena.make<Symbol>(t_fresh.name);
     ExprPtr t_dQ = arena.make<Product>(std::vector<ExprPtr>{t_sym, dQ});
     ExprPtr A = arena.make<Binary>(BinaryOp::Sub, P, t_dQ);

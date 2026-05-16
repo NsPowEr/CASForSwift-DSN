@@ -617,10 +617,11 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const FuncCall& node
                 // Build accumulator as a rational factor f, then multiply by sqrt(pi).
                 Rational factor(BigInt(1));
                 bool ok_chain = true;
-                int safety = 0;
-                // HARDCODE-OF-PASSAGE: HC-002 — Gamma half-integer recursion bound.
-                // Fix: esporre ctx.max_gamma_recursion(). Vedi HARDCODE_LEDGER.md.
-                const int safety_max = 1024;
+                std::size_t safety = 0;
+                // HC-002 closed: bound exposed via ctx.max_gamma_recursion()
+                // (default 1024).  Distinguished failure mode below.
+                const std::size_t safety_max = (context_ != nullptr)
+                    ? context_->max_gamma_recursion() : 1024U;
                 while (z != half && safety++ < safety_max) {
                     if (z > half) {
                         // Gamma(z) = (z-1) * Gamma(z-1)

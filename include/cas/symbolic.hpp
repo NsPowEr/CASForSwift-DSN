@@ -249,6 +249,36 @@ public:
     void set_gcd_error_probability(double prob) noexcept;
     [[nodiscard]] double gcd_error_probability() const noexcept { return gcd_error_probability_; }
 
+    void set_max_rootof_explicit_degree(std::size_t deg) noexcept;
+    [[nodiscard]] std::size_t max_rootof_explicit_degree() const noexcept { return max_rootof_explicit_degree_; }
+
+    void set_max_gcd_recursion_depth(std::size_t depth) noexcept;
+    [[nodiscard]] std::size_t max_gcd_recursion_depth() const noexcept { return max_gcd_recursion_depth_; }
+
+    void set_min_gcd_division_steps(std::size_t steps) noexcept;
+    [[nodiscard]] std::size_t min_gcd_division_steps() const noexcept { return min_gcd_division_steps_; }
+
+    // -1 = auto-derive from polynomial degree (2*(deg+1)); set to higher value for unusual composites
+    void set_max_cyclotomic_n(int n) noexcept;
+    [[nodiscard]] int max_cyclotomic_n() const noexcept { return max_cyclotomic_n_; }
+
+    // HC-001..006 configurable knobs.
+    void set_max_q_alpha_bridge_depth(std::size_t depth) noexcept;
+    [[nodiscard]] std::size_t max_q_alpha_bridge_depth() const noexcept { return max_q_alpha_bridge_depth_; }
+    void set_max_gamma_recursion(std::size_t iters) noexcept;
+    [[nodiscard]] std::size_t max_gamma_recursion() const noexcept { return max_gamma_recursion_; }
+    void set_improper_leading_order_scan(std::size_t window) noexcept;
+    [[nodiscard]] std::size_t improper_leading_order_scan() const noexcept { return improper_leading_order_scan_; }
+
+    // HC-004: fresh symbol generator.  Returns a Symbol whose name is unique
+    // within this context across all previous make_fresh_symbol calls AND
+    // does not collide with any name currently registered through `define`.
+    // The returned Symbol is guaranteed unique by construction: an internal
+    // counter is monotonically incremented and the candidate name is
+    // probed against the user-defined variable map until a free slot is
+    // found.
+    [[nodiscard]] Symbol make_fresh_symbol(const std::string& prefix);
+
     [[nodiscard]] Result<ExprPtr> simplify(ExprPtr expr);
     [[nodiscard]] Result<ExprPtr> substitute(ExprPtr expr, const Symbol& variable, ExprPtr value);
 
@@ -289,6 +319,14 @@ public:
     int max_simplification_depth_{300};
     std::size_t max_integration_depth_{16U};
     double gcd_error_probability_{0.001};
+    std::size_t max_rootof_explicit_degree_{2U};
+    std::size_t max_gcd_recursion_depth_{16U};
+    std::size_t min_gcd_division_steps_{8U};
+    int max_cyclotomic_n_{-1};
+    std::size_t max_q_alpha_bridge_depth_{256U};
+    std::size_t max_gamma_recursion_{1024U};
+    std::size_t improper_leading_order_scan_{8U};
+    std::uint64_t fresh_symbol_counter_{0U};
 
 public:
 // Performance Caches
