@@ -128,24 +128,33 @@ int compare_growth(ExprPtr a, ExprPtr b, const Symbol& var, symbolic::CASContext
     b = positive_growth_part(b);
     if (structural_equal(a, b)) return 0;
 
+    // Dynamic rank matching limit_infinite.cpp::get_growth_rank (Cat 10):
+    //   exp(arg) -> rank(arg) + 1  (so nested towers grow strictly)
+    //   log(arg) -> max(rank(arg) - 1, 0)
     auto get_growth_rank_impl = [&](ExprPtr e, const auto& self) -> int {
         if (!depends_on(e, var)) return 0;
-        if (const auto* call = expr_cast<FuncCall>(e)) {
-            if (call->func_id == BuiltinOp::Ln) return 1;
+        if (const auto* unary = expr_cast<Unary>(e)) {
+            if (unary->op == UnaryOp::Neg) return self(unary->operand, self);
+        }
+        if (const auto* call = expr_cast<FuncCall>(e); call != nullptr && call->args.size() == 1U) {
             if (call->func_id == BuiltinOp::Exp) {
                 auto arg_limit = try_infinite_limit(
                     call->args.front(),
                     var,
                     ctx.arena().make<Constant>(MathConstant::Infinity),
                     ctx.arena());
-                if (arg_limit.is_ok() && limit_is_infinity(arg_limit.value())) {
-                    return expr_is<Unary>(arg_limit.value()) ? 0 : 3;
+                // exp of an arg that goes to -infinity decays to 0: rank 0.
+                if (arg_limit.is_ok() && limit_is_infinity(arg_limit.value())
+                    && expr_is<Unary>(arg_limit.value())) {
+                    return 0;
                 }
-                return 3;
+                int inner = self(call->args.front(), self);
+                return inner + 1;
             }
-        }
-        if (const auto* unary = expr_cast<Unary>(e)) {
-            if (unary->op == UnaryOp::Neg) return self(unary->operand, self);
+            if (call->func_id == BuiltinOp::Ln || call->func_id == BuiltinOp::Log) {
+                int inner = self(call->args.front(), self);
+                return inner > 1 ? inner - 1 : 0;
+            }
         }
         if (const auto* product = expr_cast<Product>(e)) {
             int rank = 0;
@@ -167,6 +176,15 @@ int compare_growth(ExprPtr a, ExprPtr b, const Symbol& var, symbolic::CASContext
             }
             if (binary->op == BinaryOp::Add || binary->op == BinaryOp::Sub) {
                 return std::max(self(binary->left, self), self(binary->right, self));
+            }
+            if (binary->op == BinaryOp::Pow) {
+                const bool exp_dep = depends_on(binary->right, var);
+                const bool base_dep = depends_on(binary->left, var);
+                if (!exp_dep) return self(binary->left, self);
+                if (!base_dep) return self(binary->right, self) + 1;
+                int g = self(binary->right, self);
+                int ln_f = self(binary->left, self);
+                return g + (ln_f > 1 ? ln_f - 1 : 0) + 1;
             }
         }
         return 2;  // polynomial or mixed expression depending on var
@@ -190,11 +208,13 @@ int compare_growth(ExprPtr a, ExprPtr b, const Symbol& var, symbolic::CASContext
         }
     }
 
-    // exp(f) vs exp(g) is decided by f vs g, recursively.
-    if (ra == 3) {
+    // exp(f) vs exp(g) is decided by f vs g, recursively.  Applies at any
+    // depth in the exponential tower (ra == rb >= 3 with both exp).
+    if (ra >= 3) {
         const auto* ca = expr_cast<FuncCall>(a);
         const auto* cb = expr_cast<FuncCall>(b);
-        if (ca && cb && !ca->args.empty() && !cb->args.empty()) {
+        if (ca && cb && ca->func_id == BuiltinOp::Exp && cb->func_id == BuiltinOp::Exp
+            && !ca->args.empty() && !cb->args.empty()) {
             return compare_growth(ca->args.front(), cb->args.front(), var, ctx);
         }
     }
