@@ -217,6 +217,219 @@ risch_extract_rational_coeffs(const algebra::PolyExpr& poly) {
     return ok(risch_build_poly_expr(arena, y, var));
 }
 
+// Solve  y' + f · y = g  for  y ∈ Q[var]  with f, g RATIONAL in `var`.
+//
+// Strategy (Bronstein §6.1 simplified for the polynomial-y case):
+//   1. Decompose f and g into num/den via `algebra::apart_num_den`.
+//   2. Compute the common denominator D = lcm(den(f), den(g)) (here taken
+//      as den(f)·den(g) divided by gcd; falls back to product when gcd is
+//      a unit).  Multiply through:
+//          D · y' + f_n · y = g_n
+//      where  f_n = f · D    and   g_n = g · D    are polynomials in var.
+//   3. Hypothesise y ∈ Q[var] of degree ≤ e_max.  The dominant-degree
+//      analysis is now over the extended identity:
+//          deg(D · y')    = deg(D) + e − 1   (if y' ≠ 0)
+//          deg(f_n · y)   = deg(f_n) + e
+//          deg(g_n)
+//      e_max is chosen as deg(g_n) − min(deg(D)−1, deg(f_n)) when positive;
+//      we then build a square Q-linear system and read off the solution.
+//      The special case e = 0 (y constant) is checked separately to avoid
+//      false negatives when the D·y' term vanishes identically.
+//
+// Returns the polynomial y as ExprPtr, or Unimplemented if no polynomial
+// solution exists / the rational structure cannot be canonicalised.
+[[nodiscard]] Result<ExprPtr> solve_risch_de_rational_q(
+    ExprPtr f_expr, ExprPtr g_expr, const Symbol& var, symbolic::CASContext& ctx) {
+    AstArena& arena = ctx.arena();
+    auto fail_unimpl = [&](const char* msg) {
+        return fail<ExprPtr>(CASError{CASErrorKind::Unimplemented, msg, std::nullopt});
+    };
+
+    // Decompose into num/den.
+    auto f_parts = algebra::apart_num_den(f_expr, ctx);
+    auto g_parts = algebra::apart_num_den(g_expr, ctx);
+    if (f_parts.is_error()) return fail_unimpl("Risch DE rational: cannot split f into num/den");
+    if (g_parts.is_error()) return fail_unimpl("Risch DE rational: cannot split g into num/den");
+
+    ExprPtr fn = f_parts.value().numerator;
+    ExprPtr fd = f_parts.value().denominator;
+    ExprPtr gn = g_parts.value().numerator;
+    ExprPtr gd = g_parts.value().denominator;
+
+    // Compute D = lcm(fd, gd) via D = fd · gd / gcd(fd, gd).
+    auto gcd_fd_gd = algebra::polynomial_gcd(fd, gd, var, ctx);
+    ExprPtr D_expr;
+    if (gcd_fd_gd.is_ok()) {
+        ExprPtr prod = ctx.arena().make<Binary>(BinaryOp::Mul, fd, gd);
+        auto prod_simp = ctx.simplify(prod);
+        if (prod_simp.is_error()) return prod_simp;
+        auto D_div = ctx.simplify(arena.make<Binary>(BinaryOp::Div, prod_simp.value(), gcd_fd_gd.value()));
+        if (D_div.is_error()) return D_div;
+        D_expr = D_div.value();
+    } else {
+        // Fallback to product (over-shoots, still correct).
+        auto prod_simp = ctx.simplify(arena.make<Binary>(BinaryOp::Mul, fd, gd));
+        if (prod_simp.is_error()) return prod_simp;
+        D_expr = prod_simp.value();
+    }
+
+    // Scale: f_n_full = fn · (D / fd),  g_n_full = gn · (D / gd).  Both
+    // must reduce to polynomials in var with rational coefficients.
+    auto D_over_fd = ctx.simplify(arena.make<Binary>(BinaryOp::Div, D_expr, fd));
+    if (D_over_fd.is_error()) return D_over_fd;
+    auto D_over_gd = ctx.simplify(arena.make<Binary>(BinaryOp::Div, D_expr, gd));
+    if (D_over_gd.is_error()) return D_over_gd;
+    auto fn_full = ctx.simplify(arena.make<Binary>(BinaryOp::Mul, fn, D_over_fd.value()));
+    if (fn_full.is_error()) return fn_full;
+    auto gn_full = ctx.simplify(arena.make<Binary>(BinaryOp::Mul, gn, D_over_gd.value()));
+    if (gn_full.is_error()) return gn_full;
+
+    auto D_poly_res = algebra::parse_polynomial(D_expr, var, ctx);
+    auto fn_poly_res = algebra::parse_polynomial(fn_full.value(), var, ctx);
+    auto gn_poly_res = algebra::parse_polynomial(gn_full.value(), var, ctx);
+    if (D_poly_res.is_error()) return fail_unimpl("Risch DE rational: D not polynomial");
+    if (fn_poly_res.is_error()) return fail_unimpl("Risch DE rational: f_n not polynomial");
+    if (gn_poly_res.is_error()) return fail_unimpl("Risch DE rational: g_n not polynomial");
+
+    auto D_opt = risch_extract_rational_coeffs(D_poly_res.value());
+    auto fn_opt = risch_extract_rational_coeffs(fn_poly_res.value());
+    auto gn_opt = risch_extract_rational_coeffs(gn_poly_res.value());
+    if (!D_opt || !fn_opt || !gn_opt) return fail_unimpl("Risch DE rational: non-rational coefficients");
+
+    std::vector<Rational> D = std::move(*D_opt);
+    std::vector<Rational> Fn = std::move(*fn_opt);
+    std::vector<Rational> Gn = std::move(*gn_opt);
+
+    auto strip_trailing = [](std::vector<Rational>& v) {
+        while (!v.empty() && v.back().numerator().is_zero()) v.pop_back();
+    };
+    strip_trailing(D); strip_trailing(Fn); strip_trailing(Gn);
+
+    if (D.empty()) return fail_unimpl("Risch DE rational: zero denominator");
+
+    if (Gn.empty()) {
+        // g ≡ 0  ⇒  y = 0 is a solution.
+        return ok(arena.make<IntegerLit>(BigInt(0)));
+    }
+
+    const int deg_D = static_cast<int>(D.size()) - 1;
+    const int deg_fn = Fn.empty() ? -1 : static_cast<int>(Fn.size()) - 1;
+    const int deg_gn = static_cast<int>(Gn.size()) - 1;
+
+    // Degree bound for y.
+    int e_max = 0;
+    if (Fn.empty()) {
+        // f ≡ 0:  D·y' = g_n.  Solve as quadrature with denominator D.
+        // Degree of y: y' has degree e-1; D·y' has degree deg_D + e - 1 = deg_gn
+        //   ⇒  e = deg_gn − deg_D + 1.
+        e_max = deg_gn - deg_D + 1;
+        if (e_max < 0) {
+            // Try e = 0 (constant y): D · 0 = g_n ⇒ g_n ≡ 0, already handled.
+            return fail_unimpl("Risch DE rational: f≡0 and deg(g_n) < deg(D)−1");
+        }
+    } else if (deg_D - 1 > deg_fn) {
+        e_max = deg_gn - deg_D + 1;
+    } else if (deg_fn > deg_D - 1) {
+        e_max = deg_gn - deg_fn;
+    } else {
+        // Same dominant degree on both sides; take the larger room.
+        e_max = std::max(deg_gn - deg_fn, deg_gn - deg_D + 1);
+    }
+    // Always allow at least the constant case.
+    if (e_max < 0) e_max = 0;
+    // Safety cap.
+    if (e_max > 256) return fail_unimpl("Risch DE rational: degree bound too large");
+
+    const std::size_t n_unk = static_cast<std::size_t>(e_max) + 1U;
+    // Number of equations: highest x-degree of (D·y' + f_n·y − g_n)
+    //   ≤ max(deg_D + e_max − 1, deg_fn + e_max, deg_gn).
+    int max_eq_deg = std::max({deg_gn,
+        deg_D + e_max - 1,
+        (deg_fn >= 0 ? deg_fn + e_max : -1)});
+    if (max_eq_deg < 0) max_eq_deg = 0;
+    const std::size_t n_eq = static_cast<std::size_t>(max_eq_deg) + 1U;
+
+    std::vector<std::vector<Rational>> M(n_eq,
+        std::vector<Rational>(n_unk + 1U, Rational(BigInt(0))));
+    for (std::size_t j = 0; j < n_eq; ++j) {
+        // RHS: g_n[j].
+        if (j < Gn.size()) M[j][n_unk] = Gn[j];
+        // D · y' term:  coefficient of x^j in  Σ_p D_p x^p · Σ_k k·y_k x^{k-1}
+        //   = Σ_{p,k: p+k-1=j, k≥1} k · D_p · y_k.
+        for (std::size_t k = 1; k <= static_cast<std::size_t>(e_max); ++k) {
+            std::size_t p_needed_signed = j + 1U;
+            if (p_needed_signed < k) continue;
+            std::size_t p = p_needed_signed - k;
+            if (p >= D.size()) continue;
+            Rational add = Rational(BigInt(static_cast<std::int64_t>(k))) * D[p];
+            M[j][k] = M[j][k] + add;
+        }
+        // f_n · y term:  coefficient of x^j in  Σ_p Fn_p x^p · Σ_k y_k x^k
+        //   = Σ_{p,k: p+k=j} Fn_p · y_k.
+        for (std::size_t k = 0; k <= static_cast<std::size_t>(e_max); ++k) {
+            if (k > j) break;
+            std::size_t p = j - k;
+            if (p >= Fn.size()) continue;
+            M[j][k] = M[j][k] + Fn[p];
+        }
+    }
+
+    // Gaussian elimination over Q with partial pivoting.
+    const std::size_t cols = n_unk + 1U;
+    std::size_t pivot_row = 0;
+    for (std::size_t col = 0; col < n_unk && pivot_row < n_eq; ++col) {
+        std::size_t best = pivot_row;
+        while (best < n_eq && M[best][col].numerator().is_zero()) ++best;
+        if (best == n_eq) continue; // column without pivot → free variable
+        if (best != pivot_row) std::swap(M[best], M[pivot_row]);
+        Rational pivot = M[pivot_row][col];
+        for (std::size_t c = col; c < cols; ++c) M[pivot_row][c] = M[pivot_row][c] / pivot;
+        for (std::size_t r = 0; r < n_eq; ++r) {
+            if (r == pivot_row) continue;
+            Rational factor = M[r][col];
+            if (factor.numerator().is_zero()) continue;
+            for (std::size_t c = col; c < cols; ++c) {
+                M[r][c] = M[r][c] - factor * M[pivot_row][c];
+            }
+        }
+        ++pivot_row;
+    }
+
+    // Verify residual rows are zero.
+    for (std::size_t r = pivot_row; r < n_eq; ++r) {
+        if (!M[r][n_unk].numerator().is_zero()) {
+            return fail_unimpl("Risch DE rational: inconsistent linear system");
+        }
+    }
+
+    // Read solution.  Pivot column k has y_k = RHS; non-pivot columns
+    // (free variables) default to 0.  Need to determine pivot columns
+    // by scanning each row's leading non-zero entry.
+    std::vector<Rational> y(n_unk, Rational(BigInt(0)));
+    for (std::size_t r = 0; r < pivot_row; ++r) {
+        std::size_t leading = n_unk; // sentinel = none
+        for (std::size_t c = 0; c < n_unk; ++c) {
+            if (!M[r][c].numerator().is_zero()) { leading = c; break; }
+        }
+        if (leading < n_unk) y[leading] = M[r][n_unk];
+    }
+
+    return ok(risch_build_poly_expr(arena, y, var));
+}
+
+// Dispatch: try polynomial-fast path first; if either f or g has a
+// non-trivial denominator, fall back to the rational-coefficient solver.
+[[nodiscard]] Result<ExprPtr> solve_risch_de_q(
+    ExprPtr f_expr, ExprPtr g_expr, const Symbol& var, symbolic::CASContext& ctx) {
+    auto f_simp = ctx.simplify(f_expr);
+    auto g_simp = ctx.simplify(g_expr);
+    if (f_simp.is_ok()) f_expr = f_simp.value();
+    if (g_simp.is_ok()) g_expr = g_simp.value();
+    auto poly_attempt = solve_risch_de_poly_q(f_expr, g_expr, var, ctx);
+    if (poly_attempt.is_ok()) return poly_attempt;
+    return solve_risch_de_rational_q(f_expr, g_expr, var, ctx);
+}
+
 // Integrate the polynomial-in-t part of a single logarithmic extension
 // tower:  ∫ Σ_{k=0..n} a_k(x) * t^k dx,   where t = ln(u(x)),  Dt = u'/u.
 //
@@ -388,7 +601,21 @@ Result<ExprPtr> integrate_risch(ExprPtr expr, const Symbol& var, symbolic::CASCo
 
                     for (std::size_t k = 0; !handle_log_polynomial && k < quot.size(); ++k) {
                         ExprPtr coeff = quot[k];
-                        if (!coeff || algebra::poly_is_zero_expr(coeff)) continue;
+                        if (!coeff) continue;
+                        // Pre-simplify coefficient: divide_poly_with_remainder
+                        // can leave Product([0, …]) un-collapsed when Q has
+                        // x-dependent coefficients.  Without this collapse
+                        // the zero-check below misses true zeroes and the
+                        // recursive integrate path injects spurious terms
+                        // (e.g. arbitrary x-multiples of 1/x).
+                        {
+                            auto coeff_tog = algebra::together(coeff, context);
+                            if (coeff_tog.is_ok()) {
+                                auto coeff_simp = context.simplify(coeff_tog.value());
+                                if (coeff_simp.is_ok()) coeff = coeff_simp.value();
+                            }
+                        }
+                        if (algebra::poly_is_zero_expr(coeff)) continue;
 
                         if (ext.type == ExtensionType::Exponential) {
                             // ∫ a_k * t^k where t = exp(u), Dt = u't
@@ -409,7 +636,7 @@ Result<ExprPtr> integrate_risch(ExprPtr expr, const Symbol& var, symbolic::CASCo
                                 // system).  Handles every polynomial u, not just linear.
                                 ExprPtr f_expr = arena.make<Binary>(BinaryOp::Mul,
                                     arena.make<IntegerLit>(BigInt(static_cast<std::int64_t>(k))), du);
-                                auto y_res = solve_risch_de_poly_q(f_expr, coeff, var, context);
+                                auto y_res = solve_risch_de_q(f_expr, coeff, var, context);
                                 if (y_res.is_ok()) {
                                     ExprPtr t_pow = (k == 1) ? arena.make<Symbol>(t_top) : arena.make<Binary>(BinaryOp::Pow, arena.make<Symbol>(t_top), arena.make<IntegerLit>(BigInt(k)));
                                     int_terms.push_back(arena.make<Binary>(BinaryOp::Mul, y_res.value(), t_pow));
@@ -441,16 +668,43 @@ Result<ExprPtr> integrate_risch(ExprPtr expr, const Symbol& var, symbolic::CASCo
         }
     }
 
-    // 4. Hermite Reduction: ∫ P/Q dt = A/B + ∫ C/D dt where D is square-free
-    auto hermite_res = hermite_reduce(P, Q, t_top, field, context);
-    if (hermite_res.is_error()) return fail<ExprPtr>(hermite_res.error());
-    
-    ExprPtr rational_part = hermite_res.value().rational_part;
-    ExprPtr rem_P = hermite_res.value().remaining_P;
-    ExprPtr rem_Q = hermite_res.value().remaining_Q;
-
-    // 5. Rothstein-Trager for the remaining square-free part ∫ C/D dt
-    auto log_part_res = integrate_rothstein_trager(rem_P, rem_Q, t_top, field, context);
+    // Short-circuit: if the polynomial division consumed the whole gen_expr
+    // (rem ≡ 0 ⇒ P was zeroed at line 664), the rational/log layers have
+    // nothing left to do — Hermite/Trager would still try and may bail on
+    // Q whose coefficients are x-dependent rational expressions.  Skip
+    // straight to the back-mapping.
+    ExprPtr rational_part;
+    ExprPtr rem_P;
+    ExprPtr rem_Q;
+    // Aggressive re-simplification of P after polynomial division.  The
+    // divide_poly_with_remainder routine produces correct but unreduced
+    // coefficient algebra (e.g. x²·x⁻² is left in product form).  Without
+    // this normalisation the downstream Hermite/Trager pass parses non-
+    // polynomial coefficients and bails.  algebra::together folds rational
+    // sub-expressions into a single fraction, then simplify reduces.
+    {
+        auto P_tog = algebra::together(P, context);
+        if (P_tog.is_ok()) {
+            auto P_simp = context.simplify(P_tog.value());
+            if (P_simp.is_ok()) P = P_simp.value();
+        }
+    }
+    bool P_is_zero = expr_is<IntegerLit>(P) && expr_ref<IntegerLit>(P).value.is_zero();
+    Result<ExprPtr> log_part_res = ok(static_cast<ExprPtr>(arena.make<IntegerLit>(BigInt(0))));
+    if (P_is_zero) {
+        rational_part = arena.make<IntegerLit>(BigInt(0));
+        rem_P = arena.make<IntegerLit>(BigInt(0));
+        rem_Q = Q;
+    } else {
+        // 4. Hermite Reduction: ∫ P/Q dt = A/B + ∫ C/D dt where D is square-free
+        auto hermite_res = hermite_reduce(P, Q, t_top, field, context);
+        if (hermite_res.is_error()) return fail<ExprPtr>(hermite_res.error());
+        rational_part = hermite_res.value().rational_part;
+        rem_P = hermite_res.value().remaining_P;
+        rem_Q = hermite_res.value().remaining_Q;
+        // 5. Rothstein-Trager for the remaining square-free part ∫ C/D dt
+        log_part_res = integrate_rothstein_trager(rem_P, rem_Q, t_top, field, context);
+    }
     
     if (log_part_res.is_ok()) {
         // combine rational + log parts and map back from field generators

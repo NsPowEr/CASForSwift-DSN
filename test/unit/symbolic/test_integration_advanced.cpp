@@ -121,5 +121,14 @@ TEST(IntegrationAdvancedTest, RischDE_ExpQuarticArg_AntiHardcode) {
     expect_integration_oracle("x^3*exp(x^4)", "x");
 }
 
+// Risch DE engine: rational-f/g case via the new solver.
+// Here the exp argument is u = 1/x (rational); u' = -1/x² is rational
+// in x, so the Risch DE is y' + (-k/x²)·y = a_k with rational
+// coefficients.  Previously this hit Unimplemented.
+TEST(IntegrationAdvancedTest, RischDE_Rational_ExpReciprocal) {
+    // ∫ exp(1/x) / x^2 dx = -exp(1/x).
+    expect_integration_oracle("exp(1/x)/x^2", "x");
+}
+
 } // namespace
 } // namespace cas::calculus
