@@ -187,6 +187,38 @@ TEST_F(SpecialFunctionsTest, LegendreP_AtOne_Equals_One) {
 
 // HC-004: fresh symbol generator never collides with itself nor with
 // user-defined names.
+// L3-04: Bessel function identities.
+TEST_F(SpecialFunctionsTest, BesselJ_NegativeIntegerParity) {
+    // J_{-2}(x) = J_2(x); J_{-3}(x) = -J_3(x).
+    expect_simplify_equiv("BesselJ(-2, x)", "BesselJ(2, x)");
+    expect_simplify_equiv("BesselJ(-3, x)", "-BesselJ(3, x)");
+}
+TEST_F(SpecialFunctionsTest, BesselY_NegativeIntegerParity) {
+    expect_simplify_equiv("BesselY(-2, x)", "BesselY(2, x)");
+    expect_simplify_equiv("BesselY(-3, x)", "-BesselY(3, x)");
+}
+TEST_F(SpecialFunctionsTest, BesselI_K_NegativeIntegerEqualsPositive) {
+    expect_simplify_equiv("BesselI(-5, x)", "BesselI(5, x)");
+    expect_simplify_equiv("BesselK(-4, x)", "BesselK(4, x)");
+}
+TEST_F(SpecialFunctionsTest, BesselJ_HalfInteger_TrigClosedForm) {
+    // J_{1/2}(x) = sqrt(2/(pi*x))*sin(x);  J_{-1/2}(x) = sqrt(2/(pi*x))*cos(x).
+    expect_simplify_equiv("BesselJ(1/2, x)", "sqrt(2/(pi*x))*sin(x)");
+    expect_simplify_equiv("BesselJ(-1/2, x)", "sqrt(2/(pi*x))*cos(x)");
+}
+TEST_F(SpecialFunctionsTest, BesselY_HalfInteger_TrigClosedForm) {
+    expect_simplify_equiv("BesselY(1/2, x)", "-sqrt(2/(pi*x))*cos(x)");
+    expect_simplify_equiv("BesselY(-1/2, x)", "sqrt(2/(pi*x))*sin(x)");
+}
+TEST_F(SpecialFunctionsTest, BesselI_HalfInteger_HyperbolicClosedForm) {
+    expect_simplify_equiv("BesselI(1/2, x)", "sqrt(2/(pi*x))*sinh(x)");
+    expect_simplify_equiv("BesselI(-1/2, x)", "sqrt(2/(pi*x))*cosh(x)");
+}
+TEST_F(SpecialFunctionsTest, BesselK_HalfInteger_ExpClosedForm) {
+    expect_simplify_equiv("BesselK(1/2, x)", "sqrt(pi/(2*x))*exp(-x)");
+    expect_simplify_equiv("BesselK(-1/2, x)", "sqrt(pi/(2*x))*exp(-x)");
+}
+
 // L3-04: Chebyshev polynomials of the first / second kind.
 TEST_F(SpecialFunctionsTest, ChebyshevT_smallDegrees) {
     expect_simplify_equiv("ChebyshevT(0, x)", "1");

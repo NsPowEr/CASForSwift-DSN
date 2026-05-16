@@ -76,5 +76,26 @@ TEST(IntegrationAdvancedTest, LogarithmicPolynomialQuadraticCoefficient) {
     expect_integration_oracle("x^2*ln(x)", "x");
 }
 
+// Risch exponential extension coverage (oracle: diff∘integrate ≡ integrand).
+TEST(IntegrationAdvancedTest, ExpHigherDegreePolynomial) {
+    // ∫ x^3 * exp(x) dx = exp(x) * (x^3 − 3x^2 + 6x − 6)
+    expect_integration_oracle("x^3*exp(x)", "x");
+}
+
+TEST(IntegrationAdvancedTest, ExpNegativePolynomial) {
+    // ∫ x * exp(-x) dx = -exp(-x)*(x + 1)
+    expect_integration_oracle("x*exp(-x)", "x");
+}
+
+TEST(IntegrationAdvancedTest, LnHighDegreeProduct) {
+    // ∫ x^3 * ln(x) dx = x^4/4 * ln(x) - x^4/16
+    expect_integration_oracle("x^3*ln(x)", "x");
+}
+
+TEST(IntegrationAdvancedTest, LnCubedAntiHardcode) {
+    // ∫ ln(x)^3 dx = x·ln(x)^3 − 3·x·ln(x)^2 + 6·x·ln(x) − 6x
+    expect_integration_oracle("ln(x)^3", "x");
+}
+
 } // namespace
 } // namespace cas::calculus

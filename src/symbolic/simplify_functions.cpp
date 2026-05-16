@@ -1062,6 +1062,104 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const FuncCall& node
         }
     }
 
+    // L3-04: Bessel function identities.
+    //   J_{-n}(x) = (-1)^n · J_n(x)            integer n  (parity)
+    //   Y_{-n}(x) = (-1)^n · Y_n(x)            integer n
+    //   I_{-n}(x) = I_n(x)                     integer n
+    //   K_{-n}(x) = K_n(x)                     integer n
+    //   J_{1/2}(x)  = √(2/(π x)) · sin(x)
+    //   J_{-1/2}(x) = √(2/(π x)) · cos(x)
+    //   Y_{1/2}(x)  = −√(2/(π x)) · cos(x)
+    //   Y_{-1/2}(x) = √(2/(π x)) · sin(x)
+    if ((node.func_id == BuiltinOp::BesselJ
+         || node.func_id == BuiltinOp::BesselY
+         || node.func_id == BuiltinOp::BesselI
+         || node.func_id == BuiltinOp::BesselK) && args.size() == 2U) {
+        ExprPtr order = args[0];
+        ExprPtr x_arg = args[1];
+        // Parity / negative-order reduction for integer order.
+        if (const auto* il = expr_cast<IntegerLit>(order); il != nullptr && il->value.is_negative()) {
+            if (il->value.bit_length() > 16) {
+                return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
+                    "Bessel: negative integer order too large"));
+            }
+            BigInt mag = -il->value;
+            ExprPtr pos_order = make_integer(arena_, mag);
+            ExprPtr pos_call = arena_.make<FuncCall>(node.func_id,
+                std::vector<ExprPtr>{pos_order, x_arg});
+            const bool is_J_or_Y = (node.func_id == BuiltinOp::BesselJ
+                                    || node.func_id == BuiltinOp::BesselY);
+            const bool flip_sign = is_J_or_Y && ((mag.to_u64() % 2U) == 1U);
+            if (!flip_sign) {
+                return simplify_expr(pos_call);
+            }
+            return simplify_expr(arena_.make<Unary>(UnaryOp::Neg, pos_call));
+        }
+        // Half-integer J / Y reductions to elementary trig.
+        if (const auto* rl = expr_cast<RationalLit>(order);
+            rl != nullptr && rl->denominator == BigInt(2)
+            && (rl->numerator == BigInt(1) || rl->numerator == BigInt(-1))) {
+            ExprPtr pi_const = arena_.make<Constant>(MathConstant::Pi);
+            ExprPtr pi_x = arena_.make<Product>(std::vector<ExprPtr>{pi_const, x_arg});
+            ExprPtr two_over_pi_x = arena_.make<Binary>(BinaryOp::Div,
+                make_integer(arena_, BigInt(2)), pi_x);
+            ExprPtr root = arena_.make<FuncCall>(BuiltinOp::Sqrt,
+                std::vector<ExprPtr>{two_over_pi_x});
+            BuiltinOp inner_fn;
+            bool negate = false;
+            if (node.func_id == BuiltinOp::BesselJ) {
+                if (rl->numerator == BigInt(1)) {
+                    // J_{1/2} = √(2/(πx)) · sin x
+                    inner_fn = BuiltinOp::Sin;
+                } else {
+                    // J_{-1/2} = √(2/(πx)) · cos x
+                    inner_fn = BuiltinOp::Cos;
+                }
+            } else if (node.func_id == BuiltinOp::BesselY) {
+                if (rl->numerator == BigInt(1)) {
+                    // Y_{1/2} = -√(2/(πx)) · cos x
+                    inner_fn = BuiltinOp::Cos;
+                    negate = true;
+                } else {
+                    // Y_{-1/2} = √(2/(πx)) · sin x
+                    inner_fn = BuiltinOp::Sin;
+                }
+            } else if (node.func_id == BuiltinOp::BesselI) {
+                if (rl->numerator == BigInt(1)) {
+                    // I_{1/2}(x) = √(2/(πx)) · sinh(x)
+                    inner_fn = BuiltinOp::Sinh;
+                } else {
+                    // I_{-1/2}(x) = √(2/(πx)) · cosh(x)
+                    inner_fn = BuiltinOp::Cosh;
+                }
+            } else {
+                inner_fn = BuiltinOp::Unknown;
+            }
+            if (inner_fn != BuiltinOp::Unknown) {
+                ExprPtr trig = arena_.make<FuncCall>(inner_fn,
+                    std::vector<ExprPtr>{x_arg});
+                ExprPtr prod = arena_.make<Product>(std::vector<ExprPtr>{root, trig});
+                if (negate) prod = arena_.make<Unary>(UnaryOp::Neg, prod);
+                return simplify_expr(prod);
+            }
+            // BesselK half-integer:
+            //   K_{±1/2}(x) = √(π/(2x)) · exp(-x)
+            if (node.func_id == BuiltinOp::BesselK) {
+                ExprPtr pi_const = arena_.make<Constant>(MathConstant::Pi);
+                ExprPtr two_x = arena_.make<Product>(std::vector<ExprPtr>{
+                    make_integer(arena_, BigInt(2)), x_arg});
+                ExprPtr pi_over_2x = arena_.make<Binary>(BinaryOp::Div, pi_const, two_x);
+                ExprPtr root_k = arena_.make<FuncCall>(BuiltinOp::Sqrt,
+                    std::vector<ExprPtr>{pi_over_2x});
+                ExprPtr neg_x = arena_.make<Unary>(UnaryOp::Neg, x_arg);
+                ExprPtr exp_neg_x = arena_.make<FuncCall>(BuiltinOp::Exp,
+                    std::vector<ExprPtr>{neg_x});
+                ExprPtr prod = arena_.make<Product>(std::vector<ExprPtr>{root_k, exp_neg_x});
+                return simplify_expr(prod);
+            }
+        }
+    }
+
     // L3-04: Chebyshev polynomial of the first kind T_n(x) via the standard
     // three-term recurrence.  Algorithm scales to any non-negative integer n.
     //   T_0 = 1,  T_1 = x,  T_{n+1} = 2x·T_n − T_{n−1}.
