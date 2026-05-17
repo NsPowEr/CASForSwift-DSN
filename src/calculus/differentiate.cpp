@@ -399,6 +399,9 @@ private:
             return ok(make_product(arena_, {outer, argument_derivative.value()}));
         } else if (call.args.size() == 2U) {
             // Binary functions
+            if (call.func_id == BuiltinOp::BesselZero) {
+                return ok(make_integer(arena_, 0));
+            }
             if (call.func_id == BuiltinOp::BesselJ || call.func_id == BuiltinOp::BesselY || call.func_id == BuiltinOp::BesselI || call.func_id == BuiltinOp::BesselK) {
                 ExprPtr nu = call.args[0];
                 ExprPtr x = call.args[1];

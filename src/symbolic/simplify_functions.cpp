@@ -1062,6 +1062,44 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const FuncCall& node
         }
     }
 
+    if (node.func_id == BuiltinOp::BesselZero && args.size() == 2U) {
+        auto order_is_real = [&](ExprPtr expr) -> bool {
+            if (expr_cast<IntegerLit>(expr) != nullptr || expr_cast<RationalLit>(expr) != nullptr) return true;
+            if (const auto* constant = expr_cast<Constant>(expr)) {
+                return constant->value != MathConstant::I && constant->value != MathConstant::NaN;
+            }
+            if (const auto* symbol = expr_cast<Symbol>(expr)) {
+                return assumptions_ != nullptr && assumptions_->is_real(*symbol);
+            }
+            return assumptions_ != nullptr && assumptions_->is_real(expr);
+        };
+        auto index_is_valid = [&](ExprPtr expr) -> bool {
+            if (const auto* integer = expr_cast<IntegerLit>(expr)) {
+                return !integer->value.is_negative() && integer->value != BigInt(0);
+            }
+            if (const auto* symbol = expr_cast<Symbol>(expr)) {
+                return assumptions_ != nullptr &&
+                    assumptions_->is_integer(*symbol) &&
+                    assumptions_->is_positive(*symbol);
+            }
+            return assumptions_ != nullptr &&
+                assumptions_->is_integer(expr) &&
+                assumptions_->is_positive(expr);
+        };
+
+        if (!order_is_real(args[0])) {
+            return fail<ExprPtr>(make_error(
+                CASErrorKind::InvalidArgument,
+                "BesselZero: order must be real"));
+        }
+        if (!index_is_valid(args[1])) {
+            return fail<ExprPtr>(make_error(
+                CASErrorKind::InvalidArgument,
+                "BesselZero: index must be a natural integer >= 1"));
+        }
+        return ok(arena_.make<FuncCall>(BuiltinOp::BesselZero, args));
+    }
+
     // L3-04: Bessel function identities.
     //   J_{-n}(x) = (-1)^n · J_n(x)            integer n  (parity)
     //   Y_{-n}(x) = (-1)^n · Y_n(x)            integer n

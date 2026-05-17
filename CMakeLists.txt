@@ -382,6 +382,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/symbolic/test_improper_pv.cpp
         test/unit/symbolic/test_frobenius.cpp
         test/unit/symbolic/test_special_functions.cpp
+        test/unit/symbolic/test_bessel_zero.cpp
         test/unit/symbolic/test_complex_polar.cpp
         test/unit/calculus/test_asymptotes_rootsum.cpp
         test/unit/symbolic/test_assumptions_stability.cpp

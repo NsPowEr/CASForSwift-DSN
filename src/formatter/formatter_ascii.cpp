@@ -142,6 +142,16 @@ LayoutBox Ascii2DFormatter::layout(ExprPtr expr) {
                 }
                 return res;
             }
+            if (node.func_id == BuiltinOp::BesselZero) {
+                std::string prefix = "BesselZero(";
+                LayoutBox res = {{prefix}, static_cast<int>(prefix.length()), 1, 0};
+                for (size_t i = 0; i < node.args.size(); ++i) {
+                    if (i > 0) res = join_horizontal(res, {{", "}, 2, 1, 0});
+                    res = join_horizontal(res, layout(node.args[i]));
+                }
+                res = join_horizontal(res, {{")"}, 1, 1, 0});
+                return res;
+            }
             // Fallback per altre funzioni
             std::string prefix = node.name + "(";
             LayoutBox res = {{prefix}, static_cast<int>(prefix.length()), 1, 0};

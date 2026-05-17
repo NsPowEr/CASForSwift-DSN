@@ -35,6 +35,7 @@ bool is_builtin_function(std::string_view name) {
         "log",   "log2",   "log10",  "sqrt",  "cbrt",   "floor",  "ceil",   "round",
         "abs",   "sign",   "gamma",  "beta",  "erf",    "erfc",   "zeta",   "Gamma",
         "arg",   "Re",     "Im",     "conj",  "conjugate",
+        "bessel_zero", "BesselZero",
         "RootOf"
     };
 

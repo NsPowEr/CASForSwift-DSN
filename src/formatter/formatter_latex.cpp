@@ -66,6 +66,9 @@ std::string LaTeXFormatter::format(ExprPtr expr) {
             if (node.func_id == BuiltinOp::Erf) {
                 return "\\operatorname{erf}(" + format(node.args[0]) + ")";
             }
+            if (node.func_id == BuiltinOp::BesselZero && node.args.size() == 2U) {
+                return "j_{" + format(node.args[0]) + "," + format(node.args[1]) + "}";
+            }
             if (node.name == "BesselJ" || node.name == "BesselY" || node.name == "BesselI" || node.name == "BesselK") {
                 std::string sub = node.name.substr(6);
                 return sub + "_{" + format(node.args[0]) + "}(" + format(node.args[1]) + ")";

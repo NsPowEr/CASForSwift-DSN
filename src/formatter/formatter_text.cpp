@@ -172,6 +172,14 @@ std::string TextFormatter::format_internal(ExprPtr expr, std::unordered_map<Expr
             }
             return s + ")";
         } else if constexpr (std::is_same_v<NodeT, FuncCall>) {
+            if (node.func_id == BuiltinOp::BesselZero) {
+                std::string s = "BesselZero(";
+                for (size_t i = 0; i < node.args.size(); ++i) {
+                    if (i > 0) s += ", ";
+                    s += format_internal(node.args[i], cse_map);
+                }
+                return s + ")";
+            }
             std::string s = node.name + "(";
             for (size_t i = 0; i < node.args.size(); ++i) {
                 if (i > 0) s += ", ";

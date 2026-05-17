@@ -43,6 +43,7 @@ enum class BuiltinOp : std::uint16_t {
     N,
     BesselJ,
     BesselY,
+    BesselZero,
     BesselI,
     BesselK,
     Binomial,
@@ -101,6 +102,7 @@ enum class BuiltinOp : std::uint16_t {
     if (name == "N") return BuiltinOp::N;
     if (name == "BesselJ") return BuiltinOp::BesselJ;
     if (name == "BesselY") return BuiltinOp::BesselY;
+    if (name == "BesselZero" || name == "bessel_zero") return BuiltinOp::BesselZero;
     if (name == "BesselI") return BuiltinOp::BesselI;
     if (name == "BesselK") return BuiltinOp::BesselK;
     if (name == "binomial") return BuiltinOp::Binomial;
@@ -160,6 +162,7 @@ enum class BuiltinOp : std::uint16_t {
         case BuiltinOp::N: return "N";
         case BuiltinOp::BesselJ: return "BesselJ";
         case BuiltinOp::BesselY: return "BesselY";
+        case BuiltinOp::BesselZero: return "BesselZero";
         case BuiltinOp::BesselI: return "BesselI";
         case BuiltinOp::BesselK: return "BesselK";
         case BuiltinOp::Binomial: return "binomial";
