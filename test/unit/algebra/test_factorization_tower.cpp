@@ -1,19 +1,25 @@
 // L3-06: factor_polynomial_tower over Q(alpha_1, alpha_2).
 //
 // Validates composite Trager factorisation against handcrafted tower
-// generators built from independent quadratic radicals.
+// generators built from independent quadratic radicals.  Tests cover:
+//   - Splitting case Q(sqrt 2, sqrt 3) with f = (x^2-2)(x^2-3) → 4 linear factors.
+//   - Anti-hardcode irreducibility Q(sqrt 3, sqrt 5) with f = x^2-2 → stays irreducible.
+//   - Algorithmic invariants (Trager post-condition prod(deg(f_i)) == deg(f)).
+//   - Input validation (null poly, malformed generators, non-Q[x] input).
 
 #include "cas/algebra.hpp"
-#include "cas/algebraic_number_bridge.hpp"
 #include "cas/algebraic_tower_bridge.hpp"
 #include "cas/ast.hpp"
-#include "cas/ast_debug.hpp"
 #include "cas/lexer.hpp"
 #include "cas/parser.hpp"
 #include "cas/symbolic.hpp"
 
+#include "algebra/polynomial_internal.hpp"
+
 #include <gtest/gtest.h>
 
+#include <chrono>
+#include <cstddef>
 #include <memory>
 #include <string>
 
@@ -30,7 +36,11 @@ namespace {
 
 class FactorizationTowerTest : public ::testing::Test {
 protected:
-    void SetUp() override { ctx = std::make_unique<symbolic::CASContext>(); }
+    void SetUp() override {
+        ctx = std::make_unique<symbolic::CASContext>();
+        // Heavy resultant pipelines must not time out at the 1 s default.
+        ctx->set_timeout(std::chrono::seconds(120));
+    }
 
     [[nodiscard]] ExprPtr parse_ok(const std::string& input) {
         auto parsed = parse_expr(input, ctx->arena());
@@ -72,53 +82,23 @@ protected:
         };
     }
 
-    [[nodiscard]] std::size_t total_factor_degree(
+    // Sum of degrees of all returned factors (in var).  Used as a Trager
+    // post-condition oracle: must equal deg(input) for a correct
+    // factorisation over the tower.
+    [[nodiscard]] std::size_t cumulative_factor_degree(
         const algebra::Factorization& fact,
-        const Symbol& var) {
-        std::size_t deg = 0U;
+        const Symbol& var) const {
+        std::size_t total = 0U;
         for (const auto& pf : fact.factors) {
-            auto parsed = algebra::expand(pf.factor, *ctx);
-            if (!parsed.is_ok()) return 0U;
-            auto poly = symbolic::CASContext{}; (void)poly;
-            // Quick degree probe via repeated derivation isn't appropriate;
-            // we just count via simple polynomial parser by walking parsed string.
-            // Defer to inspection in individual tests below.
-            (void)deg;
-            (void)var;
+            auto parsed = algebra::parse_polynomial(pf.factor, var, *ctx);
+            if (parsed.is_error()) return 0U;
+            total += algebra::poly_degree(parsed.value());
         }
-        return deg;
+        return total;
     }
 
     std::unique_ptr<symbolic::CASContext> ctx;
 };
-
-// Splitting tests on degree-4 polynomials produce a composite norm of degree
-// 16, whose factorisation under ASan instrumentation exceeds the lite
-// regression budget.  They remain DISABLED here; run explicitly via
-// --gtest_also_run_disabled_tests when validating the slow path.
-TEST_F(FactorizationTowerTest, DISABLED_SplitsProductOfQuadraticsOverQSqrt2Sqrt3) {
-    auto gens = biquadratic_gens(2, 3);
-    ExprPtr poly = parse_ok("(x^2 - 2) * (x^2 - 3)");
-    ASSERT_NE(poly, nullptr);
-    auto expanded = algebra::expand(poly, *ctx);
-    ASSERT_TRUE(expanded.is_ok()) << expanded.error().message;
-
-    auto result = algebra::factor_polynomial_tower(expanded.value(), Symbol{"x"}, gens, *ctx);
-    ASSERT_TRUE(result.is_ok()) << result.error().message;
-    EXPECT_EQ(result.value().factors.size(), 4U)
-        << "expected 4 linear factors, got " << result.value().factors.size();
-}
-
-TEST_F(FactorizationTowerTest, DISABLED_SplitsX4Minus10X2Plus1OverQSqrt2Sqrt3) {
-    auto gens = biquadratic_gens(2, 3);
-    ExprPtr poly = parse_ok("x^4 - 10*x^2 + 1");
-    ASSERT_NE(poly, nullptr);
-
-    auto result = algebra::factor_polynomial_tower(poly, Symbol{"x"}, gens, *ctx);
-    ASSERT_TRUE(result.is_ok()) << result.error().message;
-    EXPECT_EQ(result.value().factors.size(), 4U)
-        << "expected 4 linear factors of x^4 - 10x^2 + 1 in Q(sqrt 2, sqrt 3)";
-}
 
 TEST_F(FactorizationTowerTest, AntiHardcodeIrreducibleX2Minus2OverQSqrt3Sqrt5) {
     // sqrt(2) is not in Q(sqrt(3), sqrt(5)); x^2 - 2 must remain irreducible.
@@ -130,6 +110,23 @@ TEST_F(FactorizationTowerTest, AntiHardcodeIrreducibleX2Minus2OverQSqrt3Sqrt5) {
     ASSERT_TRUE(result.is_ok()) << result.error().message;
     EXPECT_EQ(result.value().factors.size(), 1U)
         << "x^2 - 2 must NOT split over Q(sqrt 3, sqrt 5)";
+    EXPECT_EQ(cumulative_factor_degree(result.value(), Symbol{"x"}), 2U)
+        << "Trager post-condition: sum(deg(f_i)) == deg(f)";
+}
+
+TEST_F(FactorizationTowerTest, SplitsX2Minus3OverQSqrt2Sqrt3) {
+    // sqrt(3) IS in Q(sqrt 2, sqrt 3); x^2 - 3 must split into two linear
+    // factors (x - sqrt 3)(x + sqrt 3).
+    auto gens = biquadratic_gens(2, 3);
+    ExprPtr poly = parse_ok("x^2 - 3");
+    ASSERT_NE(poly, nullptr);
+
+    auto result = algebra::factor_polynomial_tower(poly, Symbol{"x"}, gens, *ctx);
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+    EXPECT_EQ(result.value().factors.size(), 2U)
+        << "x^2 - 3 must split into 2 linear factors over Q(sqrt 2, sqrt 3)";
+    EXPECT_EQ(cumulative_factor_degree(result.value(), Symbol{"x"}), 2U)
+        << "Trager post-condition: sum(deg(f_i)) == deg(f)";
 }
 
 TEST_F(FactorizationTowerTest, RejectsInvalidTowerGenerators) {
@@ -144,6 +141,13 @@ TEST_F(FactorizationTowerTest, RejectsInvalidTowerGenerators) {
     EXPECT_EQ(result.error().kind, CASErrorKind::InvalidArgument);
 }
 
+TEST_F(FactorizationTowerTest, RejectsNullPolynomial) {
+    auto gens = biquadratic_gens(2, 3);
+    auto result = algebra::factor_polynomial_tower(ExprPtr{}, Symbol{"x"}, gens, *ctx);
+    ASSERT_TRUE(result.is_error());
+    EXPECT_EQ(result.error().kind, CASErrorKind::InvalidArgument);
+}
+
 TEST_F(FactorizationTowerTest, RejectsNonRationalCoefficientPolynomial) {
     auto gens = biquadratic_gens(2, 3);
     // Already involves sqrt(2): cannot be parsed as Q[x] by the contract.
@@ -154,6 +158,39 @@ TEST_F(FactorizationTowerTest, RejectsNonRationalCoefficientPolynomial) {
     if (result.is_error()) {
         EXPECT_EQ(result.error().kind, CASErrorKind::Unimplemented);
     }
+}
+
+// Degree-4 splitting cases remain DISABLED: the composite norm of a
+// degree-4 polynomial has degree 16; factorisation + iterated resultant
+// under ASan instrumentation exceeds the lite regression budget.  Run
+// explicitly via --gtest_also_run_disabled_tests when validating the slow
+// path end-to-end.
+TEST_F(FactorizationTowerTest, DISABLED_SplitsProductOfQuadraticsOverQSqrt2Sqrt3) {
+    auto gens = biquadratic_gens(2, 3);
+    ctx->set_timeout(std::chrono::minutes(10));
+    ExprPtr poly = parse_ok("(x^2 - 2) * (x^2 - 3)");
+    ASSERT_NE(poly, nullptr);
+    auto expanded = algebra::expand(poly, *ctx);
+    ASSERT_TRUE(expanded.is_ok()) << expanded.error().message;
+
+    auto result = algebra::factor_polynomial_tower(expanded.value(), Symbol{"x"}, gens, *ctx);
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+    EXPECT_EQ(result.value().factors.size(), 4U)
+        << "expected 4 linear factors, got " << result.value().factors.size();
+    EXPECT_EQ(cumulative_factor_degree(result.value(), Symbol{"x"}), 4U);
+}
+
+TEST_F(FactorizationTowerTest, DISABLED_SplitsX4Minus10X2Plus1OverQSqrt2Sqrt3) {
+    auto gens = biquadratic_gens(2, 3);
+    ctx->set_timeout(std::chrono::minutes(10));
+    ExprPtr poly = parse_ok("x^4 - 10*x^2 + 1");
+    ASSERT_NE(poly, nullptr);
+
+    auto result = algebra::factor_polynomial_tower(poly, Symbol{"x"}, gens, *ctx);
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+    EXPECT_EQ(result.value().factors.size(), 4U)
+        << "expected 4 linear factors of x^4 - 10x^2 + 1 in Q(sqrt 2, sqrt 3)";
+    EXPECT_EQ(cumulative_factor_degree(result.value(), Symbol{"x"}), 4U);
 }
 
 }  // namespace
