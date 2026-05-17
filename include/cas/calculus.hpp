@@ -115,6 +115,29 @@ struct LaurentExpansion {
     unsigned int positive_order,
     symbolic::CASContext& ctx);
 
+struct PadeApproximant {
+    ExprPtr center;
+    ExprPtr numerator;       // polynomial in (var − center) of degree ≤ numerator_order
+    ExprPtr denominator;     // polynomial in (var − center) of degree ≤ denominator_order
+    unsigned int numerator_order;
+    unsigned int denominator_order;
+};
+
+// Pade [m/n] approximant of `expr` at `center`.  Builds P, Q with
+// deg(P) ≤ m, deg(Q) ≤ n, Q(0) = 1, so that  P(x)/Q(x) ≡ f(x) mod (x − c)^{m+n+1}.
+// Internally Taylor-expands `expr` to order m+n at the centre and solves
+// the linear Toeplitz system for Q's coefficients (Gauss elimination over
+// Rational), then back-substitutes to recover P.  Returns Unimplemented
+// if the Toeplitz system is singular, which signals a degenerate Pade
+// table entry (defect rank) rather than a silent wrong answer.
+[[nodiscard]] Result<PadeApproximant> pade_approximant(
+    ExprPtr expr,
+    const Symbol& var,
+    ExprPtr center,
+    unsigned int numerator_order,
+    unsigned int denominator_order,
+    symbolic::CASContext& ctx);
+
 struct Asymptote {
     enum class Type { Vertical, Horizontal, Slant };
     Type type;
