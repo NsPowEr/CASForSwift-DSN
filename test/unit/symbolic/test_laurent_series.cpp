@@ -123,4 +123,60 @@ TEST_F(LaurentSeriesTest, ResidueAtSimplePoleMatchesLaurentMinusOneCoeff) {
     expect_coeff(laurent.value(), 0U, "2/3");
 }
 
+// ─── L2-05 general path: transcendental denominator with a finite-order zero ───
+
+TEST_F(LaurentSeriesTest, ReciprocalOfSine) {
+    // csc(x) around 0:  1/sin(x) = 1/x + x/6 + 7·x³/360 + …
+    auto laurent = calculus::laurent_series(E("1/sin(x)"), Symbol("x"), E("0"), 3U, *ctx);
+    ASSERT_TRUE(laurent.is_ok()) << laurent.error().message;
+    EXPECT_EQ(laurent.value().leading_order, -1);
+    ASSERT_EQ(laurent.value().coefficients.size(), 5U);  // exponents −1..3
+    expect_coeff(laurent.value(), 0U, "1");        // c_{-1}
+    expect_coeff(laurent.value(), 1U, "0");        // c_0
+    expect_coeff(laurent.value(), 2U, "1/6");      // c_1
+    expect_coeff(laurent.value(), 3U, "0");        // c_2
+    expect_coeff(laurent.value(), 4U, "7/360");    // c_3
+}
+
+TEST_F(LaurentSeriesTest, OneOverXSquaredTimesSine) {
+    // 1/(x²·sin(x)) around 0:  1/x³ + 1/(6·x) + 7·x/360 + …
+    auto laurent = calculus::laurent_series(E("1/(x^2 * sin(x))"), Symbol("x"), E("0"), 1U, *ctx);
+    ASSERT_TRUE(laurent.is_ok()) << laurent.error().message;
+    EXPECT_EQ(laurent.value().leading_order, -3);
+    ASSERT_EQ(laurent.value().coefficients.size(), 5U);  // exponents −3..1
+    expect_coeff(laurent.value(), 0U, "1");        // c_{-3}
+    expect_coeff(laurent.value(), 1U, "0");        // c_{-2}
+    expect_coeff(laurent.value(), 2U, "1/6");      // c_{-1}
+    expect_coeff(laurent.value(), 3U, "0");        // c_0
+    expect_coeff(laurent.value(), 4U, "7/360");    // c_1
+}
+
+TEST_F(LaurentSeriesTest, CotangentLaurent) {
+    // cot(x) = cos(x)/sin(x) around 0:  1/x − x/3 − x³/45 − …
+    auto laurent = calculus::laurent_series(E("cos(x)/sin(x)"), Symbol("x"), E("0"), 3U, *ctx);
+    ASSERT_TRUE(laurent.is_ok()) << laurent.error().message;
+    EXPECT_EQ(laurent.value().leading_order, -1);
+    ASSERT_EQ(laurent.value().coefficients.size(), 5U);
+    expect_coeff(laurent.value(), 0U, "1");        // c_{-1}
+    expect_coeff(laurent.value(), 1U, "0");        // c_0
+    expect_coeff(laurent.value(), 2U, "-1/3");     // c_1
+    expect_coeff(laurent.value(), 3U, "0");        // c_2
+    expect_coeff(laurent.value(), 4U, "-1/45");    // c_3
+}
+
+TEST_F(LaurentSeriesTest, AntiHardcodeShiftedCenter) {
+    // 1/sin(x − π/2) = 1/(-cos(x − π/2 + π/2)) — choose centre = π/2 so the
+    // expansion variable is δ = x − π/2 and sin(x) = cos(δ).  Expansion of
+    // 1/cos(δ) at δ=0:  1 + δ²/2 + 5·δ⁴/24 + … (sec series).
+    auto laurent = calculus::laurent_series(E("1/sin(x)"), Symbol("x"), E("pi/2"), 4U, *ctx);
+    ASSERT_TRUE(laurent.is_ok()) << laurent.error().message;
+    EXPECT_EQ(laurent.value().leading_order, 0);  // sin(π/2) = 1 so no pole.
+    ASSERT_EQ(laurent.value().coefficients.size(), 5U);
+    expect_coeff(laurent.value(), 0U, "1");        // c_0 = sec(0)
+    expect_coeff(laurent.value(), 1U, "0");        // c_1
+    expect_coeff(laurent.value(), 2U, "1/2");      // c_2
+    expect_coeff(laurent.value(), 3U, "0");        // c_3
+    expect_coeff(laurent.value(), 4U, "5/24");     // c_4
+}
+
 }  // namespace cas::test

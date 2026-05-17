@@ -273,20 +273,33 @@ Result<LaurentExpansion> laurent_series(
     ExprPtr center,
     unsigned int positive_order,
     symbolic::CASContext& ctx) {
+    // Fast path: rational decomposition via apart_num_den.  Only valid when
+    // both pieces are polynomials in `var`, which holds for plain rational
+    // integrands.  Failures or non‑polynomial denominators fall through to
+    // the general Taylor‑inversion path below.
     auto parts = algebra::apart_num_den(expr, ctx);
-    if (parts.is_error()) return fail<LaurentExpansion>(parts.error());
+    if (parts.is_ok()) {
+        auto order = denominator_zero_order(parts.value().denominator, var, center, ctx);
+        if (order.is_ok()) {
+            auto rational_attempt = rational_laurent_from_series(
+                parts.value().numerator,
+                parts.value().denominator,
+                var,
+                center,
+                order.value(),
+                positive_order,
+                ctx);
+            if (rational_attempt.is_ok()) return rational_attempt;
+        }
+    }
 
-    auto order = denominator_zero_order(parts.value().denominator, var, center, ctx);
-    if (order.is_error()) return fail<LaurentExpansion>(order.error());
-
-    return rational_laurent_from_series(
-        parts.value().numerator,
-        parts.value().denominator,
-        var,
-        center,
-        order.value(),
-        positive_order,
-        ctx);
+    // L2-05 general path: Taylor‑expand numerator and denominator at center,
+    // invert the denominator series, multiply.  Pole budget heuristically set
+    // to positive_order + 2 to absorb common transcendental zero orders
+    // (sin(x), x·sin(x), x²·sin(x), …).  The exact zero order is detected
+    // automatically as the leading exponent of the denominator's Taylor series.
+    const unsigned int pole_budget = positive_order + 4U;
+    return laurent_series_general(expr, var, center, positive_order, pole_budget, ctx);
 }
 
 } // namespace cas::calculus

@@ -79,6 +79,21 @@ struct QuotientView {
     ExprPtr upper,
     symbolic::CASContext& ctx);
 
+// L2-05 closure: Laurent expansion via Taylor‑series inversion of the
+// denominator.  Splits expr on its top‑level Div node (no rational
+// canonicalization), Taylor‑expands numerator and denominator at `center`
+// to order positive_order + pole_budget, then divides the two series.
+// Handles transcendental denominators with finite‑order zeros at the
+// expansion point (e.g. 1/sin(x), 1/(x²·sin(x))) which the rational
+// fast path cannot.
+[[nodiscard]] Result<LaurentExpansion> laurent_series_general(
+    ExprPtr expr,
+    const Symbol& var,
+    ExprPtr center,
+    unsigned int positive_order,
+    unsigned int pole_budget,
+    symbolic::CASContext& ctx);
+
 [[nodiscard]] Result<ExprPtr> residue(
     ExprPtr expr,
     const Symbol& var,

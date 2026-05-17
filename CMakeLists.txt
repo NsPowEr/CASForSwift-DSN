@@ -125,6 +125,7 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/limit_mrv.cpp
     src/calculus/residue.cpp
     src/calculus/residue_theorem.cpp
+    src/calculus/laurent_general.cpp
     src/calculus/diff_rules.cpp
     src/calculus/integrate_parts.cpp
     src/calculus/ode_classifier.cpp
