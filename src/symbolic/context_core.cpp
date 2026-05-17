@@ -431,6 +431,10 @@ void CASContext::set_improper_leading_order_scan(std::size_t window) noexcept {
     improper_leading_order_scan_ = (window < 1U) ? 1U : window;
 }
 
+void CASContext::set_expand_bessel_recurrence(bool enabled) noexcept {
+    expand_bessel_recurrence_ = enabled;
+}
+
 Symbol CASContext::make_fresh_symbol(const std::string& prefix) {
     // Probe candidate names of the form "<prefix>_<n>" with monotonically
     // increasing n until the name is not present in the user-defined

@@ -224,6 +224,7 @@ public:
 
     void define(const Symbol& symbol, ExprPtr value);
     [[nodiscard]] std::optional<ExprPtr> lookup(const Symbol& symbol) const;
+    [[nodiscard]] const std::unordered_map<std::string, ExprPtr>& variables() const noexcept { return variables_; }
 
     [[nodiscard]] Assumptions& assumptions() noexcept;
     [[nodiscard]] const Assumptions& assumptions() const noexcept;
@@ -269,6 +270,13 @@ public:
     [[nodiscard]] std::size_t max_gamma_recursion() const noexcept { return max_gamma_recursion_; }
     void set_improper_leading_order_scan(std::size_t window) noexcept;
     [[nodiscard]] std::size_t improper_leading_order_scan() const noexcept { return improper_leading_order_scan_; }
+
+    // Opt-in: expand BesselJ(n, x) and BesselY(n, x) with integer n >= 2 via the
+    // three-term recurrence  J_{n}(x) = (2(n-1)/x) J_{n-1}(x) - J_{n-2}(x)
+    // until the order reaches {0, 1}.  Default false because the expanded form
+    // is rarely what the user wants in symbolic answers.
+    void set_expand_bessel_recurrence(bool enabled) noexcept;
+    [[nodiscard]] bool expand_bessel_recurrence() const noexcept { return expand_bessel_recurrence_; }
 
     // HC-004: fresh symbol generator.  Returns a Symbol whose name is unique
     // within this context across all previous make_fresh_symbol calls AND
@@ -326,6 +334,7 @@ public:
     std::size_t max_q_alpha_bridge_depth_{256U};
     std::size_t max_gamma_recursion_{1024U};
     std::size_t improper_leading_order_scan_{8U};
+    bool expand_bessel_recurrence_{false};
     std::uint64_t fresh_symbol_counter_{0U};
 
 public:

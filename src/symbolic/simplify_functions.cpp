@@ -1196,6 +1196,39 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const FuncCall& node
                 return simplify_expr(prod);
             }
         }
+
+        // Opt-in three-term recurrence for integer order n >= 2:
+        //   J_{n}(x) = (2(n-1)/x) · J_{n-1}(x) − J_{n-2}(x)
+        //   Y_{n}(x) = (2(n-1)/x) · Y_{n-1}(x) − Y_{n-2}(x)
+        // The same iteration applied recursively reduces every BesselJ/Y of integer
+        // order >= 2 down to combinations of order-0 and order-1 calls plus 1/x.
+        if ((node.func_id == BuiltinOp::BesselJ || node.func_id == BuiltinOp::BesselY)
+            && context_ != nullptr && context_->expand_bessel_recurrence()) {
+            if (const auto* il = expr_cast<IntegerLit>(order);
+                il != nullptr && !il->value.is_negative() && il->value > BigInt(1)) {
+                if (il->value.bit_length() > 16) {
+                    return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
+                        "Bessel recurrence: integer order too large"));
+                }
+                BigInt n_minus_1 = il->value - BigInt(1);
+                BigInt n_minus_2 = il->value - BigInt(2);
+                ExprPtr coeff = arena_.make<Binary>(
+                    BinaryOp::Div,
+                    arena_.make<Product>(std::vector<ExprPtr>{
+                        make_integer(arena_, BigInt(2)),
+                        make_integer(arena_, n_minus_1),
+                    }),
+                    x_arg);
+                ExprPtr j_minus_1 = arena_.make<FuncCall>(node.func_id,
+                    std::vector<ExprPtr>{make_integer(arena_, n_minus_1), x_arg});
+                ExprPtr j_minus_2 = arena_.make<FuncCall>(node.func_id,
+                    std::vector<ExprPtr>{make_integer(arena_, n_minus_2), x_arg});
+                ExprPtr first_term = arena_.make<Product>(std::vector<ExprPtr>{coeff, j_minus_1});
+                ExprPtr neg_second = arena_.make<Unary>(UnaryOp::Neg, j_minus_2);
+                ExprPtr sum = arena_.make<Sum>(std::vector<ExprPtr>{first_term, neg_second});
+                return simplify_expr(sum);
+            }
+        }
     }
 
     // L3-04: Chebyshev polynomial of the first kind T_n(x) via the standard

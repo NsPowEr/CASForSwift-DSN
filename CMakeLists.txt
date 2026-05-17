@@ -388,6 +388,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/symbolic/test_complex_polar.cpp
         test/unit/calculus/test_asymptotes_rootsum.cpp
         test/unit/calculus/test_bessel_orthogonality.cpp
+        test/unit/calculus/test_bessel_recurrence.cpp
         test/unit/symbolic/test_assumptions_stability.cpp
         test/unit/symbolic/test_caching.cpp
         test/unit/symbolic/test_gruntz.cpp
