@@ -262,5 +262,44 @@ TEST_F(AlgebraicTowerBridgeTest, DetectAndManualGeneratorsAgreeForDependentOuter
     EXPECT_EQ(detected.value()->min_poly_2, manual.min_poly_2);
 }
 
+TEST_F(AlgebraicTowerBridgeTest, ExpressesEquivalentInnerGeneratorVariantInDetectedTower) {
+    ExprPtr detected_expr = parse_ok("RootOf(y^2-(3*RootOf(x^2-2,x,0)+1),y,0)");
+    ExprPtr equivalent_expr = parse_ok("RootOf(y^2-(3*RootOf(t^2-2,t,0)+1),y,0)");
+
+    auto detected = algebra::detect_two_level_tower(detected_expr, *ctx);
+    ASSERT_TRUE(detected.is_ok()) << detected.error().message;
+    ASSERT_TRUE(detected.value().has_value());
+
+    auto tower = algebra::try_express_in_tower_two_level(equivalent_expr, *detected.value(), *ctx);
+    ASSERT_TRUE(tower.is_ok()) << tower.error().message;
+    ASSERT_TRUE(tower.value().has_value());
+
+    const auto& coeffs = tower.value()->value();
+    ASSERT_EQ(coeffs.size(), 2U);
+    EXPECT_TRUE(coeffs[0].is_zero());
+    EXPECT_EQ(coeffs[1], one_in_q_alpha(detected.value()->min_poly_1));
+}
+
+TEST_F(AlgebraicTowerBridgeTest, DeduplicatesEquivalentInnerRootOfAcrossVariableNames) {
+    ExprPtr expr = parse_ok(
+        "RootOf(y^2-(3*RootOf(x^2-2,x,0)+1),y,0) + RootOf(t^2-2,t,0)");
+
+    auto detected = algebra::detect_two_level_tower(expr, *ctx);
+    ASSERT_TRUE(detected.is_ok()) << detected.error().message;
+    ASSERT_TRUE(detected.value().has_value());
+
+    auto tower = algebra::try_express_in_tower_two_level(expr, *detected.value(), *ctx);
+    ASSERT_TRUE(tower.is_ok()) << tower.error().message;
+    ASSERT_TRUE(tower.value().has_value());
+
+    auto alpha_1 = algebra::alpha_from_rootof(expr_ref<RootOf>(detected.value()->alpha_1), *ctx);
+    ASSERT_TRUE(alpha_1.is_ok()) << alpha_1.error().message;
+
+    const auto& coeffs = tower.value()->value();
+    ASSERT_EQ(coeffs.size(), 2U);
+    EXPECT_EQ(coeffs[0], alpha_1.value());
+    EXPECT_EQ(coeffs[1], one_in_q_alpha(detected.value()->min_poly_1));
+}
+
 }  // namespace
 }  // namespace cas::test

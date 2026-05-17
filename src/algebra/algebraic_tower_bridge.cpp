@@ -201,6 +201,24 @@ private:
     return out;
 }
 
+[[nodiscard]] bool same_generator_expr(
+    ExprPtr expr,
+    ExprPtr generator_expr,
+    symbolic::CASContext& ctx) {
+    if (generator_expr && structural_equal(expr, generator_expr)) return true;
+
+    const auto* lhs = expr_cast<RootOf>(expr);
+    const auto* rhs = expr_cast<RootOf>(generator_expr);
+    if (!lhs || !rhs) return false;
+    if (lhs->root_index != rhs->root_index) return false;
+
+    auto lhs_mp = rootof_min_poly(*lhs, ctx);
+    if (lhs_mp.is_error()) return false;
+    auto rhs_mp = rootof_min_poly(*rhs, ctx);
+    if (rhs_mp.is_error()) return false;
+    return lhs_mp.value() == rhs_mp.value();
+}
+
 [[nodiscard]] AlgebraicNumber inner_from_rational(
     const Rational& value,
     const AlgebraicNumber::CoeffVec& min_poly) {
@@ -269,46 +287,93 @@ private:
     return ok(std::move(min_poly));
 }
 
-void collect_distinct_rootofs(ExprPtr expr, std::vector<ExprPtr>& out) {
+[[nodiscard]] Result<std::optional<std::vector<AlgebraicNumber>>> rootof_min_poly_over_q_alpha(
+    const RootOf& root,
+    ExprPtr alpha_1_expr,
+    const AlgebraicNumber::CoeffVec& min_poly_1,
+    symbolic::CASContext& ctx) {
+    RootOfExplicitDegreeGuard rootof_guard(ctx, 1U);
+    auto parsed = parse_polynomial_raw(root.polynomial, root.variable, ctx);
+    if (parsed.is_error()) return ok(std::optional<std::vector<AlgebraicNumber>>{});
+
+    std::vector<AlgebraicNumber> coeffs;
+    coeffs.reserve(parsed.value().coefficients().size());
+    for (ExprPtr coeff_expr : parsed.value().coefficients()) {
+        if (!coeff_expr || poly_is_zero_expr(coeff_expr)) {
+            coeffs.push_back(inner_zero(min_poly_1));
+            continue;
+        }
+        auto reduced = try_express_in_q_alpha(coeff_expr, alpha_1_expr, min_poly_1, ctx);
+        if (reduced.is_error()) return fail<std::optional<std::vector<AlgebraicNumber>>>(reduced.error());
+        if (!reduced.value().has_value()) return ok(std::optional<std::vector<AlgebraicNumber>>{});
+        coeffs.push_back(std::move(reduced.value().value()));
+    }
+
+    auto monic = monic_outer_min_poly(std::move(coeffs));
+    if (monic.is_error()) return ok(std::optional<std::vector<AlgebraicNumber>>{});
+    return ok(std::optional<std::vector<AlgebraicNumber>>(std::move(monic.value())));
+}
+
+[[nodiscard]] bool same_outer_generator_expr(
+    ExprPtr expr,
+    ExprPtr generator_expr,
+    ExprPtr alpha_1_expr,
+    const AlgebraicNumber::CoeffVec& min_poly_1,
+    symbolic::CASContext& ctx) {
+    if (same_generator_expr(expr, generator_expr, ctx)) return true;
+
+    const auto* lhs = expr_cast<RootOf>(expr);
+    const auto* rhs = expr_cast<RootOf>(generator_expr);
+    if (!lhs || !rhs) return false;
+    if (lhs->root_index != rhs->root_index) return false;
+
+    auto lhs_mp = rootof_min_poly_over_q_alpha(*lhs, alpha_1_expr, min_poly_1, ctx);
+    if (lhs_mp.is_error() || !lhs_mp.value().has_value()) return false;
+    auto rhs_mp = rootof_min_poly_over_q_alpha(*rhs, alpha_1_expr, min_poly_1, ctx);
+    if (rhs_mp.is_error() || !rhs_mp.value().has_value()) return false;
+    return lhs_mp.value().value() == rhs_mp.value().value();
+}
+
+void collect_distinct_rootofs(ExprPtr expr, std::vector<ExprPtr>& out, symbolic::CASContext& ctx) {
     if (!expr || out.size() >= 3U) return;
     if (expr_is<RootOf>(expr)) {
         bool seen = false;
         for (ExprPtr existing : out) {
-            if (structural_equal(existing, expr)) {
+            if (same_generator_expr(existing, expr, ctx)) {
                 seen = true;
                 break;
             }
         }
         if (!seen) out.push_back(expr);
         const auto& root = expr_ref<RootOf>(expr);
-        collect_distinct_rootofs(root.polynomial, out);
+        collect_distinct_rootofs(root.polynomial, out, ctx);
         return;
     }
 
     visit_expr(expr, [&](const auto& node) {
         using Node = std::decay_t<decltype(node)>;
         if constexpr (std::is_same_v<Node, Unary>) {
-            collect_distinct_rootofs(node.operand, out);
+            collect_distinct_rootofs(node.operand, out, ctx);
         } else if constexpr (std::is_same_v<Node, Binary>) {
-            collect_distinct_rootofs(node.left, out);
-            collect_distinct_rootofs(node.right, out);
+            collect_distinct_rootofs(node.left, out, ctx);
+            collect_distinct_rootofs(node.right, out, ctx);
         } else if constexpr (std::is_same_v<Node, FuncCall>) {
-            for (ExprPtr arg : node.args) collect_distinct_rootofs(arg, out);
+            for (ExprPtr arg : node.args) collect_distinct_rootofs(arg, out, ctx);
         } else if constexpr (std::is_same_v<Node, Sum>) {
-            for (ExprPtr term : node.terms) collect_distinct_rootofs(term, out);
+            for (ExprPtr term : node.terms) collect_distinct_rootofs(term, out, ctx);
         } else if constexpr (std::is_same_v<Node, Product>) {
-            for (ExprPtr factor : node.factors) collect_distinct_rootofs(factor, out);
+            for (ExprPtr factor : node.factors) collect_distinct_rootofs(factor, out, ctx);
         } else if constexpr (std::is_same_v<Node, Integral>) {
-            collect_distinct_rootofs(node.integrand, out);
-            if (node.lower.has_value()) collect_distinct_rootofs(*node.lower, out);
-            if (node.upper.has_value()) collect_distinct_rootofs(*node.upper, out);
+            collect_distinct_rootofs(node.integrand, out, ctx);
+            if (node.lower.has_value()) collect_distinct_rootofs(*node.lower, out, ctx);
+            if (node.upper.has_value()) collect_distinct_rootofs(*node.upper, out, ctx);
         } else if constexpr (std::is_same_v<Node, Derivative>) {
-            collect_distinct_rootofs(node.expression, out);
+            collect_distinct_rootofs(node.expression, out, ctx);
         } else if constexpr (std::is_same_v<Node, Limit>) {
-            collect_distinct_rootofs(node.expression, out);
-            collect_distinct_rootofs(node.point, out);
+            collect_distinct_rootofs(node.expression, out, ctx);
+            collect_distinct_rootofs(node.point, out, ctx);
         } else if constexpr (std::is_same_v<Node, Matrix>) {
-            for (ExprPtr item : node.elements) collect_distinct_rootofs(item, out);
+            for (ExprPtr item : node.elements) collect_distinct_rootofs(item, out, ctx);
         }
     });
 }
@@ -398,13 +463,13 @@ void collect_distinct_rootofs(ExprPtr expr, std::vector<ExprPtr>& out) {
         return ok(std::optional<AlgebraicTowerTwoLevel>{});
     }
 
-    if (structural_equal(expr, gens.alpha_2)) {
+    if (same_outer_generator_expr(expr, gens.alpha_2, gens.alpha_1, gens.min_poly_1, ctx)) {
         return ok(std::optional<AlgebraicTowerTwoLevel>(
             AlgebraicTowerTwoLevel(
                 {inner_zero(gens.min_poly_1), inner_one(gens.min_poly_1)},
                 gens.min_poly_2)));
     }
-    if (structural_equal(expr, gens.alpha_1)) {
+    if (same_generator_expr(expr, gens.alpha_1, ctx)) {
         return ok(std::optional<AlgebraicTowerTwoLevel>(
             tower_constant(inner_alpha(gens.min_poly_1), gens.min_poly_2)));
     }
@@ -491,7 +556,7 @@ void collect_distinct_rootofs(ExprPtr expr, std::vector<ExprPtr>& out) {
     ExprPtr expr,
     symbolic::CASContext& ctx) {
     std::vector<ExprPtr> roots;
-    collect_distinct_rootofs(expr, roots);
+    collect_distinct_rootofs(expr, roots, ctx);
     if (roots.size() != 2U) return ok(std::optional<TowerGenerators>{});
 
     auto first = try_build_candidate(roots[0], roots[1], ctx);
