@@ -103,6 +103,9 @@ const std::vector<DefinitePatternFn>& definite_patterns() {
     static const std::vector<DefinitePatternFn> registry = {
         &pattern_gaussian_full_line,
         &pattern_bessel_orthogonality,
+        &pattern_legendre_orthogonality,
+        &pattern_hermite_h_orthogonality,
+        &pattern_hermite_he_orthogonality,
     };
     return registry;
 }
