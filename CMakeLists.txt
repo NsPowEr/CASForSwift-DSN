@@ -277,6 +277,14 @@ target_include_directories(cas_c_api PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(cas_c_api PRIVATE cas_core)
 target_compile_features(cas_c_api PUBLIC cxx_std_20)
 
+add_library(cas_gui_bridge STATIC GUI/src/CasGuiSession.cpp)
+target_include_directories(cas_gui_bridge
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/GUI/src
+)
+target_link_libraries(cas_gui_bridge PUBLIC cas_core)
+target_compile_features(cas_gui_bridge PUBLIC cxx_std_20)
+
 if(CAS_ENABLE_TESTING)
     add_executable(cas_c_api_test test/c_api/test_c_api.c)
     target_link_libraries(cas_c_api_test PRIVATE cas_c_api)
@@ -355,6 +363,7 @@ if(CAS_ENABLE_TESTING)
     test/unit/linalg/test_eigen_over_extension.cpp
         test/unit/numeric/test_numeric.cpp
         test/unit/formatter/test_formatter.cpp
+        test/unit/gui/test_cas_gui_session.cpp
         test/unit/algebra/test_resultant.cpp
         test/unit/algebra/test_resultant_generic.cpp
         test/unit/algebra/test_algebra.cpp
@@ -408,8 +417,11 @@ if(CAS_ENABLE_TESTING)
         test/unit/test_integrate_singularity.cpp
         test/regression/test_regression.cpp
     )
-    target_link_libraries(cas_foundation_tests PRIVATE cas_core GTest::gtest_main)
-    target_include_directories(cas_foundation_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(cas_foundation_tests PRIVATE cas_core cas_gui_bridge GTest::gtest_main)
+    target_include_directories(cas_foundation_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/GUI/src
+    )
 
     add_executable(assumptions_stability_test
         test/unit/symbolic/test_assumptions_stability.cpp
