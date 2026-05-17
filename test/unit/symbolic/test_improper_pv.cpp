@@ -103,4 +103,67 @@ TEST_F(ImproperPVTest, CauchyPV_AlgebraicAtPole) {
         << "PV(1/(x-1), 0, 2) expected 0, got " << debug_print(pv.value());
 }
 
+// ─── L2-11 closure: Hadamard finite part for poles of order ≥ 2 ───
+
+TEST_F(ImproperPVTest, Hadamard_DoublePole_OneOverXSquared) {
+    // H.F. ∫_{-1}^{1} 1/x² dx
+    //   Closed form via the k = −2 row of the Hadamard table:
+    //     c_{-2}/(k+1) · ((b−p)^{k+1} − (a−p)^{k+1})
+    //     = (1)/(-1) · (1^{-1} − (-1)^{-1})
+    //     = −(1 − (−1)) = −2.
+    auto pv = calculus::cauchy_principal_value(
+        E("1/x^2"), Symbol("x"), E("-1"), E("1"), E("0"), *ctx);
+    ASSERT_TRUE(pv.is_ok()) << pv.error().message;
+    auto expected = ctx->simplify(E("-2"));
+    ASSERT_TRUE(expected.is_ok());
+    auto eq = symbolic::mathematically_equal(pv.value(), expected.value(), *ctx);
+    ASSERT_TRUE(eq.is_ok());
+    EXPECT_TRUE(eq.value())
+        << "H.F. ∫_{-1}^{1} 1/x² expected -2, got " << debug_print(pv.value());
+}
+
+TEST_F(ImproperPVTest, Hadamard_TriplePole_OneOverXCubed) {
+    // H.F. ∫_{-1}^{1} 1/x³ dx — by symmetry the only contribution is the
+    // k = −3 row, which evaluates to
+    //   (1)/(-2) · (1^{-2} − (-1)^{-2}) = (-1/2)·(1 − 1) = 0.
+    auto pv = calculus::cauchy_principal_value(
+        E("1/x^3"), Symbol("x"), E("-1"), E("1"), E("0"), *ctx);
+    ASSERT_TRUE(pv.is_ok()) << pv.error().message;
+    auto expected = ctx->simplify(E("0"));
+    ASSERT_TRUE(expected.is_ok());
+    auto eq = symbolic::mathematically_equal(pv.value(), expected.value(), *ctx);
+    ASSERT_TRUE(eq.is_ok());
+    EXPECT_TRUE(eq.value())
+        << "H.F. ∫_{-1}^{1} 1/x³ expected 0, got " << debug_print(pv.value());
+}
+
+TEST_F(ImproperPVTest, Hadamard_DoublePoleShifted) {
+    // H.F. ∫_{0}^{2} 1/(x-1)² dx
+    //   c_{-2} = 1, no c_{-1}.  Contribution = (1)/(-1) · ((2-1)^{-1} − (0-1)^{-1})
+    //   = −(1 − (−1)) = −2.
+    auto pv = calculus::cauchy_principal_value(
+        E("1/(x-1)^2"), Symbol("x"), E("0"), E("2"), E("1"), *ctx);
+    ASSERT_TRUE(pv.is_ok()) << pv.error().message;
+    auto expected = ctx->simplify(E("-2"));
+    ASSERT_TRUE(expected.is_ok());
+    auto eq = symbolic::mathematically_equal(pv.value(), expected.value(), *ctx);
+    ASSERT_TRUE(eq.is_ok());
+    EXPECT_TRUE(eq.value())
+        << "H.F. ∫_{0}^{2} 1/(x-1)² expected -2, got " << debug_print(pv.value());
+}
+
+TEST_F(ImproperPVTest, Hadamard_AntiHardcodeOrder4) {
+    // H.F. ∫_{-1}^{1} 1/x⁴ dx
+    //   k = −4 row: (1)/(-3) · (1^{-3} − (-1)^{-3}) = (-1/3)·(1 − (-1)) = -2/3.
+    auto pv = calculus::cauchy_principal_value(
+        E("1/x^4"), Symbol("x"), E("-1"), E("1"), E("0"), *ctx);
+    ASSERT_TRUE(pv.is_ok()) << pv.error().message;
+    auto expected = ctx->simplify(E("-2/3"));
+    ASSERT_TRUE(expected.is_ok());
+    auto eq = symbolic::mathematically_equal(pv.value(), expected.value(), *ctx);
+    ASSERT_TRUE(eq.is_ok());
+    EXPECT_TRUE(eq.value())
+        << "H.F. ∫_{-1}^{1} 1/x⁴ expected -2/3, got " << debug_print(pv.value());
+}
+
 }  // namespace cas::test

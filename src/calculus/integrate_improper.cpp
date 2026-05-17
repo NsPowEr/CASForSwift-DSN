@@ -227,52 +227,109 @@ Result<ExprPtr> cauchy_principal_value(
         // Integrand is analytic and vanishes at `pole`: nothing special.
         return definite_integral(expr, var, lower, upper, ctx);
     }
-    if (exp.leading_order != -1) {
-        return fail<ExprPtr>(CASError{
-            .kind = CASErrorKind::Unimplemented,
-            .message = "cauchy_principal_value: only simple poles supported (got order "
-                       + std::to_string(exp.leading_order) + ")"});
+    if (exp.leading_order >= 0) {
+        // Integrand analytic at pole — no special handling needed.
+        return definite_integral(expr, var, lower, upper, ctx);
     }
 
-    // Step 2: c_{-1} is coefficients[0] when leading_order = -1.
-    ExprPtr residue = exp.coefficients.front();
+    // General Hadamard finite‑part regularisation for a pole of order m ≥ 1.
+    // Let f(x) = Σ_{k=-m}^∞ c_k · (x − p)^k  near p.  Write
+    //   f(x) = singular(x) + regular(x)
+    //   singular(x) = Σ_{k=-m}^{-1} c_k · (x − p)^k
+    //   regular(x)  = f(x) − singular(x)   (analytic at p)
+    //
+    //   ∫_a^b regular(x) dx = F(b) − F(a)            (standard antiderivative)
+    //
+    //   For the singular part, evaluated as the limit
+    //     lim_{ε→0+} [ ∫_a^{p−ε} singular + ∫_{p+ε}^b singular − S(ε) ]
+    //   where S(ε) is the diverging tail in ε:
+    //
+    //     k = −1:    c_{-1} · (ln|b − p| − ln|a − p|)             (PV log)
+    //     k ≤ −2:    c_k/(k+1) · ((b − p)^{k+1} − (a − p)^{k+1})
+    //                 (Hadamard finite part — divergent symmetric tails
+    //                  −2 c_k ε^{k+1}/(k+1) cancel when k is odd, and are
+    //                  subtracted by definition when k is even).
+    //
+    // Both formulas merge cleanly because for k ≤ −2 the bracket
+    // (b−p)^{k+1} − (a−p)^{k+1} is exactly the finite part, regardless of
+    // parity.  The k = −1 case is special only because (k+1) = 0 forbids
+    // the same antiderivative form and the log appears instead.
+    const int m = -exp.leading_order;  // m ≥ 1 by the branch above
 
-    // Step 3: regular(x) = expr - c_{-1}/(x - pole)
+    // Step 2: build the singular part Σ_{k=-m}^{-1} c_k · (x − p)^k.
     ExprPtr x_minus_p = arena.make<Binary>(BinaryOp::Sub, arena.make<Symbol>(var), pole);
-    ExprPtr principal = arena.make<Binary>(BinaryOp::Div, residue, x_minus_p);
-    ExprPtr regular_expr = arena.make<Binary>(BinaryOp::Sub, expr, principal);
-    auto regular_simplified = ctx.simplify(regular_expr);
-    if (regular_simplified.is_error()) {
-        return regular_simplified;
+    std::vector<ExprPtr> singular_terms;
+    singular_terms.reserve(static_cast<std::size_t>(m));
+    for (int k = -m; k <= -1; ++k) {
+        const std::size_t idx = static_cast<std::size_t>(k - exp.leading_order);
+        if (idx >= exp.coefficients.size()) continue;
+        ExprPtr c_k = exp.coefficients[idx];
+        // (x − p)^k for k < 0 ⇒ 1 / (x − p)^{-k}
+        ExprPtr power_arg = arena.make<IntegerLit>(BigInt(static_cast<long long>(-k)));
+        ExprPtr denom_pow = arena.make<Binary>(BinaryOp::Pow, x_minus_p, power_arg);
+        ExprPtr term = arena.make<Binary>(BinaryOp::Div, c_k, denom_pow);
+        singular_terms.push_back(term);
     }
+    ExprPtr singular_expr = arena.make<IntegerLit>(BigInt(0));
+    if (singular_terms.size() == 1U) {
+        singular_expr = singular_terms.front();
+    } else if (singular_terms.size() > 1U) {
+        singular_expr = arena.make<Sum>(std::move(singular_terms));
+    }
+    auto singular_simp = ctx.simplify(singular_expr);
+    if (singular_simp.is_error()) return singular_simp;
+
+    // Step 3: regular(x) = f(x) − singular(x).
+    ExprPtr regular_expr = arena.make<Binary>(BinaryOp::Sub, expr, singular_simp.value());
+    auto regular_simplified = ctx.simplify(regular_expr);
+    if (regular_simplified.is_error()) return regular_simplified;
     regular_expr = regular_simplified.value();
 
-    // Step 4a: indefinite antiderivative of regular part (analytic at pole),
-    // then F(upper) - F(lower).  Avoids the pole-rejection in definite_integral.
+    // Step 4a: integrate the regular part and evaluate at the endpoints.
     auto antideriv = integrate(regular_expr, var, ctx);
-    if (antideriv.is_error()) {
-        return antideriv;
-    }
-
+    if (antideriv.is_error()) return antideriv;
     auto F_upper = ctx.substitute(antideriv.value(), var, upper);
     if (F_upper.is_error()) return F_upper;
     auto F_lower = ctx.substitute(antideriv.value(), var, lower);
     if (F_lower.is_error()) return F_lower;
-
     ExprPtr regular_part = arena.make<Binary>(BinaryOp::Sub, F_upper.value(), F_lower.value());
 
-    // Step 4b: PV contribution of c_{-1}/(x - p) on (lower, upper) =
-    //   c_{-1} * ( ln|upper - p| - ln|lower - p| ).
+    // Step 4b: singular‑part finite‑part contributions, k = −1..−m.
     ExprPtr upper_minus_p = arena.make<Binary>(BinaryOp::Sub, upper, pole);
     ExprPtr lower_minus_p = arena.make<Binary>(BinaryOp::Sub, lower, pole);
-    ExprPtr abs_upper = arena.make<FuncCall>(BuiltinOp::Abs, std::vector<ExprPtr>{upper_minus_p});
-    ExprPtr abs_lower = arena.make<FuncCall>(BuiltinOp::Abs, std::vector<ExprPtr>{lower_minus_p});
-    ExprPtr ln_upper = arena.make<FuncCall>(BuiltinOp::Log, std::vector<ExprPtr>{abs_upper});
-    ExprPtr ln_lower = arena.make<FuncCall>(BuiltinOp::Log, std::vector<ExprPtr>{abs_lower});
-    ExprPtr log_diff = arena.make<Binary>(BinaryOp::Sub, ln_upper, ln_lower);
-    ExprPtr pv_principal = arena.make<Binary>(BinaryOp::Mul, residue, log_diff);
 
-    ExprPtr total = arena.make<Binary>(BinaryOp::Add, regular_part, pv_principal);
+    std::vector<ExprPtr> singular_contributions;
+    for (int k = -1; k >= -m; --k) {
+        const std::size_t idx = static_cast<std::size_t>(k - exp.leading_order);
+        if (idx >= exp.coefficients.size()) continue;
+        ExprPtr c_k = exp.coefficients[idx];
+        if (k == -1) {
+            ExprPtr abs_upper = arena.make<FuncCall>(BuiltinOp::Abs, std::vector<ExprPtr>{upper_minus_p});
+            ExprPtr abs_lower = arena.make<FuncCall>(BuiltinOp::Abs, std::vector<ExprPtr>{lower_minus_p});
+            ExprPtr ln_upper = arena.make<FuncCall>(BuiltinOp::Log, std::vector<ExprPtr>{abs_upper});
+            ExprPtr ln_lower = arena.make<FuncCall>(BuiltinOp::Log, std::vector<ExprPtr>{abs_lower});
+            ExprPtr log_diff = arena.make<Binary>(BinaryOp::Sub, ln_upper, ln_lower);
+            singular_contributions.push_back(arena.make<Binary>(BinaryOp::Mul, c_k, log_diff));
+        } else {
+            // c_k/(k+1) · ((b − p)^{k+1} − (a − p)^{k+1}),  k+1 < 0.
+            const long long expnt = static_cast<long long>(k + 1);
+            ExprPtr expnt_lit = arena.make<IntegerLit>(BigInt(expnt));
+            ExprPtr ub_pow = arena.make<Binary>(BinaryOp::Pow, upper_minus_p, expnt_lit);
+            ExprPtr lb_pow = arena.make<Binary>(BinaryOp::Pow, lower_minus_p, expnt_lit);
+            ExprPtr diff_pow = arena.make<Binary>(BinaryOp::Sub, ub_pow, lb_pow);
+            ExprPtr k_plus_1_lit = arena.make<IntegerLit>(BigInt(expnt));
+            ExprPtr scaled = arena.make<Binary>(BinaryOp::Div, c_k, k_plus_1_lit);
+            singular_contributions.push_back(arena.make<Binary>(BinaryOp::Mul, scaled, diff_pow));
+        }
+    }
+    ExprPtr singular_part = arena.make<IntegerLit>(BigInt(0));
+    if (singular_contributions.size() == 1U) {
+        singular_part = singular_contributions.front();
+    } else if (singular_contributions.size() > 1U) {
+        singular_part = arena.make<Sum>(std::move(singular_contributions));
+    }
+
+    ExprPtr total = arena.make<Binary>(BinaryOp::Add, regular_part, singular_part);
     return ctx.simplify(total);
 }
 
