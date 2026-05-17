@@ -61,18 +61,68 @@ TEST_F(ResidueTheoremTest, OnePlusXSquared) {
 }
 
 TEST_F(ResidueTheoremTest, OnePlusXFourth) {
-    // x^4 + 1 is irreducible over Q (it is the 8th cyclotomic).  Our current
-    // algorithm only handles degree ≤ 2 irreducible factors, so this case
-    // must currently report Unimplemented.  Skip rather than assert success.
+    // ∫_{-∞}^{∞} 1/(1 + x⁴) dx = π/√2.  x⁴ + 1 is irreducible over Q (8th
+    // cyclotomic); handled via the biquadratic closure using the Q(√c, √(2√c+b))
+    // tower with b=0, c=1.
     auto result = calculus::integrate_rational_full_real_line(
         E("1/(1 + x^4)"), Symbol("x"), *ctx);
-    if (result.is_ok()) {
-        // Should equal π/√2 = π·√2/2 if a future extension lands.
-        expect_equal(result.value(), "pi/sqrt(2)");
-    } else {
-        GTEST_SKIP() << "1/(1+x^4): irreducible quartic not handled yet ("
-                     << result.error().message << ")";
-    }
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+    expect_equal(result.value(), "pi/sqrt(2)");
+}
+
+TEST_F(ResidueTheoremTest, BiquadraticScaledConstant) {
+    // ∫_{-∞}^{∞} 1/(x⁴ + 4) dx = π/4.
+    //   Formula: π / (√c · √(2√c + b))  with  c=4, b=0  →  π / (2·2) = π/4.
+    auto result = calculus::integrate_rational_full_real_line(
+        E("1/(x^4 + 4)"), Symbol("x"), *ctx);
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+    expect_equal(result.value(), "pi/4");
+}
+
+TEST_F(ResidueTheoremTest, BiquadraticNumeratorXSquared) {
+    // ∫_{-∞}^{∞} x²/(x⁴ + 1) dx = π/√2.
+    //   Formula for the x² numerator: π / √(2√c + b)  with  c=1, b=0  →  π/√2.
+    auto result = calculus::integrate_rational_full_real_line(
+        E("x^2/(x^4 + 1)"), Symbol("x"), *ctx);
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+    expect_equal(result.value(), "pi/sqrt(2)");
+}
+
+TEST_F(ResidueTheoremTest, BiquadraticAntiHardcodeIrrationalConstant) {
+    // ∫_{-∞}^{∞} 1/(x⁴ + 2) dx = π / (√2 · √(2√2)).  Non‑square c forces a
+    // nested radical in the result; the closed form must not collapse to a
+    // rational multiple of π — this is the anti‑hardcode probe.
+    auto result = calculus::integrate_rational_full_real_line(
+        E("1/(x^4 + 2)"), Symbol("x"), *ctx);
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+    expect_equal(result.value(), "pi / (sqrt(2) * sqrt(2*sqrt(2)))");
+}
+
+TEST_F(ResidueTheoremTest, BiquadraticAlreadyReducibleQuarticStillWorks) {
+    // x⁴ + x² + 1 factors over Q as (x²−x+1)(x²+x+1); the existing quadratic
+    // branch must handle it and the new biquadratic path must not interfere.
+    // Standard result: ∫ 1/(x⁴+x²+1) dx = π/√3.
+    auto result = calculus::integrate_rational_full_real_line(
+        E("1/(x^4 + x^2 + 1)"), Symbol("x"), *ctx);
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+    expect_equal(result.value(), "pi/sqrt(3)");
+}
+
+TEST_F(ResidueTheoremTest, BiquadraticGeneralRealCoefficientRejected) {
+    // x⁴ − 1 has real roots (x = ±1) → must remain Unimplemented to avoid
+    // silently producing a wrong result.  Disc(u² − 1) = 4 ≥ 0.
+    auto result = calculus::integrate_rational_full_real_line(
+        E("1/(x^4 - 1)"), Symbol("x"), *ctx);
+    EXPECT_FALSE(result.is_ok());
+}
+
+TEST_F(ResidueTheoremTest, NonBiquadraticQuarticRejectedDiagnostic) {
+    // x⁴ + x³ + 1 is not biquadratic (a₃ ≠ 0) and remains beyond the current
+    // closure.  Must report Unimplemented with a diagnostic, never produce
+    // a silent wrong answer.
+    auto result = calculus::integrate_rational_full_real_line(
+        E("1/(x^4 + x^3 + 1)"), Symbol("x"), *ctx);
+    EXPECT_FALSE(result.is_ok());
 }
 
 TEST_F(ResidueTheoremTest, DoublePoleOneOverXsqPlusOneSquared) {

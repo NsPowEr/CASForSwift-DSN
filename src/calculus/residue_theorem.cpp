@@ -229,6 +229,124 @@ struct QuadraticFactor {
     return simplify_or_fail(full, ctx);
 }
 
+// Build  y⁴ + b·y² + c  as ExprPtr.
+[[nodiscard]] ExprPtr build_biquadratic_min_poly_expr(
+    const Rational& b, const Rational& c, const Symbol& gen_var, AstArena& arena) {
+    ExprPtr y = arena.make<Symbol>(gen_var);
+    ExprPtr y2 = arena.make<Binary>(BinaryOp::Pow, y, make_int(arena, 2));
+    ExprPtr y4 = arena.make<Binary>(BinaryOp::Pow, y, make_int(arena, 4));
+    ExprPtr by2 = arena.make<Binary>(BinaryOp::Mul, make_rational_expr(arena, b), y2);
+    ExprPtr c_e = make_rational_expr(arena, c);
+    ExprPtr sum1 = arena.make<Binary>(BinaryOp::Add, y4, by2);
+    return arena.make<Binary>(BinaryOp::Add, sum1, c_e);
+}
+
+// Closure for an irreducible biquadratic factor  D_q(x) = x⁴ + b·x² + c, with
+// c > 0 (Rational) and Δ = b² − 4c < 0.  Such a quartic has four complex roots
+// on a circle of radius c^{1/4} arranged as conjugate pairs (α, −α, ᾱ, −ᾱ).
+// Two of them lie in the upper half plane; call them α₁ and α₂.
+//
+// Closed‑form derivation, working modulo y⁴ = −b·y² − c.
+//
+//   α₁·α₂            = −√c                              (sub‑Vieta)
+//   α₁ + α₂          =  i·√(2√c + b)                    (geometric)
+//   α₁² + α₂²        = −b                               (Vieta on u = α²)
+//   α₁³ + α₂³        =  i·√(2√c + b) · (√c − b)
+//
+// For any residue r expressed in Q(α) as
+//      r(α) = c₀ + c₁·α + c₂·α² + c₃·α³,
+// the sum at the upper roots collapses to
+//      Σ_upper r = (2c₀ − b·c₂) + i·√(2√c + b) · (c₁ + c₃·(√c − b)).
+//
+// Reality of the integrand forces the real part 2c₀ − b·c₂ to vanish across
+// the full sum of contributions, so the real integral coming from THIS
+// quartic factor is
+//      contribution = 2πi · Σ_upper
+//                   = −2π · √(2√c + b) · (c₁ + c₃·(√c − b))
+// after combining 2πi · i = −2π.
+//
+// All sqrt arguments are positive rationals (c > 0 and 2√c + b > 0 because
+// Δ < 0 ⇒ b² < 4c ⇒ |b| < 2√c).  The result therefore lives in the tower
+// Q(√c, √(2√c + b)), which is exactly the two‑level extension targeted by
+// the STEP A tower bridge.
+[[nodiscard]] Result<ExprPtr> contribution_from_irreducible_biquadratic(
+    const Rational& b,
+    const Rational& c,
+    ExprPtr N_over_D,
+    const Symbol& var,
+    symbolic::CASContext& ctx) {
+    AstArena& arena = ctx.arena();
+
+    // Build α = RootOf(x⁴ + b·x² + c).
+    Symbol gen = var;
+    ExprPtr min_poly_raw = build_biquadratic_min_poly_expr(b, c, gen, arena);
+    auto min_poly_simp = simplify_or_fail(min_poly_raw, ctx);
+    if (min_poly_simp.is_error()) return fail<ExprPtr>(min_poly_simp.error());
+    ExprPtr alpha_expr = arena.make<RootOf>(min_poly_simp.value(), gen, std::nullopt);
+
+    // residue(N/D, x, α).  Returns an expression in Q(α).
+    auto res = residue(N_over_D, var, alpha_expr, ctx);
+    if (res.is_error()) return fail<ExprPtr>(res.error());
+
+    auto reduced = algebra::simplify_in_q_alpha(res.value(), ctx);
+    if (reduced.is_error()) return fail<ExprPtr>(reduced.error());
+
+    algebra::AlgebraicNumber::CoeffVec min_poly_coeffs;
+    min_poly_coeffs.push_back(c);                 // x⁰
+    min_poly_coeffs.push_back(Rational(BigInt(0)));// x¹
+    min_poly_coeffs.push_back(b);                 // x²
+    min_poly_coeffs.push_back(Rational(BigInt(0)));// x³
+    min_poly_coeffs.push_back(Rational(BigInt(1)));// x⁴
+
+    auto expressed = algebra::try_express_in_q_alpha(
+        reduced.value(), alpha_expr, min_poly_coeffs, ctx);
+    if (expressed.is_error()) return fail<ExprPtr>(expressed.error());
+    if (!expressed.value().has_value()) {
+        return fail<ExprPtr>(CASError{
+            .kind = CASErrorKind::Unimplemented,
+            .message = "Residue theorem: residue not expressible in Q(α) for this biquadratic factor"});
+    }
+
+    const algebra::AlgebraicNumber& an = *expressed.value();
+    const auto& value = an.value();
+    Rational c0(BigInt(0)), c1(BigInt(0)), c2(BigInt(0)), c3(BigInt(0));
+    if (value.size() >= 1U) c0 = value[0];
+    if (value.size() >= 2U) c1 = value[1];
+    if (value.size() >= 3U) c2 = value[2];
+    if (value.size() >= 4U) c3 = value[3];
+
+    // Real part across the upper pair: 2c₀ − b·c₂.  For this single factor
+    // it must be zero in isolation when the integrand has only one quartic
+    // factor; in mixed cases the cancellation happens at the sum level.  We
+    // therefore keep the real part in the output as a real-valued correction
+    // (multiplied by 2πi it would be purely imaginary, so reality of the
+    // overall integral guarantees its cancellation).
+    //
+    // contribution_real = −2π · √(2√c + b) · (c₁ + c₃·(√c − b)).
+    ExprPtr c_expr = make_rational_expr(arena, c);
+    ExprPtr sqrt_c = arena.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{c_expr});
+
+    ExprPtr two_sqrt_c = arena.make<Binary>(BinaryOp::Mul, make_int(arena, 2), sqrt_c);
+    ExprPtr b_expr = make_rational_expr(arena, b);
+    ExprPtr radicand = arena.make<Binary>(BinaryOp::Add, two_sqrt_c, b_expr);
+    ExprPtr sqrt_radicand = arena.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{radicand});
+
+    ExprPtr sqrt_c_minus_b = arena.make<Binary>(BinaryOp::Sub, sqrt_c, b_expr);
+    ExprPtr c3_expr = make_rational_expr(arena, c3);
+    ExprPtr c3_times = arena.make<Binary>(BinaryOp::Mul, c3_expr, sqrt_c_minus_b);
+    ExprPtr c1_expr = make_rational_expr(arena, c1);
+    ExprPtr inner_sum = arena.make<Binary>(BinaryOp::Add, c1_expr, c3_times);
+
+    ExprPtr pi = arena.make<Constant>(MathConstant::Pi);
+    ExprPtr neg_two_pi = arena.make<Binary>(BinaryOp::Mul, make_int(arena, -2), pi);
+    ExprPtr part1 = arena.make<Binary>(BinaryOp::Mul, neg_two_pi, sqrt_radicand);
+    ExprPtr full = arena.make<Binary>(BinaryOp::Mul, part1, inner_sum);
+
+    (void)c0;  // imaginary‑side coefficient; cancels in the real integral.
+    (void)c2;
+    return simplify_or_fail(full, ctx);
+}
+
 }  // namespace
 
 Result<ExprPtr> integrate_rational_full_real_line(
@@ -286,6 +404,50 @@ Result<ExprPtr> integrate_rational_full_real_line(
             return fail<ExprPtr>(CASError{
                 .kind = CASErrorKind::Unimplemented,
                 .message = "Residue theorem: denominator has a real pole (linear factor over Q)"});
+        }
+        if (fdeg == 4U) {
+            // Closure for irreducible biquadratic factor: a₄·x⁴ + a₂·x² + a₀.
+            // a₁ and a₃ must be zero; the discriminant of the auxiliary
+            // quadratic in u = x² must be strictly negative so that the four
+            // roots are complex.
+            auto bq_coeffs = extract_rational_coeffs(pf.factor, var, 4U, ctx);
+            if (bq_coeffs.is_error()) return fail<ExprPtr>(bq_coeffs.error());
+            const auto& q = bq_coeffs.value();
+            if (!q[1].numerator().is_zero() || !q[3].numerator().is_zero()) {
+                return fail<ExprPtr>(CASError{
+                    .kind = CASErrorKind::Unimplemented,
+                    .message = "Residue theorem: irreducible quartic factor is not biquadratic"});
+            }
+            if (q[4].numerator().is_zero()) {
+                return fail<ExprPtr>(CASError{
+                    .kind = CASErrorKind::Unimplemented,
+                    .message = "Residue theorem: degenerate quartic factor"});
+            }
+            const Rational b_norm = q[2] / q[4];
+            const Rational c_norm = q[0] / q[4];
+            if (c_norm.numerator().is_negative() || c_norm.numerator().is_zero()) {
+                return fail<ExprPtr>(CASError{
+                    .kind = CASErrorKind::Unimplemented,
+                    .message = "Residue theorem: biquadratic factor with non‑positive constant term"});
+            }
+            const Rational aux_disc = b_norm * b_norm - Rational(BigInt(4)) * c_norm;
+            if (!aux_disc.numerator().is_negative()) {
+                return fail<ExprPtr>(CASError{
+                    .kind = CASErrorKind::Unimplemented,
+                    .message = "Residue theorem: biquadratic factor with non‑negative auxiliary discriminant (real roots in u)"});
+            }
+            if (pf.multiplicity > 1U) {
+                return fail<ExprPtr>(CASError{
+                    .kind = CASErrorKind::Unimplemented,
+                    .message = "Residue theorem: biquadratic factor with multiplicity > 1 not yet supported"});
+            }
+            auto contrib = contribution_from_irreducible_biquadratic(b_norm, c_norm, rational_expr, var, ctx);
+            if (contrib.is_error()) return fail<ExprPtr>(contrib.error());
+            ExprPtr added = arena.make<Binary>(BinaryOp::Add, total, contrib.value());
+            auto simp = simplify_or_fail(added, ctx);
+            if (simp.is_error()) return simp;
+            total = simp.value();
+            continue;
         }
         if (fdeg > 2U) {
             return fail<ExprPtr>(CASError{
