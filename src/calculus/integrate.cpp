@@ -1,5 +1,9 @@
 #include "cas/calculus.hpp"
+#include "cas/algebra.hpp"
+#include "integrate_definite_patterns.hpp"
 #include "integrate_engine.hpp"
+
+#include <optional>
 
 namespace cas::calculus {
 
@@ -15,93 +19,143 @@ namespace {
     return u != nullptr && u->op == UnaryOp::Neg && is_pos_infinity(u->operand);
 }
 
-// Matches exp(-a*x^2) for positive rational a. Returns a on success.
-[[nodiscard]] std::optional<Rational> match_gaussian_exp(ExprPtr expr, const Symbol& var) {
-    const auto* call = expr_cast<FuncCall>(expr);
-    if (!call || call->func_id != BuiltinOp::Exp || call->args.size() != 1U)
-        return std::nullopt;
-
-    ExprPtr arg = call->args.front();
-
-    // Pattern: exp(-x^2) = exp(Neg(Pow(x, 2)))
-    if (const auto* neg = expr_cast<Unary>(arg)) {
-        if (neg->op == UnaryOp::Neg) {
-            if (const auto* pw = expr_cast<Binary>(neg->operand)) {
-                if (pw->op == BinaryOp::Pow) {
-                    if (const auto* sym = expr_cast<Symbol>(pw->left)) {
-                        if (sym->name == var.name) {
-                            if (const auto* e2 = expr_cast<IntegerLit>(pw->right)) {
-                                if (e2->value == BigInt(2)) return Rational(BigInt(1));
-                            }
-                        }
-                    }
-                }
-            }
-        }
+[[nodiscard]] std::optional<Rational> exact_rational_from_expr(ExprPtr expr) {
+    if (const auto* integer = expr_cast<IntegerLit>(expr)) {
+        return Rational(integer->value);
     }
-
-    // Pattern: exp(-a*x^2) = exp(Mul(neg_rational, Pow(x,2)))
-    if (const auto* mul = expr_cast<Binary>(arg)) {
-        if (mul->op == BinaryOp::Mul) {
-            // Try both orderings: -a * x^2 and x^2 * -a
-            auto try_match = [&](ExprPtr coeff_expr, ExprPtr pow_expr) -> std::optional<Rational> {
-                const auto* pw = expr_cast<Binary>(pow_expr);
-                if (!pw || pw->op != BinaryOp::Pow) return std::nullopt;
-                const auto* sym = expr_cast<Symbol>(pw->left);
-                if (!sym || sym->name != var.name) return std::nullopt;
-                const auto* e2 = expr_cast<IntegerLit>(pw->right);
-                if (!e2 || e2->value != BigInt(2)) return std::nullopt;
-                if (const auto* i = expr_cast<IntegerLit>(coeff_expr)) {
-                    if (i->value.is_negative()) return Rational(-i->value);
-                } else if (const auto* r = expr_cast<RationalLit>(coeff_expr)) {
-                    Rational v(r->numerator, r->denominator);
-                    if (v.numerator().is_negative()) return -v;
-                }
-                return std::nullopt;
-            };
-            auto m = try_match(mul->left, mul->right);
-            if (!m) m = try_match(mul->right, mul->left);
-            if (m) return m;
-        }
+    if (const auto* rational = expr_cast<RationalLit>(expr)) {
+        return Rational(rational->numerator, rational->denominator);
     }
-
+    if (const auto* unary = expr_cast<Unary>(expr);
+        unary != nullptr && unary->op == UnaryOp::Neg) {
+        auto value = exact_rational_from_expr(unary->operand);
+        if (value.has_value()) return -value.value();
+    }
     return std::nullopt;
 }
 
-} // anonymous namespace
+[[nodiscard]] bool is_between_closed(const Rational& value, const Rational& a, const Rational& b) {
+    const Rational& lower = (a <= b) ? a : b;
+    const Rational& upper = (a <= b) ? b : a;
+    return lower <= value && value <= upper;
+}
 
+[[nodiscard]] Result<void> reject_rational_poles_in_closed_interval(
+    ExprPtr expr,
+    const Symbol& var,
+    ExprPtr lower,
+    ExprPtr upper,
+    symbolic::CASContext& ctx) {
+    auto lower_value = exact_rational_from_expr(lower);
+    auto upper_value = exact_rational_from_expr(upper);
+    if (!lower_value.has_value() || !upper_value.has_value()) {
+        return ok();
+    }
+
+    auto together_expr = algebra::together(expr, ctx);
+    ExprPtr rational_expr = together_expr.is_ok() ? together_expr.value() : expr;
+    auto simplified = ctx.simplify(rational_expr);
+    if (simplified.is_ok()) {
+        rational_expr = simplified.value();
+    }
+
+    auto parts = algebra::apart_num_den(rational_expr, ctx);
+    if (parts.is_error()) {
+        return ok();
+    }
+
+    auto denominator = ctx.simplify(parts.value().denominator);
+    if (denominator.is_error()) {
+        return ok();
+    }
+    if (!integrate_detail::depends_on(denominator.value(), var)) {
+        return ok();
+    }
+
+    auto roots = algebra::solve_polynomial(denominator.value(), var, ctx);
+    if (roots.is_error()) {
+        return ok();
+    }
+
+    for (ExprPtr root : roots.value()) {
+        auto root_value = exact_rational_from_expr(root);
+        if (!root_value.has_value()) {
+            continue;
+        }
+        if (is_between_closed(root_value.value(), lower_value.value(), upper_value.value())) {
+            return fail<void>(integrate_detail::make_error(
+                CASErrorKind::Undefined,
+                "Definite integral crosses a rational pole; improper/PV handling is not implemented here"));
+        }
+    }
+    return ok();
+}
+
+[[nodiscard]] ExprPtr normalize_definite_integrand(ExprPtr expr, symbolic::CASContext& ctx) {
+    auto together_expr = algebra::together(expr, ctx);
+    ExprPtr normalized = together_expr.is_ok() ? together_expr.value() : expr;
+    auto simplified = ctx.simplify(normalized);
+    if (simplified.is_ok()) {
+        normalized = simplified.value();
+    }
+    return normalized;
+}
+
+} // anonymous namespace
 Result<ExprPtr> integrate(ExprPtr expr, const Symbol& var, symbolic::CASContext& ctx) {
+    if (ctx.is_caching_enabled()) {
+        auto key = symbolic::CASContext::IntegrateKey{expr, var.name};
+        if (auto found = ctx.integrate_cache_.get(key)) {
+            return ok(*found);
+        }
+    }
+
     auto primitive = integrate_detail::integrate_indefinite_impl(expr, var, ctx);
     if (primitive.is_error()) {
         return primitive;
     }
-    return symbolic::materialize_expr(primitive.value(), ctx.arena());
+    auto materialized = symbolic::materialize_expr(primitive.value(), ctx.arena());
+    if (materialized.is_error()) {
+        return materialized;
+    }
+    if (ctx.is_caching_enabled()) {
+        auto key = symbolic::CASContext::IntegrateKey{expr, var.name};
+        ctx.integrate_cache_.put(key, materialized.value());
+    }
+    return materialized;
 }
 
 Result<ExprPtr> definite_integral(ExprPtr expr, const Symbol& var, ExprPtr lower, ExprPtr upper, symbolic::CASContext& ctx) {
-    // Gaussian integral: integral from -inf to +inf of exp(-a*x^2) dx = sqrt(pi/a)
+    ExprPtr normalized_expr = normalize_definite_integrand(expr, ctx);
+
+    // Extensible pattern table: each matcher returns nullopt to skip, value to commit.
+    DefiniteContext dc{
+        .integrand = expr,
+        .integrand_normalized = normalized_expr,
+        .var = var,
+        .lower = lower,
+        .upper = upper,
+        .ctx = ctx,
+    };
+    for (DefinitePatternFn matcher : definite_patterns()) {
+        auto match = matcher(dc);
+        if (match.is_error()) return fail<ExprPtr>(match.error());
+        if (match.value().has_value()) return ok(match.value().value());
+    }
+
+    // Generic infinite-domain fallback: only the Gaussian pattern is currently handled there;
+    // anything else over (-inf, +inf) goes to Unimplemented.
     if (is_neg_infinity(lower) && is_pos_infinity(upper)) {
-        if (auto a = match_gaussian_exp(expr, var)) {
-            AstArena& arena = ctx.arena();
-            ExprPtr pi = arena.make<Constant>(MathConstant::Pi);
-            if (a->numerator() == BigInt(1) && a->denominator() == BigInt(1)) {
-                // a=1: sqrt(pi)
-                ExprPtr sqrt_pi = arena.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{pi});
-                return ctx.simplify(sqrt_pi);
-            }
-            // General a: sqrt(pi/a) = sqrt(pi) / sqrt(a)
-            ExprPtr a_expr = a->is_integer()
-                ? static_cast<ExprPtr>(arena.make<IntegerLit>(a->numerator()))
-                : static_cast<ExprPtr>(arena.make<RationalLit>(a->numerator(), a->denominator()));
-            ExprPtr pi_over_a = arena.make<Binary>(BinaryOp::Div, pi, a_expr);
-            ExprPtr sqrt_pi_a = arena.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{pi_over_a});
-            return ctx.simplify(sqrt_pi_a);
-        }
         return fail<ExprPtr>(integrate_detail::make_error(CASErrorKind::Unimplemented,
             "Integrazione su dominio infinito: pattern non riconosciuto."));
     }
 
-    auto primitive = integrate(expr, var, ctx);
+    auto pole_check = reject_rational_poles_in_closed_interval(normalized_expr, var, lower, upper, ctx);
+    if (pole_check.is_error()) {
+        return fail<ExprPtr>(pole_check.error());
+    }
+
+    auto primitive = integrate(normalized_expr, var, ctx);
     if (primitive.is_error()) {
         return primitive;
     }

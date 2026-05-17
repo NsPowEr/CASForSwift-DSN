@@ -103,6 +103,8 @@ set(CAS_SYMBOLIC_SOURCES
 set(CAS_CALCULUS_SOURCES
     src/calculus/differentiate.cpp
     src/calculus/integrate.cpp
+    src/calculus/integrate_definite_patterns.cpp
+    src/calculus/bessel_orthogonality.cpp
     src/calculus/integrate_improper.cpp
     src/calculus/summation.cpp
     src/calculus/integrate_core.cpp
@@ -385,6 +387,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/symbolic/test_bessel_zero.cpp
         test/unit/symbolic/test_complex_polar.cpp
         test/unit/calculus/test_asymptotes_rootsum.cpp
+        test/unit/calculus/test_bessel_orthogonality.cpp
         test/unit/symbolic/test_assumptions_stability.cpp
         test/unit/symbolic/test_caching.cpp
         test/unit/symbolic/test_gruntz.cpp

@@ -100,11 +100,11 @@ enum class BuiltinOp : std::uint16_t {
     if (name == "inv") return BuiltinOp::Inv;
     if (name == "transpose") return BuiltinOp::Transpose;
     if (name == "N") return BuiltinOp::N;
-    if (name == "BesselJ") return BuiltinOp::BesselJ;
-    if (name == "BesselY") return BuiltinOp::BesselY;
+    if (name == "BesselJ" || name == "bessel_j") return BuiltinOp::BesselJ;
+    if (name == "BesselY" || name == "bessel_y") return BuiltinOp::BesselY;
     if (name == "BesselZero" || name == "bessel_zero") return BuiltinOp::BesselZero;
-    if (name == "BesselI") return BuiltinOp::BesselI;
-    if (name == "BesselK") return BuiltinOp::BesselK;
+    if (name == "BesselI" || name == "bessel_i") return BuiltinOp::BesselI;
+    if (name == "BesselK" || name == "bessel_k") return BuiltinOp::BesselK;
     if (name == "binomial") return BuiltinOp::Binomial;
     if (name == "sum") return BuiltinOp::SumFunc;
     if (name == "RootSum" || name == "rootsum") return BuiltinOp::RootSum;
