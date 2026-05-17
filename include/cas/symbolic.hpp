@@ -400,4 +400,14 @@ CacheContainer<IntegrateKey, ExprPtr, IntegrateHash> integrate_cache_;
 [[nodiscard]] Result<ExprPtr> substitute(ExprPtr expr, const Symbol& variable, ExprPtr value, CASContext& context);
 [[nodiscard]] Result<bool> mathematically_equal(ExprPtr lhs, ExprPtr rhs, CASContext& context);
 
+// L2-19: decidable subset of transcendental equivalence via Risch-style
+// log/exp/trig normalisation.  Applies opt-in expansion rules to lhs/rhs
+// (log(x*y) -> log(x)+log(y) under x>0, y>0; exp(x+y) -> exp(x)*exp(y);
+// exp(n*ln(x)) -> x^n under x>0; sin^2+cos^2 collapse) before delegating
+// to mathematically_equal.  Returns false (not Unimplemented) for cases
+// outside the decidable subset — Richardson's theorem precludes a total
+// decision procedure.
+[[nodiscard]] Result<bool> mathematically_equal_subset_risch(
+    ExprPtr lhs, ExprPtr rhs, CASContext& context);
+
 }  // namespace cas::symbolic

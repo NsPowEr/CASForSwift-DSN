@@ -379,6 +379,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/algebra/test_factorization_lll.cpp
         test/unit/algebra/test_factorization_trager.cpp
         test/unit/algebra/test_factorization_tower.cpp
+        test/unit/symbolic/test_equivalence_subset.cpp
         test/unit/algebra/test_regression.cpp
         test/unit/algebra/test_gap6.cpp
         test/unit/algebra/test_factorization_p2.cpp
