@@ -39,6 +39,7 @@ set(CAS_PUBLIC_HEADERS
     include/cas/algebra.hpp
     include/cas/algebraic_number.hpp
     include/cas/algebraic_tower.hpp
+    include/cas/algebraic_tower_bridge.hpp
     include/cas/ast.hpp
     include/cas/ast_debug.hpp
     include/cas/bigint.hpp
@@ -142,6 +143,7 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/algebra_core.cpp
     src/algebra/algebraic_number.cpp
     src/algebra/algebraic_number_bridge.cpp
+    src/algebra/algebraic_tower_bridge.cpp
     src/algebra/polynomial_arithmetic.cpp
     src/algebra/polynomial_multivariate.cpp
     src/algebra/polynomial_resultant.cpp
@@ -355,6 +357,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/algebra/test_polynomial_gcd_subresultant.cpp
         test/unit/algebra/test_polynomial_gcd_multivariate_robust.cpp
         test/unit/algebra/test_algebraic_number.cpp
+        test/unit/algebra/test_algebraic_tower_bridge.cpp
     test/unit/algebra/test_algebraic_number_bridge.cpp
         test/unit/algebra/test_algebraic_tower.cpp
         test/unit/algebra/test_factorization_lll.cpp

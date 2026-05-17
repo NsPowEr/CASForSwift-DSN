@@ -52,6 +52,24 @@ namespace {
     return AlgebraicNumber(AlgebraicNumber::CoeffVec{r}, min_poly);
 }
 
+[[nodiscard]] bool same_generator_expr(
+    ExprPtr expr,
+    ExprPtr alpha_expr,
+    symbolic::CASContext& ctx) {
+    if (alpha_expr && structural_equal(expr, alpha_expr)) return true;
+
+    const auto* lhs = expr_cast<RootOf>(expr);
+    const auto* rhs = expr_cast<RootOf>(alpha_expr);
+    if (!lhs || !rhs) return false;
+    if (lhs->root_index != rhs->root_index) return false;
+
+    auto lhs_mp = rootof_min_poly(*lhs, ctx);
+    if (lhs_mp.is_error()) return false;
+    auto rhs_mp = rootof_min_poly(*rhs, ctx);
+    if (rhs_mp.is_error()) return false;
+    return lhs_mp.value() == rhs_mp.value();
+}
+
 // Forward declaration: recursive worker.
 [[nodiscard]] Result<std::optional<AlgebraicNumber>> express_recursive(
     ExprPtr e,
@@ -104,7 +122,7 @@ namespace {
     }
 
     // Structural match against the supplied generator expression.
-    if (alpha_expr && structural_equal(e, alpha_expr)) {
+    if (alpha_expr && same_generator_expr(e, alpha_expr, ctx)) {
         return ok(std::optional<AlgebraicNumber>(make_alpha(min_poly)));
     }
 
