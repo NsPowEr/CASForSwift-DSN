@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cas/ast.hpp"
+#include "cas/algebraic_tower.hpp"
 #include "cas/rational.hpp"
 #include "cas/result.hpp"
 
@@ -171,6 +172,18 @@ void multiply_integer_coefficients_by_scalar(IntPoly& coefficients, const BigInt
 [[nodiscard]] Rational evaluate_integer_polynomial_at(const IntPoly& coefficients, const Rational& value);
 [[nodiscard]] Rational evaluate_rational_polynomial_at(const RatPoly& coefficients, const Rational& value);
 
+template <typename Coeff>
+[[nodiscard]] Result<std::vector<Coeff>> pseudo_remainder_generic(
+    std::vector<Coeff> a,
+    const std::vector<Coeff>& b,
+    symbolic::CASContext* ctx = nullptr);
+
+template <typename Coeff>
+[[nodiscard]] Result<Coeff> resultant_generic(
+    std::vector<Coeff> a,
+    std::vector<Coeff> b,
+    symbolic::CASContext* ctx = nullptr);
+
 void normalize_rational_coefficients(RatPoly& coefficients);
 [[nodiscard]] RatPoly add_rational_poly(const RatPoly& a, const RatPoly& b);
 [[nodiscard]] RatPoly sub_rational_poly(const RatPoly& a, const RatPoly& b);
@@ -222,3 +235,5 @@ void lll_reduction(LatticeMatrix& b, double delta = 0.75);
 
 }  // namespace algebra
 }  // namespace cas
+
+#include "polynomial_resultant_generic.hpp"

@@ -351,6 +351,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/numeric/test_numeric.cpp
         test/unit/formatter/test_formatter.cpp
         test/unit/algebra/test_resultant.cpp
+        test/unit/algebra/test_resultant_generic.cpp
         test/unit/algebra/test_algebra.cpp
         test/unit/algebra/test_root_of.cpp
         test/unit/algebra/test_groebner.cpp
