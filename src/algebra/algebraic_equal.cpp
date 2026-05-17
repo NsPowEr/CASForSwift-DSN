@@ -5,6 +5,7 @@
 #include "cas/normal_form.hpp"
 #include "algebra_internal.hpp"
 
+#include <cstddef>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -29,13 +30,11 @@ Result<bool> mathematically_equal(ExprPtr lhs, ExprPtr rhs, CASContext& context)
     auto rhs_s = context.simplify(rhs);
     if (rhs_s.is_error()) { finalize(); return fail<bool>(rhs_s.error()); }
 
-    // Fast path: structural equality after simplify
     if (structural_equal(lhs_s.value(), rhs_s.value())) {
         finalize();
         return ok(true);
     }
 
-    // Mathematical equality using polynomial normal form: normal_form(expand(lhs - rhs)) == 0
     auto diff_expr = context.arena().make<Binary>(BinaryOp::Sub, lhs_s.value(), rhs_s.value());
     auto normal_diff = polynomial_normal_form(diff_expr, context);
     if (normal_diff.is_ok()) {
@@ -45,7 +44,6 @@ Result<bool> mathematically_equal(ExprPtr lhs, ExprPtr rhs, CASContext& context)
         }
     }
 
-    // Rational equality fallback: check num_L * den_R - num_R * den_L == 0 using normal form
     auto lhs_parts = algebra::split_num_den(lhs_s.value(), context);
     auto rhs_parts = algebra::split_num_den(rhs_s.value(), context);
     if (lhs_parts.is_ok() && rhs_parts.is_ok()) {
@@ -67,59 +65,161 @@ Result<bool> mathematically_equal(ExprPtr lhs, ExprPtr rhs, CASContext& context)
 
 namespace {
 
-// L2-19 helpers.  All transformations preserve mathematical equality and
-// fire only when the relevant positivity / integrality assumptions are
-// derivable from CASContext::assumptions().
+// L2-19 subset Risch normalisation helpers.
+//
+// All transformations preserve mathematical equality and fire only when
+// the relevant positivity / numerical assumptions are derivable from
+// CASContext::assumptions() (extended with structural inference for
+// `exp`, `cosh`, `sqrt`, even-power sums and constants).
 
-[[nodiscard]] bool is_known_positive(ExprPtr expr, const Assumptions& a) {
-    if (!expr) return false;
+// ---- Positivity oracle -------------------------------------------------
+
+[[nodiscard]] bool is_positive_constant_literal(ExprPtr expr) {
     if (const auto* lit = expr_cast<IntegerLit>(expr)) {
         return !lit->value.is_zero() && !lit->value.is_negative();
     }
     if (const auto* lit = expr_cast<RationalLit>(expr)) {
-        const bool num_neg = lit->numerator.is_negative();
-        const bool den_neg = lit->denominator.is_negative();
         if (lit->numerator.is_zero()) return false;
-        return num_neg == den_neg;
+        return lit->numerator.is_negative() == lit->denominator.is_negative();
     }
-    return a.is_positive(expr);
+    return false;
 }
 
-[[nodiscard]] bool is_known_integer(ExprPtr expr, const Assumptions& a) {
+[[nodiscard]] bool infer_positive(ExprPtr expr, const Assumptions& a);
+[[nodiscard]] bool infer_zero(ExprPtr expr, const Assumptions& a);
+
+[[nodiscard]] bool infer_nonnegative(ExprPtr expr, const Assumptions& a) {
     if (!expr) return false;
-    if (expr_is<IntegerLit>(expr)) return true;
-    return a.is_integer(expr);
+    if (infer_positive(expr, a)) return true;
+    if (const auto* lit = expr_cast<IntegerLit>(expr)) return !lit->value.is_negative();
+    if (const auto* lit = expr_cast<RationalLit>(expr)) {
+        return lit->numerator.is_zero()
+            || lit->numerator.is_negative() == lit->denominator.is_negative();
+    }
+    if (a.is_nonnegative(expr)) return true;
+    if (const auto* bin = expr_cast<Binary>(expr); bin && bin->op == BinaryOp::Pow) {
+        if (const auto* exp = expr_cast<IntegerLit>(bin->right)) {
+            if (!exp->value.is_negative() && exp->value.to_u64() % 2U == 0U) return true;
+        }
+    }
+    return false;
 }
 
-ExprPtr expand_log_walker(ExprPtr expr, CASContext& ctx);
-ExprPtr expand_exp_walker(ExprPtr expr, CASContext& ctx);
+[[nodiscard]] bool infer_positive(ExprPtr expr, const Assumptions& a) {
+    if (!expr) return false;
+    if (is_positive_constant_literal(expr)) return true;
+    if (a.is_positive(expr)) return true;
 
-ExprPtr rebuild_with_children(
-    ExprPtr expr,
-    CASContext& ctx,
-    ExprPtr (*walker)(ExprPtr, CASContext&)) {
+    if (const auto* fc = expr_cast<FuncCall>(expr)) {
+        switch (fc->func_id) {
+            case BuiltinOp::Exp:
+                if (fc->args.size() == 1U && a.is_real(fc->args[0])) return true;
+                return false;
+            case BuiltinOp::Cosh:
+                if (fc->args.size() == 1U && a.is_real(fc->args[0])) return true;
+                return false;
+            case BuiltinOp::Sqrt:
+                if (fc->args.size() == 1U && infer_positive(fc->args[0], a)) return true;
+                return false;
+            default:
+                break;
+        }
+    }
+    if (const auto* prod = expr_cast<Product>(expr)) {
+        for (ExprPtr f : prod->factors) if (!infer_positive(f, a)) return false;
+        return !prod->factors.empty();
+    }
+    if (const auto* bin = expr_cast<Binary>(expr)) {
+        if (bin->op == BinaryOp::Mul) {
+            return infer_positive(bin->left, a) && infer_positive(bin->right, a);
+        }
+        if (bin->op == BinaryOp::Div) {
+            return infer_positive(bin->left, a) && infer_positive(bin->right, a);
+        }
+        if (bin->op == BinaryOp::Pow) {
+            if (infer_positive(bin->left, a)) return true;
+            if (const auto* exp = expr_cast<IntegerLit>(bin->right)) {
+                if (!exp->value.is_negative() && exp->value.to_u64() % 2U == 0U) {
+                    return !infer_zero(bin->left, a);
+                }
+            }
+        }
+    }
+    if (const auto* sum = expr_cast<Sum>(expr)) {
+        // Sum of strictly positives is strictly positive.  Sum of
+        // non-negatives with at least one strictly positive is positive.
+        bool any_strict = false;
+        for (ExprPtr t : sum->terms) {
+            if (infer_positive(t, a)) { any_strict = true; continue; }
+            if (!infer_nonnegative(t, a)) return false;
+        }
+        return any_strict;
+    }
+    return false;
+}
+
+[[nodiscard]] bool infer_zero(ExprPtr expr, const Assumptions& a) {
+    if (!expr) return false;
+    if (const auto* lit = expr_cast<IntegerLit>(expr)) return lit->value.is_zero();
+    if (const auto* lit = expr_cast<RationalLit>(expr)) return lit->numerator.is_zero();
+    (void)a;
+    return false;
+}
+
+[[nodiscard]] bool is_known_positive(ExprPtr expr, const Assumptions& a) {
+    return infer_positive(expr, a);
+}
+
+// ---- Identity-preserving recursion (REGOLA 2: Structural Sharing) ------
+
+using WalkerFn = ExprPtr (*)(ExprPtr, CASContext&);
+
+[[nodiscard]] ExprPtr rebuild_with_children(ExprPtr expr, CASContext& ctx, WalkerFn walker) {
     if (!expr) return expr;
     return visit_expr(expr, [&](const auto& node) -> ExprPtr {
         using Node = std::decay_t<decltype(node)>;
         AstArena& arena = ctx.arena();
         if constexpr (std::is_same_v<Node, Unary>) {
-            return arena.make<Unary>(node.op, walker(node.operand, ctx));
+            ExprPtr child = walker(node.operand, ctx);
+            if (child == node.operand) return expr;
+            return arena.make<Unary>(node.op, child);
         } else if constexpr (std::is_same_v<Node, Binary>) {
-            return arena.make<Binary>(node.op, walker(node.left, ctx), walker(node.right, ctx));
+            ExprPtr l = walker(node.left, ctx);
+            ExprPtr r = walker(node.right, ctx);
+            if (l == node.left && r == node.right) return expr;
+            return arena.make<Binary>(node.op, l, r);
         } else if constexpr (std::is_same_v<Node, FuncCall>) {
             std::vector<ExprPtr> args;
             args.reserve(node.args.size());
-            for (ExprPtr a : node.args) args.push_back(walker(a, ctx));
+            bool changed = false;
+            for (ExprPtr a : node.args) {
+                ExprPtr a2 = walker(a, ctx);
+                if (a2 != a) changed = true;
+                args.push_back(a2);
+            }
+            if (!changed) return expr;
             return arena.make<FuncCall>(node.func_id, std::move(args));
         } else if constexpr (std::is_same_v<Node, Sum>) {
             std::vector<ExprPtr> terms;
             terms.reserve(node.terms.size());
-            for (ExprPtr t : node.terms) terms.push_back(walker(t, ctx));
+            bool changed = false;
+            for (ExprPtr t : node.terms) {
+                ExprPtr t2 = walker(t, ctx);
+                if (t2 != t) changed = true;
+                terms.push_back(t2);
+            }
+            if (!changed) return expr;
             return arena.make<Sum>(std::move(terms));
         } else if constexpr (std::is_same_v<Node, Product>) {
             std::vector<ExprPtr> factors;
             factors.reserve(node.factors.size());
-            for (ExprPtr f : node.factors) factors.push_back(walker(f, ctx));
+            bool changed = false;
+            for (ExprPtr f : node.factors) {
+                ExprPtr f2 = walker(f, ctx);
+                if (f2 != f) changed = true;
+                factors.push_back(f2);
+            }
+            if (!changed) return expr;
             return arena.make<Product>(std::move(factors));
         } else {
             return expr;
@@ -135,19 +235,21 @@ ExprPtr rebuild_with_children(
     return fc.func_id == BuiltinOp::Exp && fc.args.size() == 1U;
 }
 
-ExprPtr expand_log_walker(ExprPtr expr, CASContext& ctx) {
-    if (!expr) return expr;
-    ExprPtr transformed = rebuild_with_children(expr, ctx, expand_log_walker);
+ExprPtr expand_log_walker(ExprPtr expr, CASContext& ctx);
+ExprPtr expand_exp_walker(ExprPtr expr, CASContext& ctx);
 
-    const auto* fc = expr_cast<FuncCall>(transformed);
-    if (!fc || !is_log_funccall(*fc)) return transformed;
-
-    ExprPtr arg = fc->args[0];
+// One-shot local rewrite for a log(arg).  Returns nullptr if no rewrite
+// applies.  The expand_log_walker calls this AND then re-applies itself
+// to the rewritten subtree to honour the recursive contract (B2 fix).
+[[nodiscard]] ExprPtr try_local_log_rewrite(
+    const FuncCall& fc,
+    ExprPtr arg,
+    CASContext& ctx) {
     const Assumptions& a = ctx.assumptions();
     AstArena& arena = ctx.arena();
 
     if (const auto* prod = expr_cast<Product>(arg)) {
-        bool all_positive = true;
+        bool all_positive = !prod->factors.empty();
         for (ExprPtr f : prod->factors) {
             if (!is_known_positive(f, a)) { all_positive = false; break; }
         }
@@ -155,7 +257,7 @@ ExprPtr expand_log_walker(ExprPtr expr, CASContext& ctx) {
             std::vector<ExprPtr> terms;
             terms.reserve(prod->factors.size());
             for (ExprPtr f : prod->factors) {
-                terms.push_back(arena.make<FuncCall>(fc->func_id, std::vector<ExprPtr>{f}));
+                terms.push_back(arena.make<FuncCall>(fc.func_id, std::vector<ExprPtr>{f}));
             }
             return arena.make<Sum>(std::move(terms));
         }
@@ -163,77 +265,95 @@ ExprPtr expand_log_walker(ExprPtr expr, CASContext& ctx) {
 
     if (const auto* bin = expr_cast<Binary>(arg)) {
         if (bin->op == BinaryOp::Pow && is_known_positive(bin->left, a)) {
-            ExprPtr inner_log = arena.make<FuncCall>(fc->func_id, std::vector<ExprPtr>{bin->left});
+            ExprPtr inner_log = arena.make<FuncCall>(fc.func_id, std::vector<ExprPtr>{bin->left});
             return arena.make<Binary>(BinaryOp::Mul, bin->right, inner_log);
         }
         if (bin->op == BinaryOp::Div
             && is_known_positive(bin->left, a)
             && is_known_positive(bin->right, a)) {
-            ExprPtr log_num = arena.make<FuncCall>(fc->func_id, std::vector<ExprPtr>{bin->left});
-            ExprPtr log_den = arena.make<FuncCall>(fc->func_id, std::vector<ExprPtr>{bin->right});
+            ExprPtr log_num = arena.make<FuncCall>(fc.func_id, std::vector<ExprPtr>{bin->left});
+            ExprPtr log_den = arena.make<FuncCall>(fc.func_id, std::vector<ExprPtr>{bin->right});
             return arena.make<Binary>(BinaryOp::Sub, log_num, log_den);
         }
         if (bin->op == BinaryOp::Mul
             && is_known_positive(bin->left, a)
             && is_known_positive(bin->right, a)) {
-            ExprPtr log_l = arena.make<FuncCall>(fc->func_id, std::vector<ExprPtr>{bin->left});
-            ExprPtr log_r = arena.make<FuncCall>(fc->func_id, std::vector<ExprPtr>{bin->right});
+            ExprPtr log_l = arena.make<FuncCall>(fc.func_id, std::vector<ExprPtr>{bin->left});
+            ExprPtr log_r = arena.make<FuncCall>(fc.func_id, std::vector<ExprPtr>{bin->right});
             return arena.make<Binary>(BinaryOp::Add, log_l, log_r);
         }
     }
-    return transformed;
+    return ExprPtr{};
 }
 
-// Detect a single factor of the form n * ln(x) inside an exponent and
-// return the (n, ln_arg) pair on success.
-[[nodiscard]] bool try_match_integer_times_log(
-    ExprPtr expr,
-    const Assumptions& a,
-    ExprPtr& out_n,
-    ExprPtr& out_log_arg) {
-    if (const auto* bin = expr_cast<Binary>(expr); bin && bin->op == BinaryOp::Mul) {
-        ExprPtr lhs = bin->left;
-        ExprPtr rhs = bin->right;
-        for (int trial = 0; trial < 2; ++trial) {
-            if (const auto* fc = expr_cast<FuncCall>(rhs); fc && is_log_funccall(*fc)) {
-                if (is_known_positive(fc->args[0], a) && is_known_integer(lhs, a)) {
-                    out_n = lhs;
-                    out_log_arg = fc->args[0];
-                    return true;
-                }
-            }
-            std::swap(lhs, rhs);
-        }
-    }
-    if (const auto* prod = expr_cast<Product>(expr); prod && prod->factors.size() == 2U) {
-        ExprPtr lhs = prod->factors[0];
-        ExprPtr rhs = prod->factors[1];
-        for (int trial = 0; trial < 2; ++trial) {
-            if (const auto* fc = expr_cast<FuncCall>(rhs); fc && is_log_funccall(*fc)) {
-                if (is_known_positive(fc->args[0], a) && is_known_integer(lhs, a)) {
-                    out_n = lhs;
-                    out_log_arg = fc->args[0];
-                    return true;
-                }
-            }
-            std::swap(lhs, rhs);
-        }
-    }
-    return false;
-}
-
-ExprPtr expand_exp_walker(ExprPtr expr, CASContext& ctx) {
+ExprPtr expand_log_walker(ExprPtr expr, CASContext& ctx) {
     if (!expr) return expr;
-    ExprPtr transformed = rebuild_with_children(expr, ctx, expand_exp_walker);
+    ExprPtr transformed = rebuild_with_children(expr, ctx, expand_log_walker);
 
     const auto* fc = expr_cast<FuncCall>(transformed);
-    if (!fc || !is_exp_funccall(*fc)) return transformed;
+    if (!fc || !is_log_funccall(*fc)) return transformed;
 
-    ExprPtr arg = fc->args[0];
+    ExprPtr local = try_local_log_rewrite(*fc, fc->args[0], ctx);
+    if (!local) return transformed;
+    // Re-apply walker to the rewritten subtree so newly-produced log(...)
+    // subterms (e.g. log(x^a) from log(x^a · y^b)) collapse further.
+    return expand_log_walker(local, ctx);
+}
+
+// Walk a Mul/Product node trying to factor it as  scalar * ln(arg)  where
+// scalar is anything (no integer constraint — for x>0 the identity
+// exp(c * ln(x)) = x^c holds for any real c on the principal branch).
+[[nodiscard]] bool try_match_scalar_times_log(
+    ExprPtr expr,
+    const Assumptions& a,
+    AstArena& arena,
+    ExprPtr& out_scalar,
+    ExprPtr& out_log_arg) {
+    std::vector<ExprPtr> factors;
+    if (const auto* prod = expr_cast<Product>(expr)) {
+        factors = prod->factors;
+    } else if (const auto* bin = expr_cast<Binary>(expr); bin && bin->op == BinaryOp::Mul) {
+        factors = {bin->left, bin->right};
+    } else {
+        return false;
+    }
+    if (factors.size() < 2U) return false;
+
+    int log_index = -1;
+    for (std::size_t i = 0; i < factors.size(); ++i) {
+        if (const auto* fc = expr_cast<FuncCall>(factors[i]); fc && is_log_funccall(*fc)) {
+            if (is_known_positive(fc->args[0], a)) {
+                if (log_index != -1) return false;  // ambiguous: > 1 log factor
+                log_index = static_cast<int>(i);
+            }
+        }
+    }
+    if (log_index == -1) return false;
+
+    const auto& log_fc = expr_ref<FuncCall>(factors[static_cast<std::size_t>(log_index)]);
+    out_log_arg = log_fc.args[0];
+
+    std::vector<ExprPtr> rest;
+    rest.reserve(factors.size() - 1U);
+    for (std::size_t i = 0; i < factors.size(); ++i) {
+        if (static_cast<int>(i) == log_index) continue;
+        rest.push_back(factors[i]);
+    }
+    if (rest.size() == 1U) {
+        out_scalar = rest.front();
+    } else {
+        out_scalar = arena.make<Product>(std::move(rest));
+    }
+    return true;
+}
+
+[[nodiscard]] ExprPtr try_local_exp_rewrite(
+    const FuncCall& fc,
+    ExprPtr arg,
+    CASContext& ctx) {
     const Assumptions& a = ctx.assumptions();
     AstArena& arena = ctx.arena();
 
-    // exp(sum t_i) -> prod exp(t_i)  (always valid; no positivity needed).
     if (const auto* sum = expr_cast<Sum>(arg); sum && sum->terms.size() >= 2U) {
         std::vector<ExprPtr> factors;
         factors.reserve(sum->terms.size());
@@ -243,22 +363,32 @@ ExprPtr expand_exp_walker(ExprPtr expr, CASContext& ctx) {
         return arena.make<Product>(std::move(factors));
     }
 
-    // exp(ln(x)) -> x  when x > 0.
     if (const auto* inner = expr_cast<FuncCall>(arg); inner && is_log_funccall(*inner)) {
         if (is_known_positive(inner->args[0], a)) {
             return inner->args[0];
         }
     }
 
-    // exp(n * ln(x)) -> x^n  when x > 0 and n integer (handles the common
-    // case where the original expression was 2*ln(x) etc).
-    ExprPtr n_factor{};
+    ExprPtr scalar{};
     ExprPtr log_arg{};
-    if (try_match_integer_times_log(arg, a, n_factor, log_arg)) {
-        return arena.make<Binary>(BinaryOp::Pow, log_arg, n_factor);
+    if (try_match_scalar_times_log(arg, a, arena, scalar, log_arg)) {
+        return arena.make<Binary>(BinaryOp::Pow, log_arg, scalar);
     }
 
-    return transformed;
+    (void)fc;
+    return ExprPtr{};
+}
+
+ExprPtr expand_exp_walker(ExprPtr expr, CASContext& ctx) {
+    if (!expr) return expr;
+    ExprPtr transformed = rebuild_with_children(expr, ctx, expand_exp_walker);
+
+    const auto* fc = expr_cast<FuncCall>(transformed);
+    if (!fc || !is_exp_funccall(*fc)) return transformed;
+
+    ExprPtr local = try_local_exp_rewrite(*fc, fc->args[0], ctx);
+    if (!local) return transformed;
+    return expand_exp_walker(local, ctx);
 }
 
 }  // namespace
@@ -271,9 +401,6 @@ Result<bool> mathematically_equal_subset_risch(ExprPtr lhs, ExprPtr rhs, CASCont
             std::nullopt});
     }
 
-    // Apply log expansion first, then exp expansion.  The expansions
-    // commute on the decidable subset (positive arguments / integer
-    // exponents) so a single pass each suffices.
     ExprPtr lhs_log = expand_log_walker(lhs, context);
     ExprPtr rhs_log = expand_log_walker(rhs, context);
     ExprPtr lhs_norm = expand_exp_walker(lhs_log, context);

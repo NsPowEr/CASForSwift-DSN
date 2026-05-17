@@ -157,6 +157,7 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/factorization_recombination.cpp
     src/algebra/factorization_polynomials.cpp
     src/algebra/factorization_tower.cpp
+    src/algebra/factorization_tower_helpers.cpp
     src/algebra/polynomial_groebner.cpp
     src/algebra/polynomial_groebner_f4.cpp
     src/algebra/polynomial_groebner_f4_buchberger.cpp

@@ -97,6 +97,22 @@ protected:
         return total;
     }
 
+    // Reconstruct  content * prod(factors)  as an ExprPtr and test it
+    // against the original input via mathematically_equal.  This is the
+    // strongest oracle for a factorization: degree + content + each
+    // factor must combine to recover f exactly.
+    [[nodiscard]] bool factorization_reconstructs(
+        const algebra::Factorization& fact,
+        ExprPtr original) const {
+        if (!fact.content) return false;
+        ExprPtr product = fact.content;
+        for (const auto& pf : fact.factors) {
+            product = ctx->arena().make<Binary>(BinaryOp::Mul, product, pf.factor);
+        }
+        auto eq = symbolic::mathematically_equal(product, original, *ctx);
+        return eq.is_ok() && eq.value();
+    }
+
     std::unique_ptr<symbolic::CASContext> ctx;
 };
 
@@ -112,6 +128,8 @@ TEST_F(FactorizationTowerTest, AntiHardcodeIrreducibleX2Minus2OverQSqrt3Sqrt5) {
         << "x^2 - 2 must NOT split over Q(sqrt 3, sqrt 5)";
     EXPECT_EQ(cumulative_factor_degree(result.value(), Symbol{"x"}), 2U)
         << "Trager post-condition: sum(deg(f_i)) == deg(f)";
+    EXPECT_TRUE(factorization_reconstructs(result.value(), poly))
+        << "content * prod(factors) must reconstruct the input polynomial";
 }
 
 TEST_F(FactorizationTowerTest, SplitsX2Minus3OverQSqrt2Sqrt3) {
@@ -127,6 +145,22 @@ TEST_F(FactorizationTowerTest, SplitsX2Minus3OverQSqrt2Sqrt3) {
         << "x^2 - 3 must split into 2 linear factors over Q(sqrt 2, sqrt 3)";
     EXPECT_EQ(cumulative_factor_degree(result.value(), Symbol{"x"}), 2U)
         << "Trager post-condition: sum(deg(f_i)) == deg(f)";
+    EXPECT_TRUE(factorization_reconstructs(result.value(), poly))
+        << "content * prod(factors) must reconstruct the input polynomial";
+}
+
+// Audit fix B-L3-06-CRITICO: leading-coefficient preservation.  For
+// f = 2x^2 - 4 = 2(x^2 - 2) the monic factor is x^2 - 2 and the content
+// must carry the dropped factor of 2.
+TEST_F(FactorizationTowerTest, PreservesLeadingCoefficientAsContent) {
+    auto gens = biquadratic_gens(3, 5);  // x^2 - 2 stays irreducible here.
+    ExprPtr poly = parse_ok("2*x^2 - 4");
+    ASSERT_NE(poly, nullptr);
+
+    auto result = algebra::factor_polynomial_tower(poly, Symbol{"x"}, gens, *ctx);
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+    EXPECT_TRUE(factorization_reconstructs(result.value(), poly))
+        << "content must carry the leading coefficient (here 2)";
 }
 
 TEST_F(FactorizationTowerTest, RejectsInvalidTowerGenerators) {

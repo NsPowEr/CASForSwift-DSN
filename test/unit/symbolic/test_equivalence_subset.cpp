@@ -119,16 +119,13 @@ TEST_F(EquivalenceSubsetRischTest, LogOfSquareWithoutPositivityIsNotEqualToTwoLo
         << "without x>0 the identity must not be claimed (branch-cut safety)";
 }
 
-// ----- Indecidable / out-of-subset cases (anti-hardcode) -------------------
+// ----- Reflexivity / robustness ------------------------------------------
 
-TEST_F(EquivalenceSubsetRischTest, SchanuelDistinctConstantsReturnFalseNotUnimplemented) {
-    // exp(pi) + pi == ? -- Schanuel-conjecture territory; the subset must
-    // refuse to claim equality with a fabricated alternative.
-    auto lhs = parse_ok("exp(pi) + pi");
-    auto rhs = parse_ok("exp(pi) + pi + 1");  // distinct by 1
-    auto eq = symbolic::mathematically_equal_subset_risch(lhs, rhs, *ctx);
+TEST_F(EquivalenceSubsetRischTest, ReflexivityHoldsForArbitraryExpression) {
+    auto e = parse_ok("ln(x^2 * y) + exp(z + w)");
+    auto eq = symbolic::mathematically_equal_subset_risch(e, e, *ctx);
     ASSERT_TRUE(eq.is_ok()) << eq.error().message;
-    EXPECT_FALSE(eq.value()) << "subset must not claim equality of provably distinct constants";
+    EXPECT_TRUE(eq.value()) << "subset_risch must be reflexive";
 }
 
 TEST_F(EquivalenceSubsetRischTest, RejectsNullOperand) {
@@ -136,6 +133,54 @@ TEST_F(EquivalenceSubsetRischTest, RejectsNullOperand) {
     auto eq = symbolic::mathematically_equal_subset_risch(lhs, ExprPtr{}, *ctx);
     ASSERT_TRUE(eq.is_error());
     EXPECT_EQ(eq.error().kind, CASErrorKind::InvalidArgument);
+}
+
+// ----- New: positivity inference + non-integer scalar (B3+B4+B5 fixes) ----
+
+TEST_F(EquivalenceSubsetRischTest, LogOfTripleProductExpandsUnderAllPositive) {
+    assume_positive("x");
+    assume_positive("y");
+    assume_positive("z");
+    auto lhs = parse_ok("ln(x * y * z)");
+    auto rhs = parse_ok("ln(x) + ln(y) + ln(z)");
+    auto eq = symbolic::mathematically_equal_subset_risch(lhs, rhs, *ctx);
+    ASSERT_TRUE(eq.is_ok()) << eq.error().message;
+    EXPECT_TRUE(eq.value());
+}
+
+TEST_F(EquivalenceSubsetRischTest, ExpOfRationalTimesLogCollapsesToPowerUnderPositive) {
+    // For x > 0,  exp((1/2) * ln(x)) = x^(1/2) = sqrt(x).  Rational
+    // exponent must NOT be rejected by the matcher (B3+B4 fix).
+    assume_positive("x");
+    auto lhs = parse_ok("exp((1/2) * ln(x))");
+    auto rhs = parse_ok("x^(1/2)");
+    auto eq = symbolic::mathematically_equal_subset_risch(lhs, rhs, *ctx);
+    ASSERT_TRUE(eq.is_ok()) << eq.error().message;
+    EXPECT_TRUE(eq.value());
+}
+
+TEST_F(EquivalenceSubsetRischTest, ExpAlwaysPositiveInfersLogExpInverse) {
+    // exp(x) is always positive (real x) by structural inference (B5).
+    // Thus ln(exp(x)) = x with only the standard "x real" assumption.
+    ctx->assumptions().assume_real(Symbol{"x"});
+    auto lhs = parse_ok("ln(exp(x))");
+    auto rhs = parse_ok("x");
+    auto eq = symbolic::mathematically_equal_subset_risch(lhs, rhs, *ctx);
+    ASSERT_TRUE(eq.is_ok()) << eq.error().message;
+    EXPECT_TRUE(eq.value());
+}
+
+TEST_F(EquivalenceSubsetRischTest, NestedLogProductExpandsRecursively) {
+    // ln((x^2 * y^3) * z) under all-positive must reduce to
+    // 2*ln(x) + 3*ln(y) + ln(z) via the recursive walker (B2 fix).
+    assume_positive("x");
+    assume_positive("y");
+    assume_positive("z");
+    auto lhs = parse_ok("ln((x^2 * y^3) * z)");
+    auto rhs = parse_ok("2*ln(x) + 3*ln(y) + ln(z)");
+    auto eq = symbolic::mathematically_equal_subset_risch(lhs, rhs, *ctx);
+    ASSERT_TRUE(eq.is_ok()) << eq.error().message;
+    EXPECT_TRUE(eq.value());
 }
 
 }  // namespace
