@@ -156,6 +156,7 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/factorization_integers.cpp
     src/algebra/factorization_recombination.cpp
     src/algebra/factorization_polynomials.cpp
+    src/algebra/factorization_tower.cpp
     src/algebra/polynomial_groebner.cpp
     src/algebra/polynomial_groebner_f4.cpp
     src/algebra/polynomial_groebner_f4_buchberger.cpp
@@ -377,6 +378,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/algebra/test_algebraic_tower.cpp
         test/unit/algebra/test_factorization_lll.cpp
         test/unit/algebra/test_factorization_trager.cpp
+        test/unit/algebra/test_factorization_tower.cpp
         test/unit/algebra/test_regression.cpp
         test/unit/algebra/test_gap6.cpp
         test/unit/algebra/test_factorization_p2.cpp

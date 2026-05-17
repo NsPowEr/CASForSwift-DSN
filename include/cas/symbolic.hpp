@@ -278,6 +278,12 @@ public:
     void set_expand_bessel_recurrence(bool enabled) noexcept;
     [[nodiscard]] bool expand_bessel_recurrence() const noexcept { return expand_bessel_recurrence_; }
 
+    // L3-06: maximum shift attempts (s1, s2) when searching for a square-free
+    // composite Trager norm Res_y2(m2, Res_y1(m1, f(x - s1*y1 - s2*y2))).
+    // Default 0 → auto-derive from discriminant collision bound.
+    void set_max_trager_tower_shift_attempts(std::size_t attempts) noexcept;
+    [[nodiscard]] std::size_t max_trager_tower_shift_attempts() const noexcept { return max_trager_tower_shift_attempts_; }
+
     // HC-004: fresh symbol generator.  Returns a Symbol whose name is unique
     // within this context across all previous make_fresh_symbol calls AND
     // does not collide with any name currently registered through `define`.
@@ -335,6 +341,7 @@ public:
     std::size_t max_gamma_recursion_{1024U};
     std::size_t improper_leading_order_scan_{8U};
     bool expand_bessel_recurrence_{false};
+    std::size_t max_trager_tower_shift_attempts_{0U};
     std::uint64_t fresh_symbol_counter_{0U};
 
 public:

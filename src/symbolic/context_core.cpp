@@ -435,6 +435,10 @@ void CASContext::set_expand_bessel_recurrence(bool enabled) noexcept {
     expand_bessel_recurrence_ = enabled;
 }
 
+void CASContext::set_max_trager_tower_shift_attempts(std::size_t attempts) noexcept {
+    max_trager_tower_shift_attempts_ = attempts;
+}
+
 Symbol CASContext::make_fresh_symbol(const std::string& prefix) {
     // Probe candidate names of the form "<prefix>_<n>" with monotonically
     // increasing n until the name is not present in the user-defined

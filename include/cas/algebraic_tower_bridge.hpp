@@ -1,5 +1,6 @@
 #pragma once
 
+#include "cas/algebra.hpp"
 #include "cas/algebraic_number.hpp"
 #include "cas/algebraic_tower.hpp"
 #include "cas/ast.hpp"
@@ -33,6 +34,14 @@ struct TowerGenerators {
     const AlgebraicTowerTwoLevel& value,
     const TowerGenerators& gens,
     AstArena& arena);
+
+// L3-06: factorization of p(x) in Q[x] over the two-level tower Q(α_1, α_2)
+// via composite Trager shift (s_1, s_2) and iterated absolute resultant.
+[[nodiscard]] Result<Factorization> factor_polynomial_tower(
+    ExprPtr poly,
+    const Symbol& var,
+    const TowerGenerators& gens,
+    symbolic::CASContext& ctx);
 
 }  // namespace algebra
 }  // namespace cas
