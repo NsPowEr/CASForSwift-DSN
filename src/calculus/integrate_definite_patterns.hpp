@@ -36,5 +36,7 @@ using DefinitePatternFn = Result<std::optional<ExprPtr>> (*)(const DefiniteConte
 [[nodiscard]] Result<std::optional<ExprPtr>> pattern_legendre_orthogonality(const DefiniteContext& dc);
 [[nodiscard]] Result<std::optional<ExprPtr>> pattern_hermite_h_orthogonality(const DefiniteContext& dc);
 [[nodiscard]] Result<std::optional<ExprPtr>> pattern_hermite_he_orthogonality(const DefiniteContext& dc);
+[[nodiscard]] Result<std::optional<ExprPtr>> pattern_chebyshev_t_orthogonality(const DefiniteContext& dc);
+[[nodiscard]] Result<std::optional<ExprPtr>> pattern_chebyshev_u_orthogonality(const DefiniteContext& dc);
 
 }  // namespace cas::calculus

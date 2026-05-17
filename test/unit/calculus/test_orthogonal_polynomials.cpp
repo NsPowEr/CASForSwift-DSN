@@ -146,4 +146,63 @@ TEST_F(OrthogonalPolynomialsTest, LegendreWrongIntervalNotMatched) {
     }
 }
 
+// ─── Chebyshev T_n on [-1, 1] with weight 1/√(1-x²) ─────────────────────────
+
+TEST_F(OrthogonalPolynomialsTest, ChebyshevTCross) {
+    // ∫_{-1}^{1} T_1·T_3 / √(1-x²) dx = 0.
+    auto e = parse_expr("ChebyshevT(1, x) * ChebyshevT(3, x) / sqrt(1 - x^2)", ctx.arena());
+    ASSERT_TRUE(e.is_ok());
+    auto lower = parse_expr("-1", ctx.arena()).value();
+    auto upper = parse_expr("1", ctx.arena()).value();
+    auto res = calculus::definite_integral(e.value(), Symbol("x"), lower, upper, ctx);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+    EXPECT_TRUE(is_integer_zero(res.value()));
+}
+
+TEST_F(OrthogonalPolynomialsTest, ChebyshevTDiagonalZero) {
+    // ∫_{-1}^{1} T_0² / √(1-x²) dx = π.
+    auto e = parse_expr("ChebyshevT(0, x) * ChebyshevT(0, x) / sqrt(1 - x^2)", ctx.arena());
+    ASSERT_TRUE(e.is_ok());
+    auto lower = parse_expr("-1", ctx.arena()).value();
+    auto upper = parse_expr("1", ctx.arena()).value();
+    auto res = calculus::definite_integral(e.value(), Symbol("x"), lower, upper, ctx);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+    expect_zero_or_match(res.value(), "pi");
+}
+
+TEST_F(OrthogonalPolynomialsTest, ChebyshevTDiagonalNonzero) {
+    // ∫_{-1}^{1} T_4² / √(1-x²) dx = π/2.
+    auto e = parse_expr("ChebyshevT(4, x) * ChebyshevT(4, x) / sqrt(1 - x^2)", ctx.arena());
+    ASSERT_TRUE(e.is_ok());
+    auto lower = parse_expr("-1", ctx.arena()).value();
+    auto upper = parse_expr("1", ctx.arena()).value();
+    auto res = calculus::definite_integral(e.value(), Symbol("x"), lower, upper, ctx);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+    expect_zero_or_match(res.value(), "pi/2");
+}
+
+// ─── Chebyshev U_n on [-1, 1] with weight √(1-x²) ───────────────────────────
+
+TEST_F(OrthogonalPolynomialsTest, ChebyshevUCross) {
+    // ∫_{-1}^{1} U_2·U_5·√(1-x²) dx = 0.
+    auto e = parse_expr("ChebyshevU(2, x) * ChebyshevU(5, x) * sqrt(1 - x^2)", ctx.arena());
+    ASSERT_TRUE(e.is_ok());
+    auto lower = parse_expr("-1", ctx.arena()).value();
+    auto upper = parse_expr("1", ctx.arena()).value();
+    auto res = calculus::definite_integral(e.value(), Symbol("x"), lower, upper, ctx);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+    EXPECT_TRUE(is_integer_zero(res.value()));
+}
+
+TEST_F(OrthogonalPolynomialsTest, ChebyshevUDiagonalAntiHardcode) {
+    // ∫_{-1}^{1} U_6²·√(1-x²) dx = π/2.  Anti-hardcode high index.
+    auto e = parse_expr("ChebyshevU(6, x) * ChebyshevU(6, x) * sqrt(1 - x^2)", ctx.arena());
+    ASSERT_TRUE(e.is_ok());
+    auto lower = parse_expr("-1", ctx.arena()).value();
+    auto upper = parse_expr("1", ctx.arena()).value();
+    auto res = calculus::definite_integral(e.value(), Symbol("x"), lower, upper, ctx);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+    expect_zero_or_match(res.value(), "pi/2");
+}
+
 }  // namespace cas::test
