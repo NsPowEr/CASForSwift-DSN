@@ -76,6 +76,33 @@ struct LaurentExpansion {
     ExprPtr upper,
     symbolic::CASContext& ctx);
 
+// L2-09: iterated (multiple) integration.
+// Each IntegralSpec specifies one integration step (var, lower, upper);
+// specs[0] is the innermost integral (applied first).
+struct IntegralSpec {
+    Symbol var;
+    ExprPtr lower;
+    ExprPtr upper;
+};
+
+// Computes ∫...∫ f dv_n...dv_1  (specs[0] = innermost).
+// Returns the final scalar expression.
+[[nodiscard]] Result<ExprPtr> multiple_integral(
+    ExprPtr integrand,
+    const std::vector<IntegralSpec>& specs,
+    symbolic::CASContext& ctx);
+
+// Fubini: swaps order of a rectangular double integral.
+// ∫_ay^by ∫_ax^bx f dx dy  ↔  ∫_ax^bx ∫_ay^by f dy dx.
+// Requires: ax, bx do not depend on y; ay, by do not depend on x.
+// Returns the result evaluated in both orders (must be equal); errors if
+// bounds are not rectangular (i.e. contain the other variable).
+[[nodiscard]] Result<ExprPtr> fubini_swap(
+    ExprPtr integrand,
+    const Symbol& x, ExprPtr ax, ExprPtr bx,
+    const Symbol& y, ExprPtr ay, ExprPtr by,
+    symbolic::CASContext& ctx);
+
 [[nodiscard]] Result<ExprPtr> limit(
     ExprPtr expr,
     const Symbol& var,

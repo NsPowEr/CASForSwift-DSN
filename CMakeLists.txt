@@ -133,6 +133,7 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/residue_theorem.cpp
     src/calculus/laurent_general.cpp
     src/calculus/pade.cpp
+    src/calculus/multiple_integral.cpp
     src/calculus/diff_rules.cpp
     src/calculus/integrate_parts.cpp
     src/calculus/ode_classifier.cpp
@@ -388,6 +389,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/parser/test_parser_roundtrip.cpp
         test/unit/symbolic/test_calculus.cpp
         test/unit/symbolic/test_calculus_f4.cpp
+        test/unit/symbolic/test_multiple_integral.cpp
         test/unit/symbolic/test_compositions.cpp
         test/unit/symbolic/test_abs_sign.cpp
         test/unit/symbolic/test_trig_identities.cpp
