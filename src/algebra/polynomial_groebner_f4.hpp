@@ -31,7 +31,7 @@ struct PolyF4 {
     void make_monic(MonomialOrder order = MonomialOrder::Lex);
 };
 
-std::vector<PolyF4> f4_groebner(
+Result<std::vector<PolyF4>> f4_groebner(
     std::vector<PolyF4> G,
     MonomialOrder order = MonomialOrder::GRevLex);
 
@@ -46,6 +46,15 @@ Result<PolyF4> expr_to_f4(
     symbolic::CASContext& ctx);
 
 void inter_reduce(std::vector<PolyF4>& G, MonomialOrder order);
+
+// Returns true iff G is a reduced Groebner basis:
+// (1) Groebner: every S-polynomial reduces to 0 mod G.
+// (2) Monic: every element has leading coefficient 1.
+// (3) Fully inter-reduced: no LM of any g_i divides any term of any other g_j.
+// Complexity O(|G|^2 * max_terms); use only for testing/validation.
+[[nodiscard]] bool is_reduced_groebner_basis(
+    const std::vector<PolyF4>& G,
+    MonomialOrder order);
 
 Result<std::vector<std::vector<ExprPtr>>> solve_nonlinear_system_f4(
     const std::vector<ExprPtr>& equations,

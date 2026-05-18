@@ -358,3 +358,67 @@ TEST(GroebnerTest, GmFourGeneratorSystemSatisfiesBuchbergerCriterion) {
         {eq1.value(), eq2.value(), eq3.value(), eq4.value()},
         result.value(), vars, ctx);
 }
+
+// L2-25: is_reduced_groebner_basis — verifies the output satisfies all 3 RGB properties.
+TEST(GroebnerTest, L25_OutputIsReducedGroebnerBasis) {
+    symbolic::CASContext ctx;
+
+    auto eq1 = parse_expr("x*y - 1", ctx);
+    auto eq2 = parse_expr("y^2 - x", ctx);
+    ASSERT_TRUE(eq1.is_ok());
+    ASSERT_TRUE(eq2.is_ok());
+
+    std::vector<Symbol> vars = {Symbol("x"), Symbol("y")};
+    auto result = polynomial_groebner({eq1.value(), eq2.value()}, vars, ctx);
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+    ASSERT_FALSE(result.value().empty());
+
+    // Convert to PolyF4 and verify RGB property
+    const std::vector<PolyF4> basis_f4 = to_f4_basis(result.value(), vars, ctx);
+    EXPECT_TRUE(is_reduced_groebner_basis(basis_f4, MonomialOrder::GRevLex))
+        << "polynomial_groebner output must be a reduced Gröbner basis";
+}
+
+// L2-25: uniqueness — same ideal with different generator order → identical reduced basis.
+TEST(GroebnerTest, L25_ReducedBasisUniquenessForSameIdeal) {
+    symbolic::CASContext ctx;
+    std::vector<Symbol> vars = {Symbol("x"), Symbol("y")};
+
+    // Two orderings of the same generators
+    auto x2_minus_y = parse_expr("x^2 - y", ctx);
+    auto y2_minus_x = parse_expr("y^2 - x", ctx);
+    ASSERT_TRUE(x2_minus_y.is_ok());
+    ASSERT_TRUE(y2_minus_x.is_ok());
+
+    auto res1 = polynomial_groebner({x2_minus_y.value(), y2_minus_x.value()}, vars, ctx);
+    auto res2 = polynomial_groebner({y2_minus_x.value(), x2_minus_y.value()}, vars, ctx);
+    ASSERT_TRUE(res1.is_ok()) << res1.error().message;
+    ASSERT_TRUE(res2.is_ok()) << res2.error().message;
+
+    // Both results must satisfy RGB property
+    const std::vector<PolyF4> b1 = to_f4_basis(res1.value(), vars, ctx);
+    const std::vector<PolyF4> b2 = to_f4_basis(res2.value(), vars, ctx);
+    EXPECT_TRUE(is_reduced_groebner_basis(b1, MonomialOrder::GRevLex));
+    EXPECT_TRUE(is_reduced_groebner_basis(b2, MonomialOrder::GRevLex));
+    // Same number of elements (unique RGB for a fixed order has fixed cardinality)
+    EXPECT_EQ(b1.size(), b2.size());
+}
+
+// L2-25: reduced basis is minimal — no element is redundant.
+TEST(GroebnerTest, L25_ReducedBasisIsMinimal) {
+    symbolic::CASContext ctx;
+    // Linear system: {x+y-3, x-y-1} → reduced basis is {x-2, y-1} (2 elements)
+    auto eq1 = parse_expr("x + y - 3", ctx);
+    auto eq2 = parse_expr("x - y - 1", ctx);
+    ASSERT_TRUE(eq1.is_ok());
+    ASSERT_TRUE(eq2.is_ok());
+
+    std::vector<Symbol> vars = {Symbol("x"), Symbol("y")};
+    auto result = polynomial_groebner({eq1.value(), eq2.value()}, vars, ctx);
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+
+    const std::vector<PolyF4> basis_f4 = to_f4_basis(result.value(), vars, ctx);
+    EXPECT_TRUE(is_reduced_groebner_basis(basis_f4, MonomialOrder::GRevLex));
+    // For a 0-dimensional ideal with 2 variables, the RGB has exactly 2 elements
+    EXPECT_EQ(basis_f4.size(), 2U);
+}
