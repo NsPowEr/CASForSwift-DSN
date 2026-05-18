@@ -338,6 +338,10 @@ void CASContext::define(const Symbol& symbol, ExprPtr value) {
     variables_[symbol.name] = value;
 }
 
+void CASContext::clear_variables() noexcept {
+    variables_.clear();
+}
+
 std::optional<ExprPtr> CASContext::lookup(const Symbol& symbol) const {
     const auto found = variables_.find(symbol.name);
     if (found == variables_.end()) {
@@ -511,6 +515,17 @@ Result<ExprPtr> CASContext::simplify(ExprPtr expr) {
         operation_active_ = false;
         trace_capture_active_ = false;
         ops_count_ = 0;
+
+        // Post-simplify hook: algebraic extension reduction (e.g. Q(alpha) via bridge).
+        // Only runs at the top-level call to avoid O(N) overhead on sub-expressions.
+        if (result.is_ok() && post_simplify_hook_) {
+            auto hook_res = post_simplify_hook_(result.value(), *this);
+            if (hook_res.is_ok() && hook_res.value() != result.value()) {
+                // Hook produced a distinct expression; re-simplify to canonical form.
+                auto resimplified = symbolic::simplify(hook_res.value(), *this);
+                result = resimplified.is_ok() ? resimplified : hook_res;
+            }
+        }
     }
 
     if (caching_enabled_ && !trace_enabled_ && result.is_ok()) {

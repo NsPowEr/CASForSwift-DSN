@@ -424,6 +424,12 @@ void collect_distinct_rootofs(ExprPtr expr, std::vector<ExprPtr>& out) {
     return ctx.simplify(reduced.value());
 }
 
+void register_algebraic_simplify_hook(symbolic::CASContext& ctx) {
+    ctx.set_post_simplify_hook([](ExprPtr e, symbolic::CASContext& c) -> Result<ExprPtr> {
+        return try_reduce_in_q_alpha(e, c);
+    });
+}
+
 [[nodiscard]] Result<ExprPtr> simplify_polynomial_in_x_over_q_alpha(
     ExprPtr expr,
     const Symbol& poly_var,

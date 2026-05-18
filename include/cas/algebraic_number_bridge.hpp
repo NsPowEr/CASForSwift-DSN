@@ -89,6 +89,12 @@ namespace algebra {
     ExprPtr expr,
     symbolic::CASContext& ctx);
 
+// Register try_reduce_in_q_alpha as a post-simplify hook on ctx so that
+// ctx.simplify() automatically performs Q(alpha) reduction whenever the
+// result contains a unique RootOf with a rational minimal polynomial.
+// Idempotent: calling again replaces the previous hook.
+void register_algebraic_simplify_hook(symbolic::CASContext& ctx);
+
 // Reduce an expression that is a polynomial in `poly_var` whose coefficients
 // live in Q(alpha) (where alpha is the unique RootOf appearing in the
 // expression with rational minimal polynomial).  For each coefficient of

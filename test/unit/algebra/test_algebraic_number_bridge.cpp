@@ -303,4 +303,86 @@ TEST_F(AlgebraicNumberBridgeTest, MinPolyRejectsRootOfWithSymbolicCoefficients) 
     EXPECT_TRUE(mp.is_error());
 }
 
+// ── L1-05: register_algebraic_simplify_hook auto-trigger tests ──────────────
+
+class AlgebraicSimplifyHookTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        ctx = std::make_unique<symbolic::CASContext>();
+        cas::algebra::register_algebraic_simplify_hook(*ctx);
+    }
+
+    std::unique_ptr<symbolic::CASContext> ctx;
+};
+
+TEST_F(AlgebraicSimplifyHookTest, HookRegistered) {
+    EXPECT_TRUE(ctx->has_post_simplify_hook());
+}
+
+TEST_F(AlgebraicSimplifyHookTest, ClearHookDisables) {
+    ctx->clear_post_simplify_hook();
+    EXPECT_FALSE(ctx->has_post_simplify_hook());
+}
+
+TEST_F(AlgebraicSimplifyHookTest, CubeRoot2_AlphaCubed_ReducesToTwo) {
+    // alpha = RootOf(x^3 - 2, x, 0)  →  alpha^3 should reduce to 2 via hook.
+    // Degree-3 RootOf stays as RootOf (not auto-solved), so the hook fires.
+    auto& ar = ctx->arena();
+    ExprPtr x_sym = ar.make<Symbol>("x");
+    ExprPtr x3 = ar.make<Binary>(BinaryOp::Pow, x_sym, ar.make<IntegerLit>(BigInt(3)));
+    ExprPtr poly = ar.make<Binary>(BinaryOp::Sub, x3, ar.make<IntegerLit>(BigInt(2)));
+    ExprPtr alpha = ar.make<RootOf>(poly, Symbol("x"), 0U);
+
+    // alpha^3
+    ExprPtr expr = ar.make<Binary>(
+        BinaryOp::Pow, alpha, ar.make<IntegerLit>(BigInt(3)));
+
+    auto res = ctx->simplify(expr);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+
+    // Expected: IntegerLit(2)
+    bool is_two = expr_is<IntegerLit>(res.value())
+        && expr_ref<IntegerLit>(res.value()).value == BigInt(2);
+    EXPECT_TRUE(is_two) << "Got: " << debug_print(res.value());
+}
+
+TEST_F(AlgebraicSimplifyHookTest, CubeRoot2_AlphaFourth_ReducesToTwoAlpha) {
+    // alpha^4 = alpha * alpha^3 = 2*alpha.
+    auto& ar = ctx->arena();
+    ExprPtr x_sym = ar.make<Symbol>("x");
+    ExprPtr x3 = ar.make<Binary>(BinaryOp::Pow, x_sym, ar.make<IntegerLit>(BigInt(3)));
+    ExprPtr poly = ar.make<Binary>(BinaryOp::Sub, x3, ar.make<IntegerLit>(BigInt(2)));
+    ExprPtr alpha = ar.make<RootOf>(poly, Symbol("x"), 0U);
+
+    // alpha^4
+    ExprPtr expr = ar.make<Binary>(
+        BinaryOp::Pow, alpha, ar.make<IntegerLit>(BigInt(4)));
+
+    auto res = ctx->simplify(expr);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+
+    // Expected: 2*alpha  →  diff from (result - 2*alpha) = 0
+    ExprPtr two_alpha = ar.make<Binary>(
+        BinaryOp::Mul, ar.make<IntegerLit>(BigInt(2)), alpha);
+    auto diff = ar.make<Binary>(BinaryOp::Sub, res.value(), two_alpha);
+    auto diff_s = ctx->simplify(diff);
+    ASSERT_TRUE(diff_s.is_ok());
+    bool is_zero = expr_is<IntegerLit>(diff_s.value())
+        && expr_ref<IntegerLit>(diff_s.value()).value == BigInt(0);
+    EXPECT_TRUE(is_zero) << "Got: " << debug_print(res.value())
+                         << "  diff: " << debug_print(diff_s.value());
+}
+
+TEST_F(AlgebraicSimplifyHookTest, NoRootOf_ExprUnchanged) {
+    // Without RootOf, hook is a no-op: 2 + 3 = 5
+    auto& ar = ctx->arena();
+    ExprPtr two = ar.make<IntegerLit>(BigInt(2));
+    ExprPtr three = ar.make<IntegerLit>(BigInt(3));
+    ExprPtr expr = ar.make<Binary>(BinaryOp::Add, two, three);
+    auto res = ctx->simplify(expr);
+    ASSERT_TRUE(res.is_ok());
+    ASSERT_TRUE(expr_is<IntegerLit>(res.value()));
+    EXPECT_EQ(expr_ref<IntegerLit>(res.value()).value, BigInt(5));
+}
+
 }  // namespace cas::test

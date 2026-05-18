@@ -300,6 +300,24 @@ public:
     [[nodiscard]] Result<ExprPtr> simplify(ExprPtr expr);
     [[nodiscard]] Result<ExprPtr> substitute(ExprPtr expr, const Symbol& variable, ExprPtr value);
 
+    // Optional post-simplify hook invoked at the top-level simplify call.
+    // The hook receives the already-simplified expression and may return a
+    // further-reduced form (e.g. algebraic extension reduction via Q(alpha)).
+    // If the hook returns a different pointer, a second standard simplify pass
+    // is run on the result.  Set to nullptr to disable.
+    using PostSimplifyHook = std::function<Result<ExprPtr>(ExprPtr, CASContext&)>;
+    void set_post_simplify_hook(PostSimplifyHook hook) {
+        post_simplify_hook_ = std::move(hook);
+        clear_caches();
+    }
+    void clear_post_simplify_hook() noexcept {
+        post_simplify_hook_ = nullptr;
+        clear_caches();
+    }
+    [[nodiscard]] bool has_post_simplify_hook() const noexcept {
+        return static_cast<bool>(post_simplify_hook_);
+    }
+
     void collect_garbage(const std::vector<ExprPtr*>& external_roots = {});
 
     // Caching methods
@@ -348,6 +366,7 @@ public:
     long long max_trig_power_reduction_{32LL};
     std::size_t max_trager_tower_shift_attempts_{0U};
     std::uint64_t fresh_symbol_counter_{0U};
+    PostSimplifyHook post_simplify_hook_{nullptr};
 
 public:
 // Performance Caches
