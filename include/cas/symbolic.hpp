@@ -223,6 +223,7 @@ public:
     CASContext();
 
     void define(const Symbol& symbol, ExprPtr value);
+    void clear_variables() noexcept;
     [[nodiscard]] std::optional<ExprPtr> lookup(const Symbol& symbol) const;
     [[nodiscard]] const std::unordered_map<std::string, ExprPtr>& variables() const noexcept { return variables_; }
 
@@ -249,6 +250,9 @@ public:
 
     void set_gcd_error_probability(double prob) noexcept;
     [[nodiscard]] double gcd_error_probability() const noexcept { return gcd_error_probability_; }
+
+    void set_max_trig_power_reduction(long long n) noexcept { max_trig_power_reduction_ = n; }
+    [[nodiscard]] long long max_trig_power_reduction() const noexcept { return max_trig_power_reduction_; }
 
     void set_max_rootof_explicit_degree(std::size_t deg) noexcept;
     [[nodiscard]] std::size_t max_rootof_explicit_degree() const noexcept { return max_rootof_explicit_degree_; }
@@ -341,6 +345,7 @@ public:
     std::size_t max_gamma_recursion_{1024U};
     std::size_t improper_leading_order_scan_{8U};
     bool expand_bessel_recurrence_{false};
+    long long max_trig_power_reduction_{32LL};
     std::size_t max_trager_tower_shift_attempts_{0U};
     std::uint64_t fresh_symbol_counter_{0U};
 

@@ -36,8 +36,8 @@ namespace {
     case ExprKind::Limit:
     case ExprKind::RootOf:
     case ExprKind::Matrix:
-    case ExprKind::SeriesExp:
-        return 8;
+    case ExprKind::SeriesExp: return 85;
+    case ExprKind::Quantity: return 90;
     }
 
     return 9;
@@ -92,7 +92,12 @@ namespace {
     case BinaryOp::Add: return 30;
     case BinaryOp::Sub: return 30;
     case BinaryOp::Mod: return 20;
-    case BinaryOp::Equal: return 10;
+    case BinaryOp::Equal:
+    case BinaryOp::Less:
+    case BinaryOp::Greater:
+    case BinaryOp::LessEqual:
+    case BinaryOp::GreaterEqual:
+        return 10;
     }
     return 0;
 }
@@ -238,6 +243,32 @@ int canonical_compare(ExprPtr lhs, ExprPtr rhs) noexcept {
         int left_cmp = canonical_compare(lhs_binary->left, rhs_binary->left);
         if (left_cmp != 0) return left_cmp;
         return canonical_compare(lhs_binary->right, rhs_binary->right);
+    }
+
+    if (const auto* lhs_call = expr_cast<FuncCall>(lhs)) {
+        const auto* rhs_call = expr_cast<FuncCall>(rhs);
+        if (lhs_call->func_id != rhs_call->func_id) {
+            const int lp = get_builtin_precedence(lhs_call->func_id);
+            const int rp = get_builtin_precedence(rhs_call->func_id);
+            if (lp != rp) return lp < rp ? -1 : 1;
+            return lhs_call->func_id < rhs_call->func_id ? -1 : 1;
+        }
+        // Same func_id — for Unknown, compare names
+        if (lhs_call->func_id == BuiltinOp::Unknown) {
+            const int name_cmp = compare_string_precedence(lhs_call->name, rhs_call->name);
+            if (name_cmp != 0) return name_cmp;
+        }
+        // Same function: compare arguments
+        const auto& la = lhs_call->args;
+        const auto& ra = rhs_call->args;
+        const std::size_t shared = std::min(la.size(), ra.size());
+        for (std::size_t i = 0; i < shared; ++i) {
+            const int c = canonical_compare(la[i], ra[i]);
+            if (c != 0) return c;
+        }
+        if (la.size() < ra.size()) return -1;
+        if (ra.size() < la.size()) return 1;
+        return 0;
     }
 
     const auto lhs_children = term_order_children(lhs);

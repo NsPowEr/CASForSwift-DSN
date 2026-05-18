@@ -1,5 +1,7 @@
 #include "simplify_impl.hpp"
 #include "cas/linalg/Matrix.hpp"
+#include "cas/algebra.hpp"
+#include "../algebra/polynomial_internal.hpp"
 #include <algorithm>
 
 namespace cas::symbolic::detail {
@@ -167,8 +169,12 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const Binary& node) 
         return ok(arena_.make<Binary>(BinaryOp::Mod, lhs.value(), rhs.value()));
     }
     case BinaryOp::Equal:
+    case BinaryOp::Less:
+    case BinaryOp::Greater:
+    case BinaryOp::LessEqual:
+    case BinaryOp::GreaterEqual:
         if (lhs.value() == node.left && rhs.value() == node.right) return ok(original);
-        return ok(arena_.make<Binary>(BinaryOp::Equal, lhs.value(), rhs.value()));
+        return ok(arena_.make<Binary>(node.op, lhs.value(), rhs.value()));
     }
     return fail<ExprPtr>(make_error(CASErrorKind::InternalError, "Unsupported binary operator"));
 }
@@ -209,74 +215,10 @@ Result<ExprPtr> Simplifier::simplify_additive_chain_fast(ExprPtr original) {
 }
 
 // ── Trig power linearization (Chebyshev / DeMoivre) ──────────────────────
-[[nodiscard]] static BigInt trig_binomial(unsigned int n, unsigned int k) {
-    if (k > n) return BigInt(0);
-    if (k == 0U || k == n) return BigInt(1);
-    if (k > n - k) k = n - k;
-    BigInt result(1);
-    for (unsigned int i = 0U; i < k; ++i) {
-        result = result * BigInt(static_cast<long long>(n - i));
-        result = result / BigInt(static_cast<long long>(i + 1U));
-    }
-    return result;
-}
-
-[[nodiscard]] static BigInt trig_pow4(unsigned int m) {
-    BigInt result(1);
-    const BigInt four(4);
-    for (unsigned int i = 0U; i < m; ++i) result = result * four;
-    return result;
-}
 
 // Returns linearized form of sin^n or cos^n using multiple-angle identities.
 // Odd n=2m+1:  trig^n = (1/4^m) * sum_{j=0}^{m} c_j * trig((n-2j)*arg)
 // Even n=2m:   trig^n = (1/4^m) * [C(n,m) + 2*sum_{j=0}^{m-1} c_j * cos((n-2j)*arg)]
-[[nodiscard]] static ExprPtr try_trig_linearize(AstArena& arena, BuiltinOp func, ExprPtr arg, unsigned int n) {
-    const bool is_sin = (func == BuiltinOp::Sin);
-    std::vector<ExprPtr> terms;
-
-    if (n % 2U == 1U) {
-        // odd
-        const unsigned int m = (n - 1U) / 2U;
-        const BigInt denom = trig_pow4(m);
-        for (unsigned int j = 0U; j <= m; ++j) {
-            const unsigned int freq = n - 2U * j;
-            const BigInt c = trig_binomial(n, j);
-            const bool negate_coeff = is_sin && ((m - j) % 2U == 1U);
-            const BigInt num = negate_coeff ? -c : c;
-            ExprPtr angle_arg = (freq == 1U)
-                ? arg
-                : arena.make<Binary>(BinaryOp::Mul,
-                    arena.make<IntegerLit>(BigInt(static_cast<long long>(freq))), arg);
-            ExprPtr trig_node = arena.make<FuncCall>(func, std::vector<ExprPtr>{angle_arg});
-            terms.push_back(arena.make<Binary>(BinaryOp::Mul,
-                arena.make<RationalLit>(num, denom), trig_node));
-        }
-    } else {
-        // even
-        const unsigned int m = n / 2U;
-        const BigInt denom = trig_pow4(m);
-        terms.push_back(arena.make<RationalLit>(trig_binomial(n, m), denom));
-        for (unsigned int j = 0U; j < m; ++j) {
-            const unsigned int freq = n - 2U * j;
-            const BigInt c = trig_binomial(n, j);
-            const bool negate_coeff = is_sin && ((m - j) % 2U == 1U);
-            const BigInt num = negate_coeff ? BigInt(-2) * c : BigInt(2) * c;
-            ExprPtr angle_arg = (freq == 1U)
-                ? arg
-                : arena.make<Binary>(BinaryOp::Mul,
-                    arena.make<IntegerLit>(BigInt(static_cast<long long>(freq))), arg);
-            ExprPtr trig_node = arena.make<FuncCall>(BuiltinOp::Cos, std::vector<ExprPtr>{angle_arg});
-            terms.push_back(arena.make<Binary>(BinaryOp::Mul,
-                arena.make<RationalLit>(num, denom), trig_node));
-        }
-    }
-
-    if (terms.empty()) return ExprPtr{};
-    if (terms.size() == 1U) return terms.front();
-    return arena.make<Sum>(std::move(terms));
-}
-// ──────────────────────────────────────────────────────────────────────────
 
 Result<ExprPtr> Simplifier::simplify_power(ExprPtr base, ExprPtr exponent, ExprPtr target_before) {
     if (!target_before && trace_enabled_) {
@@ -325,6 +267,119 @@ Result<ExprPtr> Simplifier::simplify_power(ExprPtr base, ExprPtr exponent, ExprP
     if (is_zero_expr(exponent)) return traced_result(RuleId::SimplifyPowerZero, target_before, make_integer(arena_, BigInt(1)));
     if (is_one_expr(exponent)) return traced_result(RuleId::SimplifyPowerOne, target_before, base);
     if (is_one_expr(base)) return ok(base);
+
+    if (e_exact.value() && exp_rat.value.is_integer()) {
+        const BigInt n = exp_rat.value.numerator();
+        // Chebyshev/DeMoivre linearization: sin/cos^n → multiple-angle sum for n ≥ 2.
+        // Even n=2m: trig^n = (1/4^m)*[C(n,m) + 2*Σ_{j=0}^{m-1} s_j*C(n,j)*cos((n-2j)*arg)]
+        //   sin: s_j = (-1)^(m-j),  cos: s_j = 1
+        // Odd n=2m+1: trig^n = (1/4^m)*Σ_{j=0}^{m} s_j*C(n,j)*trig((n-2j)*arg)
+        //   sin: s_j = (-1)^(m-j),  cos: s_j = 1
+        // Limit: ctx.max_trig_power_reduction (default 32) — returns unchanged if exceeded.
+        if (n >= BigInt(2) && !n.is_negative()) {
+            if (const auto* func = expr_cast<FuncCall>(base)) {
+                const bool is_sin = (func->func_id == BuiltinOp::Sin);
+                const bool is_cos = (func->func_id == BuiltinOp::Cos);
+                if ((is_sin || is_cos) && func->args.size() == 1U) {
+                    const long long max_n = context_ ? static_cast<long long>(context_->max_trig_power_reduction()) : 32LL;
+                    if (n <= BigInt(max_n)) {
+                        const long long n_ll = static_cast<long long>(n.to_u64());
+                        ExprPtr arg = func->args[0];
+                        // Pascal's triangle for C(n, j), j = 0..n
+                        std::vector<BigInt> binom(static_cast<std::size_t>(n_ll + 1), BigInt(0));
+                        binom[0] = BigInt(1);
+                        for (long long i = 1; i <= n_ll; ++i)
+                            for (long long j = i; j >= 1; --j)
+                                binom[static_cast<std::size_t>(j)] = binom[static_cast<std::size_t>(j)] + binom[static_cast<std::size_t>(j - 1)];
+
+                        const long long m = n_ll / 2;
+                        BigInt denom(1);
+                        for (long long i = 0; i < m; ++i) denom = denom * BigInt(4);
+
+                        std::vector<ExprPtr> terms;
+                        if (n_ll % 2 == 0) {
+                            // Constant: C(n,m)/4^m
+                            terms.push_back(make_rational(arena_, Rational(binom[static_cast<std::size_t>(m)], denom)));
+                            for (long long j = 0; j < m; ++j) {
+                                BigInt c2 = binom[static_cast<std::size_t>(j)] * BigInt(2);
+                                Rational coeff(c2, denom);
+                                if (is_sin && ((m - j) % 2 == 1)) coeff = -coeff;
+                                const long long k = n_ll - 2 * j;
+                                ExprPtr ka = arena_.make<Binary>(BinaryOp::Mul, make_integer(arena_, BigInt(k)), arg);
+                                ExprPtr cos_ka = arena_.make<FuncCall>(BuiltinOp::Cos, std::vector<ExprPtr>{ka});
+                                terms.push_back(arena_.make<Binary>(BinaryOp::Mul, make_rational(arena_, coeff), cos_ka));
+                            }
+                        } else {
+                            const BuiltinOp trig_op = is_sin ? BuiltinOp::Sin : BuiltinOp::Cos;
+                            for (long long j = 0; j <= m; ++j) {
+                                Rational coeff(binom[static_cast<std::size_t>(j)], denom);
+                                if (is_sin && ((m - j) % 2 == 1)) coeff = -coeff;
+                                const long long k = n_ll - 2 * j;
+                                ExprPtr ka = arena_.make<Binary>(BinaryOp::Mul, make_integer(arena_, BigInt(k)), arg);
+                                ExprPtr trig_ka = arena_.make<FuncCall>(trig_op, std::vector<ExprPtr>{ka});
+                                terms.push_back(arena_.make<Binary>(BinaryOp::Mul, make_rational(arena_, coeff), trig_ka));
+                            }
+                        }
+                        return simplify_expr(arena_.make<Sum>(std::move(terms)));
+                    }
+                }
+            }
+        }
+    }
+
+    // RootOf algebraic reduction: RootOf(P, x, k)^n -> reduce using P(R) = 0
+    if (const auto* root = expr_cast<RootOf>(base)) {
+        if (auto maybe_n = try_get_integer_exponent(exponent); maybe_n.has_value() && context_) {
+            const BigInt n_val = *maybe_n;
+            if (n_val > BigInt(0)) {
+                auto poly_res = cas::algebra::parse_polynomial(root->polynomial, root->variable, *context_);
+                if (poly_res.is_ok()) {
+                    auto poly = poly_res.value();
+                    std::size_t d = cas::algebra::poly_degree(poly);
+                    if (d > 0 && n_val >= BigInt(static_cast<long long>(d))) {
+                        // Create monomial x^n
+                        cas::algebra::PolyExpr x_n = cas::algebra::poly_make_monomial(make_integer(arena_, BigInt(1)), static_cast<std::size_t>(n_val.to_u64()));
+                        auto div_res = cas::algebra::divide_poly_with_remainder(x_n, poly, *context_);
+                        if (div_res.is_ok()) {
+                            auto reduced_poly_expr = cas::algebra::polynomial_to_expr(div_res.value().remainder, root->variable, *context_);
+                            if (reduced_poly_expr.is_ok()) {
+                                // Sostituisci Symbol(var) con RootOf
+                                auto result = substitute(reduced_poly_expr.value(), root->variable, base, *context_);
+                                if (result.is_ok()) {
+                                    append_trace(RuleId::Unknown, target_before, result.value());
+                                    return simplify_expr(result.value());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Quantity power: Quantity(v, d)^n -> Quantity(v^n, d*n) for integer n
+    if (const auto* q = expr_cast<Quantity>(base)) {
+        if (auto maybe_n = try_get_integer_exponent(exponent); maybe_n.has_value()) {
+            const BigInt n = *maybe_n;
+            long long n_val = n.to_u64();
+            if (n.is_negative()) n_val = -static_cast<long long>((-n).to_u64());
+
+            SIDimensions dims = q->dimensions;
+            dims.m = static_cast<int16_t>(dims.m * n_val);
+            dims.kg = static_cast<int16_t>(dims.kg * n_val);
+            dims.s = static_cast<int16_t>(dims.s * n_val);
+            dims.A = static_cast<int16_t>(dims.A * n_val);
+            dims.K = static_cast<int16_t>(dims.K * n_val);
+            dims.mol = static_cast<int16_t>(dims.mol * n_val);
+            dims.cd = static_cast<int16_t>(dims.cd * n_val);
+
+            auto inner_pow = simplify_power(q->value, exponent);
+            if (inner_pow.is_error()) return inner_pow;
+
+            if (dims.is_dimensionless()) return inner_pow;
+            return ok(arena_.make<Quantity>(inner_pow.value(), dims));
+        }
+    }
 
     // x^(1/2) → sqrt(x)  (canonical form)
     {
@@ -481,21 +536,6 @@ Result<ExprPtr> Simplifier::simplify_power(ExprPtr base, ExprPtr exponent, ExprP
         if (e_ex.is_ok() && e_ex.value() && exp_r.value.is_integer() && exp_r.value.numerator() == BigInt(2)) {
             // (sqrt(x))^2 = x is always true for principal complex branch.
             return traced_result(RuleId::SimplifyFlattenNestedPowers, target_before, sqrt_call->args.front());
-        }
-    }
-
-    // Trig power linearization: sin(u)^n / cos(u)^n for integer n >= 2
-    if (const auto* trig_call = expr_cast<FuncCall>(base);
-        trig_call != nullptr &&
-        (trig_call->func_id == BuiltinOp::Sin || trig_call->func_id == BuiltinOp::Cos) &&
-        trig_call->args.size() == 1U) {
-        if (auto maybe_n = try_get_integer_exponent(exponent);
-            maybe_n.has_value() && !maybe_n->is_negative() &&
-            *maybe_n >= BigInt(2) && *maybe_n <= BigInt(20)) {
-            const auto n_val = static_cast<unsigned int>(maybe_n->to_u64());
-            if (auto lin = try_trig_linearize(arena_, trig_call->func_id, trig_call->args.front(), n_val)) {
-                return simplify_expr(lin);
-            }
         }
     }
 
