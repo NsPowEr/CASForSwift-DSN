@@ -87,6 +87,11 @@ set(CAS_SYMBOLIC_SOURCES
     src/symbolic/simplify_arithmetic.cpp
     src/symbolic/simplify_arithmetic_chain.cpp
     src/symbolic/simplify_functions.cpp
+    src/symbolic/simplify_trig.cpp
+    src/symbolic/simplify_exp_log.cpp
+    src/symbolic/simplify_special_fn.cpp
+    src/symbolic/simplify_bessel_orthogonal.cpp
+    src/symbolic/simplify_complex.cpp
     src/symbolic/simplify_utils.cpp
     src/symbolic/context_core.cpp
     src/symbolic/context_utils.cpp
@@ -321,6 +326,14 @@ add_subdirectory(tools/cas_ui)
 
 # ─── GUI OPZIONALE E STACCABILE ───
 if(CAS_ENABLE_GUI)
+    find_package(Qt6 6.7 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 Concurrent)
+    set(CMAKE_AUTOMOC ON)
+    qt_standard_project_setup()
+    if(COMMAND qt_policy)
+        qt_policy(SET QTP0001 NEW)
+        qt_policy(SET QTP0004 NEW)
+    endif()
+
     add_subdirectory(GUI)
 endif()
 
@@ -426,6 +439,41 @@ if(CAS_ENABLE_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}/GUI/src
     )
+
+    if(CAS_ENABLE_GUI)
+        qt_add_executable(cas_gui_vm_tests
+            GUI/test/test_appcore_undo_redo.cpp
+            GUI/test/test_workspace_recovery.cpp
+        )
+        target_link_libraries(cas_gui_vm_tests
+            PRIVATE
+                cas_gui_core
+                GTest::gtest
+        )
+        target_include_directories(cas_gui_vm_tests PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/GUI/macos-cpp/src
+            ${CMAKE_CURRENT_SOURCE_DIR}/GUI/macos-cpp/src/viewmodels
+            ${CMAKE_CURRENT_SOURCE_DIR}/GUI/macos-cpp/src/core
+            ${CMAKE_CURRENT_SOURCE_DIR}/GUI/src
+        )
+        add_test(NAME cas_gui_vm_tests COMMAND cas_gui_vm_tests)
+
+        qt_add_executable(cas_gui_qml_smoke_tests
+            GUI/test/test_qml_smoke.cpp
+        )
+        target_link_libraries(cas_gui_qml_smoke_tests
+            PRIVATE
+                cas_gui_vm
+                cas_gui_vmplugin
+                GTest::gtest
+        )
+        target_include_directories(cas_gui_qml_smoke_tests PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/GUI/macos-cpp/src
+            ${CMAKE_CURRENT_SOURCE_DIR}/GUI/macos-cpp/src/viewmodels
+            ${CMAKE_CURRENT_SOURCE_DIR}/GUI/macos-cpp/src/core
+        )
+        add_test(NAME cas_gui_qml_smoke_tests COMMAND cas_gui_qml_smoke_tests)
+    endif()
 
     add_executable(assumptions_stability_test
         test/unit/symbolic/test_assumptions_stability.cpp

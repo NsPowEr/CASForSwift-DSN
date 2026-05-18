@@ -175,6 +175,13 @@ private:
     [[nodiscard]] bool is_known_nonnegative(ExprPtr expr) const;
     [[nodiscard]] bool is_known_negative(ExprPtr expr) const;
 
+    // FuncCall domain sub-dispatchers (called by simplify_node(FuncCall))
+    [[nodiscard]] Result<ExprPtr> simplify_funcall_trig(ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr target_before);
+    [[nodiscard]] Result<ExprPtr> simplify_funcall_exp_log_sqrt(ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr target_before);
+    [[nodiscard]] Result<ExprPtr> simplify_funcall_special(ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr target_before);
+    [[nodiscard]] Result<ExprPtr> simplify_funcall_bessel_orthogonal(ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr target_before);
+    [[nodiscard]] Result<ExprPtr> simplify_funcall_complex(ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr target_before);
+
     // Monomial helpers
     [[nodiscard]] static bool monomial_keys_equal(const MonomialKey& lhs, const MonomialKey& rhs);
     [[nodiscard]] Result<std::optional<MonomialTerm>> extract_monomial(ExprPtr expr);

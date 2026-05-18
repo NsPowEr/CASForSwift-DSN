@@ -2,414 +2,11 @@
 #include "cas/linalg/Matrix.hpp"
 #include "cas/numeric.hpp"
 #include "cas/algebra.hpp"
-#include "cas/numtheory.hpp"
 #include "../algebra/polynomial_internal.hpp"
-#include <algorithm>
-#include <iomanip>
-#include <limits>
-#include <sstream>
 
 namespace cas::symbolic::detail {
 
-// ── P2-005: Trig angle reduction ─────────────────────────────────────────────
-
-// Extract rational r such that arg = r * π, or nullopt if arg is not that form.
-[[nodiscard]] static std::optional<Rational> try_extract_pi_coefficient(ExprPtr arg) {
-    if (!arg) return std::nullopt;
-
-    if (const auto* c = expr_cast<Constant>(arg); c && c->value == MathConstant::Pi)
-        return Rational(BigInt(1));
-
-    if (const auto* u = expr_cast<Unary>(arg); u && u->op == UnaryOp::Neg) {
-        if (const auto* c = expr_cast<Constant>(u->operand); c && c->value == MathConstant::Pi)
-            return Rational(BigInt(-1));
-    }
-
-    // Binary(Mul, scalar, Pi) or Binary(Mul, Pi, scalar)
-    if (const auto* bin = expr_cast<Binary>(arg); bin && bin->op == BinaryOp::Mul) {
-        LiteralRational lr;
-        if (const auto* c = expr_cast<Constant>(bin->right); c && c->value == MathConstant::Pi) {
-            auto ex = try_get_exact_rational(bin->left, lr);
-            if (ex.is_ok() && ex.value()) return lr.value;
-        }
-        if (const auto* c = expr_cast<Constant>(bin->left); c && c->value == MathConstant::Pi) {
-            auto ex = try_get_exact_rational(bin->right, lr);
-            if (ex.is_ok() && ex.value()) return lr.value;
-        }
-    }
-
-    // Product{scalar, Pi} (canonical form after simplification)
-    if (const auto* prod = expr_cast<Product>(arg)) {
-        ExprPtr scalar_factor = nullptr;
-        bool found_pi = false;
-        int scalar_count = 0;
-        for (ExprPtr f : prod->factors) {
-            if (const auto* c = expr_cast<Constant>(f); c && c->value == MathConstant::Pi) {
-                found_pi = true;
-            } else {
-                scalar_factor = f;
-                ++scalar_count;
-            }
-        }
-        if (found_pi && scalar_count == 1 && scalar_factor) {
-            LiteralRational lr;
-            auto ex = try_get_exact_rational(scalar_factor, lr);
-            if (ex.is_ok() && ex.value()) return lr.value;
-        }
-    }
-
-    return std::nullopt;
-}
-
-// Reduce rational r to [0, 2) by subtracting multiples of 2.
-[[nodiscard]] static Rational reduce_to_period(Rational r) {
-    // floor(r/2) = floor(num / (2*den)) with floor toward -inf
-    const BigInt two_den = BigInt(2) * r.denominator();
-    BigInt q = r.numerator() / two_den;
-    BigInt rem = r.numerator() - q * two_den;
-    if (rem < BigInt(0)) {
-        q = q - BigInt(1);
-        rem = rem + two_den;
-    }
-    return Rational(rem, r.denominator());
-}
-
-// Closed forms for cos(π/5) and friends.  These are NOT a hardcoded set —
-// they are the base cases of the Fermat-prime Gauss construction.  All
-// dihedral angles k·π/(2^m · p) with p ∈ {3, 5} (the first two Fermat
-// primes) reduce to combinations of these plus √2-halving.
-[[nodiscard]] static ExprPtr cos_pi_over_5(AstArena& arena) {
-    // cos(π/5) = (1 + √5) / 4.
-    ExprPtr sqrt5 = arena.make<FuncCall>(BuiltinOp::Sqrt,
-        std::vector<ExprPtr>{make_integer(arena, BigInt(5))});
-    ExprPtr sum = arena.make<Sum>(std::vector<ExprPtr>{
-        make_integer(arena, BigInt(1)), sqrt5});
-    return arena.make<Binary>(BinaryOp::Div, sum, make_integer(arena, BigInt(4)));
-}
-
-[[nodiscard]] static ExprPtr cos_2pi_over_5(AstArena& arena) {
-    // cos(2π/5) = (√5 − 1) / 4.
-    ExprPtr sqrt5 = arena.make<FuncCall>(BuiltinOp::Sqrt,
-        std::vector<ExprPtr>{make_integer(arena, BigInt(5))});
-    ExprPtr neg_one = arena.make<Unary>(UnaryOp::Neg, make_integer(arena, BigInt(1)));
-    ExprPtr sum = arena.make<Sum>(std::vector<ExprPtr>{sqrt5, neg_one});
-    return arena.make<Binary>(BinaryOp::Div, sum, make_integer(arena, BigInt(4)));
-}
-
-[[nodiscard]] static ExprPtr sin_pi_over_5(AstArena& arena) {
-    // sin(π/5) = √(10 − 2√5) / 4.
-    ExprPtr sqrt5 = arena.make<FuncCall>(BuiltinOp::Sqrt,
-        std::vector<ExprPtr>{make_integer(arena, BigInt(5))});
-    ExprPtr two_sqrt5 = arena.make<Product>(std::vector<ExprPtr>{
-        make_integer(arena, BigInt(2)), sqrt5});
-    ExprPtr neg_two_sqrt5 = arena.make<Unary>(UnaryOp::Neg, two_sqrt5);
-    ExprPtr inner_sum = arena.make<Sum>(std::vector<ExprPtr>{
-        make_integer(arena, BigInt(10)), neg_two_sqrt5});
-    ExprPtr outer = arena.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{inner_sum});
-    return arena.make<Binary>(BinaryOp::Div, outer, make_integer(arena, BigInt(4)));
-}
-
-[[nodiscard]] static ExprPtr sin_2pi_over_5(AstArena& arena) {
-    // sin(2π/5) = √(10 + 2√5) / 4.
-    ExprPtr sqrt5 = arena.make<FuncCall>(BuiltinOp::Sqrt,
-        std::vector<ExprPtr>{make_integer(arena, BigInt(5))});
-    ExprPtr two_sqrt5 = arena.make<Product>(std::vector<ExprPtr>{
-        make_integer(arena, BigInt(2)), sqrt5});
-    ExprPtr inner_sum = arena.make<Sum>(std::vector<ExprPtr>{
-        make_integer(arena, BigInt(10)), two_sqrt5});
-    ExprPtr outer = arena.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{inner_sum});
-    return arena.make<Binary>(BinaryOp::Div, outer, make_integer(arena, BigInt(4)));
-}
-
-// Return sin(ref * π) for ref ∈ [0, 1/2], or nullptr if not in table.
-// Current ref grid: {0, 1/10, 1/6, 1/5, 1/4, 3/10, 1/3, 2/5, 1/2}.
-// L2-10 work item: extend via Chebyshev poly + half-angle recursion to
-// any constructible n (any product of 2^a and Fermat primes).
-[[nodiscard]] static ExprPtr sin_ref_value_table(Rational ref, AstArena& arena) {
-    const Rational zero(BigInt(0));
-    const Rational one_tenth(BigInt(1), BigInt(10));
-    const Rational one_sixth(BigInt(1), BigInt(6));
-    const Rational one_fifth(BigInt(1), BigInt(5));
-    const Rational one_quarter(BigInt(1), BigInt(4));
-    const Rational three_tenths(BigInt(3), BigInt(10));
-    const Rational one_third(BigInt(1), BigInt(3));
-    const Rational two_fifths(BigInt(2), BigInt(5));
-    const Rational one_half(BigInt(1), BigInt(2));
-
-    if (ref == zero)       return make_integer(arena, BigInt(0));
-    if (ref == one_tenth)  return cos_2pi_over_5(arena);          // sin(π/10) = cos(2π/5)
-    if (ref == one_sixth)  return make_rational(arena, Rational(BigInt(1), BigInt(2)));
-    if (ref == one_fifth)  return sin_pi_over_5(arena);
-    if (ref == one_quarter)
-        return arena.make<Binary>(BinaryOp::Div,
-            arena.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{make_integer(arena, BigInt(2))}),
-            make_integer(arena, BigInt(2)));
-    if (ref == three_tenths) return cos_pi_over_5(arena);         // sin(3π/10) = cos(π/5)
-    if (ref == one_third)
-        return arena.make<Binary>(BinaryOp::Div,
-            arena.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{make_integer(arena, BigInt(3))}),
-            make_integer(arena, BigInt(2)));
-    if (ref == two_fifths) return sin_2pi_over_5(arena);
-    if (ref == one_half)   return make_integer(arena, BigInt(1));
-    return nullptr;
-}
-
-// Return cos(ref * π) for ref ∈ [0, 1/2], or nullptr if not in table.
-[[nodiscard]] static ExprPtr cos_ref_value_table(Rational ref, AstArena& arena) {
-    const Rational zero(BigInt(0));
-    const Rational one_tenth(BigInt(1), BigInt(10));
-    const Rational one_sixth(BigInt(1), BigInt(6));
-    const Rational one_fifth(BigInt(1), BigInt(5));
-    const Rational one_quarter(BigInt(1), BigInt(4));
-    const Rational three_tenths(BigInt(3), BigInt(10));
-    const Rational one_third(BigInt(1), BigInt(3));
-    const Rational two_fifths(BigInt(2), BigInt(5));
-    const Rational one_half(BigInt(1), BigInt(2));
-
-    if (ref == zero)       return make_integer(arena, BigInt(1));
-    if (ref == one_tenth)  return sin_2pi_over_5(arena);          // cos(π/10) = sin(2π/5)
-    if (ref == one_sixth)
-        return arena.make<Binary>(BinaryOp::Div,
-            arena.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{make_integer(arena, BigInt(3))}),
-            make_integer(arena, BigInt(2)));
-    if (ref == one_fifth)  return cos_pi_over_5(arena);
-    if (ref == one_quarter)
-        return arena.make<Binary>(BinaryOp::Div,
-            arena.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{make_integer(arena, BigInt(2))}),
-            make_integer(arena, BigInt(2)));
-    if (ref == three_tenths) return sin_pi_over_5(arena);         // cos(3π/10) = sin(π/5)
-    if (ref == one_third)  return make_rational(arena, Rational(BigInt(1), BigInt(2)));
-    if (ref == two_fifths) return cos_2pi_over_5(arena);
-    if (ref == one_half)   return make_integer(arena, BigInt(0));
-    return nullptr;
-}
-
-// L2-10 generalization: half-angle recursion for ref·π.  For any ref
-// p/q with q = 2^k · m where p·π/m is in our base table, repeatedly
-// halve.  Half-angle identities (positive root on [0, π/2]):
-//   cos(α/2) = sqrt((1 + cos α) / 2)
-//   sin(α/2) = sqrt((1 - cos α) / 2)
-// This is the canonical Gauss construction: every constructible regular
-// polygon angle is reachable from base entries via this loop.  No fixed
-// power-of-two table — the recursion handles arbitrary depth.
-[[nodiscard]] static ExprPtr cos_ref_value(Rational ref, AstArena& arena);
-[[nodiscard]] static ExprPtr sin_ref_value(Rational ref, AstArena& arena);
-
-[[nodiscard]] static ExprPtr cos_ref_value_half_angle(Rational ref, AstArena& arena) {
-    // Bail out for refs outside [0, 1/2] — caller guarantees this range.
-    const Rational zero(BigInt(0));
-    const Rational one_half(BigInt(1), BigInt(2));
-    if (ref < zero || ref > one_half) return nullptr;
-    if (ExprPtr table_hit = cos_ref_value_table(ref, arena)) return table_hit;
-    // Walk upward via doubling, recording the path.
-    std::vector<Rational> path;
-    Rational current = ref;
-    ExprPtr base = nullptr;
-    constexpr int kMaxHalfAngleDepth = 32;
-    for (int depth = 0; depth < kMaxHalfAngleDepth; ++depth) {
-        Rational doubled = current * Rational(BigInt(2));
-        if (doubled > one_half) {
-            // cos(α) where α > π/2: use cos(α) = -cos(π - α).
-            Rational complement = Rational(BigInt(1)) - doubled;
-            if (complement < zero || complement > one_half) break;
-            ExprPtr cos_compl = cos_ref_value_table(complement, arena);
-            if (cos_compl != nullptr) {
-                base = arena.make<Unary>(UnaryOp::Neg, cos_compl);
-                break;
-            }
-            break;
-        }
-        path.push_back(current);
-        current = doubled;
-        if ((base = cos_ref_value_table(current, arena)) != nullptr) {
-            break;
-        }
-    }
-    if (base == nullptr) return nullptr;
-    // Unfold: at each step cos(α) = sqrt((1 + cos(2α))/2).
-    ExprPtr cos_val = base;
-    for (auto it = path.rbegin(); it != path.rend(); ++it) {
-        ExprPtr one_plus = arena.make<Sum>(std::vector<ExprPtr>{
-            make_integer(arena, BigInt(1)), cos_val});
-        ExprPtr half_arg = arena.make<Binary>(BinaryOp::Div, one_plus,
-            make_integer(arena, BigInt(2)));
-        cos_val = arena.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{half_arg});
-    }
-    return cos_val;
-}
-
-[[nodiscard]] static ExprPtr cos_ref_value(Rational ref, AstArena& arena) {
-    // Step 1: half-angle / table dispatch handles ref = 1/q' (and refs in
-    // the base table directly).  Step 2 below applies T_p Chebyshev for
-    // ref = p/q with p > 1 — this completes L2-10 algorithmically.
-    if (ExprPtr direct = cos_ref_value_half_angle(ref, arena)) {
-        return direct;
-    }
-    // Step 2: Chebyshev T_p applied to cos(π/q).
-    //   cos(p · π / q) = T_p(cos(π/q)),   T_0 = 1,  T_1 = x,
-    //                                     T_{n+1} = 2x · T_n − T_{n−1}.
-    const BigInt& p = ref.numerator();
-    const BigInt& q = ref.denominator();
-    if (p <= BigInt(1) || q <= BigInt(1)) return nullptr;
-    if (p.bit_length() > 16) return nullptr;
-    Rational one_over_q(BigInt(1), q);
-    ExprPtr cos_q = cos_ref_value_half_angle(one_over_q, arena);
-    if (cos_q == nullptr) return nullptr;
-    const std::uint64_t p_u = p.to_u64();
-    ExprPtr T_prev = make_integer(arena, BigInt(1));   // T_0
-    ExprPtr T_curr = cos_q;                             // T_1
-    for (std::uint64_t k = 1U; k < p_u; ++k) {
-        ExprPtr two_x_Tk = arena.make<Product>(std::vector<ExprPtr>{
-            make_integer(arena, BigInt(2)), cos_q, T_curr});
-        ExprPtr neg_prev = arena.make<Unary>(UnaryOp::Neg, T_prev);
-        ExprPtr next = arena.make<Sum>(std::vector<ExprPtr>{two_x_Tk, neg_prev});
-        T_prev = T_curr;
-        T_curr = next;
-    }
-    return T_curr;
-}
-
-[[nodiscard]] static ExprPtr sin_ref_value(Rational ref, AstArena& arena) {
-    if (ExprPtr table_hit = sin_ref_value_table(ref, arena)) {
-        return table_hit;
-    }
-    const Rational zero(BigInt(0));
-    const Rational one_half(BigInt(1), BigInt(2));
-    if (ref < zero || ref > one_half) return nullptr;
-    // sin(α) = sqrt((1 - cos(2α)) / 2) on [0, π/2].
-    Rational doubled = ref * Rational(BigInt(2));
-    ExprPtr cos_2ref = nullptr;
-    if (doubled > one_half) {
-        // 2·ref ∈ (1/2, 1]: cos(2·ref·π) = -cos((1-2·ref)·π).
-        Rational complement = Rational(BigInt(1)) - doubled;
-        ExprPtr cos_c = cos_ref_value(complement, arena);
-        if (cos_c != nullptr) cos_2ref = arena.make<Unary>(UnaryOp::Neg, cos_c);
-    } else {
-        cos_2ref = cos_ref_value(doubled, arena);
-    }
-    if (cos_2ref == nullptr) return nullptr;
-    ExprPtr neg = arena.make<Unary>(UnaryOp::Neg, cos_2ref);
-    ExprPtr one_minus = arena.make<Sum>(std::vector<ExprPtr>{
-        make_integer(arena, BigInt(1)), neg});
-    ExprPtr half_arg = arena.make<Binary>(BinaryOp::Div, one_minus,
-        make_integer(arena, BigInt(2)));
-    return arena.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{half_arg});
-}
-
-// Negate an expression: if it's already 0 return 0, else wrap in Unary(Neg).
-[[nodiscard]] static ExprPtr negate_expr(ExprPtr e, AstArena& arena) {
-    if (is_zero_expr(e)) return e;
-    LiteralRational lr;
-    auto ex = try_get_exact_rational(e, lr);
-    if (ex.is_ok() && ex.value()) return make_rational(arena, -lr.value);
-    return arena.make<Unary>(UnaryOp::Neg, e);
-}
-
-// Compute sin(r * π) or cos(r * π) where r is any rational, using quadrant reduction.
-// Returns nullptr if reference angle not in table.
-[[nodiscard]] static ExprPtr trig_exact_at_pi_multiple(
-    BuiltinOp func_id, Rational r, AstArena& arena) {
-
-    const Rational half(BigInt(1), BigInt(2));
-    const Rational one(BigInt(1));
-    const Rational three_halves(BigInt(3), BigInt(2));
-
-    Rational red = reduce_to_period(r); // red ∈ [0, 2)
-    // Quadrant:
-    //   Q1 [0, 1/2]:   sin = +sin_ref(red),     cos = +cos_ref(red)
-    //   Q2 (1/2, 1]:   sin = +sin_ref(1 - red), cos = -cos_ref(1 - red)
-    //   Q3 (1, 3/2]:   sin = -sin_ref(red - 1), cos = -cos_ref(red - 1)
-    //   Q4 (3/2, 2):   sin = -sin_ref(2 - red), cos = +cos_ref(2 - red)
-
-    Rational ref;
-    int sin_sign = 1;
-    int cos_sign = 1;
-
-    if (red <= half) {
-        ref = red;
-    } else if (red <= one) {
-        ref = one - red;
-        cos_sign = -1;
-    } else if (red <= three_halves) {
-        ref = red - one;
-        sin_sign = -1;
-        cos_sign = -1;
-    } else {
-        ref = Rational(BigInt(2)) - red;
-        sin_sign = -1;
-    }
-
-    ExprPtr val = (func_id == BuiltinOp::Sin)
-        ? sin_ref_value(ref, arena)
-        : cos_ref_value(ref, arena);
-    if (!val) return nullptr;
-
-    int sign = (func_id == BuiltinOp::Sin) ? sin_sign : cos_sign;
-    if (sign < 0) return negate_expr(val, arena);
-    return val;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-
-// Extract perfect-square factor from n: returns {k, m} where n = k²·m, m squarefree.
-[[nodiscard]] static std::pair<BigInt, BigInt> extract_square_factor(BigInt n) {
-    BigInt k(1);
-    BigInt i(2);
-    while (i * i <= n) {
-        BigInt i2 = i * i;
-        while ((n % i2).is_zero()) {
-            k = k * i;
-            n = n / i2;
-        }
-        i = i + BigInt(1);
-    }
-    return {k, n};
-}
-
-// Simplify sqrt(r) for rational r: extract perfect-square factors.
-// Returns k*sqrt(m) where k is rational, m is squarefree integer.
-// Requires r >= 0.
-[[nodiscard]] static Result<ExprPtr> simplify_rational_sqrt(const Rational& r, AstArena& arena) {
-    const BigInt& p = r.numerator();
-    const BigInt& q = r.denominator();
-    if (p.is_zero()) return ok(arena.make<IntegerLit>(BigInt(0)));
-    // r must be normalized and positive (caller ensures this)
-    auto [p_out, p_rem] = extract_square_factor(p);
-    auto [q_out, q_rem] = extract_square_factor(q);
-    // sqrt(r) = (p_out/q_out) * sqrt(p_rem/q_rem)
-    //         = (p_out/(q_out*q_rem)) * sqrt(p_rem*q_rem)
-    // Since r is normalized, gcd(p,q)=1 => gcd(p_rem,q_rem)=1 => p_rem*q_rem is squarefree.
-    BigInt final_radicand = p_rem * q_rem;
-    Rational coeff(p_out, q_out * q_rem);
-
-    ExprPtr coeff_expr;
-    if (coeff.denominator() == BigInt(1)) {
-        coeff_expr = arena.make<IntegerLit>(coeff.numerator());
-    } else {
-        coeff_expr = arena.make<RationalLit>(coeff.numerator(), coeff.denominator());
-    }
-
-    if (final_radicand == BigInt(1)) return ok(coeff_expr);
-
-    ExprPtr sqrt_expr = arena.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{arena.make<IntegerLit>(final_radicand)});
-    if (coeff.numerator() == BigInt(1) && coeff.denominator() == BigInt(1))
-        return ok(sqrt_expr);
-    return ok(arena.make<Binary>(BinaryOp::Mul, coeff_expr, sqrt_expr));
-}
-
-[[nodiscard]] static BigInt integer_sqrt(const BigInt& n) {
-    if (n.is_zero()) return BigInt(0);
-    static const BigInt one(1);
-    if (n == one) return one;
-    
-    // Initial guess: bit length / 2
-    BigInt x = one.shift_left_bits((n.bit_length() + 1) / 2);
-    while (true) {
-        BigInt y = (x + n / x) / BigInt(2);
-        if (y >= x) return x;
-        x = std::move(y);
-    }
-}
+// ── simplify_node(FuncCall) — pure dispatcher ─────────────────────────────────
 
 Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const FuncCall& node) {
     std::vector<ExprPtr> args;
@@ -419,7 +16,8 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const FuncCall& node
             if (trace_enabled_) {
                 std::vector<ExprPtr> current_args = node.args;
                 for (std::size_t j = 0; j < args.size(); ++j) current_args[j] = args[j];
-                ScopedFrame frame(*this, [this, current_args = std::move(current_args), i, name = node.name](ExprPtr value) mutable {
+                ScopedFrame frame(*this, [this, current_args = std::move(current_args), i,
+                                          name = node.name](ExprPtr value) mutable {
                     current_args[i] = value;
                     return arena_.make<FuncCall>(name, std::move(current_args));
                 });
@@ -432,1341 +30,161 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const FuncCall& node
         args.push_back(res.value());
     }
 
-    const ExprPtr target_before = expr_ptr_sequence_identical(args, node.args) ? original : (trace_enabled_ ? arena_.make<FuncCall>(node.func_id, args) : ExprPtr{});
+    const ExprPtr target_before = expr_ptr_sequence_identical(args, node.args)
+        ? original
+        : (trace_enabled_ ? arena_.make<FuncCall>(node.func_id, args) : ExprPtr{});
 
     if (rewrite_provider_ != nullptr && may_rewrite_function_call(node.func_id, args)) {
-        ExprPtr rewrite_target = expr_ptr_sequence_identical(args, node.args) ? original : arena_.make<FuncCall>(node.func_id, args);
-        auto rewritten = rewrite_provider_->try_rewrite(rewrite_target, arena_, assumptions_, context_);
+        ExprPtr rewrite_target = expr_ptr_sequence_identical(args, node.args)
+            ? original
+            : arena_.make<FuncCall>(node.func_id, args);
+        auto rewritten = rewrite_provider_->try_rewrite(
+            rewrite_target, arena_, assumptions_, context_);
         if (rewritten.is_ok() && rewritten.value() != rewrite_target) {
             append_trace(RuleId::RewriteProviderApplied, rewrite_target, rewritten.value());
             return simplify_expr(rewritten.value());
         }
     }
 
-    if (node.func_id == BuiltinOp::Sin && args.size() == 1U) {
-        if (is_zero_expr(args.front())) return traced_result(RuleId::SimplifySinZero, target_before, make_integer(arena_, BigInt(0)));
-        if (is_constant_expr(args.front(), MathConstant::Pi)) return traced_result(RuleId::SimplifySinPi, target_before, make_integer(arena_, BigInt(0)));
-        
-        // sin(asin(x)) -> x
-        if (const auto* call = expr_cast<FuncCall>(args.front()); call && call->func_id == BuiltinOp::Asin) {
-            return ok(call->args[0]);
-        }
-        
-        // P2-005: sin(r*π) exact for r = k/12
-        if (auto coeff = try_extract_pi_coefficient(args.front())) {
-            if (ExprPtr val = trig_exact_at_pi_multiple(BuiltinOp::Sin, *coeff, arena_)) {
-                auto simplified = simplify_expr(val);
-                if (simplified.is_ok()) return traced_result(RuleId::Unknown, target_before, simplified.value());
-            }
-        }
-    }
-    if (node.func_id == BuiltinOp::Cos && args.size() == 1U) {
-        if (is_zero_expr(args.front())) return traced_result(RuleId::SimplifyCosZero, target_before, make_integer(arena_, BigInt(1)));
-        if (is_constant_expr(args.front(), MathConstant::Pi)) return traced_result(RuleId::SimplifyCosPi, target_before, make_integer(arena_, BigInt(-1)));
+    const BuiltinOp op = node.func_id;
 
-        // cos(acos(x)) -> x
-        if (const auto* call = expr_cast<FuncCall>(args.front()); call && call->func_id == BuiltinOp::Acos) {
-            return ok(call->args[0]);
-        }
+    switch (op) {
+    case BuiltinOp::Sin:
+    case BuiltinOp::Cos:
+    case BuiltinOp::Tan:
+    case BuiltinOp::Asin:
+    case BuiltinOp::Acos:
+    case BuiltinOp::Atan:
+        return simplify_funcall_trig(original, op, std::move(args), target_before);
 
-        // P2-005: cos(r*π) exact for r = k/12
-        if (auto coeff = try_extract_pi_coefficient(args.front())) {
-            if (ExprPtr val = trig_exact_at_pi_multiple(BuiltinOp::Cos, *coeff, arena_)) {
-                auto simplified = simplify_expr(val);
-                if (simplified.is_ok()) return traced_result(RuleId::Unknown, target_before, simplified.value());
-            }
-        }
-    }
-    if (node.func_id == BuiltinOp::Tan && args.size() == 1U) {
-        // tan(atan(x)) -> x
-        if (const auto* call = expr_cast<FuncCall>(args.front()); call && call->func_id == BuiltinOp::Atan) {
-            return ok(call->args[0]);
-        }
-    }
+    case BuiltinOp::Exp:
+    case BuiltinOp::Ln:
+    case BuiltinOp::Sqrt:
+        return simplify_funcall_exp_log_sqrt(original, op, std::move(args), target_before);
 
-    if (node.func_id == BuiltinOp::Exp && args.size() == 1U) {
-        if (is_zero_expr(args.front())) return traced_result(RuleId::SimplifyExpZero, target_before, make_integer(arena_, BigInt(1)));
-        if (is_one_expr(args.front())) return traced_result(RuleId::SimplifyExpOne, target_before, make_constant(arena_, MathConstant::E));
-        
-        // exp(ln(x)) -> x
-        if (const auto* ln_call = expr_cast<FuncCall>(args.front()); ln_call && ln_call->func_id == BuiltinOp::Ln && ln_call->args.size() == 1U) {
-            return ok(ln_call->args[0]);
-        }
+    case BuiltinOp::Gamma:
+    case BuiltinOp::Digamma:
+    case BuiltinOp::Polygamma:
+    case BuiltinOp::Beta:
+    case BuiltinOp::Pochhammer:
+    case BuiltinOp::Erf:
+    case BuiltinOp::Zeta:
+        return simplify_funcall_special(original, op, std::move(args), target_before);
 
-        if (is_constant_expr(args.front(), MathConstant::Infinity)) return traced_result(RuleId::Unknown, target_before, make_constant(arena_, MathConstant::Infinity));
-        if (expr_is<Unary>(args.front()) && expr_ref<Unary>(args.front()).op == UnaryOp::Neg && is_constant_expr(expr_ref<Unary>(args.front()).operand, MathConstant::Infinity)) {
-            return traced_result(RuleId::Unknown, target_before, make_integer(arena_, BigInt(0)));
-        }
-        if (const auto* sum = expr_cast<Sum>(args.front())) {
-            std::vector<ExprPtr> factors;
-            for (ExprPtr term : sum->terms) factors.push_back(arena_.make<FuncCall>(BuiltinOp::Exp, std::vector<ExprPtr>{term}));
-            auto rewritten = simplify_product_factors(factors, arena_.make<Product>(factors));
-            if (rewritten.is_ok()) { append_trace(RuleId::SimplifyExpSum, target_before, rewritten.value()); return rewritten; }
-        }
+    case BuiltinOp::BesselJ:
+    case BuiltinOp::BesselY:
+    case BuiltinOp::BesselI:
+    case BuiltinOp::BesselK:
+    case BuiltinOp::BesselZero:
+    case BuiltinOp::ChebyshevT:
+    case BuiltinOp::ChebyshevU:
+    case BuiltinOp::HermiteH:
+    case BuiltinOp::HermiteHe:
+    case BuiltinOp::LegendreP:
+        return simplify_funcall_bessel_orthogonal(original, op, std::move(args), target_before);
+
+    case BuiltinOp::Re:
+    case BuiltinOp::Im:
+    case BuiltinOp::Conj:
+    case BuiltinOp::Abs:
+    case BuiltinOp::Arg:
+    case BuiltinOp::Sign:
+        return simplify_funcall_complex(original, op, std::move(args), target_before);
+
+    default:
+        break;
     }
 
-    if (node.func_id == BuiltinOp::Ln && args.size() == 1U) {
-        if (is_zero_expr(args.front())) return fail<ExprPtr>(make_error(CASErrorKind::Undefined, "ln(0) is undefined"));
-        if (is_one_expr(args.front())) return traced_result(RuleId::SimplifyLnOne, target_before, make_integer(arena_, BigInt(0)));
-        if (is_constant_expr(args.front(), MathConstant::E)) return traced_result(RuleId::SimplifyLnE, target_before, make_integer(arena_, BigInt(1)));
-        if (is_constant_expr(args.front(), MathConstant::Infinity)) return traced_result(RuleId::Unknown, target_before, make_constant(arena_, MathConstant::Infinity));
-        
-        // ln(e^x) -> x
-        if (const auto* power = expr_cast<Binary>(args.front()); power != nullptr && power->op == BinaryOp::Pow && is_constant_expr(power->left, MathConstant::E)) {
-            return traced_result(RuleId::SimplifyLnExp, target_before, power->right);
-        }
-        // ln(exp(x)) -> x
-        if (const auto* exp_call = expr_cast<FuncCall>(args.front()); exp_call && exp_call->func_id == BuiltinOp::Exp && exp_call->args.size() == 1U) {
-            return traced_result(RuleId::SimplifyLnExp, target_before, exp_call->args[0]);
-        }
-
-        // ln(a*b) -> ln(a) + ln(b) for a,b > 0
-        if (const auto* prod = expr_cast<Product>(args.front())) {
-            bool all_pos = true;
-            for (auto f : prod->factors) if (!is_known_positive(f)) { all_pos = false; break; }
-            if (all_pos) {
-                std::vector<ExprPtr> ln_factors;
-                for (auto f : prod->factors) {
-                    auto res = simplify_expr(arena_.make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{f}));
-                    if (res.is_error()) return res;
-                    ln_factors.push_back(res.value());
-                }
-                return simplify_expr(arena_.make<Sum>(std::move(ln_factors)));
-            }
-        }
-        // ln(sqrt(x)) = (1/2)*ln(x)  — valido per x > 0, identità esatta
-        if (const auto* sqrt_call = expr_cast<FuncCall>(args.front());
-            sqrt_call != nullptr && sqrt_call->func_id == BuiltinOp::Sqrt && sqrt_call->args.size() == 1U) {
-            ExprPtr half = make_rational(arena_, Rational(BigInt(1), BigInt(2)));
-            ExprPtr ln_inner = arena_.make<FuncCall>(BuiltinOp::Ln, sqrt_call->args);
-            return simplify_expr(arena_.make<Binary>(BinaryOp::Mul, half, ln_inner));
-        }
-        // Branch cut principal value: ln(-x) = ln(x) + I*pi for x > 0
-        if (const auto* neg = expr_cast<Unary>(args.front()); neg != nullptr && neg->op == UnaryOp::Neg) {
-            ExprPtr inner = neg->operand;
-            bool inner_pos = is_known_positive(inner) || is_constant_expr(inner, MathConstant::E);
-            if (!inner_pos) {
-                LiteralRational rat;
-                auto ex = try_get_exact_rational(inner, rat);
-                if (ex.is_ok() && ex.value() && !rat.value.numerator().is_negative() && !rat.value.numerator().is_zero()) {
-                    inner_pos = true;
-                }
-            }
-            if (inner_pos) {
-                ExprPtr ln_inner;
-                if (is_one_expr(inner)) {
-                    ln_inner = make_integer(arena_, BigInt(0));
-                } else {
-                    auto r = simplify_expr(arena_.make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{inner}));
-                    if (r.is_error()) return r;
-                    ln_inner = r.value();
-                }
-                ExprPtr i_pi = arena_.make<Binary>(BinaryOp::Mul,
-                    make_constant(arena_, MathConstant::I),
-                    make_constant(arena_, MathConstant::Pi));
-                return simplify_expr(arena_.make<Binary>(BinaryOp::Add, ln_inner, i_pi));
-            }
-        }
-    }
-    if (node.func_id == BuiltinOp::Asin && args.size() == 1U) {
-        // asin(sin(x)) -> x if -pi/2 <= x <= pi/2
-        if (const auto* call = expr_cast<FuncCall>(args.front()); call && call->func_id == BuiltinOp::Sin) {
-            ExprPtr x = call->args[0];
-            if (assumptions_) {
-                ExprPtr pi_2 = arena_.make<Binary>(BinaryOp::Div, arena_.make<Constant>(MathConstant::Pi), make_integer(arena_, 2));
-                ExprPtr neg_pi_2 = arena_.make<Unary>(UnaryOp::Neg, pi_2);
-                if (assumptions_->is_greater_equal(x, neg_pi_2) && assumptions_->is_greater_equal(pi_2, x)) {
-                    return ok(x);
-                }
-            }
-        }
-    }
-    if (node.func_id == BuiltinOp::Acos && args.size() == 1U) {
-        // acos(cos(x)) -> x if 0 <= x <= pi
-        if (const auto* call = expr_cast<FuncCall>(args.front()); call && call->func_id == BuiltinOp::Cos) {
-            ExprPtr x = call->args[0];
-            if (assumptions_) {
-                ExprPtr pi = arena_.make<Constant>(MathConstant::Pi);
-                ExprPtr zero = make_integer(arena_, 0);
-                if (assumptions_->is_greater_equal(x, zero) && assumptions_->is_greater_equal(pi, x)) {
-                    return ok(x);
-                }
-            }
-        }
-    }
-    if (node.func_id == BuiltinOp::Atan && args.size() == 1U) {
-        // atan(tan(x)) -> x if -pi/2 < x < pi/2
-        if (const auto* call = expr_cast<FuncCall>(args.front()); call && call->func_id == BuiltinOp::Tan) {
-            ExprPtr x = call->args[0];
-            if (assumptions_) {
-                ExprPtr pi_2 = arena_.make<Binary>(BinaryOp::Div, arena_.make<Constant>(MathConstant::Pi), make_integer(arena_, 2));
-                ExprPtr neg_pi_2 = arena_.make<Unary>(UnaryOp::Neg, pi_2);
-                if (assumptions_->is_greater(x, neg_pi_2) && assumptions_->is_greater(pi_2, x)) {
-                    return ok(x);
-                }
-            }
-        }
-        // Special values: atan(0)=0, atan(1)=pi/4, atan(-1)=-pi/4,
-        //                 atan(sqrt(3))=pi/3, atan(1/sqrt(3))=pi/6
-        if (is_zero_expr(args.front())) {
-            return ok(make_integer(arena_, BigInt(0)));
-        }
-        if (const auto* il = expr_cast<IntegerLit>(args.front())) {
-            if (il->value == BigInt(1)) {
-                return simplify_expr(arena_.make<Binary>(BinaryOp::Div,
-                    arena_.make<Constant>(MathConstant::Pi),
-                    make_integer(arena_, BigInt(4))));
-            }
-            if (il->value == BigInt(-1)) {
-                return simplify_expr(arena_.make<Unary>(UnaryOp::Neg,
-                    arena_.make<Binary>(BinaryOp::Div,
-                        arena_.make<Constant>(MathConstant::Pi),
-                        make_integer(arena_, BigInt(4)))));
-            }
-        }
-        // atan is odd: atan(-x) = -atan(x)
-        if (const auto* un = expr_cast<Unary>(args.front()); un && un->op == UnaryOp::Neg) {
-            ExprPtr inner = arena_.make<FuncCall>(
-                BuiltinOp::Atan, std::vector<ExprPtr>{un->operand});
-            return simplify_expr(arena_.make<Unary>(UnaryOp::Neg, inner));
-        }
-    }
-    if (node.func_id == BuiltinOp::Sqrt && args.size() == 1U) {
-        // Denesting sqrt(a + b*sqrt(c))
-        if (const auto* sum = expr_cast<Sum>(args.front()); sum && sum->terms.size() == 2) {
-            LiteralRational rat_a, rat_b, rat_c;
-            ExprPtr a_ptr = nullptr, b_ptr = nullptr, c_ptr = nullptr;
-            
-            // Try to find 'a' and 'b*sqrt(c)'
-            for (auto term : sum->terms) {
-                if (auto ex = try_get_exact_rational(term, rat_a); ex.is_ok() && ex.value()) {
-                    a_ptr = term;
-                } else if (const auto* prod = expr_cast<Product>(term)) {
-                    // Look for rational coefficient and a single sqrt factor
-                    Rational b_coeff(1);
-                    ExprPtr c_val = nullptr;
-                    bool found_sqrt = false;
-                    for (ExprPtr f : prod->factors) {
-                        LiteralRational lr;
-                        if (auto ex = try_get_exact_rational(f, lr); ex.is_ok() && ex.value()) {
-                            b_coeff *= lr.value;
-                        } else if (const auto* sqrt_c = expr_cast<FuncCall>(f); sqrt_c && sqrt_c->func_id == BuiltinOp::Sqrt && !found_sqrt) {
-                            c_val = sqrt_c->args[0];
-                            found_sqrt = true;
-                        } else {
-                            // Other factors found, not a simple b*sqrt(c)
-                            found_sqrt = false;
-                            break;
-                        }
-                    }
-                    if (found_sqrt && c_val) {
-                        LiteralRational lr_c;
-                        if (auto ex_c = try_get_exact_rational(c_val, lr_c); ex_c.is_ok() && ex_c.value()) {
-                            rat_b.value = b_coeff;
-                            rat_c.value = lr_c.value;
-                            b_ptr = make_rational(arena_, b_coeff);
-                            c_ptr = c_val;
-                        }
-                    }
-                }
-            }
-
-            if (a_ptr && b_ptr && c_ptr) {
-                // sqrt(a + b*sqrt(c)) = sqrt((a + sqrt(a^2 - b^2*c))/2) + sign(b)*sqrt((a - sqrt(a^2 - b^2*c))/2)
-                Rational a = rat_a.value;
-                Rational b = rat_b.value;
-                Rational c = rat_c.value;
-                Rational discriminant = a*a - b*b*c;
-                if (discriminant >= Rational(0)) {
-                    BigInt d_num = discriminant.numerator();
-                    BigInt d_den = discriminant.denominator();
-                    BigInt s_num = integer_sqrt(d_num);
-                    BigInt s_den = integer_sqrt(d_den);
-                    if (s_num * s_num == d_num && s_den * s_den == d_den) {
-                        Rational s(s_num, s_den);
-                        Rational x = (a + s) / Rational(2);
-                        Rational y = (a - s) / Rational(2);
-                        
-                        auto sqrt_x = simplify_expr(arena_.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{make_rational(arena_, x)}));
-                        auto sqrt_y = simplify_expr(arena_.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{make_rational(arena_, y)}));
-                        
-                        if (sqrt_x.is_ok() && sqrt_y.is_ok()) {
-                            ExprPtr res;
-                            if (b >= Rational(0)) {
-                                res = arena_.make<Sum>(std::vector<ExprPtr>{sqrt_x.value(), sqrt_y.value()});
-                            } else {
-                                res = arena_.make<Binary>(BinaryOp::Sub, sqrt_x.value(), sqrt_y.value());
-                            }
-                            return simplify_expr(res);
-                        }
-                    }
-                }
-            }
-        }
-
-        LiteralRational rat;
-        auto exact = try_get_exact_rational(args.front(), rat);
-        if (exact.is_error()) return fail<ExprPtr>(exact.error());
-        if (exact.is_ok() && exact.value()) {
-            if (rat.value.numerator().is_zero()) {
-                return traced_result(RuleId::Unknown, target_before, make_integer(arena_, BigInt(0)));
-            }
-            if (rat.value == Rational(BigInt(1))) {
-                return traced_result(RuleId::Unknown, target_before, make_integer(arena_, BigInt(1)));
-            }
-            
-            if (rat.value.numerator().is_negative()) {
-                auto pos_rat = -rat.value;
-                auto sqrt_pos = simplify_expr(arena_.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{make_rational(arena_, pos_rat)}));
-                if (sqrt_pos.is_ok()) {
-                    auto product = simplify_expr(arena_.make<Binary>(
-                        BinaryOp::Mul,
-                        arena_.make<Constant>(MathConstant::I),
-                        sqrt_pos.value()));
-                    if (product.is_error()) return product;
-                    return traced_result(RuleId::Unknown, target_before, product.value());
-                }
-            }
-
-            // Valutazione quadrati perfetti
-            auto num_sqrt = integer_sqrt(rat.value.numerator());
-            auto den_sqrt = integer_sqrt(rat.value.denominator());
-            if (num_sqrt * num_sqrt == rat.value.numerator() && den_sqrt * den_sqrt == rat.value.denominator()) {
-                return traced_result(RuleId::Unknown, target_before, make_rational(arena_, Rational(num_sqrt, den_sqrt)));
-            }
-            // Estrazione fattori quadrati parziali: sqrt(k²·m) → k·sqrt(m)
-            auto denested = simplify_rational_sqrt(rat.value, arena_);
-            if (denested.is_ok()) {
-                return traced_result(RuleId::Unknown, target_before, denested.value());
-            }
-        }
-
-        if (is_known_negative(args.front())) {
-            auto negated_arg = simplify_expr(arena_.make<Unary>(UnaryOp::Neg, args.front()));
-            if (negated_arg.is_ok()) {
-                auto sqrt_pos = simplify_expr(arena_.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{negated_arg.value()}));
-                if (sqrt_pos.is_ok()) {
-                    ExprPtr res = arena_.make<Binary>(BinaryOp::Mul, arena_.make<Constant>(MathConstant::I), sqrt_pos.value());
-                    return traced_result(RuleId::Unknown, target_before, simplify_expr(res).value());
-                }
-            }
-        }
-        if (const auto* power = expr_cast<Binary>(args.front()); power != nullptr && power->op == BinaryOp::Pow) {
-            if (auto exp = try_get_integer_exponent(power->right); exp.has_value() && *exp == BigInt(2)) {
-                if (is_known_nonnegative(power->left)) { append_assumption(target_before); return traced_result(RuleId::SimplifySqrtSquare, target_before, power->left); }
-                return traced_result(RuleId::SimplifySqrtSquare, target_before, arena_.make<FuncCall>(BuiltinOp::Abs, std::vector<ExprPtr>{power->left}));
-            }
-        }
-        // sqrt(sqrt(x)) -> x^(1/4)
-        if (const auto* inner = expr_cast<FuncCall>(args.front()); inner && inner->func_id == BuiltinOp::Sqrt) {
-            return simplify_expr(arena_.make<Binary>(BinaryOp::Pow, inner->args[0], make_rational(arena_, Rational(BigInt(1), BigInt(4)))));
-        }
-    }
-
-    if (node.func_id == BuiltinOp::Sin || node.func_id == BuiltinOp::Cos) {
-    }
-
-
-    if (node.func_id == BuiltinOp::Gamma && args.size() == 1U) {
-        // Gamma(n) = (n-1)! for positive integers n >= 1
-        if (const auto* il = expr_cast<IntegerLit>(args.front())) {
-            if (il->value > BigInt(0)) {
-                BigInt n = il->value;
-                BigInt result(1);
-                for (BigInt k(1); k < n; k += BigInt(1)) {
-                    result *= k;
-                }
-                return ok(make_integer(arena_, result));
-            }
-        }
-        // Half-integer Gamma values:  Gamma(1/2) = sqrt(pi),
-        // Gamma(n + 1/2) = (2n)! / (4^n * n!) * sqrt(pi)   for non-negative integer n.
-        // Gamma(-n + 1/2) computed via recursion Gamma(z) = Gamma(z+1)/z down to Gamma(1/2).
-        if (const auto* rl = expr_cast<RationalLit>(args.front())) {
-            if (rl->denominator == BigInt(2)) {
-                // arg = num/2 where num is odd (otherwise it would simplify to an integer).
-                BigInt num = rl->numerator;
-                // Reduce to Gamma(1/2) by recursion:
-                //   Gamma(z+1) = z * Gamma(z)  =>  Gamma(z) = Gamma(z+1)/z, for z != 0.
-                // Walk from arg back / forward to 1/2, accumulating multiplicative factors.
-                Rational z(num, BigInt(2));
-                const Rational half(BigInt(1), BigInt(2));
-                // Build accumulator as a rational factor f, then multiply by sqrt(pi).
-                Rational factor(BigInt(1));
-                bool ok_chain = true;
-                std::size_t safety = 0;
-                // HC-002 closed: bound exposed via ctx.max_gamma_recursion()
-                // (default 1024).  Distinguished failure mode below.
-                const std::size_t safety_max = (context_ != nullptr)
-                    ? context_->max_gamma_recursion() : 1024U;
-                while (z != half && safety++ < safety_max) {
-                    if (z > half) {
-                        // Gamma(z) = (z-1) * Gamma(z-1)
-                        Rational z_minus_1 = z - Rational(BigInt(1));
-                        factor = factor * z_minus_1;
-                        z = z_minus_1;
-                    } else {
-                        // z < 1/2 (still half-integer):  Gamma(z) = Gamma(z+1) / z, z != 0.
-                        if (z.numerator().is_zero()) { ok_chain = false; break; }
-                        factor = factor / z;
-                        z = z + Rational(BigInt(1));
-                    }
-                }
-                if (ok_chain && safety < safety_max) {
-                    ExprPtr sqrt_pi = arena_.make<FuncCall>(
-                        BuiltinOp::Sqrt,
-                        std::vector<ExprPtr>{arena_.make<Constant>(MathConstant::Pi)});
-                    if (factor == Rational(BigInt(1))) {
-                        return simplify_expr(sqrt_pi);
-                    }
-                    ExprPtr factor_expr = factor.denominator() == BigInt(1)
-                        ? static_cast<ExprPtr>(arena_.make<IntegerLit>(factor.numerator()))
-                        : static_cast<ExprPtr>(arena_.make<RationalLit>(factor.numerator(), factor.denominator()));
-                    return simplify_expr(
-                        arena_.make<Product>(std::vector<ExprPtr>{factor_expr, sqrt_pi}));
-                }
-            }
-        }
-        // Functional equation:  Gamma(z + n)  -> (z)(z+1)...(z+n-1) * Gamma(z)
-        // when the argument is a Sum and the integer summand can be stripped.
-        if (const auto* sum = expr_cast<Sum>(args.front()); sum && sum->terms.size() >= 2U) {
-            // Find a single IntegerLit term we can strip.
-            int idx = -1;
-            BigInt shift(0);
-            for (std::size_t i = 0; i < sum->terms.size(); ++i) {
-                if (const auto* il = expr_cast<IntegerLit>(sum->terms[i])) {
-                    if (idx == -1) { idx = static_cast<int>(i); shift = il->value; }
-                    else { idx = -1; break; }  // multiple integer terms: leave alone
-                }
-            }
-            if (idx >= 0 && !shift.is_zero()) {
-                // Reconstruct z = sum without that term.
-                std::vector<ExprPtr> rest;
-                rest.reserve(sum->terms.size() - 1U);
-                for (std::size_t i = 0; i < sum->terms.size(); ++i) {
-                    if (static_cast<int>(i) != idx) rest.push_back(sum->terms[i]);
-                }
-                ExprPtr z = rest.size() == 1U ? rest.front()
-                                              : arena_.make<Sum>(std::move(rest));
-                std::vector<ExprPtr> factors;
-                if (shift > BigInt(0)) {
-                    // Gamma(z + n) = z*(z+1)*...*(z+n-1) * Gamma(z), n positive integer.
-                    BigInt n = shift;
-                    for (BigInt k(0); k < n; k += BigInt(1)) {
-                        ExprPtr term = k.is_zero()
-                            ? z
-                            : static_cast<ExprPtr>(arena_.make<Sum>(std::vector<ExprPtr>{
-                                  z, arena_.make<IntegerLit>(k)}));
-                        factors.push_back(term);
-                    }
-                    factors.push_back(arena_.make<FuncCall>(
-                        BuiltinOp::Gamma, std::vector<ExprPtr>{z}));
-                    return simplify_expr(arena_.make<Product>(std::move(factors)));
-                }
-                // shift < 0: Gamma(z - n) = Gamma(z) / [(z-1)(z-2)...(z-n)]
-                BigInt n = -shift;
-                std::vector<ExprPtr> denom_factors;
-                for (BigInt k(1); k <= n; k += BigInt(1)) {
-                    denom_factors.push_back(
-                        arena_.make<Sum>(std::vector<ExprPtr>{
-                            z,
-                            arena_.make<Unary>(UnaryOp::Neg, arena_.make<IntegerLit>(k))}));
-                }
-                ExprPtr denom = denom_factors.size() == 1U
-                    ? denom_factors.front()
-                    : arena_.make<Product>(std::move(denom_factors));
-                return simplify_expr(arena_.make<Binary>(
-                    BinaryOp::Div,
-                    arena_.make<FuncCall>(BuiltinOp::Gamma, std::vector<ExprPtr>{z}),
-                    denom));
-            }
-        }
-    }
-
-    // L3-04: Digamma ψ(z) = Γ'(z)/Γ(z).
-    //   ψ(1) = -γ
-    //   ψ(n) = -γ + H_{n-1}   for positive integer n,  H_k = Σ_{j=1..k} 1/j
-    //   ψ(1/2) = -γ - 2·ln(2)
-    //   ψ(n + 1/2) = -γ - 2·ln(2) + 2·Σ_{k=1..n} 1/(2k-1)   for n ≥ 1
-    //   ψ(z+1) = ψ(z) + 1/z   (functional equation)
-    if (node.func_id == BuiltinOp::Digamma && args.size() == 1U) {
-        auto build_gamma = [&]() -> ExprPtr {
-            return arena_.make<Unary>(UnaryOp::Neg,
-                arena_.make<Constant>(MathConstant::EulerGamma));
-        };
-        if (const auto* il = expr_cast<IntegerLit>(args.front())) {
-            if (il->value > BigInt(0)) {
-                if (il->value.bit_length() > 16) {
-                    return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
-                        "Digamma: positive integer too large"));
-                }
-                const std::uint64_t n = il->value.to_u64();
-                // ψ(n) = -γ + Σ_{k=1..n-1} 1/k.
-                std::vector<ExprPtr> terms;
-                terms.push_back(build_gamma());
-                for (std::uint64_t k = 1U; k < n; ++k) {
-                    terms.push_back(arena_.make<RationalLit>(
-                        BigInt(1), BigInt(static_cast<std::int64_t>(k))));
-                }
-                if (terms.size() == 1U) return simplify_expr(terms.front());
-                return simplify_expr(arena_.make<Sum>(std::move(terms)));
-            }
-        }
-        if (const auto* rl = expr_cast<RationalLit>(args.front());
-            rl != nullptr && rl->denominator == BigInt(2)) {
-            // Half-integer arg = (2m+1)/2 with m ≥ 0  →  ψ((2m+1)/2).
-            BigInt num = rl->numerator;
-            if (num > BigInt(0) && (num.to_u64() % 2U) == 1U) {
-                const std::uint64_t two_m_plus_1 = num.to_u64();
-                const std::uint64_t m = (two_m_plus_1 - 1U) / 2U;
-                ExprPtr ln2 = arena_.make<FuncCall>(BuiltinOp::Ln,
-                    std::vector<ExprPtr>{make_integer(arena_, BigInt(2))});
-                ExprPtr two_ln2 = arena_.make<Product>(std::vector<ExprPtr>{
-                    make_integer(arena_, BigInt(2)), ln2});
-                std::vector<ExprPtr> terms;
-                terms.push_back(build_gamma());
-                terms.push_back(arena_.make<Unary>(UnaryOp::Neg, two_ln2));
-                for (std::uint64_t k = 1U; k <= m; ++k) {
-                    ExprPtr two_inv = arena_.make<RationalLit>(
-                        BigInt(2),
-                        BigInt(static_cast<std::int64_t>(2U * k - 1U)));
-                    terms.push_back(two_inv);
-                }
-                return simplify_expr(arena_.make<Sum>(std::move(terms)));
-            }
-        }
-        // Functional equation:  ψ(z+1) = ψ(z) + 1/z.  Detect Sum with single
-        // positive-integer summand (analogous to Gamma functional eq).
-        if (const auto* sum = expr_cast<Sum>(args.front()); sum && sum->terms.size() >= 2U) {
-            int idx = -1;
-            BigInt shift(0);
-            for (std::size_t i = 0; i < sum->terms.size(); ++i) {
-                if (const auto* il2 = expr_cast<IntegerLit>(sum->terms[i])) {
-                    if (idx == -1) { idx = static_cast<int>(i); shift = il2->value; }
-                    else { idx = -1; break; }
-                }
-            }
-            if (idx >= 0 && !shift.is_zero() && !shift.is_negative() && shift.bit_length() <= 16) {
-                std::vector<ExprPtr> rest;
-                rest.reserve(sum->terms.size() - 1U);
-                for (std::size_t i = 0; i < sum->terms.size(); ++i) {
-                    if (static_cast<int>(i) != idx) rest.push_back(sum->terms[i]);
-                }
-                ExprPtr z = rest.size() == 1U ? rest.front()
-                                              : arena_.make<Sum>(std::move(rest));
-                const std::uint64_t n = shift.to_u64();
-                std::vector<ExprPtr> terms;
-                terms.push_back(arena_.make<FuncCall>(BuiltinOp::Digamma,
-                    std::vector<ExprPtr>{z}));
-                for (std::uint64_t k = 0U; k < n; ++k) {
-                    ExprPtr shift_k = (k == 0U)
-                        ? z
-                        : static_cast<ExprPtr>(arena_.make<Sum>(std::vector<ExprPtr>{
-                              z, make_integer(arena_, BigInt(static_cast<std::int64_t>(k)))}));
-                    ExprPtr one = make_integer(arena_, BigInt(1));
-                    terms.push_back(arena_.make<Binary>(BinaryOp::Div, one, shift_k));
-                }
-                return simplify_expr(arena_.make<Sum>(std::move(terms)));
-            }
-        }
-    }
-
-    // L3-04: Polygamma ψ^{(n)}(z) = (n+1)-th derivative of ln Γ(z).
-    //   Polygamma(0, z) ≡ Digamma(z).
-    //   Polygamma(n, 1) = (-1)^(n+1) · n! · ζ(n+1)         for n ≥ 1.
-    if (node.func_id == BuiltinOp::Polygamma && args.size() == 2U) {
-        const auto* il_n = expr_cast<IntegerLit>(args[0]);
-        if (il_n != nullptr && !il_n->value.is_negative() && il_n->value.bit_length() <= 16) {
-            const std::uint64_t n = il_n->value.to_u64();
-            if (n == 0U) {
-                return simplify_expr(arena_.make<FuncCall>(BuiltinOp::Digamma,
-                    std::vector<ExprPtr>{args[1]}));
-            }
-            // Polygamma(n, 1) = (-1)^(n+1) · n! · ζ(n+1).
-            if (const auto* il_z = expr_cast<IntegerLit>(args[1]);
-                il_z != nullptr && il_z->value == BigInt(1)) {
-                BigInt fact(1);
-                for (std::uint64_t k = 2U; k <= n; ++k) {
-                    fact *= BigInt(static_cast<std::int64_t>(k));
-                }
-                ExprPtr fact_expr = make_integer(arena_, fact);
-                ExprPtr zeta_expr = arena_.make<FuncCall>(BuiltinOp::Zeta,
-                    std::vector<ExprPtr>{make_integer(arena_,
-                        BigInt(static_cast<std::int64_t>(n + 1U)))});
-                ExprPtr prod = arena_.make<Product>(std::vector<ExprPtr>{fact_expr, zeta_expr});
-                if ((n % 2U) == 0U) {
-                    prod = arena_.make<Unary>(UnaryOp::Neg, prod);
-                }
-                return simplify_expr(prod);
-            }
-        }
-    }
-
-    // L3-04: Beta function B(x, y) = Gamma(x)*Gamma(y)/Gamma(x+y).
-    // Pure identity expansion; the simplifier then picks up Gamma
-    // reductions (integer/half-integer values, reflection on the product).
-    if (node.func_id == BuiltinOp::Beta && args.size() == 2U) {
-        ExprPtr x_arg = args[0];
-        ExprPtr y_arg = args[1];
-        ExprPtr gx = arena_.make<FuncCall>(BuiltinOp::Gamma, std::vector<ExprPtr>{x_arg});
-        ExprPtr gy = arena_.make<FuncCall>(BuiltinOp::Gamma, std::vector<ExprPtr>{y_arg});
-        ExprPtr sum_xy = arena_.make<Sum>(std::vector<ExprPtr>{x_arg, y_arg});
-        ExprPtr gxy = arena_.make<FuncCall>(BuiltinOp::Gamma, std::vector<ExprPtr>{sum_xy});
-        ExprPtr num = arena_.make<Product>(std::vector<ExprPtr>{gx, gy});
-        return simplify_expr(arena_.make<Binary>(BinaryOp::Div, num, gxy));
-    }
-
-    // L3-04: Pochhammer (rising factorial)  (x)_n
-    //   integer n >= 0:  (x)_n = x*(x+1)*...*(x+n-1),   (x)_0 = 1.
-    //   integer n <  0:  (x)_n = 1 / [(x-1)*(x-2)*...*(x+n)]
-    //   symbolic n:      leave inert (formal identity).
-    if (node.func_id == BuiltinOp::Pochhammer && args.size() == 2U) {
-        ExprPtr x_arg = args[0];
-        if (const auto* il = expr_cast<IntegerLit>(args[1])) {
-            if (il->value.bit_length() > 16) {
-                return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
-                    "Pochhammer: degree too large for symbolic expansion"));
-            }
-            if (il->value.is_zero()) return ok(make_integer(arena_, BigInt(1)));
-            if (!il->value.is_negative()) {
-                const std::uint64_t n = il->value.to_u64();
-                std::vector<ExprPtr> factors;
-                factors.reserve(n);
-                for (std::uint64_t k = 0U; k < n; ++k) {
-                    ExprPtr term = k == 0U
-                        ? x_arg
-                        : static_cast<ExprPtr>(arena_.make<Sum>(std::vector<ExprPtr>{
-                              x_arg, make_integer(arena_, BigInt(static_cast<std::int64_t>(k)))}));
-                    factors.push_back(term);
-                }
-                ExprPtr prod = factors.size() == 1U
-                    ? factors.front()
-                    : static_cast<ExprPtr>(arena_.make<Product>(std::move(factors)));
-                return simplify_expr(prod);
-            }
-            // n < 0:  (x)_(-m) = 1 / ((x-1)*(x-2)*...*(x-m))
-            BigInt mag = -il->value;
-            const std::uint64_t m = mag.to_u64();
-            std::vector<ExprPtr> denom_factors;
-            denom_factors.reserve(m);
-            for (std::uint64_t k = 1U; k <= m; ++k) {
-                ExprPtr neg_k = arena_.make<Unary>(UnaryOp::Neg,
-                    make_integer(arena_, BigInt(static_cast<std::int64_t>(k))));
-                denom_factors.push_back(arena_.make<Sum>(std::vector<ExprPtr>{x_arg, neg_k}));
-            }
-            ExprPtr denom = denom_factors.size() == 1U
-                ? denom_factors.front()
-                : static_cast<ExprPtr>(arena_.make<Product>(std::move(denom_factors)));
-            return simplify_expr(arena_.make<Binary>(BinaryOp::Div,
-                make_integer(arena_, BigInt(1)), denom));
-        }
-    }
-
-    if (node.func_id == BuiltinOp::BesselZero && args.size() == 2U) {
-        auto order_is_real = [&](ExprPtr expr) -> bool {
-            if (expr_cast<IntegerLit>(expr) != nullptr || expr_cast<RationalLit>(expr) != nullptr) return true;
-            if (const auto* constant = expr_cast<Constant>(expr)) {
-                return constant->value != MathConstant::I && constant->value != MathConstant::NaN;
-            }
-            if (const auto* symbol = expr_cast<Symbol>(expr)) {
-                return assumptions_ != nullptr && assumptions_->is_real(*symbol);
-            }
-            return assumptions_ != nullptr && assumptions_->is_real(expr);
-        };
-        auto index_is_valid = [&](ExprPtr expr) -> bool {
-            if (const auto* integer = expr_cast<IntegerLit>(expr)) {
-                return !integer->value.is_negative() && integer->value != BigInt(0);
-            }
-            if (const auto* symbol = expr_cast<Symbol>(expr)) {
-                return assumptions_ != nullptr &&
-                    assumptions_->is_integer(*symbol) &&
-                    assumptions_->is_positive(*symbol);
-            }
-            return assumptions_ != nullptr &&
-                assumptions_->is_integer(expr) &&
-                assumptions_->is_positive(expr);
-        };
-
-        if (!order_is_real(args[0])) {
-            return fail<ExprPtr>(make_error(
-                CASErrorKind::InvalidArgument,
-                "BesselZero: order must be real"));
-        }
-        if (!index_is_valid(args[1])) {
-            return fail<ExprPtr>(make_error(
-                CASErrorKind::InvalidArgument,
-                "BesselZero: index must be a natural integer >= 1"));
-        }
-        return ok(arena_.make<FuncCall>(BuiltinOp::BesselZero, args));
-    }
-
-    // L3-04: Bessel function identities.
-    //   J_{-n}(x) = (-1)^n · J_n(x)            integer n  (parity)
-    //   Y_{-n}(x) = (-1)^n · Y_n(x)            integer n
-    //   I_{-n}(x) = I_n(x)                     integer n
-    //   K_{-n}(x) = K_n(x)                     integer n
-    //   J_{1/2}(x)  = √(2/(π x)) · sin(x)
-    //   J_{-1/2}(x) = √(2/(π x)) · cos(x)
-    //   Y_{1/2}(x)  = −√(2/(π x)) · cos(x)
-    //   Y_{-1/2}(x) = √(2/(π x)) · sin(x)
-    if ((node.func_id == BuiltinOp::BesselJ
-         || node.func_id == BuiltinOp::BesselY
-         || node.func_id == BuiltinOp::BesselI
-         || node.func_id == BuiltinOp::BesselK) && args.size() == 2U) {
-        ExprPtr order = args[0];
-        ExprPtr x_arg = args[1];
-        // Parity / negative-order reduction for integer order.
-        if (const auto* il = expr_cast<IntegerLit>(order); il != nullptr && il->value.is_negative()) {
-            if (il->value.bit_length() > 16) {
-                return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
-                    "Bessel: negative integer order too large"));
-            }
-            BigInt mag = -il->value;
-            ExprPtr pos_order = make_integer(arena_, mag);
-            ExprPtr pos_call = arena_.make<FuncCall>(node.func_id,
-                std::vector<ExprPtr>{pos_order, x_arg});
-            const bool is_J_or_Y = (node.func_id == BuiltinOp::BesselJ
-                                    || node.func_id == BuiltinOp::BesselY);
-            const bool flip_sign = is_J_or_Y && ((mag.to_u64() % 2U) == 1U);
-            if (!flip_sign) {
-                return simplify_expr(pos_call);
-            }
-            return simplify_expr(arena_.make<Unary>(UnaryOp::Neg, pos_call));
-        }
-        // Half-integer J / Y reductions to elementary trig.
-        if (const auto* rl = expr_cast<RationalLit>(order);
-            rl != nullptr && rl->denominator == BigInt(2)
-            && (rl->numerator == BigInt(1) || rl->numerator == BigInt(-1))) {
-            ExprPtr pi_const = arena_.make<Constant>(MathConstant::Pi);
-            ExprPtr pi_x = arena_.make<Product>(std::vector<ExprPtr>{pi_const, x_arg});
-            ExprPtr two_over_pi_x = arena_.make<Binary>(BinaryOp::Div,
-                make_integer(arena_, BigInt(2)), pi_x);
-            ExprPtr root = arena_.make<FuncCall>(BuiltinOp::Sqrt,
-                std::vector<ExprPtr>{two_over_pi_x});
-            BuiltinOp inner_fn;
-            bool negate = false;
-            if (node.func_id == BuiltinOp::BesselJ) {
-                if (rl->numerator == BigInt(1)) {
-                    // J_{1/2} = √(2/(πx)) · sin x
-                    inner_fn = BuiltinOp::Sin;
-                } else {
-                    // J_{-1/2} = √(2/(πx)) · cos x
-                    inner_fn = BuiltinOp::Cos;
-                }
-            } else if (node.func_id == BuiltinOp::BesselY) {
-                if (rl->numerator == BigInt(1)) {
-                    // Y_{1/2} = -√(2/(πx)) · cos x
-                    inner_fn = BuiltinOp::Cos;
-                    negate = true;
-                } else {
-                    // Y_{-1/2} = √(2/(πx)) · sin x
-                    inner_fn = BuiltinOp::Sin;
-                }
-            } else if (node.func_id == BuiltinOp::BesselI) {
-                if (rl->numerator == BigInt(1)) {
-                    // I_{1/2}(x) = √(2/(πx)) · sinh(x)
-                    inner_fn = BuiltinOp::Sinh;
-                } else {
-                    // I_{-1/2}(x) = √(2/(πx)) · cosh(x)
-                    inner_fn = BuiltinOp::Cosh;
-                }
-            } else {
-                inner_fn = BuiltinOp::Unknown;
-            }
-            if (inner_fn != BuiltinOp::Unknown) {
-                ExprPtr trig = arena_.make<FuncCall>(inner_fn,
-                    std::vector<ExprPtr>{x_arg});
-                ExprPtr prod = arena_.make<Product>(std::vector<ExprPtr>{root, trig});
-                if (negate) prod = arena_.make<Unary>(UnaryOp::Neg, prod);
-                return simplify_expr(prod);
-            }
-            // BesselK half-integer:
-            //   K_{±1/2}(x) = √(π/(2x)) · exp(-x)
-            if (node.func_id == BuiltinOp::BesselK) {
-                ExprPtr pi_const = arena_.make<Constant>(MathConstant::Pi);
-                ExprPtr two_x = arena_.make<Product>(std::vector<ExprPtr>{
-                    make_integer(arena_, BigInt(2)), x_arg});
-                ExprPtr pi_over_2x = arena_.make<Binary>(BinaryOp::Div, pi_const, two_x);
-                ExprPtr root_k = arena_.make<FuncCall>(BuiltinOp::Sqrt,
-                    std::vector<ExprPtr>{pi_over_2x});
-                ExprPtr neg_x = arena_.make<Unary>(UnaryOp::Neg, x_arg);
-                ExprPtr exp_neg_x = arena_.make<FuncCall>(BuiltinOp::Exp,
-                    std::vector<ExprPtr>{neg_x});
-                ExprPtr prod = arena_.make<Product>(std::vector<ExprPtr>{root_k, exp_neg_x});
-                return simplify_expr(prod);
-            }
-        }
-
-        // Opt-in three-term recurrence for integer order n >= 2:
-        //   J_{n}(x) = (2(n-1)/x) · J_{n-1}(x) − J_{n-2}(x)
-        //   Y_{n}(x) = (2(n-1)/x) · Y_{n-1}(x) − Y_{n-2}(x)
-        // The same iteration applied recursively reduces every BesselJ/Y of integer
-        // order >= 2 down to combinations of order-0 and order-1 calls plus 1/x.
-        if ((node.func_id == BuiltinOp::BesselJ || node.func_id == BuiltinOp::BesselY)
-            && context_ != nullptr && context_->expand_bessel_recurrence()) {
-            if (const auto* il = expr_cast<IntegerLit>(order);
-                il != nullptr && !il->value.is_negative() && il->value > BigInt(1)) {
-                if (il->value.bit_length() > 16) {
-                    return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
-                        "Bessel recurrence: integer order too large"));
-                }
-                BigInt n_minus_1 = il->value - BigInt(1);
-                BigInt n_minus_2 = il->value - BigInt(2);
-                ExprPtr coeff = arena_.make<Binary>(
-                    BinaryOp::Div,
-                    arena_.make<Product>(std::vector<ExprPtr>{
-                        make_integer(arena_, BigInt(2)),
-                        make_integer(arena_, n_minus_1),
-                    }),
-                    x_arg);
-                ExprPtr j_minus_1 = arena_.make<FuncCall>(node.func_id,
-                    std::vector<ExprPtr>{make_integer(arena_, n_minus_1), x_arg});
-                ExprPtr j_minus_2 = arena_.make<FuncCall>(node.func_id,
-                    std::vector<ExprPtr>{make_integer(arena_, n_minus_2), x_arg});
-                ExprPtr first_term = arena_.make<Product>(std::vector<ExprPtr>{coeff, j_minus_1});
-                ExprPtr neg_second = arena_.make<Unary>(UnaryOp::Neg, j_minus_2);
-                ExprPtr sum = arena_.make<Sum>(std::vector<ExprPtr>{first_term, neg_second});
-                return simplify_expr(sum);
-            }
-        }
-    }
-
-    // L3-04: Chebyshev polynomial of the first kind T_n(x) via the standard
-    // three-term recurrence.  Algorithm scales to any non-negative integer n.
-    //   T_0 = 1,  T_1 = x,  T_{n+1} = 2x·T_n − T_{n−1}.
-    if (node.func_id == BuiltinOp::ChebyshevT && args.size() == 2U) {
-        if (const auto* il = expr_cast<IntegerLit>(args[0]); il != nullptr && !il->value.is_negative()) {
-            if (il->value.bit_length() > 16) {
-                return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
-                    "ChebyshevT: degree too large"));
-            }
-            const std::uint64_t n = il->value.to_u64();
-            ExprPtr x = args[1];
-            if (n == 0U) return ok(make_integer(arena_, BigInt(1)));
-            if (n == 1U) return ok(x);
-            ExprPtr t_prev = make_integer(arena_, BigInt(1));
-            ExprPtr t_curr = x;
-            for (std::uint64_t k = 1U; k < n; ++k) {
-                ExprPtr two_x_tk = arena_.make<Product>(std::vector<ExprPtr>{
-                    make_integer(arena_, BigInt(2)), x, t_curr});
-                ExprPtr neg_prev = arena_.make<Unary>(UnaryOp::Neg, t_prev);
-                ExprPtr next = arena_.make<Sum>(std::vector<ExprPtr>{two_x_tk, neg_prev});
-                auto s = simplify_expr(next);
-                if (s.is_error()) return s;
-                t_prev = t_curr;
-                t_curr = s.value();
-            }
-            return ok(t_curr);
-        }
-    }
-
-    // L3-04: Chebyshev polynomial of the second kind U_n(x).
-    //   U_0 = 1,  U_1 = 2x,  U_{n+1} = 2x·U_n − U_{n−1}.
-    if (node.func_id == BuiltinOp::ChebyshevU && args.size() == 2U) {
-        if (const auto* il = expr_cast<IntegerLit>(args[0]); il != nullptr && !il->value.is_negative()) {
-            if (il->value.bit_length() > 16) {
-                return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
-                    "ChebyshevU: degree too large"));
-            }
-            const std::uint64_t n = il->value.to_u64();
-            ExprPtr x = args[1];
-            if (n == 0U) return ok(make_integer(arena_, BigInt(1)));
-            ExprPtr two_x = arena_.make<Product>(std::vector<ExprPtr>{
-                make_integer(arena_, BigInt(2)), x});
-            if (n == 1U) return simplify_expr(two_x);
-            ExprPtr u_prev = make_integer(arena_, BigInt(1));
-            ExprPtr u_curr = two_x;
-            for (std::uint64_t k = 1U; k < n; ++k) {
-                ExprPtr two_x_uk = arena_.make<Product>(std::vector<ExprPtr>{
-                    make_integer(arena_, BigInt(2)), x, u_curr});
-                ExprPtr neg_prev = arena_.make<Unary>(UnaryOp::Neg, u_prev);
-                ExprPtr next = arena_.make<Sum>(std::vector<ExprPtr>{two_x_uk, neg_prev});
-                auto s = simplify_expr(next);
-                if (s.is_error()) return s;
-                u_prev = u_curr;
-                u_curr = s.value();
-            }
-            return ok(u_curr);
-        }
-    }
-
-    // L3-04: Hermite polynomial H_n(x) (physicist's convention).
-    //   H_0 = 1,  H_1 = 2x,  H_{n+1} = 2x·H_n − 2n·H_{n−1}.
-    if (node.func_id == BuiltinOp::HermiteH && args.size() == 2U) {
-        if (const auto* il = expr_cast<IntegerLit>(args[0]); il != nullptr && !il->value.is_negative()) {
-            if (il->value.bit_length() > 16) {
-                return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
-                    "HermiteH: degree too large"));
-            }
-            const std::uint64_t n = il->value.to_u64();
-            ExprPtr x = args[1];
-            if (n == 0U) return ok(make_integer(arena_, BigInt(1)));
-            ExprPtr two_x = arena_.make<Product>(std::vector<ExprPtr>{
-                make_integer(arena_, BigInt(2)), x});
-            if (n == 1U) return simplify_expr(two_x);
-            ExprPtr h_prev = make_integer(arena_, BigInt(1));
-            ExprPtr h_curr = two_x;
-            for (std::uint64_t k = 1U; k < n; ++k) {
-                ExprPtr two_x_hk = arena_.make<Product>(std::vector<ExprPtr>{
-                    make_integer(arena_, BigInt(2)), x, h_curr});
-                ExprPtr two_k = make_integer(arena_, BigInt(static_cast<std::int64_t>(2U * k)));
-                ExprPtr two_k_hprev = arena_.make<Product>(std::vector<ExprPtr>{two_k, h_prev});
-                ExprPtr neg = arena_.make<Unary>(UnaryOp::Neg, two_k_hprev);
-                ExprPtr next = arena_.make<Sum>(std::vector<ExprPtr>{two_x_hk, neg});
-                auto s = simplify_expr(next);
-                if (s.is_error()) return s;
-                h_prev = h_curr;
-                h_curr = s.value();
-            }
-            return ok(h_curr);
-        }
-    }
-
-    // L3-04: Hermite polynomial He_n(x) (probabilist's convention).
-    //   He_0 = 1,  He_1 = x,  He_{n+1} = x·He_n − n·He_{n−1}.
-    if (node.func_id == BuiltinOp::HermiteHe && args.size() == 2U) {
-        if (const auto* il = expr_cast<IntegerLit>(args[0]); il != nullptr && !il->value.is_negative()) {
-            if (il->value.bit_length() > 16) {
-                return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
-                    "HermiteHe: degree too large"));
-            }
-            const std::uint64_t n = il->value.to_u64();
-            ExprPtr x = args[1];
-            if (n == 0U) return ok(make_integer(arena_, BigInt(1)));
-            if (n == 1U) return ok(x);
-            ExprPtr h_prev = make_integer(arena_, BigInt(1));
-            ExprPtr h_curr = x;
-            for (std::uint64_t k = 1U; k < n; ++k) {
-                ExprPtr x_hk = arena_.make<Product>(std::vector<ExprPtr>{x, h_curr});
-                ExprPtr k_const = make_integer(arena_, BigInt(static_cast<std::int64_t>(k)));
-                ExprPtr k_hprev = arena_.make<Product>(std::vector<ExprPtr>{k_const, h_prev});
-                ExprPtr neg = arena_.make<Unary>(UnaryOp::Neg, k_hprev);
-                ExprPtr next = arena_.make<Sum>(std::vector<ExprPtr>{x_hk, neg});
-                auto s = simplify_expr(next);
-                if (s.is_error()) return s;
-                h_prev = h_curr;
-                h_curr = s.value();
-            }
-            return ok(h_curr);
-        }
-    }
-
-    // L3-04: Legendre polynomial P_n(x) via Bonnet recurrence.
-    //   P_0(x) = 1
-    //   P_1(x) = x
-    //   (n+1) * P_{n+1}(x) = (2n+1) * x * P_n(x) - n * P_{n-1}(x)
-    // Pure algorithm — no hardcoded polynomial table, scales to any n.
-    if (node.func_id == BuiltinOp::LegendreP && args.size() == 2U) {
-        if (const auto* il = expr_cast<IntegerLit>(args[0]); il != nullptr && il->value >= BigInt(0)) {
-            if (il->value.bit_length() > 16) {
-                return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
-                    "LegendreP: degree too large for symbolic expansion"));
-            }
-            const std::uint64_t n = il->value.to_u64();
-            ExprPtr x = args[1];
-            if (n == 0U) return ok(make_integer(arena_, BigInt(1)));
-            if (n == 1U) return ok(x);
-            ExprPtr p_prev = make_integer(arena_, BigInt(1));
-            ExprPtr p_curr = x;
-            for (std::uint64_t k = 1U; k < n; ++k) {
-                // P_{k+1}(x) = a*x*P_k(x) - b*P_{k-1}(x),
-                // with  a = (2k+1)/(k+1),  b = k/(k+1).
-                Rational a(BigInt(static_cast<std::int64_t>(2U * k + 1U)),
-                           BigInt(static_cast<std::int64_t>(k + 1U)));
-                Rational b(BigInt(static_cast<std::int64_t>(k)),
-                           BigInt(static_cast<std::int64_t>(k + 1U)));
-                ExprPtr a_expr = make_rational(arena_, a);
-                ExprPtr b_expr = make_rational(arena_, b);
-                ExprPtr term1 = arena_.make<Product>(std::vector<ExprPtr>{a_expr, x, p_curr});
-                ExprPtr term2 = arena_.make<Product>(std::vector<ExprPtr>{b_expr, p_prev});
-                ExprPtr neg_term2 = arena_.make<Unary>(UnaryOp::Neg, term2);
-                ExprPtr next = arena_.make<Sum>(std::vector<ExprPtr>{term1, neg_term2});
-                auto simp = simplify_expr(next);
-                if (simp.is_error()) return simp;
-                p_prev = p_curr;
-                p_curr = simp.value();
-            }
-            return ok(p_curr);
-        }
-    }
-
-    // P3-005: Re, Im, Conj over a + b*I form
-    // Returns {real_part, imag_part} from Sum/Product containing Constant(I)
-    auto extract_complex = [&](ExprPtr expr) -> std::optional<std::pair<ExprPtr, ExprPtr>> {
-        ExprPtr real_part = nullptr;
-        ExprPtr imag_part = nullptr;
-        ExprPtr zero = make_integer(arena_, BigInt(0));
-
-        auto is_imaginary_unit = [](ExprPtr e) {
-            const auto* c = expr_cast<Constant>(e);
-            return c != nullptr && c->value == MathConstant::I;
-        };
-
-        auto extract_imag_factor = [&](ExprPtr e) -> ExprPtr {
-            // e = I  → imag factor = 1
-            if (is_imaginary_unit(e)) return make_integer(arena_, BigInt(1));
-            // e = -I → imag factor = -1
-            if (const auto* u = expr_cast<Unary>(e); u && u->op == UnaryOp::Neg && is_imaginary_unit(u->operand))
-                return make_integer(arena_, BigInt(-1));
-            // e = Product{..., I} → imag factor = Product{remaining}
-            if (const auto* prod = expr_cast<Product>(e)) {
-                std::vector<ExprPtr> non_i;
-                bool found_i = false;
-                for (ExprPtr f : prod->factors) {
-                    if (!found_i && is_imaginary_unit(f)) { found_i = true; continue; }
-                    non_i.push_back(f);
-                }
-                if (found_i) {
-                    if (non_i.size() == 1U) return non_i[0];
-                    if (non_i.empty()) return make_integer(arena_, BigInt(1));
-                    return arena_.make<Product>(std::move(non_i));
-                }
-            }
-            return nullptr;
-        };
-
-        if (const auto* sum = expr_cast<Sum>(expr)) {
-            for (ExprPtr term : sum->terms) {
-                ExprPtr maybe_b = extract_imag_factor(term);
-                if (maybe_b) {
-                    imag_part = maybe_b;
-                } else {
-                    real_part = term;
-                }
-            }
-            if (!real_part) real_part = zero;
-            if (!imag_part) return std::nullopt;
-            return std::make_pair(real_part, imag_part);
-        }
-        // bare I
-        ExprPtr maybe_b = extract_imag_factor(expr);
-        if (maybe_b) return std::make_pair(zero, maybe_b);
-        return std::nullopt;
-    };
-
-    if (args.size() == 1U) {
-        auto parts = extract_complex(args.front());
-
-        if (node.func_id == BuiltinOp::Re) {
-            if (parts) return ok(parts->first);
-            // Re(real) = real if no imaginary component detected
-        }
-
-        if (node.func_id == BuiltinOp::Im) {
-            if (parts) return ok(parts->second);
-        }
-
-        if (node.func_id == BuiltinOp::Conj && parts) {
-            // conj(a + b*I) = a - b*I
-            ExprPtr neg_b_i = arena_.make<Product>(std::vector<ExprPtr>{
-                arena_.make<Unary>(UnaryOp::Neg, parts->second),
-                arena_.make<Constant>(MathConstant::I)
-            });
-            auto conj_expr = arena_.make<Sum>(std::vector<ExprPtr>{parts->first, neg_b_i});
-            auto simp = simplify_expr(conj_expr);
-            if (simp.is_ok()) return simp;
-        }
-    }
-
-    if (node.func_id == BuiltinOp::Erf && args.size() == 1U) {
-        if (is_zero_expr(args.front())) return traced_result(RuleId::SimplifyErfZero, target_before, make_integer(arena_, BigInt(0)));
-        // erf is odd:  erf(-x) = -erf(x)
-        if (const auto* un = expr_cast<Unary>(args.front()); un && un->op == UnaryOp::Neg) {
-            ExprPtr inner_erf = arena_.make<FuncCall>(
-                BuiltinOp::Erf, std::vector<ExprPtr>{un->operand});
-            auto neg = arena_.make<Unary>(UnaryOp::Neg, inner_erf);
-            return simplify_expr(neg);
-        }
-    }
-    // Zeta closed-form values:
-    //   zeta(0) = -1/2
-    //   zeta(-2k) = 0  for k >= 1  (trivial zeros)
-    //   zeta(-(2k-1)) = -B_{2k} / (2k)            via Bernoulli, k >= 1
-    //   zeta(2k)      = (-1)^(k+1) · 2^(2k-1) · π^(2k) · B_{2k} / (2k)!   for k >= 1
-    //
-    // HC-003 resolved (2026-05-16): closed-form via cas::numtheory::bernoulli_numbers
-    // for arbitrary 2k, no more lookup. REGOLA ZERO satisfied.
-    if (node.func_id == BuiltinOp::Zeta && args.size() == 1U) {
-        if (const auto* il = expr_cast<IntegerLit>(args.front())) {
-            const BigInt& n = il->value;
-            if (n.is_zero()) {
-                return ok(arena_.make<RationalLit>(BigInt(-1), BigInt(2)));
-            }
-            // Negative integers.
-            if (n.is_negative()) {
-                BigInt mag = -n;
-                // bit_length guard: bound below context max_bigint_limbs implicit; here
-                // we only need to fit 2k in unsigned. Cap to avoid pathological inputs.
-                if (mag.bit_length() > 30) {
-                    return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
-                        "zeta: negative integer magnitude too large"));
-                }
-                const std::uint64_t magu = mag.to_u64();
-                if (magu % 2U == 0U) {
-                    // zeta(-2k) = 0
-                    return ok(make_integer(arena_, BigInt(0)));
-                }
-                // zeta(-(2k-1)) = -B_{2k} / (2k)
-                const unsigned int two_k = static_cast<unsigned int>(magu + 1U);
-                Rational b2k = cas::numtheory::bernoulli_number(two_k);
-                Rational result = -b2k / Rational(BigInt(static_cast<std::int64_t>(two_k)));
-                if (result.denominator() == BigInt(1)) {
-                    return ok(make_integer(arena_, result.numerator()));
-                }
-                return ok(arena_.make<RationalLit>(result.numerator(), result.denominator()));
-            }
-            // Positive integers.
-            if (n > BigInt(0)) {
-                if (n.bit_length() > 30) {
-                    return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
-                        "zeta: positive integer magnitude too large"));
-                }
-                const std::uint64_t nu = n.to_u64();
-                if (nu % 2U != 0U) {
-                    // zeta(odd positive) has no closed form in pi-powers — leave inert.
-                    return ok(target_before);
-                }
-                const unsigned int two_k = static_cast<unsigned int>(nu);
-                const unsigned int k = two_k / 2U;
-                // Compute 2^(2k-1) and (2k)! as BigInt.
-                BigInt two_pow(1);
-                for (unsigned int i = 0U; i < two_k - 1U; ++i) two_pow *= BigInt(2);
-                BigInt fact(1);
-                for (unsigned int i = 2U; i <= two_k; ++i) {
-                    fact *= BigInt(static_cast<std::int64_t>(i));
-                }
-                Rational b2k = cas::numtheory::bernoulli_number(two_k);
-                Rational coeff = b2k * Rational(two_pow, fact);
-                // Sign: (-1)^(k+1).  Equivalent to flipping when k is even
-                // (because B_{2k} already alternates sign starting at B_2 = +1/6).
-                if ((k % 2U) == 0U) {
-                    coeff = -coeff;
-                }
-                ExprPtr pi_pow = arena_.make<Binary>(
-                    BinaryOp::Pow,
-                    arena_.make<Constant>(MathConstant::Pi),
-                    arena_.make<IntegerLit>(n));
-                ExprPtr coeff_expr;
-                if (coeff.denominator() == BigInt(1)) {
-                    if (coeff.numerator() == BigInt(1)) {
-                        return simplify_expr(pi_pow);
-                    }
-                    coeff_expr = make_integer(arena_, coeff.numerator());
-                } else {
-                    coeff_expr = arena_.make<RationalLit>(coeff.numerator(), coeff.denominator());
-                }
-                return simplify_expr(arena_.make<Binary>(BinaryOp::Mul, coeff_expr, pi_pow));
-            }
-        }
-    }
-    if (node.func_id == BuiltinOp::Abs && args.size() == 1U) {
-        if (is_known_nonnegative(args.front())) {
-            return traced_result(RuleId::SimplifyAbsPositive, target_before, args.front());
-        }
-        if (is_known_negative(args.front())) {
-            auto neg = arena_.make<Unary>(UnaryOp::Neg, args.front());
-            auto simplified = simplify_expr(neg);
-            if (simplified.is_ok()) return traced_result(RuleId::SimplifyAbsNegative, target_before, simplified.value());
-        }
-        // abs(abs(x)) -> abs(x)
-        if (const auto* inner = expr_cast<FuncCall>(args.front()); inner && inner->func_id == BuiltinOp::Abs) {
-            return traced_result(RuleId::SimplifyAbsAbs, target_before, args.front());
-        }
-        // abs(-x) -> abs(x)
-        if (const auto* unary = expr_cast<Unary>(args.front()); unary && unary->op == UnaryOp::Neg) {
-            return simplify_expr(arena_.make<FuncCall>(BuiltinOp::Abs, std::vector<ExprPtr>{unary->operand}));
-        }
-        // abs(I) = 1
-        if (const auto* c = expr_cast<Constant>(args.front()); c && c->value == MathConstant::I) {
-            return ok(make_integer(arena_, BigInt(1)));
-        }
-        // abs(a + b*I) = sqrt(a^2 + b^2)
-        {
-            auto parts = extract_complex(args.front());
-            if (parts) {
-                ExprPtr a_sq = arena_.make<Binary>(BinaryOp::Pow, parts->first, make_integer(arena_, BigInt(2)));
-                ExprPtr b_sq = arena_.make<Binary>(BinaryOp::Pow, parts->second, make_integer(arena_, BigInt(2)));
-                ExprPtr sum = arena_.make<Sum>(std::vector<ExprPtr>{a_sq, b_sq});
-                ExprPtr rooted = arena_.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{sum});
-                return simplify_expr(rooted);
-            }
-        }
-    }
-    // arg(z) — principal argument.  Only handles the cases we can fully decide:
-    //   arg(0) = 0  (convention)
-    //   arg(positive real) = 0
-    //   arg(negative real) = pi
-    //   arg(i)  = pi/2,   arg(-i) = -pi/2
-    //   arg(a + b*i) numeric, a > 0:  atan(b/a)
-    if (node.func_id == BuiltinOp::Arg && args.size() == 1U) {
-        if (is_zero_expr(args.front())) return ok(make_integer(arena_, BigInt(0)));
-        if (is_known_positive(args.front())) return ok(make_integer(arena_, BigInt(0)));
-        if (is_known_negative(args.front())) {
-            return ok(arena_.make<Constant>(MathConstant::Pi));
-        }
-        // arg(i) = pi/2
-        if (const auto* c = expr_cast<Constant>(args.front()); c && c->value == MathConstant::I) {
-            return simplify_expr(arena_.make<Binary>(
-                BinaryOp::Div,
-                arena_.make<Constant>(MathConstant::Pi),
-                make_integer(arena_, BigInt(2))));
-        }
-        // arg(-i) = -pi/2
-        if (const auto* un = expr_cast<Unary>(args.front()); un && un->op == UnaryOp::Neg) {
-            if (const auto* c = expr_cast<Constant>(un->operand); c && c->value == MathConstant::I) {
-                return simplify_expr(arena_.make<Unary>(
-                    UnaryOp::Neg,
-                    arena_.make<Binary>(BinaryOp::Div,
-                        arena_.make<Constant>(MathConstant::Pi),
-                        make_integer(arena_, BigInt(2)))));
-            }
-        }
-        // a + b*i form
-        auto parts = extract_complex(args.front());
-        if (parts) {
-            ExprPtr a = parts->first;
-            ExprPtr b = parts->second;
-            // a > 0 → arctan(b/a)
-            if (is_known_positive(a)) {
-                ExprPtr ratio = arena_.make<Binary>(BinaryOp::Div, b, a);
-                ExprPtr atan = arena_.make<FuncCall>(BuiltinOp::Atan, std::vector<ExprPtr>{ratio});
-                return simplify_expr(atan);
-            }
-            // a = 0
-            if (is_zero_expr(a)) {
-                if (is_known_positive(b)) {
-                    return simplify_expr(arena_.make<Binary>(
-                        BinaryOp::Div,
-                        arena_.make<Constant>(MathConstant::Pi),
-                        make_integer(arena_, BigInt(2))));
-                }
-                if (is_known_negative(b)) {
-                    return simplify_expr(arena_.make<Unary>(
-                        UnaryOp::Neg,
-                        arena_.make<Binary>(BinaryOp::Div,
-                            arena_.make<Constant>(MathConstant::Pi),
-                            make_integer(arena_, BigInt(2)))));
-                }
-            }
-            // a < 0:  arg = atan(b/a) + sign(b)*pi
-            if (is_known_negative(a)) {
-                ExprPtr ratio = arena_.make<Binary>(BinaryOp::Div, b, a);
-                ExprPtr atan = arena_.make<FuncCall>(BuiltinOp::Atan, std::vector<ExprPtr>{ratio});
-                ExprPtr pi_expr = arena_.make<Constant>(MathConstant::Pi);
-                if (is_known_nonnegative(b)) {
-                    return simplify_expr(arena_.make<Sum>(std::vector<ExprPtr>{atan, pi_expr}));
-                }
-                if (is_known_negative(b)) {
-                    return simplify_expr(arena_.make<Sum>(std::vector<ExprPtr>{
-                        atan, arena_.make<Unary>(UnaryOp::Neg, pi_expr)}));
-                }
-            }
-        }
-    }
-    // ln(I) = I * pi / 2
-    if (node.func_id == BuiltinOp::Ln && args.size() == 1U) {
-        if (const auto* c = expr_cast<Constant>(args.front()); c && c->value == MathConstant::I) {
-            ExprPtr i_pi = arena_.make<Product>(std::vector<ExprPtr>{
-                arena_.make<Constant>(MathConstant::I),
-                arena_.make<Constant>(MathConstant::Pi)});
-            return simplify_expr(
-                arena_.make<Binary>(BinaryOp::Div, i_pi, make_integer(arena_, BigInt(2))));
-        }
-        // ln(-1) = I*pi  (principal branch).  Detect the literal -1.
-        if (const auto* il = expr_cast<IntegerLit>(args.front()); il && il->value == BigInt(-1)) {
-            return simplify_expr(arena_.make<Product>(std::vector<ExprPtr>{
-                arena_.make<Constant>(MathConstant::I),
-                arena_.make<Constant>(MathConstant::Pi)}));
-        }
-    }
-    if (node.func_id == BuiltinOp::Sign && args.size() == 1U) {
-        if (is_known_positive(args.front())) {
-            return traced_result(RuleId::SimplifySignPositive, target_before, make_integer(arena_, BigInt(1)));
-        }
-        if (is_known_negative(args.front())) {
-            return traced_result(RuleId::SimplifySignNegative, target_before, make_integer(arena_, BigInt(-1)));
-        }
-        if (is_zero_expr(args.front())) {
-            return traced_result(RuleId::SimplifySignZero, target_before, make_integer(arena_, BigInt(0)));
-        }
-    }
-
+    // Matrix operations — Det/Rank/Trace/Inv/Transpose
     if (context_ != nullptr && args.size() == 1U && expr_is<Matrix>(args.front())) {
         const auto& m_node = expr_ref<Matrix>(args.front());
         cas::linalg::MatrixExpr m_expr(m_node.rows, m_node.cols, m_node.elements);
-
-        if (node.func_id == BuiltinOp::Det) {
+        if (op == BuiltinOp::Det) {
             auto res = cas::linalg::determinant(m_expr, *context_);
             if (res.is_ok()) return ok(res.value());
         }
-        if (node.func_id == BuiltinOp::Rank) {
+        if (op == BuiltinOp::Rank) {
             auto res = cas::linalg::rank(m_expr, *context_);
-            if (res.is_ok()) return ok(make_integer(arena_, static_cast<long long>(res.value())));
+            if (res.is_ok()) return ok(make_integer(arena_,
+                static_cast<long long>(res.value())));
         }
-        if (node.func_id == BuiltinOp::Trace) {
+        if (op == BuiltinOp::Trace) {
             auto res = cas::linalg::trace(m_expr, *context_);
             if (res.is_ok()) return ok(res.value());
         }
-        if (node.func_id == BuiltinOp::Inv) {
+        if (op == BuiltinOp::Inv) {
             auto res = cas::linalg::inverse(m_expr, *context_);
-            if (res.is_ok()) return ok(arena_.make<Matrix>(res.value().rows(), res.value().cols(), res.value().elements()));
+            if (res.is_ok()) return ok(arena_.make<Matrix>(
+                res.value().rows(), res.value().cols(), res.value().elements()));
         }
-        if (node.func_id == BuiltinOp::Transpose) {
+        if (op == BuiltinOp::Transpose) {
             auto res = cas::linalg::transpose(m_expr);
-            if (res.is_ok()) return ok(arena_.make<Matrix>(res.value().rows(), res.value().cols(), res.value().elements()));
+            if (res.is_ok()) return ok(arena_.make<Matrix>(
+                res.value().rows(), res.value().cols(), res.value().elements()));
         }
     }
 
-    if (node.func_id == BuiltinOp::N && args.size() == 1U) {
+    // N — numeric evaluation
+    if (op == BuiltinOp::N && args.size() == 1U) {
+        namespace num = cas::numeric;
         if (const auto* matrix = expr_cast<Matrix>(args.front())) {
             std::vector<ExprPtr> numeric_elements;
             for (auto elem : matrix->elements) {
-                auto val = cas::numeric::eval(elem);
-                if (val.is_ok()) {
-                    numeric_elements.push_back(arena_.make<DecimalLit>(val.value()));
-                } else {
-                    numeric_elements.push_back(elem);
-                }
+                auto val = num::eval(elem);
+                if (val.is_ok()) numeric_elements.push_back(arena_.make<DecimalLit>(val.value()));
+                else             numeric_elements.push_back(elem);
             }
-            return ok(arena_.make<Matrix>(matrix->rows, matrix->cols, std::move(numeric_elements)));
+            return ok(arena_.make<Matrix>(
+                matrix->rows, matrix->cols, std::move(numeric_elements)));
         }
-
-        auto val = cas::numeric::eval(args.front());
-        if (val.is_ok()) {
-            return ok(arena_.make<DecimalLit>(val.value()));
-        }
+        auto val = num::eval(args.front());
+        if (val.is_ok()) return ok(arena_.make<DecimalLit>(val.value()));
     }
 
     if (expr_ptr_sequence_identical(args, node.args)) return ok(original);
     return ok(arena_.make<FuncCall>(node.func_id, std::move(args)));
 }
 
-Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const Integral& node) { return simplify_passthrough(original, node); }
-Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const Derivative& node) { return simplify_passthrough(original, node); }
-Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const Limit& node) { return simplify_passthrough(original, node); }
+// ── Other node types ──────────────────────────────────────────────────────────
+
+Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const Integral& node) {
+    return simplify_passthrough(original, node);
+}
+Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const Derivative& node) {
+    return simplify_passthrough(original, node);
+}
+Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const Limit& node) {
+    return simplify_passthrough(original, node);
+}
 
 Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const RootOf& node) {
     auto simplified_poly = simplify_expr(node.polynomial);
     if (simplified_poly.is_error()) return simplified_poly;
 
     if (context_) {
-        // Risolviamo esplicitamente solo fino a max_rootof_explicit_degree (default 2) per evitare swell
-        auto poly_res = cas::algebra::parse_polynomial(simplified_poly.value(), node.variable, *context_);
-        if (poly_res.is_ok() && cas::algebra::poly_degree(poly_res.value()) <= context_->max_rootof_explicit_degree()) {
-            auto roots_res = cas::algebra::solve_polynomial(simplified_poly.value(), node.variable, *context_);
+        auto poly_res = cas::algebra::parse_polynomial(
+            simplified_poly.value(), node.variable, *context_);
+        if (poly_res.is_ok()
+            && cas::algebra::poly_degree(poly_res.value())
+               <= context_->max_rootof_explicit_degree()) {
+            auto roots_res = cas::algebra::solve_polynomial(
+                simplified_poly.value(), node.variable, *context_);
             if (roots_res.is_ok()) {
                 const auto& roots = roots_res.value();
                 if (roots.size() == 1) {
                     if (roots[0]->kind != ExprKind::RootOf) return ok(roots[0]);
-                } else if (node.root_index.has_value() && *node.root_index < roots.size()) {
-                    if (roots[*node.root_index]->kind != ExprKind::RootOf) return ok(roots[*node.root_index]);
+                } else if (node.root_index.has_value()
+                           && *node.root_index < roots.size()) {
+                    if (roots[*node.root_index]->kind != ExprKind::RootOf)
+                        return ok(roots[*node.root_index]);
                 }
             }
         }
     }
 
     if (simplified_poly.value() == node.polynomial) return ok(original);
-    return ok(arena_.make<RootOf>(simplified_poly.value(), node.variable, node.root_index));
+    return ok(arena_.make<RootOf>(
+        simplified_poly.value(), node.variable, node.root_index));
 }
 
 Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const Matrix& node) {
@@ -1777,9 +195,12 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const Matrix& node) 
             if (trace_enabled_) {
                 std::vector<ExprPtr> current = node.elements;
                 for (std::size_t j = 0; j < elements.size(); ++j) current[j] = elements[j];
-                ScopedFrame frame(*this, [this, current = std::move(current), i, r = node.rows, c = node.cols](ExprPtr value) mutable {
-                    current[i] = value; return arena_.make<Matrix>(r, c, std::move(current));
-                });
+                ScopedFrame frame(*this,
+                    [this, current = std::move(current), i,
+                     r = node.rows, c = node.cols](ExprPtr value) mutable {
+                        current[i] = value;
+                        return arena_.make<Matrix>(r, c, std::move(current));
+                    });
                 return simplify_expr(node.elements[i]);
             }
             return simplify_expr(node.elements[i]);
@@ -1797,7 +218,6 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const SeriesExp& nod
     simplified_terms.reserve(node.terms.size());
     bool changed = false;
 
-    // Simplify point
     auto simplified_point = [&]() -> Result<ExprPtr> {
         if (trace_enabled_) {
             ScopedFrame frame(*this, [this, &node](ExprPtr value) {
@@ -1810,14 +230,14 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const SeriesExp& nod
     if (simplified_point.is_error()) return simplified_point;
     if (simplified_point.value() != node.point) changed = true;
 
-    // Simplify terms
     for (std::size_t i = 0; i < node.terms.size(); ++i) {
         auto simplified_coeff = [&]() -> Result<ExprPtr> {
             if (trace_enabled_) {
                 ScopedFrame frame(*this, [this, &node, i](ExprPtr value) {
                     auto terms = node.terms;
                     terms[i].second = value;
-                    return arena_.make<SeriesExp>(node.var, node.point, std::move(terms), node.order);
+                    return arena_.make<SeriesExp>(
+                        node.var, node.point, std::move(terms), node.order);
                 });
                 return simplify_expr(node.terms[i].second);
             }
@@ -1829,7 +249,8 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const SeriesExp& nod
     }
 
     if (!changed) return ok(original);
-    return ok(arena_.make<SeriesExp>(node.var, simplified_point.value(), std::move(simplified_terms), node.order));
+    return ok(arena_.make<SeriesExp>(
+        node.var, simplified_point.value(), std::move(simplified_terms), node.order));
 }
 
 Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const Quantity& node) {
@@ -1840,34 +261,54 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const Quantity& node
 }
 
 template <typename Node>
-Result<ExprPtr> Simplifier::simplify_passthrough(ExprPtr original, const Node&) { return ok(original); }
+Result<ExprPtr> Simplifier::simplify_passthrough(ExprPtr original, const Node&) {
+    return ok(original);
+}
 
-bool Simplifier::may_rewrite_function_call(BuiltinOp op, const std::vector<ExprPtr>& args) const {
+// ── Rewrite guards ────────────────────────────────────────────────────────────
+
+bool Simplifier::may_rewrite_function_call(BuiltinOp op,
+    const std::vector<ExprPtr>& args) const {
     if (args.size() != 1U) return false;
     if (op == BuiltinOp::Tan) return true;
     if (is_parity_rewrite_function(op)) {
-        if (is_zero_expr(args.front())) return op == BuiltinOp::Sin || op == BuiltinOp::Cos || op == BuiltinOp::Tan || op == BuiltinOp::Sinh || op == BuiltinOp::Tanh;
+        if (is_zero_expr(args.front()))
+            return op == BuiltinOp::Sin || op == BuiltinOp::Cos || op == BuiltinOp::Tan
+                || op == BuiltinOp::Sinh || op == BuiltinOp::Tanh;
         const auto* unary = expr_cast<Unary>(args.front());
         return unary != nullptr && unary->op == UnaryOp::Neg;
     }
-    if (op == BuiltinOp::Exp) return is_zero_expr(args.front()) || is_one_expr(args.front());
+    if (op == BuiltinOp::Exp)
+        return is_zero_expr(args.front()) || is_one_expr(args.front());
     if (op == BuiltinOp::Ln) {
-        if (is_one_expr(args.front()) || is_constant_expr(args.front(), MathConstant::E)) return true;
-        if (const auto* quot = expr_cast<Binary>(args.front()); quot != nullptr && quot->op == BinaryOp::Div) return is_known_positive(quot->left) && is_known_positive(quot->right);
-        if (const auto* pow = expr_cast<Binary>(args.front()); pow != nullptr && pow->op == BinaryOp::Pow) return is_constant_expr(pow->left, MathConstant::E) || is_known_positive(pow->left);
-        if (const auto* prod = expr_cast<Product>(args.front())) return std::all_of(prod->factors.begin(), prod->factors.end(), [this](ExprPtr f) { return is_known_positive(f); });
+        if (is_one_expr(args.front()) || is_constant_expr(args.front(), MathConstant::E))
+            return true;
+        if (const auto* quot = expr_cast<Binary>(args.front());
+            quot != nullptr && quot->op == BinaryOp::Div)
+            return is_known_positive(quot->left) && is_known_positive(quot->right);
+        if (const auto* pow = expr_cast<Binary>(args.front());
+            pow != nullptr && pow->op == BinaryOp::Pow)
+            return is_constant_expr(pow->left, MathConstant::E)
+                || is_known_positive(pow->left);
+        if (const auto* prod = expr_cast<Product>(args.front()))
+            return std::all_of(prod->factors.begin(), prod->factors.end(),
+                [this](ExprPtr f) { return is_known_positive(f); });
         const auto* sqrt = expr_cast<FuncCall>(args.front());
-        return sqrt != nullptr && sqrt->func_id == BuiltinOp::Sqrt && sqrt->args.size() == 1U && is_known_positive(sqrt->args.front());
+        return sqrt != nullptr && sqrt->func_id == BuiltinOp::Sqrt
+            && sqrt->args.size() == 1U && is_known_positive(sqrt->args.front());
     }
     if (op != BuiltinOp::Sqrt) {
-        if (op == BuiltinOp::Det || op == BuiltinOp::Rank || op == BuiltinOp::Trace || op == BuiltinOp::Inv || op == BuiltinOp::Transpose || op == BuiltinOp::N) {
+        if (op == BuiltinOp::Det || op == BuiltinOp::Rank || op == BuiltinOp::Trace
+            || op == BuiltinOp::Inv || op == BuiltinOp::Transpose || op == BuiltinOp::N)
             return !args.empty() && (expr_is<Matrix>(args.front()) || op == BuiltinOp::N);
-        }
         return false;
     }
-    if (const auto* quot = expr_cast<Binary>(args.front()); quot != nullptr && quot->op == BinaryOp::Div) return is_known_nonnegative(quot->left) && is_known_positive(quot->right);
+    if (const auto* quot = expr_cast<Binary>(args.front());
+        quot != nullptr && quot->op == BinaryOp::Div)
+        return is_known_nonnegative(quot->left) && is_known_positive(quot->right);
     const auto* prod = expr_cast<Product>(args.front());
-    return prod != nullptr && std::all_of(prod->factors.begin(), prod->factors.end(), [this](ExprPtr f) { return is_known_nonnegative(f); });
+    return prod != nullptr && std::all_of(prod->factors.begin(), prod->factors.end(),
+        [this](ExprPtr f) { return is_known_nonnegative(f); });
 }
 
 bool Simplifier::may_rewrite_sum_terms(const std::vector<ExprPtr>& terms) const {
@@ -1875,7 +316,8 @@ bool Simplifier::may_rewrite_sum_terms(const std::vector<ExprPtr>& terms) const 
     for (ExprPtr term : terms) {
         const auto* pow = expr_cast<Binary>(term);
         if (pow == nullptr || pow->op != BinaryOp::Pow) continue;
-        if (auto exp = try_get_integer_exponent(pow->right); !exp.has_value() || *exp != BigInt(2)) continue;
+        if (auto exp = try_get_integer_exponent(pow->right);
+            !exp.has_value() || *exp != BigInt(2)) continue;
         const auto* call = expr_cast<FuncCall>(pow->left);
         if (call == nullptr || call->args.size() != 1U) continue;
         if (call->func_id == BuiltinOp::Sin) {
@@ -1892,74 +334,64 @@ bool Simplifier::may_rewrite_sum_terms(const std::vector<ExprPtr>& terms) const 
 bool Simplifier::may_rewrite_power(ExprPtr base, ExprPtr exponent) const {
     if (!is_constant_expr(base, MathConstant::E)) return false;
     const auto* ln = expr_cast<FuncCall>(exponent);
-    return ln != nullptr && ln->func_id == BuiltinOp::Ln && ln->args.size() == 1U && is_known_positive(ln->args.front());
+    return ln != nullptr && ln->func_id == BuiltinOp::Ln
+        && ln->args.size() == 1U && is_known_positive(ln->args.front());
 }
+
+// ── Sign predicates ───────────────────────────────────────────────────────────
 
 bool Simplifier::is_known_positive(ExprPtr expr) const {
     if (!expr) return false;
-    
-    // 1. Check Assumptions (Primary Choice)
     if (assumptions_ != nullptr && assumptions_->is_positive(expr)) return true;
-    
-    // 2. Fallback for literals and constants
     LiteralRational rat;
-    if (auto exact = try_get_exact_rational(expr, rat); exact.is_ok() && exact.value()) {
+    if (auto exact = try_get_exact_rational(expr, rat); exact.is_ok() && exact.value())
         return !rat.value.numerator().is_zero() && !rat.value.numerator().is_negative();
-    }
-    if (const auto* constant = expr_cast<Constant>(expr)) return is_known_positive_constant(constant->value);
-    
-    // 3. Structural fallback (if assumptions_ is null or missed it)
+    if (const auto* constant = expr_cast<Constant>(expr))
+        return is_known_positive_constant(constant->value);
     if (const auto* bin = expr_cast<Binary>(expr)) {
         if (bin->op == BinaryOp::Pow) return is_known_positive(bin->left);
-        if (bin->op == BinaryOp::Div) return is_known_positive(bin->left) && is_known_positive(bin->right);
+        if (bin->op == BinaryOp::Div)
+            return is_known_positive(bin->left) && is_known_positive(bin->right);
     }
     if (const auto* prod = expr_cast<Product>(expr)) {
         if (prod->factors.empty()) return false;
         for (ExprPtr f : prod->factors) if (!is_known_positive(f)) return false;
         return true;
     }
-    
     return false;
 }
 
 bool Simplifier::is_known_nonnegative(ExprPtr expr) const {
     if (!expr) return false;
-    
-    // 1. Check Assumptions (Primary Choice)
     if (assumptions_ != nullptr && assumptions_->is_nonnegative(expr)) return true;
-    
-    // 2. Check if it's strictly positive
     if (is_known_positive(expr)) return true;
-
-    // 3. Fallback for literals and constants
     LiteralRational rat;
-    if (auto exact = try_get_exact_rational(expr, rat); exact.is_ok() && exact.value()) {
+    if (auto exact = try_get_exact_rational(expr, rat); exact.is_ok() && exact.value())
         return !rat.value.numerator().is_negative();
-    }
-    if (const auto* constant = expr_cast<Constant>(expr)) return is_known_nonnegative_constant(constant->value);
-    
-    // 4. Structural fallback
+    if (const auto* constant = expr_cast<Constant>(expr))
+        return is_known_nonnegative_constant(constant->value);
     if (const auto* bin = expr_cast<Binary>(expr)) {
-        if (bin->op == BinaryOp::Div) return is_known_nonnegative(bin->left) && is_known_positive(bin->right);
+        if (bin->op == BinaryOp::Div)
+            return is_known_nonnegative(bin->left) && is_known_positive(bin->right);
     }
     if (const auto* prod = expr_cast<Product>(expr)) {
         if (prod->factors.empty()) return false;
         for (ExprPtr f : prod->factors) if (!is_known_nonnegative(f)) return false;
         return true;
     }
-    
     return false;
 }
 
 bool Simplifier::is_known_negative(ExprPtr expr) const {
     if (!expr) return false;
     if (assumptions_ != nullptr && assumptions_->is_negative(expr)) return true;
-
     LiteralRational rat;
-    if (auto exact = try_get_exact_rational(expr, rat); exact.is_ok() && exact.value()) return rat.value.numerator().is_negative();
+    if (auto exact = try_get_exact_rational(expr, rat); exact.is_ok() && exact.value())
+        return rat.value.numerator().is_negative();
     if (const auto* bin = expr_cast<Binary>(expr)) {
-        if (bin->op == BinaryOp::Div) return (is_known_negative(bin->left) && is_known_positive(bin->right)) ||
-                                            (is_known_positive(bin->left) && is_known_negative(bin->right));
+        if (bin->op == BinaryOp::Div)
+            return (is_known_negative(bin->left) && is_known_positive(bin->right))
+                || (is_known_positive(bin->left) && is_known_negative(bin->right));
     }
     if (const auto* prod = expr_cast<Product>(expr)) {
         int negative_count = 0;
@@ -1969,10 +401,19 @@ bool Simplifier::is_known_negative(ExprPtr expr) const {
         }
         return (negative_count % 2 != 0);
     }
-    if (const auto* unary = expr_cast<Unary>(expr); unary != nullptr && unary->op == UnaryOp::Neg) {
+    if (const auto* unary = expr_cast<Unary>(expr);
+        unary != nullptr && unary->op == UnaryOp::Neg)
         return is_known_positive(unary->operand);
-    }
     return false;
+}
+
+bool Simplifier::is_assumed_nonzero(ExprPtr expr) const {
+    if (!expr) return false;
+    if (assumptions_ != nullptr && assumptions_->is_nonzero(expr)) return true;
+    LiteralRational rat;
+    if (auto exact = try_get_exact_rational(expr, rat); exact.is_ok() && exact.value())
+        return !rat.value.numerator().is_zero();
+    return is_known_positive(expr) || is_known_negative(expr);
 }
 
 } // namespace cas::symbolic::detail
