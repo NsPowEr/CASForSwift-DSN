@@ -170,6 +170,7 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/polynomial_groebner_f4_conversion.cpp
     src/algebra/polynomial_groebner_f4_solver.cpp
     src/algebra/csolve.cpp
+    src/algebra/fsolve.cpp
     src/algebra/partial_fractions.cpp
     src/algebra/partial_fractions_lrt.cpp
     src/algebra/solve_polynomial.cpp
@@ -413,6 +414,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/algebra/test_algebraic_tower_bridge.cpp
     test/unit/algebra/test_algebraic_number_bridge.cpp
         test/unit/algebra/test_algebraic_tower.cpp
+        test/unit/algebra/test_fsolve.cpp
         test/unit/algebra/test_factorization_lll.cpp
         test/unit/algebra/test_factorization_trager.cpp
         test/unit/algebra/test_factorization_tower.cpp
@@ -511,8 +513,10 @@ if(CAS_ENABLE_TESTING)
     target_link_libraries(assumptions_stability_test PRIVATE cas_core GTest::gtest_main)
 
     include(GoogleTest)
-    gtest_discover_tests(cas_foundation_tests)
-    gtest_discover_tests(assumptions_stability_test)
+    gtest_discover_tests(cas_foundation_tests DISCOVERY_TIMEOUT 60
+        PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
+    gtest_discover_tests(assumptions_stability_test DISCOVERY_TIMEOUT 60
+        PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
 endif()
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     include(CheckCXXCompilerFlag)

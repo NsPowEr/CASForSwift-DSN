@@ -97,6 +97,18 @@ struct SquareFreeFactorization {
     ExprPtr eqs,
     ExprPtr vars,
     symbolic::CASContext& ctx);
+
+// L2-06: fsolve — transcendental equation solver.
+// Accepts f(x)=0 or f(x)=g(x) form with one variable.
+// Pipeline: (1) try symbolic solve_polynomial; (2) fallback to numeric
+// multi-root scan on [low, high] via bisection + Newton polish.
+// Returns a column Matrix of root values (exact rational or DecimalLit).
+[[nodiscard]] Result<ExprPtr> fsolve(
+    ExprPtr equation,
+    const Symbol& var,
+    symbolic::CASContext& ctx,
+    double search_low  = -10.0,
+    double search_high =  10.0);
 [[nodiscard]] Result<SquareFreeFactorization> square_free_factorization(
     ExprPtr poly,
     const Symbol& var,

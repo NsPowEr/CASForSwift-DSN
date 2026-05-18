@@ -68,6 +68,26 @@ struct RootFindingOptions {
     const RootFindingOptions& options = {});
 
 /**
+ * Trova tutte le radici di expr(variable)=0 nell'intervallo [low, high].
+ * Scansiona num_samples punti equidistanti, localizza sign-changes via bisection,
+ * poi polish via Newton-Raphson.  Deduplica radici entro dedup_tolerance.
+ * L2-06.
+ */
+struct MultiRootOptions {
+    double low{-10.0};
+    double high{10.0};
+    std::size_t num_samples{200};
+    double dedup_tolerance{1e-6};
+    RootFindingOptions root_opts{};
+};
+
+[[nodiscard]] Result<std::vector<double>> find_roots_on_interval(
+    ExprPtr expr,
+    const std::string& variable,
+    symbolic::CASContext& ctx,
+    const MultiRootOptions& options = {});
+
+/**
  * Integrazione numerica.
  */
 struct IntegrationOptions {
