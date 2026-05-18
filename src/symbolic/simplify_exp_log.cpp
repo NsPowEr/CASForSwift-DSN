@@ -176,6 +176,50 @@ Result<ExprPtr> Simplifier::simplify_funcall_exp_log_sqrt(
                 arena_.make<Constant>(MathConstant::I),
                 arena_.make<Constant>(MathConstant::Pi)}));
         }
+        // L2-08: ln(a + b·I) = ln|z| + I·arg(z)  (principal branch).
+        // Triggered only when the argument is a Sum containing an imaginary term b·I.
+        // abs(z) and arg(z) dispatch back to simplify_funcall_complex which already
+        // handles the quadrant logic — no duplication.
+        if (const auto* sum_z = expr_cast<Sum>(args.front())) {
+            auto is_i_unit = [](ExprPtr e) -> bool {
+                const auto* c = expr_cast<Constant>(e);
+                return c != nullptr && c->value == MathConstant::I;
+            };
+            auto extract_imag_coeff = [&](ExprPtr term) -> ExprPtr {
+                if (is_i_unit(term)) return make_integer(arena_, BigInt(1));
+                if (const auto* prod = expr_cast<Product>(term)) {
+                    bool found_i = false;
+                    std::vector<ExprPtr> others;
+                    for (ExprPtr f : prod->factors) {
+                        if (!found_i && is_i_unit(f)) { found_i = true; continue; }
+                        others.push_back(f);
+                    }
+                    if (found_i) {
+                        if (others.empty()) return make_integer(arena_, BigInt(1));
+                        if (others.size() == 1U) return others[0];
+                        return arena_.make<Product>(std::move(others));
+                    }
+                }
+                return nullptr;
+            };
+            ExprPtr real_part = nullptr, imag_part = nullptr;
+            for (ExprPtr term : sum_z->terms) {
+                ExprPtr b = extract_imag_coeff(term);
+                if (b && !imag_part) imag_part = b;
+                else if (!b && !real_part) real_part = term;
+            }
+            if (real_part && imag_part) {
+                // ln(a + b·I) = ln(abs(a+b·I)) + I·arg(a+b·I)
+                ExprPtr z = args.front();
+                ExprPtr abs_z = arena_.make<FuncCall>(BuiltinOp::Abs, std::vector<ExprPtr>{z});
+                ExprPtr arg_z = arena_.make<FuncCall>(BuiltinOp::Arg, std::vector<ExprPtr>{z});
+                ExprPtr ln_abs = arena_.make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{abs_z});
+                ExprPtr i_arg = arena_.make<Product>(std::vector<ExprPtr>{
+                    arena_.make<Constant>(MathConstant::I), arg_z});
+                ExprPtr result = arena_.make<Sum>(std::vector<ExprPtr>{ln_abs, i_arg});
+                return simplify_expr(result);
+            }
+        }
     }
 
     if (op == BuiltinOp::Sqrt && args.size() == 1U) {

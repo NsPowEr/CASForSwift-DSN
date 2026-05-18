@@ -390,6 +390,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/symbolic/test_compositions.cpp
         test/unit/symbolic/test_abs_sign.cpp
         test/unit/symbolic/test_trig_identities.cpp
+        test/unit/symbolic/test_complex_log.cpp
         test/unit/symbolic/test_symbolic.cpp
         test/unit/symbolic/test_linalg_integration.cpp
         test/unit/linalg/test_matrix_basic.cpp
