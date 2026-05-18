@@ -167,6 +167,8 @@ namespace cas::symbolic::detail {
 // Forward declarations for mutual recursion.
 [[nodiscard]] static ExprPtr cos_ref_value(Rational ref, AstArena& arena);
 [[nodiscard]] static ExprPtr sin_ref_value(Rational ref, AstArena& arena);
+[[nodiscard]] static ExprPtr try_angle_combination(Rational ref, BuiltinOp func, AstArena& arena);
+[[nodiscard]] static ExprPtr trig_exact_at_pi_multiple(BuiltinOp func_id, Rational r, AstArena& arena);
 
 // L2-10: half-angle recursion — cos(α/2) = sqrt((1+cos α)/2).
 // Arbitrary depth via doubling; no fixed power-of-two table.
@@ -212,11 +214,21 @@ namespace cas::symbolic::detail {
     if (ExprPtr direct = cos_ref_value_half_angle(ref, arena)) return direct;
     const BigInt& p = ref.numerator();
     const BigInt& q = ref.denominator();
-    if (p <= BigInt(1) || q <= BigInt(1)) return nullptr;
+    if (p <= BigInt(1) || q <= BigInt(1)) {
+        // p=1 case not reachable by half-angle: try angle combination (e.g. cos(π/15)).
+        if (p == BigInt(1) && q > BigInt(1))
+            return try_angle_combination(ref, BuiltinOp::Cos, arena);
+        return nullptr;
+    }
     if (p.bit_length() > 16) return nullptr;
     Rational one_over_q(BigInt(1), q);
     ExprPtr cos_q = cos_ref_value_half_angle(one_over_q, arena);
-    if (cos_q == nullptr) return nullptr;
+    if (cos_q == nullptr) {
+        // Base angle not in half-angle reachable set; try combination path.
+        if (ExprPtr combo = try_angle_combination(ref, BuiltinOp::Cos, arena))
+            return combo;
+        return nullptr;
+    }
     const std::uint64_t p_u = p.to_u64();
     ExprPtr T_prev = make_integer(arena, BigInt(1));
     ExprPtr T_curr = cos_q;
@@ -245,11 +257,55 @@ namespace cas::symbolic::detail {
     } else {
         cos_2ref = cos_ref_value(doubled, arena);
     }
-    if (cos_2ref == nullptr) return nullptr;
+    if (cos_2ref == nullptr) {
+        // cos(2·ref·π) not reachable; try angle combination for sin.
+        return try_angle_combination(ref, BuiltinOp::Sin, arena);
+    }
     ExprPtr neg = arena.make<Unary>(UnaryOp::Neg, cos_2ref);
     ExprPtr one_minus = arena.make<Sum>(std::vector<ExprPtr>{make_integer(arena, BigInt(1)), neg});
     ExprPtr half_arg = arena.make<Binary>(BinaryOp::Div, one_minus, make_integer(arena, BigInt(2)));
     return arena.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{half_arg});
+}
+
+// L2-10: angle subtraction formula for constructible angles not reachable by halving/Chebyshev.
+// Handles denominators like 15 = lcm(3,5) by expressing ref = r1 - r2 where r1 is a base
+// table angle (den ≤ 10) and r2 has strictly smaller denominator than ref.
+// cos(A-B) = cos(A)cos(B) + sin(A)sin(B), sin(A-B) = sin(A)cos(B) - cos(A)sin(B).
+[[nodiscard]] static ExprPtr try_angle_combination(Rational ref, BuiltinOp func, AstArena& arena) {
+    const Rational zero(BigInt(0));
+    if (ref.denominator() < BigInt(7)) return nullptr;
+
+    // Enumerates rational multiples of π with small denominators as r1 candidates.
+    static const std::pair<int,int> kBaseAngles[] = {
+        {1,2},{1,3},{2,3},{1,4},{3,4},{1,5},{2,5},{3,5},{4,5},
+        {1,6},{5,6},{1,10},{3,10},{7,10},{9,10}
+    };
+    for (auto [k1_i, d1_i] : kBaseAngles) {
+        auto r1 = Rational{BigInt{k1_i}, BigInt{d1_i}};
+        auto r2 = r1 - ref;
+        if (r2 <= zero) continue;
+        if (r2.denominator() >= ref.denominator()) continue;
+
+        ExprPtr c1 = trig_exact_at_pi_multiple(BuiltinOp::Cos, r1, arena);
+        ExprPtr s1 = trig_exact_at_pi_multiple(BuiltinOp::Sin, r1, arena);
+        ExprPtr c2 = trig_exact_at_pi_multiple(BuiltinOp::Cos, r2, arena);
+        ExprPtr s2 = trig_exact_at_pi_multiple(BuiltinOp::Sin, r2, arena);
+        if (!c1 || !s1 || !c2 || !s2) continue;
+
+        if (func == BuiltinOp::Cos) {
+            // cos(r1-r2)·π = cos(r1·π)cos(r2·π) + sin(r1·π)sin(r2·π)
+            return arena.make<Sum>(std::vector<ExprPtr>{
+                arena.make<Product>(std::vector<ExprPtr>{c1, c2}),
+                arena.make<Product>(std::vector<ExprPtr>{s1, s2})});
+        } else {
+            // sin(r1-r2)·π = sin(r1·π)cos(r2·π) - cos(r1·π)sin(r2·π)
+            return arena.make<Sum>(std::vector<ExprPtr>{
+                arena.make<Product>(std::vector<ExprPtr>{s1, c2}),
+                arena.make<Unary>(UnaryOp::Neg,
+                    arena.make<Product>(std::vector<ExprPtr>{c1, s2}))});
+        }
+    }
+    return nullptr;
 }
 
 [[nodiscard]] static ExprPtr negate_expr(ExprPtr e, AstArena& arena) {

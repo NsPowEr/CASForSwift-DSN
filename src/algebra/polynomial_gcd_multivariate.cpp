@@ -4,7 +4,6 @@
 #include "polynomial_internal.hpp"
 
 #include <algorithm>
-#include <cmath>
 #include <array>
 #include <map>
 #include <optional>
@@ -514,7 +513,8 @@ void sparse_subtract(SparsePoly& lhs, const SparsePoly& rhs) {
 [[nodiscard]] Result<std::optional<MultivariatePolynomial>> exact_quotient(
     const MultivariatePolynomial& dividend,
     const MultivariatePolynomial& divisor,
-    const std::vector<Symbol>& vars) {
+    const std::vector<Symbol>& vars,
+    symbolic::CASContext& ctx) {
     if (divisor.is_zero()) {
         return fail<std::optional<MultivariatePolynomial>>(make_error(
             CASErrorKind::InvalidArgument,
@@ -533,7 +533,7 @@ void sparse_subtract(SparsePoly& lhs, const SparsePoly& rhs) {
 
     const auto [divisor_lm, divisor_lc] = *std::prev(divisor_sparse.end());
     const std::size_t max_steps =
-        std::max<std::size_t>(8U, (remainder.size() + 1U) * (vars.size() + 1U) * 16U);
+        std::max(ctx.min_gcd_division_steps(), (remainder.size() + 1U) * (vars.size() + 1U) * 16U);
     std::size_t steps = 0U;
 
     while (!remainder.empty()) {
@@ -681,7 +681,7 @@ void sparse_subtract(SparsePoly& lhs, const SparsePoly& rhs) {
     const MultivariatePolynomial& Q,
     symbolic::CASContext& ctx,
     std::size_t depth) {
-    if (depth > 16U) {
+    if (depth > ctx.max_gcd_recursion_depth()) {
         return fail<MultivariatePolynomial>(make_error(
             CASErrorKind::Unimplemented,
             "polynomial_gcd_multivariate: recursion depth limit reached while certifying gcd"));
@@ -722,15 +722,30 @@ void sparse_subtract(SparsePoly& lhs, const SparsePoly& rhs) {
         return ok(intpoly_to_multivariate(gcd_int, vars[0]));
     }
 
-    auto linear_gcd = try_certified_linear_gcd(p, q, vars, ctx, depth);
-    if (linear_gcd.is_error()) {
-        return fail<MultivariatePolynomial>(linear_gcd.error());
+    // Identical-polynomial shortcut: covers gcd(p,p)=p for all variable counts,
+    // including linear trivariate cases where the degree≤1 guard below is absent.
+    if (same_polynomial(p, q)) {
+        return ok(normalize_multivariate_gcd(p));
     }
-    if (linear_gcd.value().has_value()) {
-        return ok(linear_gcd.value().value());
-    }
-    if (std::min(p.total_degree(), q.total_degree()) <= 1U) {
-        return ok(MultivariatePolynomial({MultivariateTerm{.coefficient = BigInt(1), .factors = {}}}));
+
+    // Linear-candidate fast-path: only worthwhile for ≤2 variables.
+    // For 3+ variables the candidate count grows as 5^n which makes the scan
+    // more expensive than the eval-interpolation path it is meant to accelerate.
+    if (vars.size() <= 2U) {
+        auto linear_gcd = try_certified_linear_gcd(p, q, vars, ctx, depth);
+        if (linear_gcd.is_error()) {
+            return fail<MultivariatePolynomial>(linear_gcd.error());
+        }
+        if (linear_gcd.value().has_value()) {
+            return ok(linear_gcd.value().value());
+        }
+        // Bivariate termination: try_certified_linear_gcd calls gcd_multivariate_recursive
+        // for cofactor GCDs, which would loop forever if we fell through to interpolation
+        // on degree-1 coprime inputs (e.g., gcd(x-y, x+y) = 1).  The identical-polynomial
+        // check above already handled p==q; here p≠q so returning 1 is correct.
+        if (std::min(p.total_degree(), q.total_degree()) <= 1U) {
+            return ok(MultivariatePolynomial({MultivariateTerm{.coefficient = BigInt(1), .factors = {}}}));
+        }
     }
 
     const Symbol& main_var = vars.front();
@@ -739,9 +754,12 @@ void sparse_subtract(SparsePoly& lhs, const SparsePoly& rhs) {
     const std::size_t interpolation_degree_bound =
         std::min(degree_in_var(p, interpolation_var), degree_in_var(q, interpolation_var));
     const std::size_t required_samples = std::max<std::size_t>(interpolation_degree_bound + 1U, 2U);
-    const std::size_t safety_margin = static_cast<std::size_t>(
-        std::ceil(std::log(ctx.gcd_error_probability()) / std::log(0.5)));
-    const std::size_t max_samples = required_samples + safety_margin;
+    // Schwartz-Zippel bound: lc(GCD, interp_var) vanishes at at most D = interpolation_degree_bound
+    // values in any evaluation domain.  Therefore 2D+3 samples always contain at least D+2 lucky
+    // ones — enough for unique interpolation + one extra for the bucket selection heuristic.
+    // This replaces the previous O(log(1/δ)) safety margin which caused O(N^k) fan-out blowup for
+    // polynomials in k≥3 variables.
+    const std::size_t max_samples = 2U * interpolation_degree_bound + 3U;
 
     struct SamplePoint {
         BigInt value;
@@ -850,11 +868,11 @@ void sparse_subtract(SparsePoly& lhs, const SparsePoly& rhs) {
             continue;
         }
 
-        auto quotient_p = exact_quotient(p, candidate, vars);
+        auto quotient_p = exact_quotient(p, candidate, vars, ctx);
         if (quotient_p.is_error() || !quotient_p.value().has_value()) {
             continue;
         }
-        auto quotient_q = exact_quotient(q, candidate, vars);
+        auto quotient_q = exact_quotient(q, candidate, vars, ctx);
         if (quotient_q.is_error() || !quotient_q.value().has_value()) {
             continue;
         }
@@ -878,8 +896,8 @@ void sparse_subtract(SparsePoly& lhs, const SparsePoly& rhs) {
             }
 
             MultivariatePolynomial next_gcd = normalize_multivariate_gcd(certified_gcd * extra_factor);
-            auto next_quotient_p = exact_quotient(p, next_gcd, vars);
-            auto next_quotient_q = exact_quotient(q, next_gcd, vars);
+            auto next_quotient_p = exact_quotient(p, next_gcd, vars, ctx);
+            auto next_quotient_q = exact_quotient(q, next_gcd, vars, ctx);
             if (next_quotient_p.is_error() || next_quotient_q.is_error() ||
                 !next_quotient_p.value().has_value() || !next_quotient_q.value().has_value()) {
                 certified = false;
@@ -914,7 +932,7 @@ void sparse_subtract(SparsePoly& lhs, const SparsePoly& rhs) {
     symbolic::CASContext& ctx,
     std::size_t depth) {
     for (const auto& candidate : primitive_linear_candidates(vars)) {
-        auto quotient_p = exact_quotient(p, candidate, vars);
+        auto quotient_p = exact_quotient(p, candidate, vars, ctx);
         if (quotient_p.is_error()) {
             continue;
         }
@@ -922,7 +940,7 @@ void sparse_subtract(SparsePoly& lhs, const SparsePoly& rhs) {
             continue;
         }
 
-        auto quotient_q = exact_quotient(q, candidate, vars);
+        auto quotient_q = exact_quotient(q, candidate, vars, ctx);
         if (quotient_q.is_error()) {
             continue;
         }

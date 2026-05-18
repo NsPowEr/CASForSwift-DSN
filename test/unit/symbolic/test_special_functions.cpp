@@ -350,6 +350,65 @@ TEST_F(SpecialFunctionsTest, GoldenRatioIdentityFromCosPiOverFive) {
     expect_simplify_equiv("2*cos(pi/5)", "(1 + sqrt(5))/2");
 }
 
+// L2-10: angle combination formula — denominators not reachable by halving/Chebyshev alone.
+// cos(π/15) = cos(2π/5 - π/3) = cos(2π/5)·cos(π/3) + sin(2π/5)·sin(π/3).
+// Anti-hardcode: ensure these stay non-inert (structural form, not numeric oracle).
+TEST_F(SpecialFunctionsTest, CosPiOverFifteen_NotInert) {
+    auto e = parse_expr("cos(pi/15)", ctx->arena());
+    ASSERT_TRUE(e.is_ok());
+    auto s = ctx->simplify(e.value());
+    ASSERT_TRUE(s.is_ok());
+    const auto* fc = expr_cast<FuncCall>(s.value());
+    EXPECT_FALSE(fc != nullptr && fc->func_id == BuiltinOp::Cos)
+        << "cos(π/15) stayed inert: " << debug_print(s.value());
+}
+TEST_F(SpecialFunctionsTest, SinPiOverFifteen_NotInert) {
+    auto e = parse_expr("sin(pi/15)", ctx->arena());
+    ASSERT_TRUE(e.is_ok());
+    auto s = ctx->simplify(e.value());
+    ASSERT_TRUE(s.is_ok());
+    const auto* fc = expr_cast<FuncCall>(s.value());
+    EXPECT_FALSE(fc != nullptr && fc->func_id == BuiltinOp::Sin)
+        << "sin(π/15) stayed inert: " << debug_print(s.value());
+}
+TEST_F(SpecialFunctionsTest, CosTwoPiOverFifteen_NotInert) {
+    // cos(2π/15) = cos(π/3 - π/5) — combines base table entries.
+    auto e = parse_expr("cos(2*pi/15)", ctx->arena());
+    ASSERT_TRUE(e.is_ok());
+    auto s = ctx->simplify(e.value());
+    ASSERT_TRUE(s.is_ok());
+    const auto* fc = expr_cast<FuncCall>(s.value());
+    EXPECT_FALSE(fc != nullptr && fc->func_id == BuiltinOp::Cos)
+        << "cos(2π/15) stayed inert: " << debug_print(s.value());
+}
+// Anti-hardcode: cos(π/15) + cos(2π/15) should equal a closed-form value (not an inert sum).
+TEST_F(SpecialFunctionsTest, AngleCombination_AntiHardcode_q15) {
+    // Verify that BOTH cos(π/15) and sin(π/15) are non-inert (denominator 15 fully covered).
+    for (const char* expr_str : {"cos(pi/15)", "sin(pi/15)", "cos(2*pi/15)", "sin(2*pi/15)",
+                                  "cos(4*pi/15)", "sin(4*pi/15)"}) {
+        auto e = parse_expr(expr_str, ctx->arena());
+        ASSERT_TRUE(e.is_ok()) << "parse failed: " << expr_str;
+        auto s = ctx->simplify(e.value());
+        ASSERT_TRUE(s.is_ok()) << "simplify failed: " << expr_str;
+        const auto* fc = expr_cast<FuncCall>(s.value());
+        EXPECT_FALSE(fc != nullptr &&
+                     (fc->func_id == BuiltinOp::Cos || fc->func_id == BuiltinOp::Sin))
+            << expr_str << " stayed inert: " << debug_print(s.value());
+    }
+}
+
+// L2-10: q=30 = 2×15 — half-angle on top of angle-combination result.
+TEST_F(SpecialFunctionsTest, CosPiOverThirty_NotInert) {
+    // cos(π/30) = cos(6°) reached via half-angle from cos(π/15).
+    auto e = parse_expr("cos(pi/30)", ctx->arena());
+    ASSERT_TRUE(e.is_ok());
+    auto s = ctx->simplify(e.value());
+    ASSERT_TRUE(s.is_ok());
+    const auto* fc = expr_cast<FuncCall>(s.value());
+    EXPECT_FALSE(fc != nullptr && fc->func_id == BuiltinOp::Cos)
+        << "cos(π/30) stayed inert: " << debug_print(s.value());
+}
+
 // L1-12: nested radical denesting sqrt(a + b·sqrt(c)).
 TEST_F(SpecialFunctionsTest, DenestSqrt_5_plus_2sqrt6) {
     // sqrt(5 + 2*sqrt(6)) = sqrt(2) + sqrt(3).
