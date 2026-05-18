@@ -294,3 +294,67 @@ TEST(GroebnerTest, OversizedExponentReturnsErrorNotException) {
     ASSERT_TRUE(result.is_error());
     EXPECT_EQ(result.error().kind, CASErrorKind::Overflow);
 }
+
+// L2-20: Gebauer-Moeller — product criterion eliminates coprime-LM pairs.
+// x^2-1 has LM x^2, y^2-1 has LM y^2; they are coprime so the S-pair
+// (x^2-1, y^2-1) must be pruned by product criterion, yet the basis is correct.
+TEST(GroebnerTest, GmProductCriterionCoprimePair) {
+    symbolic::CASContext ctx;
+
+    auto eq1 = parse_expr("x^2 - 1", ctx);
+    auto eq2 = parse_expr("y^2 - 1", ctx);
+    ASSERT_TRUE(eq1.is_ok());
+    ASSERT_TRUE(eq2.is_ok());
+
+    std::vector<Symbol> vars = {Symbol("x"), Symbol("y")};
+    auto result = polynomial_groebner({eq1.value(), eq2.value()}, vars, ctx);
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+    // Basis must still be correct even though product criterion prunes the one S-pair
+    expect_groebner_basis_for({eq1.value(), eq2.value()}, result.value(), vars, ctx);
+    // The generators are already a Groebner basis (coprime LM), so size ≤ 2
+    EXPECT_LE(result.value().size(), 2U);
+}
+
+// L2-20: Gebauer-Moeller — chain criterion removes pairs subsumed by new generator.
+// Cyclic-3 is a classic Buchberger benchmark; without GM pruning it generates many
+// redundant S-pairs. With GM it should complete within the budget and give a valid basis.
+TEST(GroebnerTest, GmChainCriterionCyclic3) {
+    symbolic::CASContext ctx;
+
+    // cyclic-3: x+y+z, xy+yz+xz, xyz-1
+    auto eq1 = parse_expr("x + y + z", ctx);
+    auto eq2 = parse_expr("x*y + y*z + x*z", ctx);
+    auto eq3 = parse_expr("x*y*z - 1", ctx);
+    ASSERT_TRUE(eq1.is_ok());
+    ASSERT_TRUE(eq2.is_ok());
+    ASSERT_TRUE(eq3.is_ok());
+
+    std::vector<Symbol> vars = {Symbol("x"), Symbol("y"), Symbol("z")};
+    auto result = polynomial_groebner({eq1.value(), eq2.value(), eq3.value()}, vars, ctx);
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+    expect_groebner_basis_for(
+        {eq1.value(), eq2.value(), eq3.value()},
+        result.value(), vars, ctx);
+}
+
+// L2-20: Four-generator anti-hardcode — verifies GM handles ≥4 initial generators.
+TEST(GroebnerTest, GmFourGeneratorSystemSatisfiesBuchbergerCriterion) {
+    symbolic::CASContext ctx;
+
+    auto eq1 = parse_expr("x^2 - y", ctx);
+    auto eq2 = parse_expr("y^2 - z", ctx);
+    auto eq3 = parse_expr("z^2 - x", ctx);
+    auto eq4 = parse_expr("x + y + z - 1", ctx);
+    ASSERT_TRUE(eq1.is_ok());
+    ASSERT_TRUE(eq2.is_ok());
+    ASSERT_TRUE(eq3.is_ok());
+    ASSERT_TRUE(eq4.is_ok());
+
+    std::vector<Symbol> vars = {Symbol("x"), Symbol("y"), Symbol("z")};
+    auto result = polynomial_groebner(
+        {eq1.value(), eq2.value(), eq3.value(), eq4.value()}, vars, ctx);
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+    expect_groebner_basis_for(
+        {eq1.value(), eq2.value(), eq3.value(), eq4.value()},
+        result.value(), vars, ctx);
+}
