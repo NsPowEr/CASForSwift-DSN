@@ -65,23 +65,125 @@ namespace {
     return 0;
 }
 
+// LPO (Lexicographic Path Ordering) function precedence.
+//
+// Formal constraints derived from simplifier rewrite rules (each pair must
+// satisfy lhs ≻ rhs so the rewrite is orientation-preserving and terminates):
+//
+//   R1.  exp(ln(x))  → x          ⇒  Exp ≻ Ln
+//   R2.  sqrt(x^2)   → |x|        ⇒  Sqrt ≻ Pow  (Pow = 60, ok)
+//                                  ⇒  Sqrt ≻ Abs (Abs  = 50, ok)
+//   R3.  tan(x)      → sin/cos    ⇒  Tan ≻ Sin, Tan ≻ Cos
+//   R4.  asin(sin)   → x          ⇒  Sin ≻ Asin
+//   R5.  acos(cos)   → x          ⇒  Cos ≻ Acos
+//   R6.  atan(tan)   → x          ⇒  Tan ≻ Atan
+//   R7.  cot/sec/csc → 1/{tan,cos,sin}
+//                                  ⇒  Cot ≻ Tan, Sec ≻ Cos, Csc ≻ Sin
+//   R8.  asinh/acosh/atanh:        not in BuiltinOp enum (no constraint)
+//   R9.  digamma     ≺ gamma      ⇒  Digamma ≺ Gamma (logarithmic deriv.)
+//   R10. polygamma   ≺ digamma    ⇒  Polygamma ≺ Digamma
+//   R11. log10(x)    → ln(x)/ln(10)
+//                                  ⇒  Log10 ≻ Ln
+//   R12. log_b(x)    → ln(x)/ln(b)
+//                                  ⇒  Log   ≻ Ln
+//   R13. bessel_*    composite of exp + polynomial: ranked below Exp.
+//
+// All other rankings are stylistic (do not block any rewrite rule) but kept
+// strictly distinct so the LPO order is total on builtins, which is required
+// for confluence of the AC-rewriter on commutative operators.
 [[nodiscard]] int get_builtin_precedence(BuiltinOp op) noexcept {
     switch (op) {
-    case BuiltinOp::Exp: return 100;
-    case BuiltinOp::Ln:
-    case BuiltinOp::Log: return 90;
-    case BuiltinOp::Sqrt: return 85;
-    case BuiltinOp::Sin:
-    case BuiltinOp::Cos:
-    case BuiltinOp::Tan: return 80;
-    case BuiltinOp::Asin:
-    case BuiltinOp::Acos:
-    case BuiltinOp::Atan: return 75;
-    case BuiltinOp::Sinh:
-    case BuiltinOp::Cosh:
-    case BuiltinOp::Tanh: return 70;
-    default: return 50;
+    // Top tier: exponential/log core. R1, R11, R12.
+    case BuiltinOp::Exp:        return 100;
+    case BuiltinOp::Log10:      return 96;
+    case BuiltinOp::Log:        return 95;
+    case BuiltinOp::Ln:         return 94;
+
+    // Gamma family. R9, R10.
+    case BuiltinOp::Gamma:      return 92;
+    case BuiltinOp::Digamma:    return 91;
+    case BuiltinOp::Polygamma:  return 90;
+    case BuiltinOp::Beta:       return 89;
+    case BuiltinOp::Pochhammer: return 88;
+
+    // Radicals.
+    case BuiltinOp::Sqrt:       return 85;
+
+    // Number-theoretic / special transcendentals.
+    case BuiltinOp::Zeta:       return 84;
+    case BuiltinOp::Erf:        return 83;
+
+    // Trig (R3, R7). Cot/Sec/Csc above Tan/Cos/Sin to orient R7.
+    case BuiltinOp::Cot:        return 82;
+    case BuiltinOp::Sec:        return 81;
+    case BuiltinOp::Csc:        return 80;
+    case BuiltinOp::Tan:        return 79;
+    case BuiltinOp::Sin:        return 78;
+    case BuiltinOp::Cos:        return 77;
+
+    // Inverse trig (R4, R5, R6). Strictly below their forward counterparts.
+    case BuiltinOp::Atan:       return 74;
+    case BuiltinOp::Asin:       return 73;
+    case BuiltinOp::Acos:       return 72;
+
+    // Hyperbolic. Coth above Tanh by analogy with R7.
+    case BuiltinOp::Coth:       return 70;
+    case BuiltinOp::Tanh:       return 69;
+    case BuiltinOp::Sinh:       return 68;
+    case BuiltinOp::Cosh:       return 67;
+
+    // Bessel family (R13).
+    case BuiltinOp::BesselJ:    return 65;
+    case BuiltinOp::BesselY:    return 64;
+    case BuiltinOp::BesselI:    return 63;
+    case BuiltinOp::BesselK:    return 62;
+    case BuiltinOp::BesselZero: return 61;
+
+    // Orthogonal polynomial families.
+    case BuiltinOp::LegendreP:  return 58;
+    case BuiltinOp::ChebyshevT: return 57;
+    case BuiltinOp::ChebyshevU: return 56;
+    case BuiltinOp::HermiteH:   return 55;
+    case BuiltinOp::HermiteHe:  return 54;
+
+    // Complex-component projections.
+    case BuiltinOp::Conj:       return 49;
+    case BuiltinOp::Re:         return 48;
+    case BuiltinOp::Im:         return 47;
+    case BuiltinOp::Arg:        return 46;
+
+    // Algebraic absolute-value / sign operators.
+    case BuiltinOp::Abs:        return 44;
+    case BuiltinOp::Sign:       return 43;
+
+    // Discrete rounding (deterministic on real inputs).
+    case BuiltinOp::Floor:      return 41;
+    case BuiltinOp::Ceil:       return 40;
+    case BuiltinOp::Round:      return 39;
+
+    // Combinatorial / discrete.
+    case BuiltinOp::Binomial:   return 37;
+    case BuiltinOp::Min:        return 36;
+    case BuiltinOp::Max:        return 35;
+
+    // Matrix operators (semantically distinct domain).
+    case BuiltinOp::Det:        return 33;
+    case BuiltinOp::Rank:       return 32;
+    case BuiltinOp::Trace:      return 31;
+    case BuiltinOp::Inv:        return 30;
+    case BuiltinOp::Transpose:  return 29;
+
+    // High-level meta-operators.
+    case BuiltinOp::SumFunc:    return 27;
+    case BuiltinOp::RootSum:    return 26;
+    case BuiltinOp::N:          return 25;
+
+    case BuiltinOp::Unknown:    return 1;
     }
+    // Unreachable: enum is exhaustive above. Return a deterministic low rank
+    // rather than UB so new builtins added without updating this switch sort
+    // to the bottom (terminating but suboptimal) until repaired.
+    return 0;
 }
 
 [[nodiscard]] int get_binary_op_precedence(BinaryOp op) noexcept {
