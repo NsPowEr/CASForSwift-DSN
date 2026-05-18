@@ -3,7 +3,7 @@
 namespace cas::symbolic::detail {
 
 Result<ExprPtr> Simplifier::simplify_funcall_bessel_orthogonal(
-    ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr target_before) {
+    ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr /*target_before*/) {
 
     if (op == BuiltinOp::BesselZero && args.size() == 2U) {
         auto order_is_real = [&](ExprPtr expr) -> bool {

@@ -31,9 +31,19 @@ private:
 };
 
 /**
- * Funzione di comodità per valutazioni rapide.
+ * Funzione di comodo per valutazioni rapide (double).
  */
 [[nodiscard]] Result<double> eval(ExprPtr expr, const NumericEnv& env = {});
+
+/**
+ * Valutazione MPFR a precisione arbitraria (L3-01).
+ * Ritorna decimal_digits cifre significative come stringa.
+ * Esempio: N(pi, 50) -> "3.1415926535897932384626433832795028841971693993751"
+ * Implementata in bigfloat_eval.cpp; non richiede bigfloat.hpp in questo header.
+ */
+[[nodiscard]] Result<std::string> eval_mpfr(ExprPtr expr,
+    unsigned int decimal_digits,
+    const NumericEnv& env = {});
 
 /**
  * Root finding numerico.

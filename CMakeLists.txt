@@ -206,6 +206,8 @@ set(CAS_NUMERIC_SOURCES
     src/numeric/integration.cpp
     src/numeric/ode.cpp
     src/numeric/sampler.cpp
+    src/numeric/bigfloat.cpp
+    src/numeric/bigfloat_eval.cpp
 )
 
 set(CAS_FORMATTER_SOURCES
@@ -261,9 +263,27 @@ target_include_directories(cas_linalg PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
 target_link_libraries(cas_linalg PUBLIC cas_ast cas_symbolic cas_algebra)
 target_compile_features(cas_linalg PUBLIC cxx_std_20)
 
+# ── MPFR / GMP (required for BigFloat / L3-01) ────────────────────────────────
+find_library(MPFR_LIB mpfr
+    HINTS /opt/homebrew/opt/mpfr/lib
+    REQUIRED)
+find_library(GMP_LIB gmp
+    HINTS /opt/homebrew/opt/gmp/lib
+    REQUIRED)
+find_path(MPFR_INCLUDE_DIR mpfr.h
+    HINTS /opt/homebrew/opt/mpfr/include
+    REQUIRED)
+find_path(GMP_INCLUDE_DIR gmp.h
+    HINTS /opt/homebrew/opt/gmp/include
+    REQUIRED)
+
 add_library(cas_numeric STATIC ${CAS_NUMERIC_SOURCES})
-target_include_directories(cas_numeric PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(cas_numeric PUBLIC cas_ast cas_foundation cas_calculus)
+target_include_directories(cas_numeric PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${MPFR_INCLUDE_DIR}
+    ${GMP_INCLUDE_DIR})
+target_link_libraries(cas_numeric PUBLIC cas_ast cas_foundation cas_calculus
+    ${MPFR_LIB} ${GMP_LIB})
 target_compile_features(cas_numeric PUBLIC cxx_std_20)
 
 add_library(cas_formatter STATIC ${CAS_FORMATTER_SOURCES})
@@ -377,6 +397,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/linalg/test_eigen_n_gt_3.cpp
     test/unit/linalg/test_eigen_over_extension.cpp
         test/unit/numeric/test_numeric.cpp
+        test/unit/numeric/test_bigfloat.cpp
         test/unit/formatter/test_formatter.cpp
         test/unit/gui/test_cas_gui_session.cpp
         test/unit/algebra/test_resultant.cpp
@@ -447,7 +468,7 @@ if(CAS_ENABLE_TESTING)
         )
         target_link_libraries(cas_gui_vm_tests
             PRIVATE
-                cas_gui_core
+                cas_gui_vm
                 GTest::gtest
         )
         target_include_directories(cas_gui_vm_tests PRIVATE
@@ -458,19 +479,26 @@ if(CAS_ENABLE_TESTING)
         )
         add_test(NAME cas_gui_vm_tests COMMAND cas_gui_vm_tests)
 
-        qt_add_executable(cas_gui_qml_smoke_tests
+        add_executable(cas_gui_qml_smoke_tests
             GUI/test/test_qml_smoke.cpp
         )
         target_link_libraries(cas_gui_qml_smoke_tests
             PRIVATE
-                cas_gui_vm
                 cas_gui_vmplugin
+                cas_gui_vmplugin_init
+                Qt6::Quick
+                Qt6::Gui
+                Qt6::Qml
+                Qt6::Concurrent
                 GTest::gtest
         )
         target_include_directories(cas_gui_qml_smoke_tests PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/GUI/macos-cpp/src
             ${CMAKE_CURRENT_SOURCE_DIR}/GUI/macos-cpp/src/viewmodels
+            ${CMAKE_CURRENT_SOURCE_DIR}/GUI/macos-cpp/src/qml-items
             ${CMAKE_CURRENT_SOURCE_DIR}/GUI/macos-cpp/src/core
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/GUI/src
         )
         add_test(NAME cas_gui_qml_smoke_tests COMMAND cas_gui_qml_smoke_tests)
     endif()

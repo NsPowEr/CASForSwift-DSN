@@ -125,19 +125,36 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const FuncCall& node
     }
 
     // N — numeric evaluation
+    if (op == BuiltinOp::N && args.size() == 2U) {
+        // N(expr, digits) — MPFR arbitrary-precision evaluation
+        LiteralRational drat;
+        if (auto ex = try_get_exact_rational(args[1], drat);
+            ex.is_ok() && ex.value()
+            && !drat.value.numerator().is_negative()
+            && !drat.value.numerator().is_zero()) {
+            const unsigned int digits = static_cast<unsigned int>(
+                drat.value.numerator().to_u64()
+                / (drat.value.denominator().is_zero()
+                    ? 1ULL : drat.value.denominator().to_u64()));
+            auto mpfr_res = cas::numeric::eval_mpfr(args[0], digits);
+            if (mpfr_res.is_ok())
+                return ok(arena_.make<DecimalLit>(mpfr_res.value()));
+        }
+    }
     if (op == BuiltinOp::N && args.size() == 1U) {
-        namespace num = cas::numeric;
         if (const auto* matrix = expr_cast<Matrix>(args.front())) {
             std::vector<ExprPtr> numeric_elements;
             for (auto elem : matrix->elements) {
-                auto val = num::eval(elem);
-                if (val.is_ok()) numeric_elements.push_back(arena_.make<DecimalLit>(val.value()));
-                else             numeric_elements.push_back(elem);
+                auto val = cas::numeric::eval(elem);
+                if (val.is_ok())
+                    numeric_elements.push_back(arena_.make<DecimalLit>(val.value()));
+                else
+                    numeric_elements.push_back(elem);
             }
             return ok(arena_.make<Matrix>(
                 matrix->rows, matrix->cols, std::move(numeric_elements)));
         }
-        auto val = num::eval(args.front());
+        auto val = cas::numeric::eval(args.front());
         if (val.is_ok()) return ok(arena_.make<DecimalLit>(val.value()));
     }
 
