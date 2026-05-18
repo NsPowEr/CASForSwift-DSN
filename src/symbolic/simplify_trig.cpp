@@ -403,6 +403,51 @@ Result<ExprPtr> Simplifier::simplify_funcall_trig(
         }
     }
 
+    // L2-07: Addition formula — sin/cos(x + kπ/n) where kπ/n has an exact value.
+    // Only triggered when the argument is a Sum containing at least one extractable π-term.
+    // The non-π residual becomes the "x" argument; cos/sin of the π-part evaluate to exact
+    // algebraic numbers, so the result is always a simplification, never an expansion spiral.
+    if ((op == BuiltinOp::Sin || op == BuiltinOp::Cos) && args.size() == 1U) {
+        if (const auto* sum_arg = expr_cast<Sum>(args.front())) {
+            Rational pi_total(BigInt(0));
+            std::vector<ExprPtr> non_pi_terms;
+            for (ExprPtr term : sum_arg->terms) {
+                if (auto c = try_extract_pi_coefficient(term))
+                    pi_total = pi_total + *c;
+                else
+                    non_pi_terms.push_back(term);
+            }
+            if (!non_pi_terms.empty() && !(pi_total == Rational(BigInt(0)))) {
+                ExprPtr cv = trig_exact_at_pi_multiple(BuiltinOp::Cos, pi_total, arena_);
+                ExprPtr sv = trig_exact_at_pi_multiple(BuiltinOp::Sin, pi_total, arena_);
+                if (cv && sv) {
+                    ExprPtr x = (non_pi_terms.size() == 1U)
+                        ? non_pi_terms[0]
+                        : arena_.make<Sum>(std::move(non_pi_terms));
+                    auto cv_s = simplify_expr(cv);
+                    auto sv_s = simplify_expr(sv);
+                    if (cv_s.is_ok() && sv_s.is_ok()) {
+                        ExprPtr sin_x = arena_.make<FuncCall>(BuiltinOp::Sin, std::vector<ExprPtr>{x});
+                        ExprPtr cos_x = arena_.make<FuncCall>(BuiltinOp::Cos, std::vector<ExprPtr>{x});
+                        ExprPtr t1, t2, expanded;
+                        if (op == BuiltinOp::Sin) {
+                            // sin(x + kπ) = sin(x)cos(kπ) + cos(x)sin(kπ)
+                            t1 = arena_.make<Product>(std::vector<ExprPtr>{cv_s.value(), sin_x});
+                            t2 = arena_.make<Product>(std::vector<ExprPtr>{sv_s.value(), cos_x});
+                        } else {
+                            // cos(x + kπ) = cos(x)cos(kπ) - sin(x)sin(kπ)
+                            t1 = arena_.make<Product>(std::vector<ExprPtr>{cv_s.value(), cos_x});
+                            ExprPtr neg_sv = arena_.make<Unary>(UnaryOp::Neg, sv_s.value());
+                            t2 = arena_.make<Product>(std::vector<ExprPtr>{neg_sv, sin_x});
+                        }
+                        expanded = arena_.make<Sum>(std::vector<ExprPtr>{t1, t2});
+                        return simplify_expr(expanded);
+                    }
+                }
+            }
+        }
+    }
+
     const auto& orig_args = expr_ref<FuncCall>(original).args;
     if (expr_ptr_sequence_identical(args, orig_args)) return ok(original);
     return ok(arena_.make<FuncCall>(op, std::move(args)));

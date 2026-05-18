@@ -309,6 +309,42 @@ Result<ExprPtr> Simplifier::simplify_product_factors(const std::vector<ExprPtr>&
         if (reflected_any) merge_symbolic_factors(symbolic);
     }
 
+    // L2-07: Double-angle compaction — sin(x)·cos(x) → (1/2)·sin(2x).
+    // Fires at most once per product pass; sin(x)^n·cos(x)^m with n,m≥1 not handled here
+    // (would require exponent matching beyond BigInt(1)).  Clean form: C·sin·cos = (C/2)·sin(2x).
+    {
+        std::optional<std::pair<std::size_t, std::size_t>> sc_pair;
+        ExprPtr sc_arg = nullptr;
+        for (std::size_t ii = 0; ii < symbolic.size() && !sc_pair; ++ii) {
+            if (symbolic[ii].second != BigInt(1)) continue;
+            const auto* fi = expr_cast<FuncCall>(symbolic[ii].first);
+            if (!fi || fi->func_id != BuiltinOp::Sin || fi->args.size() != 1U) continue;
+            for (std::size_t jj = ii + 1; jj < symbolic.size(); ++jj) {
+                if (symbolic[jj].second != BigInt(1)) continue;
+                const auto* fj = expr_cast<FuncCall>(symbolic[jj].first);
+                if (!fj || fj->func_id != BuiltinOp::Cos || fj->args.size() != 1U) continue;
+                if (structural_equal(fi->args[0], fj->args[0])) {
+                    sc_pair = {ii, jj};
+                    sc_arg = fi->args[0];
+                    break;
+                }
+            }
+        }
+        if (sc_pair) {
+            const auto [si, ci] = *sc_pair;
+            coefficient *= Rational(BigInt(1), BigInt(2));
+            ExprPtr two_arg = arena_.make<Binary>(BinaryOp::Mul,
+                make_integer(arena_, BigInt(2)), sc_arg);
+            ExprPtr sin2x = arena_.make<FuncCall>(BuiltinOp::Sin,
+                std::vector<ExprPtr>{two_arg});
+            // Remove sin(x) and cos(x) from symbolic (erase larger index first)
+            symbolic.erase(symbolic.begin() + ci);
+            symbolic.erase(symbolic.begin() + si);
+            auto sin2x_s = simplify_expr(sin2x);
+            symbolic.push_back({sin2x_s.is_ok() ? sin2x_s.value() : sin2x, BigInt(1)});
+        }
+    }
+
     // Distribute over Sum
     ExprPtr sum_factor = nullptr;
     std::size_t sum_idx = 0;
