@@ -3,6 +3,7 @@
 #include "cas/symbolic.hpp"
 #include "cas/lexer.hpp"
 #include "cas/parser.hpp"
+#include "algebra/algebra_internal.hpp"
 #include "algebra/polynomial_internal.hpp"
 
 using namespace cas;
@@ -110,6 +111,21 @@ TEST(AlgebraFactorizationTest, L0_05_HashBasedPrimeSelection_DifferentPolys) {
     EXPECT_EQ(r2.value().factors.size(), 3U);
 }
 
+TEST(AlgebraFactorizationTest, L0_05_PrimeSelectionDoesNotUseFixedEmergencyFallback) {
+    const BigInt pool_product =
+        BigInt(13) * BigInt(17) * BigInt(19) * BigInt(23) * BigInt(29) *
+        BigInt(31) * BigInt(37) * BigInt(41) * BigInt(43) * BigInt(47) *
+        BigInt(53) * BigInt(59) * BigInt(61) * BigInt(67) * BigInt(71) *
+        BigInt(73) * BigInt(79) * BigInt(83) * BigInt(89) * BigInt(97) *
+        BigInt(101);
+    const IntPoly f({BigInt(1), BigInt(0), pool_product});
+
+    const BigInt p = select_factorization_prime(f);
+
+    EXPECT_FALSE((pool_product % p).is_zero());
+    EXPECT_NE(p, BigInt(101));
+}
+
 // L1-19: GCD heuristic B adapts to large coefficients (Mignotte bound)
 TEST(AlgebraGcdHeuristicTest, L1_19_MignotteBoundAdaptivePadding) {
     symbolic::CASContext ctx;
@@ -122,6 +138,36 @@ TEST(AlgebraGcdHeuristicTest, L1_19_MignotteBoundAdaptivePadding) {
     ASSERT_TRUE(g.is_ok()) << g.error().message;
     // Result should be non-trivial (divisible by x-1)
     EXPECT_TRUE(g.is_ok());
+}
+
+TEST(AlgebraGcdHeuristicTest, KroneckerAtRigorousMignotteBoundReturnsTrueGcd) {
+    // p = -5 - 5x - 5y - 2xy,  q = -5 - 5x - 5y - xy.  Then p - q = -xy
+    // so gcd(p, q) | xy, and a direct content check shows gcd is a unit (1).
+    // With the rigorous Mignotte bound the Kronecker substitution image
+    // reconstructs the true GCD (a constant) and verify_gcd_candidate accepts.
+    // (Previously a softer bound B=max(formula,1000) caused a spurious image
+    //  and the algorithm returned InternalError to reject it.)
+    MultivariatePolynomial p({
+        MultivariateTerm{.coefficient = BigInt(-5), .factors = {}},
+        MultivariateTerm{.coefficient = BigInt(-5), .factors = {{Symbol("x"), 1U}}},
+        MultivariateTerm{.coefficient = BigInt(-5), .factors = {{Symbol("y"), 1U}}},
+        MultivariateTerm{.coefficient = BigInt(-2), .factors = {{Symbol("x"), 1U}, {Symbol("y"), 1U}}},
+    });
+    MultivariatePolynomial q({
+        MultivariateTerm{.coefficient = BigInt(-5), .factors = {}},
+        MultivariateTerm{.coefficient = BigInt(-5), .factors = {{Symbol("x"), 1U}}},
+        MultivariateTerm{.coefficient = BigInt(-5), .factors = {{Symbol("y"), 1U}}},
+        MultivariateTerm{.coefficient = BigInt(-1), .factors = {{Symbol("x"), 1U}, {Symbol("y"), 1U}}},
+    });
+
+    auto gcd = gcd_heuristic(p, q);
+    ASSERT_TRUE(gcd.is_ok()) << gcd.error().message;
+    // True GCD is a unit (±1). Verify the reconstructed polynomial is constant
+    // with coefficient magnitude 1.
+    ASSERT_EQ(gcd.value().terms().size(), 1U);
+    const auto& term = gcd.value().terms()[0];
+    EXPECT_TRUE(term.factors.empty()) << "GCD must be a constant polynomial";
+    EXPECT_EQ(term.coefficient.abs(), BigInt(1)) << "GCD must be a unit";
 }
 
 // L1-20: evaluate_at_rational accepts rational values
