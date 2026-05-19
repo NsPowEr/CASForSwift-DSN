@@ -21,13 +21,26 @@ int mobius(int n) {
     return (p % 2 == 0) ? 1 : -1;
 }
 
+// F2.1.c: hard cap on recursion depth and search range. The recursion
+// descends along divisors of n, so depth ≤ log2(n). For n ≤ 2^20 the
+// recursion is safe; beyond that the inner divisor-enumeration loop
+// `for (int d = 1; d < n; ++d)` and the cache map become the dominant
+// cost (O(n) time, O(n) memory). We refuse arguments above kMaxN to
+// prevent silent OOM / runaway.
+constexpr int kCyclotomicMaxN = 1 << 20;  // 1048576
+
 IntPoly compute_cyclotomic(int n) {
     // Phi_n(x) = product_{d|n} (x^d - 1)^mu(n/d)
     // We can also use recursive division: x^n - 1 = product_{d|n} Phi_d(x)
     // So Phi_n(x) = (x^n - 1) / product_{d|n, d<n} Phi_d(x)
-    
+
     static std::map<int, IntPoly> cache;
     if (cache.count(n)) return cache[n];
+    if (n <= 0 || n > kCyclotomicMaxN) {
+        // Caller must guard against this; we return empty to signal
+        // failure rather than crash. is_cyclotomic checks this below.
+        return IntPoly{};
+    }
 
     // Simple cases
     if (n == 1) return cache[1] = IntPoly({BigInt(-1), BigInt(1)}); // x - 1
@@ -74,19 +87,27 @@ bool poly_equal(const IntPoly& a, const IntPoly& b) {
 
 } // namespace
 
-std::optional<int> is_cyclotomic(const IntPoly& poly) {
+std::optional<int> is_cyclotomic(const IntPoly& poly, int max_n) {
     if (poly.empty()) return std::nullopt;
     if (poly.leading_coeff() != BigInt(1)) return std::nullopt;
 
     std::size_t deg = poly.degree();
     if (deg == 0) return std::nullopt;
 
-    // Candidates n for deg = phi(n)
-    // We only check up to n=100 or something reasonable.
-    // Small phi(n) lookup:
-    // n=1:1, 2:1, 3:2, 4:2, 5:4, 6:2, 7:6, 8:4, 9:6, 10:4, 12:4, ...
-    for (int n = 1; n <= 100; ++n) {
+    // If max_n not specified, derive from degree.
+    // For φ(n) = d: n = p (prime, p-1 = d), n = 2p, or composites up to ~2*(d+1).
+    // We use 2*(deg+1) as the base and add a small constant for composites like n=4 (d=2).
+    if (max_n < 0) {
+        max_n = static_cast<int>(std::max<std::size_t>(12U, 2U * (deg + 1U)));
+    }
+    // Cap at kCyclotomicMaxN to prevent runaway scan; for deg > ~500
+    // a Möbius-formula direct construction is faster than enumeration.
+    // Tracked as FE-004 for follow-up.
+    if (max_n > kCyclotomicMaxN) max_n = kCyclotomicMaxN;
+
+    for (int n = 1; n <= max_n; ++n) {
         IntPoly phi = compute_cyclotomic(n);
+        if (phi.empty()) continue;  // skip cap'd-out entries
         if (phi.degree() == deg) {
             if (poly_equal(poly, phi)) return n;
         }

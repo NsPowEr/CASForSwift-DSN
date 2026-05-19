@@ -11,37 +11,57 @@ namespace cas::calculus {
 
 namespace {
 
+// F2.1.b: recursion depth bound. AST descent is strictly one level per
+// call; an expression of N nodes has nesting depth ≤ N. Cap at 4096
+// matches the simplifier's MAX_SIMPLIFICATION_DEPTH (300) with margin
+// for AST trees that have not been simplified yet. Beyond this depth,
+// return Unimplemented so the caller can bail diagnostically rather
+// than blowing the stack.
+constexpr unsigned int kVisitRecursiveMaxDepth = 4096U;
+
 template <typename F>
-Result<void> visit_recursive(ExprPtr expr, F&& f) {
+Result<void> visit_recursive_impl(ExprPtr expr, F&& f, unsigned int depth) {
+    if (depth >= kVisitRecursiveMaxDepth) {
+        return fail<void>(CASError{
+            .kind = CASErrorKind::Unimplemented,
+            .message = "Differential field visit recursion budget exceeded",
+            .hint = std::nullopt,
+        });
+    }
     auto res = f(expr);
     if (res.is_error()) return res;
 
     return visit_expr(expr, [&](const auto& node) -> Result<void> {
         using T = std::decay_t<decltype(node)>;
         if constexpr (std::is_same_v<T, Unary>) {
-            return visit_recursive(node.operand, f);
+            return visit_recursive_impl(node.operand, f, depth + 1U);
         } else if constexpr (std::is_same_v<T, Binary>) {
-            auto r1 = visit_recursive(node.left, f);
+            auto r1 = visit_recursive_impl(node.left, f, depth + 1U);
             if (r1.is_error()) return r1;
-            return visit_recursive(node.right, f);
+            return visit_recursive_impl(node.right, f, depth + 1U);
         } else if constexpr (std::is_same_v<T, FuncCall>) {
             for (ExprPtr arg : node.args) {
-                auto r = visit_recursive(arg, f);
+                auto r = visit_recursive_impl(arg, f, depth + 1U);
                 if (r.is_error()) return r;
             }
         } else if constexpr (std::is_same_v<T, Sum>) {
             for (ExprPtr term : node.terms) {
-                auto r = visit_recursive(term, f);
+                auto r = visit_recursive_impl(term, f, depth + 1U);
                 if (r.is_error()) return r;
             }
         } else if constexpr (std::is_same_v<T, Product>) {
             for (ExprPtr factor : node.factors) {
-                auto r = visit_recursive(factor, f);
+                auto r = visit_recursive_impl(factor, f, depth + 1U);
                 if (r.is_error()) return r;
             }
         }
         return ok();
     });
+}
+
+template <typename F>
+Result<void> visit_recursive(ExprPtr expr, F&& f) {
+    return visit_recursive_impl(expr, std::forward<F>(f), 0U);
 }
 
 ExprPtr substitute_pattern(ExprPtr expr, ExprPtr pattern, ExprPtr replacement, AstArena& arena) {

@@ -131,10 +131,18 @@ int compare_growth(ExprPtr a, ExprPtr b, const Symbol& var, symbolic::CASContext
     // Dynamic rank matching limit_infinite.cpp::get_growth_rank (Cat 10):
     //   exp(arg) -> rank(arg) + 1  (so nested towers grow strictly)
     //   log(arg) -> max(rank(arg) - 1, 0)
-    auto get_growth_rank_impl = [&](ExprPtr e, const auto& self) -> int {
+    //
+    // F2.1.a: depth bound derived from AST nesting. The recursion descends
+    // strictly one AST level per call; an expression of N nodes can have
+    // recursion depth ≤ N. Cap at 1024 prevents stack overflow on
+    // pathological or self-referential trees (return 0 = "unknown growth
+    // class" which is conservative and forces the caller to bail).
+    constexpr int kGrowthRankMaxDepth = 1024;
+    auto get_growth_rank_impl = [&](ExprPtr e, const auto& self, int depth) -> int {
+        if (depth >= kGrowthRankMaxDepth) return 0;
         if (!depends_on(e, var)) return 0;
         if (const auto* unary = expr_cast<Unary>(e)) {
-            if (unary->op == UnaryOp::Neg) return self(unary->operand, self);
+            if (unary->op == UnaryOp::Neg) return self(unary->operand, self, depth + 1);
         }
         if (const auto* call = expr_cast<FuncCall>(e); call != nullptr && call->args.size() == 1U) {
             if (call->func_id == BuiltinOp::Exp) {
@@ -148,49 +156,51 @@ int compare_growth(ExprPtr a, ExprPtr b, const Symbol& var, symbolic::CASContext
                     && expr_is<Unary>(arg_limit.value())) {
                     return 0;
                 }
-                int inner = self(call->args.front(), self);
+                int inner = self(call->args.front(), self, depth + 1);
                 return inner + 1;
             }
             if (call->func_id == BuiltinOp::Ln || call->func_id == BuiltinOp::Log) {
-                int inner = self(call->args.front(), self);
+                int inner = self(call->args.front(), self, depth + 1);
                 return inner > 1 ? inner - 1 : 0;
             }
         }
         if (const auto* product = expr_cast<Product>(e)) {
             int rank = 0;
             for (ExprPtr factor : product->factors) {
-                rank = std::max(rank, self(factor, self));
+                rank = std::max(rank, self(factor, self, depth + 1));
             }
             return rank;
         }
         if (const auto* sum = expr_cast<Sum>(e)) {
             int rank = 0;
             for (ExprPtr term : sum->terms) {
-                rank = std::max(rank, self(term, self));
+                rank = std::max(rank, self(term, self, depth + 1));
             }
             return rank;
         }
         if (const auto* binary = expr_cast<Binary>(e)) {
             if (binary->op == BinaryOp::Mul || binary->op == BinaryOp::Div) {
-                return std::max(self(binary->left, self), self(binary->right, self));
+                return std::max(self(binary->left, self, depth + 1),
+                                self(binary->right, self, depth + 1));
             }
             if (binary->op == BinaryOp::Add || binary->op == BinaryOp::Sub) {
-                return std::max(self(binary->left, self), self(binary->right, self));
+                return std::max(self(binary->left, self, depth + 1),
+                                self(binary->right, self, depth + 1));
             }
             if (binary->op == BinaryOp::Pow) {
                 const bool exp_dep = depends_on(binary->right, var);
                 const bool base_dep = depends_on(binary->left, var);
-                if (!exp_dep) return self(binary->left, self);
-                if (!base_dep) return self(binary->right, self) + 1;
-                int g = self(binary->right, self);
-                int ln_f = self(binary->left, self);
+                if (!exp_dep) return self(binary->left, self, depth + 1);
+                if (!base_dep) return self(binary->right, self, depth + 1) + 1;
+                int g = self(binary->right, self, depth + 1);
+                int ln_f = self(binary->left, self, depth + 1);
                 return g + (ln_f > 1 ? ln_f - 1 : 0) + 1;
             }
         }
         return 2;  // polynomial or mixed expression depending on var
     };
     auto get_growth_rank = [&](ExprPtr e) -> int {
-        return get_growth_rank_impl(e, get_growth_rank_impl);
+        return get_growth_rank_impl(e, get_growth_rank_impl, 0);
     };
 
     int ra = get_growth_rank(a);
