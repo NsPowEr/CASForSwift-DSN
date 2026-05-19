@@ -17,7 +17,34 @@
 
 ## Voci aperte
 
-_(nessuna — ledger ripulito 2026-05-19 dopo audit + 9 fix algoritmici)_
+### KNOWN-DEBT-001 — `-Werror` disabilitato (CMakeLists.txt:21)
+- **File**: `CMakeLists.txt:21` (non-MSVC branch).
+- **Categoria**: build hygiene; CLAUDE.md § REGOLA ZERO richiede zero
+  warning compilation.
+- **Stato**: ~6 pre-existing warnings impediscono restore immediato:
+  - `src/rewrite/builtin_rewrite.cpp:179` — unused-function
+  - `src/algebra/polynomial_cyclotomic.cpp:11,101` — unused-function /
+    -parameter
+  - `src/algebra/polynomial_conversions.cpp:170` — non-exhaustive switch
+  - `libcas_symbolic.a(functions_special.cpp.o)` — empty TU
+- **Fix**: pulire warnings + restore `-Werror`. Effort stimato ~1h.
+
+### KNOWN-DEBT-002 — Test coverage ratio 0.64 (89 test / 139 src)
+- **Categoria**: testing.
+- **Stato**: Moduli grandi senza unit test dedicato:
+  - `src/algebra/factorization_polynomials.cpp` (40.8K)
+  - `src/algebra/polynomial_gcd_multivariate.cpp` (34.4K)
+  - `src/calculus/integrate_risch.cpp` (36.8K)
+  - `src/calculus/differentiate.cpp` (24.1K)
+  - `src/calculus/limit.cpp` (25.1K)
+- **Fix**: stub happy-path test per ciascuno. Effort ~3h totale.
+
+### KNOWN-DEBT-003 — Test DISABLED senza task aperto
+- `test_residue_theorem.cpp:138`: double-pole Q(α) GTEST_SKIP
+- `test_equivalence_subset.cpp:105`: DISABLED_ExpOfLogSumWithoutPositivity...
+- `test_factorization_tower.cpp:202,217`: DISABLED_SplitsProductOfQuadratics...
+- `test_factorization_trager.cpp:281,291,310,328`: 4× GTEST_SKIP Galois
+- **Fix**: collegare ciascuno a task aperto in CAS_TASKS.md.
 
 ---
 

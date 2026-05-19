@@ -9,7 +9,6 @@ namespace cas::calculus {
 
 namespace {
 
-constexpr std::size_t kMaxIntegrationByPartsDepth = 8U;
 
 [[nodiscard]] int get_ilate_priority(ExprPtr expr) {
     if (!expr) {
@@ -55,10 +54,11 @@ constexpr std::size_t kMaxIntegrationByPartsDepth = 8U;
 
 class IntegrationByPartsGuard {
 public:
-    explicit IntegrationByPartsGuard(ExprPtr expr) : expr_(expr) {}
+    IntegrationByPartsGuard(ExprPtr expr, std::size_t max_depth)
+        : expr_(expr), max_depth_(max_depth) {}
 
     [[nodiscard]] Result<void> enter() {
-        if (active_stack().size() >= kMaxIntegrationByPartsDepth) {
+        if (active_stack().size() >= max_depth_) {
             return fail<void>(CASError{
                 .kind = CASErrorKind::Unimplemented,
                 .message = "Integration by parts depth budget exceeded",
@@ -98,6 +98,7 @@ private:
     }
 
     ExprPtr expr_;
+    std::size_t max_depth_;
     bool entered_ = false;
 };
 
@@ -107,7 +108,7 @@ Result<ExprPtr> integrate_by_parts(
     ExprPtr expr,
     const Symbol& var,
     symbolic::CASContext& context) {
-    IntegrationByPartsGuard guard(expr);
+    IntegrationByPartsGuard guard(expr, context.max_integrate_by_parts_depth());
     auto guard_result = guard.enter();
     if (guard_result.is_error()) {
         return fail<ExprPtr>(guard_result.error());

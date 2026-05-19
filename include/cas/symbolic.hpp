@@ -302,6 +302,20 @@ public:
     void set_f4_max_pending_monomials(std::size_t n) noexcept { f4_max_pending_monomials_ = n; }
     [[nodiscard]] std::size_t f4_max_pending_monomials() const noexcept { return f4_max_pending_monomials_; }
 
+    // Integration-by-parts recursion depth budget. Defaults to 8;
+    // typical IBP problems converge in 1-3 levels. Deeper exotic
+    // integrands can be unlocked by raising this, paired with the
+    // built-in structural cycle detection in `IntegrationByPartsGuard`.
+    void set_max_integrate_by_parts_depth(std::size_t n) noexcept { max_integrate_by_parts_depth_ = n; }
+    [[nodiscard]] std::size_t max_integrate_by_parts_depth() const noexcept { return max_integrate_by_parts_depth_; }
+
+    // LLL reduction quality parameter (Lenstra-Lenstra-Lovász 1982).
+    // Higher delta produces shorter basis vectors at higher cost. Default
+    // 0.75 (LLL standard); raise toward 0.9999 for tighter bounds in
+    // factorization recombination.
+    void set_lll_delta(double delta) noexcept { lll_delta_ = delta; }
+    [[nodiscard]] double lll_delta() const noexcept { return lll_delta_; }
+
     // HC-004: fresh symbol generator.  Returns a Symbol whose name is unique
     // within this context across all previous make_fresh_symbol calls AND
     // does not collide with any name currently registered through `define`.
@@ -386,6 +400,8 @@ public:
     std::size_t f4_max_macaulay_rows_{512U};
     std::size_t f4_max_macaulay_monomials_{512U};
     std::size_t f4_max_pending_monomials_{1024U};
+    std::size_t max_integrate_by_parts_depth_{8U};
+    double lll_delta_{0.75};
     std::uint64_t fresh_symbol_counter_{0U};
     PostSimplifyHook post_simplify_hook_{nullptr};
     std::atomic_bool interrupted_{false};

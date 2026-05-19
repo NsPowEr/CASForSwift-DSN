@@ -15,10 +15,21 @@ option(ENABLE_SANITIZERS "Compatibility alias for milestone scripts and legacy d
 set(CAS_ENABLE_SANITIZERS "${ENABLE_SANITIZERS}")
 
 # ─── ZERO WARNING POLICY OBBLIGATORIA ───
+#
+# DEBT: `-Werror` is disabled on non-MSVC builds pending a cleanup of
+# ~6 pre-existing warnings inherited from earlier commits:
+#   * src/rewrite/builtin_rewrite.cpp:179 — unused-function
+#   * src/algebra/polynomial_cyclotomic.cpp:11,101 — unused-function / -parameter
+#   * src/algebra/polynomial_conversions.cpp:170 — non-exhaustive switch
+#   * libcas_symbolic.a(functions_special.cpp.o) — empty TU (no symbols)
+#
+# Tracked in HARDCODE_LEDGER.md as KNOWN-DEBT-001. Once these are
+# fixed, restore `-Werror` here and remove this comment block.
+# CLAUDE.md § REGOLA ZERO requires zero warning compilation.
 if(MSVC)
     add_compile_options(/W4 /WX)
 else()
-    add_compile_options(-Wall -Wextra -Wpedantic) # Rimosso -Werror temporaneamente
+    add_compile_options(-Wall -Wextra -Wpedantic) # -Werror restored after KNOWN-DEBT-001
 endif()
 
 # ─── SANITIZERS (abilitati in Debug / RelWithDebInfo, anche multi-config) ───
@@ -477,6 +488,10 @@ if(CAS_ENABLE_TESTING)
             GUI/test/test_workspace_layout_state.cpp
             GUI/test/test_autocomplete_vm.cpp
             GUI/test/test_variables_actions.cpp
+            GUI/test/test_notebook_interaction_state.cpp
+            GUI/test/test_command_availability.cpp
+            GUI/test/test_command_palette_behavior.cpp
+            GUI/test/test_session_sidebar_model.cpp
         )
         target_link_libraries(cas_gui_vm_tests
             PRIVATE

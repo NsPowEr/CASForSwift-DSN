@@ -576,16 +576,28 @@ struct ExponentialTerm {
     return true;
 }
 
+// Recursion depth bound — derived from AST nesting depth, not arbitrary.
+// Each recursive call peels one layer: Unary(Neg)→operand, Binary(Mul,
+// const, t)→t, Product(consts..., t)→t. The AST construction depth of
+// any valid expression is bounded by total node count; 1024 is a
+// conservative ceiling that triggers Unimplemented (not crash) on
+// pathologically self-referential or excessively-deep inputs. The
+// previous version had no bound and stack-overflowed on towers of
+// depth ≥ 4 — see SOURCE NOTE in test/unit/symbolic/
+// test_limit_tower_adaptive.cpp.
 [[nodiscard]] bool append_scaled_exponential_term(
     std::vector<ExponentialTerm>& terms,
     ExprPtr exponent,
     long long coefficient,
-    AstArena& arena) {
+    AstArena& arena,
+    unsigned int depth = 0U) {
+    constexpr unsigned int kMaxAppendDepth = 1024U;
+    if (depth >= kMaxAppendDepth) return false;
     if (coefficient == 0) return true;
     if (const auto* unary = expr_cast<Unary>(exponent)) {
         if (unary->op == UnaryOp::Neg) {
             if (coefficient == std::numeric_limits<long long>::min()) return false;
-            return append_scaled_exponential_term(terms, unary->operand, -coefficient, arena);
+            return append_scaled_exponential_term(terms, unary->operand, -coefficient, arena, depth + 1U);
         }
     }
 
@@ -594,12 +606,12 @@ struct ExponentialTerm {
             if (auto lhs_coeff = integer_value(binary->left)) {
                 long long scaled{};
                 if (!safe_mul_i64(coefficient, *lhs_coeff, scaled)) return false;
-                return append_scaled_exponential_term(terms, binary->right, scaled, arena);
+                return append_scaled_exponential_term(terms, binary->right, scaled, arena, depth + 1U);
             }
             if (auto rhs_coeff = integer_value(binary->right)) {
                 long long scaled{};
                 if (!safe_mul_i64(coefficient, *rhs_coeff, scaled)) return false;
-                return append_scaled_exponential_term(terms, binary->left, scaled, arena);
+                return append_scaled_exponential_term(terms, binary->left, scaled, arena, depth + 1U);
             }
         }
     }
@@ -618,7 +630,14 @@ struct ExponentialTerm {
         ExprPtr symbolic_exponent = symbolic_factors.size() == 1U
             ? symbolic_factors.front()
             : arena.make<Product>(std::move(symbolic_factors));
-        return append_scaled_exponential_term(terms, symbolic_exponent, scaled, arena);
+        // Guard against pathological case where Product reconstruction
+        // returns an expression structurally identical to its input
+        // (would cause infinite recursion). Tested via depth bound.
+        if (symbolic_exponent == exponent) {
+            terms.push_back(ExponentialTerm{.exponent = exponent, .coefficient = coefficient});
+            return true;
+        }
+        return append_scaled_exponential_term(terms, symbolic_exponent, scaled, arena, depth + 1U);
     }
 
     terms.push_back(ExponentialTerm{.exponent = exponent, .coefficient = coefficient});

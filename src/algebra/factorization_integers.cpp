@@ -3,6 +3,7 @@
 #include "algebra_internal.hpp"
 #include "polynomial_internal.hpp"
 #include <algorithm>
+#include <cstdint>
 #include <optional>
 #include <vector>
 
@@ -244,7 +245,17 @@ void append_factor_with_multiplicity(
     return h;
 }
 
-[[nodiscard]] static BigInt select_factorization_prime(const IntPoly& f) {
+[[nodiscard]] static bool is_small_prime(std::uint64_t n) {
+    if (n < 2U) return false;
+    if (n == 2U) return true;
+    if ((n % 2U) == 0U) return false;
+    for (std::uint64_t d = 3U; d <= n / d; d += 2U) {
+        if ((n % d) == 0U) return false;
+    }
+    return true;
+}
+
+[[nodiscard]] BigInt select_factorization_prime(const IntPoly& f) {
     static constexpr int kPool[] = {
         13, 17, 19, 23, 29, 31, 37, 41, 43, 47,
         53, 59, 61, 67, 71, 73, 79, 83, 89, 97
@@ -257,8 +268,16 @@ void append_factor_with_multiplicity(
         BigInt bp(p_val);
         if (!(lc % bp).is_zero()) return bp;
     }
-    // All pool primes divide lc (astronomically rare); fall back to 101
-    return BigInt(101);
+
+    std::uint64_t candidate = 101U + 2U * (poly_hash_fnv1a(f) % 128U);
+    if ((candidate % 2U) == 0U) ++candidate;
+    for (;;) {
+        if (is_small_prime(candidate)) {
+            BigInt p(static_cast<long long>(candidate));
+            if (!(lc % p).is_zero()) return p;
+        }
+        candidate += 2U;
+    }
 }
 
 [[nodiscard]] Result<void> append_integer_factor_component(
@@ -341,7 +360,7 @@ void append_factor_with_multiplicity(
                     }
                 }
                 for (const auto& g_mod : lifted) {
-                    auto h = find_factor_lll(remaining, g_mod, pk, remaining.degree() / 2);
+                    auto h = find_factor_lll(remaining, g_mod, pk, remaining.degree() / 2, ctx.lll_delta());
                     if (h.has_value()) {
                         auto quotient = exact_divide_integer_poly(remaining, *h, ctx);
                         if (quotient.is_ok()) {
