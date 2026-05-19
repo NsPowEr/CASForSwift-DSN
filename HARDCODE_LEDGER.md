@@ -17,7 +17,7 @@
 
 ## Voci aperte
 
-_(nessuna — ledger ripulito 2026-05-16)_
+_(nessuna — ledger ripulito 2026-05-19 dopo audit + 9 fix algoritmici)_
 
 ---
 
@@ -60,6 +60,95 @@ _(nessuna — ledger ripulito 2026-05-16)_
   `effective_leading_order` in
   `src/calculus/integrate_improper.cpp` legge il valore dal contesto
   quando il parametro chiamante è 0.
+
+### HC-007 — Mignotte GCDHEU `B<1000` override — RISOLTO 2026-05-19
+- **File**: `src/algebra/polynomial_gcd_heuristic.cpp:268` (era).
+- **Categoria CLAUDE.md**: Cat 2 — costante magica in algoritmo algebrico.
+- **Fix applicato (commit `cce829b`)**: rimpiazzato `if (B<1000) B=1000` con
+  bound Mignotte rigoroso `B = 2·(max_coeff+1)·2^(D+1)+1`, dominante per
+  ogni (D, max_coeff). Floor strutturale `B≥3` per signed-digit
+  reconstruction. Test `KroneckerAtRigorousMignotteBoundReturnsTrueGcd`
+  aggiornato (era basato su B=1000 spurious).
+
+### HC-008 — LPO precedence non esaustiva — RISOLTO 2026-05-19
+- **File**: `src/symbolic/term_order.cpp:68-85`.
+- **Categoria CLAUDE.md**: Cat 5 — ordinamento non configurabile,
+  default=50 collisione su 40+ BuiltinOp.
+- **Fix applicato (commit `ed22283`)**: switch esaustivo su tutti i
+  BuiltinOp con precedenze distinte derivate dai vincoli rewrite rules
+  R1-R12 (exp(ln x)→x, sqrt(x²)→|x|, tan→sin/cos, ecc.). Default branch
+  ritorna 0 per nuovi builtin senza UB.
+
+### HC-009 — Bareiss pivot score magici — RISOLTO 2026-05-19
+- **File**: `src/linalg/matrix_bareiss.cpp:110-118`.
+- **Categoria CLAUDE.md**: Cat 2 — costanti `1000/900/800/500-cplx`.
+- **Fix applicato (commit `2892492`)**: `PivotScore` lessicografico
+  `(certainty, -total_degree, -complexity)`. `certainty` ∈ {0..3}
+  derivato da assumptions; `total_degree` recursive AST walk;
+  `complexity` AST-size tiebreaker.
+
+### HC-010 — Limit depth=16 fisso — RISOLTO 2026-05-19
+- **File**: `src/calculus/limit.cpp:118` (era `if (depth >= 16U)`).
+- **Categoria CLAUDE.md**: Cat 1 — budget computazionale non
+  configurabile.
+- **Fix applicato (commit `a8d3e75`)**: bound dinamico
+  `max(8, 2·tower_height + 4)` con `tower_height` calcolato via
+  `transcendental_tower_depth()` helper (Gruntz §3.5). Cap scala con
+  altezza tower MRV.
+
+### HC-011 — Buchberger kMaxBuchbergerPairs+kMaxBasisSize — RISOLTO 2026-05-19
+- **File**: `src/algebra/polynomial_groebner_f4_buchberger.cpp:159-160`
+  (era).
+- **Categoria CLAUDE.md**: Cat 1 — budget non configurabile.
+- **Fix applicato (commit `43dd1fb`)**: rimossi entrambi i cap. Sugar
+  selection strategy (Giovini-Mora-Niesi-Robbiano 1991) + Gebauer-Moeller
+  pruning garantiscono basis minimale per Hilbert basis theorem. `Pair`
+  struct esteso con `sugar` field; `basis_sugar` parallel vector;
+  `select_pair` ora lex `(sugar, total_lcm_degree)`.
+
+### HC-012 — fsolve num_samples=400 (poly path) — RISOLTO 2026-05-19
+- **File**: `src/algebra/fsolve.cpp:76` (era).
+- **Categoria CLAUDE.md**: Cat 2 — costante magica.
+- **Fix applicato (commit `1108880`)**: Sturm sequence 1829 in nuovo
+  `src/numeric/sturm.cpp`. Conta esattamente radici reali distinte in
+  intervallo; squarefree via `gcd(f, f')`; bisection rationale + Newton
+  polish. Path polinomiale ora esatto, grid scan resta solo per
+  transcendental (sostituito in HC-014).
+
+### HC-013 — F4 kMaxF4Batches=2048 — RISOLTO 2026-05-19
+- **File**: `src/algebra/polynomial_groebner_f4.cpp:200` (era).
+- **Categoria CLAUDE.md**: Cat 1 — batch counter arbitrario.
+- **Fix applicato (commit `fb23498`)**: rimosso. Hilbert basis theorem
+  + Buchberger termination + Sugar selection garantiscono P.empty() in
+  tempo finito. Memory guards `kMaxMacaulay*` mantenuti (vedi HC-016).
+
+### HC-014 — fsolve tol/max_iter (transc path) — RISOLTO 2026-05-19
+- **File**: `src/algebra/fsolve.cpp:78-79` (era).
+- **Categoria CLAUDE.md**: Cat 2 — costanti precision/iter magiche.
+- **Fix applicato (commit `5f5e068`)**: Lipschitz dyadic refinement
+  (Hansen-style) in nuovo `src/numeric/lipschitz.cpp`. Esclusione
+  intervalli senza root via stima Lipschitz 3-punto; descent dyadic;
+  Newton polish (30 iter da quadratic convergence). `sin(50x)` su [0,1]
+  trova ~16 root, era miss-dipendenti su grid.
+
+### HC-015 — Recombination kMaxSubsets=32768 — RISOLTO 2026-05-19
+- **File**: `src/algebra/factorization_recombination.cpp:105` (era).
+- **Categoria CLAUDE.md**: Cat 1 — cap subset enumeration.
+- **Fix applicato (commit `6c809cd`)**: rimosso. Landau-Mignotte
+  coefficient bound pruning (TAOCP §4.6.2 Thm F): `||h||_inf ≤ 2^d·||f||_inf`
+  per ogni fattore h. `lift_and_check_subset` rifiuta candidati che
+  eccedono il bound prima della divisione costosa. Pruning polynomial
+  in pratica; pathological Swinnerton-Dyer resta esponenziale → Step 8.
+
+### HC-016 — F4 Macaulay caps configurable — RISOLTO 2026-05-19
+- **File**: `src/algebra/polynomial_groebner_f4.cpp:201-203` (era
+  `constexpr`).
+- **Categoria CLAUDE.md**: Cat 1 — memory safety hardcoded.
+- **Fix applicato (commit precedente in questa sessione)**:
+  `ctx.f4_max_macaulay_rows()`, `f4_max_macaulay_monomials()`,
+  `f4_max_pending_monomials()` esposti in `CASContext`. Default
+  preserva valori storici (512/512/1024). Esposizione, non upgrade
+  algoritmico — Block F4 vero (Faugère 2002 §4.3) resta follow-up.
 
 ### HC-003 — Zeta closed-form lookup table — RISOLTO 2026-05-16
 
