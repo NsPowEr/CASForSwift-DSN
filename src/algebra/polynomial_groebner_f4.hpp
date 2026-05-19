@@ -48,6 +48,18 @@ Result<PolyF4> expr_to_f4(
 
 void inter_reduce(std::vector<PolyF4>& G, MonomialOrder order);
 
+// Buchberger 1985 on-fly inter-reduction: after a new polynomial is
+// appended to G at `new_idx`, re-reduce affected elements (those whose
+// LM is divisible by lm(G[new_idx])) and drop redundant ones. Removed
+// basis indices (in descending order) are reported via
+// `removed_indices` so the caller can synchronise parallel data
+// structures (sugar, pair queue references).
+void inter_reduce_after_addition(
+    std::vector<PolyF4>& G,
+    std::size_t new_idx,
+    MonomialOrder order,
+    std::vector<std::size_t>& removed_indices);
+
 // Returns true iff G is a reduced Groebner basis:
 // (1) Groebner: every S-polynomial reduces to 0 mod G.
 // (2) Monic: every element has leading coefficient 1.

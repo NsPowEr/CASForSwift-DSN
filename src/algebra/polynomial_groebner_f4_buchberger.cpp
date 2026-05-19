@@ -226,6 +226,10 @@ Result<std::vector<PolyF4>> buchberger_groebner(std::vector<PolyF4> basis, Monom
     while (!pairs.empty()) {
         Pair pair = select_pair(pairs);
 
+        // Skip pairs referencing now-zero basis slots (Buchberger 1985
+        // on-fly inter-reduction may have invalidated either side).
+        if (basis[pair.i].is_zero() || basis[pair.j].is_zero()) continue;
+
         PolyF4 remainder = reduce_by_basis(s_polynomial(basis[pair.i], basis[pair.j], order), basis, order);
         if (remainder.is_zero()) continue;
 
@@ -236,8 +240,28 @@ Result<std::vector<PolyF4>> buchberger_groebner(std::vector<PolyF4> basis, Monom
         basis_sugar.push_back(new_sugar);
 
         gm_update(pairs, basis, basis_sugar, new_idx, order);
+
+        // Buchberger 1985 on-fly inter-reduction: zero out basis
+        // elements whose LM is a strict multiple of lm(basis[new_idx]),
+        // and re-reduce trailing terms of all live elements. Keeps |G|
+        // at its theoretical minimum (Cox-Little-O'Shea Thm 2.7.4)
+        // during the run rather than only at the end.
+        std::vector<std::size_t> removed;
+        inter_reduce_after_addition(basis, new_idx, order, removed);
+        // Discard pending pairs that touch zeroed-out basis slots; the
+        // index check inside the main loop also handles this lazily,
+        // but pruning here keeps the queue small.
+        if (!removed.empty()) {
+            pairs.erase(std::remove_if(pairs.begin(), pairs.end(),
+                [&](const Pair& p) {
+                    return basis[p.i].is_zero() || basis[p.j].is_zero();
+                }), pairs.end());
+        }
     }
 
+    // Compact zero placeholders before the final pass.
+    basis.erase(std::remove_if(basis.begin(), basis.end(),
+        [](const PolyF4& g) { return g.is_zero(); }), basis.end());
     inter_reduce(basis, order);
     for (auto& g : basis) g.make_monic(order);
     return ok(std::move(basis));

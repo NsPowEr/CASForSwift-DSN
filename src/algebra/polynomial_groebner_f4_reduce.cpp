@@ -128,6 +128,78 @@ void inter_reduce(std::vector<PolyF4>& G, MonomialOrder order) {  // NOLINT(bugp
     }
 }
 
+// Buchberger 1985 on-fly tail-reduction (Cox-Little-O'Shea Thm 2.7.4
+// safe variant): after a new polynomial G[new_idx] is appended, re-
+// reduce *trailing terms* (not leading) of every other live basis
+// element by the rest of G. This keeps each basis element close to
+// reduced form during the algorithm run, which feeds simpler S-polys
+// into subsequent gm_update steps.
+//
+// Important: full Buchberger minimization (removing elements whose LM
+// is divisible by another's LM) is NOT safe to do during the run —
+// the pair queue still contains S-polynomials whose computation
+// references these elements. Minimization is therefore deferred to
+// the post-loop `inter_reduce` pass. On-fly we only tighten tails.
+//
+// `removed_indices` always returns empty here (no element is dropped
+// during the run); the parameter is retained for API stability and to
+// support a future full-minimization variant that synchronises the
+// pair queue.
+void inter_reduce_after_addition(
+    std::vector<PolyF4>& G,
+    std::size_t new_idx,
+    MonomialOrder order,
+    std::vector<std::size_t>& removed_indices) {
+    removed_indices.clear();
+    if (new_idx >= G.size()) return;
+    const Monomial lm_new = G[new_idx].leading_monomial(order);
+    if (lm_new.empty()) return;
+    const std::size_t n_vars = lm_new.size();
+
+    for (std::size_t i = 0; i < G.size(); ++i) {
+        if (G[i].is_zero()) continue;
+        PolyF4 f = G[i];
+        const Monomial lm_f = f.leading_monomial(order);
+        bool f_changed = false;
+        auto it = f.terms.begin();
+        while (it != f.terms.end()) {
+            const Monomial m = it->first;
+            // Preserve the leading monomial — reducing it would imply
+            // dropping the element from the basis, which is unsafe
+            // during the run (see header comment).
+            if (m == lm_f) { ++it; continue; }
+            bool reduced = false;
+            for (std::size_t j = 0; j < G.size(); ++j) {
+                if (i == j) continue;
+                if (G[j].is_zero()) continue;
+                const Monomial lmj = G[j].leading_monomial(order);
+                if (lmj.empty()) continue;
+                if (divides(lmj, m)) {
+                    Rational factor = it->second / G[j].leading_coefficient(order);
+                    Monomial t(n_vars);
+                    for (std::size_t k = 0; k < n_vars; ++k) t[k] = m[k] - lmj[k];
+                    for (const auto& [mon_j, coeff_j] : G[j].terms) {
+                        Monomial nm(n_vars);
+                        for (std::size_t k = 0; k < n_vars; ++k) nm[k] = mon_j[k] + t[k];
+                        // Skip writes that would alter the leading term.
+                        if (nm == lm_f) continue;
+                        f.terms[nm] = f.terms[nm] - factor * coeff_j;
+                        if (f.terms[nm].numerator().is_zero()) f.terms.erase(nm);
+                    }
+                    f_changed = true;
+                    reduced = true;
+                    it = f.terms.begin();
+                    break;
+                }
+            }
+            if (!reduced) ++it;
+        }
+        if (f_changed) {
+            G[i] = std::move(f);
+        }
+    }
+}
+
 bool is_reduced_groebner_basis(const std::vector<PolyF4>& G, MonomialOrder order) {
     if (G.empty()) return true;
 
