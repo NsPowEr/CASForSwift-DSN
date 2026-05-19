@@ -39,6 +39,23 @@
   - `src/calculus/limit.cpp` (25.1K)
 - **Fix**: stub happy-path test per ciascuno. Effort ~3h totale.
 
+### KNOWN-DEBT-004 — Risch `∫ 1/(x·ln(x)) dx` produces wrong result
+- **File**: `src/calculus/integrate_risch.cpp` (path that handles
+  `1 / (x * ln(x))`).
+- **Categoria**: math correctness — silent wrong answer.
+- **Discovered**: 2026-05-20 audit probe
+  `test/unit/calculus/test_risch_logarithmic_probe.cpp`.
+- **Symptom**: input `1/(x·ln(x))` → engine returns
+  `ln(x)^(-1) · ln(abs(x))`, which simplifies to 1 for x>0.
+  Correct answer: `ln(ln(x)) + C`.
+- **Verification**: `diff(result, x) - integrand` simplified gives
+  `-1/(x·ln(x))`, not 0. Invariant test fails.
+- **Fix**: implement Risch table-substitution recognising
+  u = ln(x) as a logarithmic Liouvillian extension; integrate by
+  parts handling the tower. Filed for F3.5 main implementation.
+- **Severity**: ALTA. Common calculus pattern; user-visible wrong
+  answer without diagnostic.
+
 ### KNOWN-DEBT-003 — Test DISABLED senza task aperto
 - `test_residue_theorem.cpp:138`: double-pole Q(α) GTEST_SKIP
 - `test_equivalence_subset.cpp:105`: DISABLED_ExpOfLogSumWithoutPositivity...
