@@ -68,9 +68,18 @@ Result<ExprPtr> Simplifier::simplify_funcall_exp_log_sqrt(
             return traced_result(RuleId::SimplifyExpZero, target_before, make_integer(arena_, BigInt(1)));
         if (is_one_expr(args.front()))
             return traced_result(RuleId::SimplifyExpOne, target_before, make_constant(arena_, MathConstant::E));
+        // exp(ln(x)) = x is valid ONLY for x > 0 (principal branch of
+        // ln has a cut along the negative real axis). Pre-fix this
+        // rule was applied unconditionally — wrong for symbolic x.
+        // Reference: Bronstein "Symbolic Integration" §3.3.
         if (const auto* ln_call = expr_cast<FuncCall>(args.front());
-            ln_call && ln_call->func_id == BuiltinOp::Ln && ln_call->args.size() == 1U)
-            return ok(ln_call->args[0]);
+            ln_call && ln_call->func_id == BuiltinOp::Ln && ln_call->args.size() == 1U) {
+            ExprPtr ln_arg = ln_call->args[0];
+            if (is_known_positive(ln_arg)) {
+                return ok(ln_arg);
+            }
+            // Otherwise keep symbolic exp(ln(arg)).
+        }
         if (is_constant_expr(args.front(), MathConstant::Infinity))
             return traced_result(RuleId::Unknown, target_before, make_constant(arena_, MathConstant::Infinity));
         if (expr_is<Unary>(args.front())

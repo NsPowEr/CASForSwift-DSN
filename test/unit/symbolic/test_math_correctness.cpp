@@ -122,6 +122,33 @@ TEST_F(MathCorrectnessTest, ZeroToZeroIsIndeterminate) {
     }
 }
 
+// F1.1.3: same branch-cut protection on the FuncCall(Exp, [Ln(x)])
+// path (parser produces FuncCall when input uses `exp(...)` instead
+// of `E^(...)`). Pre-fix the branch in simplify_exp_log.cpp:73
+// applied the cancellation unconditionally.
+TEST_F(MathCorrectnessTest, ExpFuncOfLnSymbolicKeepsSymbolic) {
+    ExprPtr expr = parse("exp(ln(x))");
+    auto res = ctx.simplify(expr);
+    ASSERT_TRUE(res.is_ok());
+    auto formatted = formatter::TextFormatter{}.format(res.value());
+    EXPECT_NE(formatted.find("ln"), std::string::npos)
+        << "exp(ln(x)) collapsed to x without positivity assumption. "
+        << "Got: " << formatted;
+}
+
+TEST_F(MathCorrectnessTest, ExpFuncOfLnCollapsesUnderAssumption) {
+    Symbol x{"x"};
+    ctx.assumptions().assume_positive(x);
+    ExprPtr expr = parse("exp(ln(x))");
+    auto res = ctx.simplify(expr);
+    ASSERT_TRUE(res.is_ok());
+    // Now collapse to bare x is legitimate.
+    auto* sym = expr_cast<Symbol>(res.value());
+    EXPECT_TRUE(sym != nullptr && sym->name == "x")
+        << "Under x>0, exp(ln(x)) must reduce to x. Got: "
+        << formatter::TextFormatter{}.format(res.value());
+}
+
 // F1.1.2: x^0 for nonzero literal base still collapses to 1 (correct).
 TEST_F(MathCorrectnessTest, NonzeroToZeroPowerIsOne) {
     ExprPtr expr = parse("5^0");
