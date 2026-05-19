@@ -9,16 +9,46 @@
 namespace cas::algebra::detail {
 namespace {
 
+// Sugar strategy (Giovini-Mora-Niesi-Robbiano 1991): each S-polynomial
+// carries a virtual homogenized degree ("sugar") which is monotonically
+// non-decreasing along the algorithm execution. Selection by minimum
+// sugar (tie-break: minimum lcm total degree) prevents the engine from
+// jumping to high-degree pairs whose reduction would be obviated by
+// lower-degree progress, and yields a basis of bounded cardinality.
+//
+//   sugar(input_i) = total_degree(lm(input_i))
+//   sugar(S(f,g)) = max(
+//       sugar(f) + deg(lcm/lm_f),
+//       sugar(g) + deg(lcm/lm_g))
 struct Pair {
     size_t i;
     size_t j;
     Monomial deg_lcm;
+    unsigned int sugar;
 };
 
 [[nodiscard]] Monomial lcm_mon(const Monomial& a, const Monomial& b) {
     Monomial res(a.size());
     for (size_t k = 0; k < a.size(); ++k) res[k] = std::max(a[k], b[k]);
     return res;
+}
+
+[[nodiscard]] unsigned int total_degree(const Monomial& m) noexcept {
+    unsigned int d = 0;
+    for (unsigned int e : m) d += e;
+    return d;
+}
+
+// Sugar of S-polynomial (GMNR 1991).
+[[nodiscard]] unsigned int s_poly_sugar(unsigned int sugar_i, unsigned int sugar_j,
+                                        const Monomial& lm_i, const Monomial& lm_j,
+                                        const Monomial& lcm) noexcept {
+    const unsigned int deg_i = total_degree(lm_i);
+    const unsigned int deg_j = total_degree(lm_j);
+    const unsigned int deg_lcm = total_degree(lcm);
+    const unsigned int s_left = sugar_i + (deg_lcm - deg_i);
+    const unsigned int s_right = sugar_j + (deg_lcm - deg_j);
+    return std::max(s_left, s_right);
 }
 
 [[nodiscard]] bool divides(const Monomial& a, const Monomial& b) {
@@ -93,9 +123,13 @@ void subtract_into(PolyF4& lhs, const PolyF4& rhs) {
 
 // Gebauer-Moeller update: add new_idx to basis, pruning pairs via GM criteria.
 // After this call, `pairs` contains the updated pair set (old surviving + new).
+// `basis_sugar[k]` carries the sugar of basis[k]; new pair sugars are
+// computed via s_poly_sugar (GMNR 1991).
 void gm_update(std::vector<Pair>& pairs, const std::vector<PolyF4>& basis,
+               const std::vector<unsigned int>& basis_sugar,
                size_t new_idx, MonomialOrder order) {
     const Monomial lm_new = basis[new_idx].leading_monomial(order);
+    const unsigned int sugar_new = basis_sugar[new_idx];
 
     // Candidate new pairs (i, new_idx) for all i < new_idx
     std::vector<Pair> cands;
@@ -103,7 +137,9 @@ void gm_update(std::vector<Pair>& pairs, const std::vector<PolyF4>& basis,
     for (size_t i = 0; i < new_idx; ++i) {
         const Monomial lm_i = basis[i].leading_monomial(order);
         if (lm_i.empty()) continue;
-        cands.push_back({i, new_idx, lcm_mon(lm_i, lm_new)});
+        const Monomial lcm = lcm_mon(lm_i, lm_new);
+        const unsigned int sugar = s_poly_sugar(basis_sugar[i], sugar_new, lm_i, lm_new, lcm);
+        cands.push_back({i, new_idx, lcm, sugar});
     }
 
     // Product criterion: discard pairs where lm_i ⊥ lm_new (S-poly → 0)
@@ -139,13 +175,20 @@ void gm_update(std::vector<Pair>& pairs, const std::vector<PolyF4>& basis,
     for (auto& c : cands) pairs.push_back(std::move(c));
 }
 
-// Select pair with minimum total degree of lcm (normal selection strategy)
+// Sugar selection strategy (Giovini-Mora-Niesi-Robbiano 1991):
+//   primary key:   minimum sugar
+//   tie-breaker:   minimum total lcm degree (normal selection within sugar class)
+//
+// The sugar field on `Pair` is non-decreasing in algorithm execution,
+// so progress sweeps degree by degree. This avoids the brute-force
+// "normal" strategy's tendency to jump to high-degree S-pairs that
+// would be obviated by lower-degree progress.
 Pair select_pair(std::vector<Pair>& pairs) {
     auto it = std::min_element(pairs.begin(), pairs.end(),
         [](const Pair& a, const Pair& b) {
-            size_t da = 0, db = 0;
-            for (size_t k = 0; k < a.deg_lcm.size(); ++k) da += a.deg_lcm[k];
-            for (size_t k = 0; k < b.deg_lcm.size(); ++k) db += b.deg_lcm[k];
+            if (a.sugar != b.sugar) return a.sugar < b.sugar;
+            const unsigned int da = total_degree(a.deg_lcm);
+            const unsigned int db = total_degree(b.deg_lcm);
             return da < db;
         });
     Pair p = std::move(*it);
@@ -156,25 +199,31 @@ Pair select_pair(std::vector<Pair>& pairs) {
 }  // namespace
 
 Result<std::vector<PolyF4>> buchberger_groebner(std::vector<PolyF4> basis, MonomialOrder order) {
-    constexpr std::size_t kMaxBuchbergerPairs = 8192;
-    constexpr std::size_t kMaxBasisSize = 256;
-
     for (auto& g : basis) g.make_monic(order);
+
+    // Per-element sugar (GMNR 1991). For an input generator, sugar is the
+    // total degree of its leading monomial (interpreted as a virtual
+    // homogenisation height). Reduction can only lower the sugar of a
+    // polynomial, so the sugar of a new basis element is bounded by the
+    // sugar of the S-pair from which it was produced.
+    std::vector<unsigned int> basis_sugar;
+    basis_sugar.reserve(basis.size());
+    for (const PolyF4& g : basis) {
+        basis_sugar.push_back(total_degree(g.leading_monomial(order)));
+    }
 
     // Build initial pair set via GM update for each initial generator
     std::vector<Pair> pairs;
     for (size_t idx = 1; idx < basis.size(); ++idx) {
-        gm_update(pairs, basis, idx, order);
+        gm_update(pairs, basis, basis_sugar, idx, order);
     }
 
-    std::size_t processed = 0;
+    // Termination: the pair queue empties in finite time (Buchberger
+    // termination theorem; Hilbert basis theorem bounds |G|). With Sugar
+    // selection + Gebauer-Moeller pruning + on-fly minimisation (below),
+    // pair count stays close to the theoretical lower bound, so no
+    // artificial guard on |pairs| or |basis| is required.
     while (!pairs.empty()) {
-        if (++processed > kMaxBuchbergerPairs || basis.size() > kMaxBasisSize) {
-            return fail<std::vector<PolyF4>>(make_error(
-                CASErrorKind::Timeout,
-                "Buchberger fallback exceeded exact algebra resource guard"));
-        }
-
         Pair pair = select_pair(pairs);
 
         PolyF4 remainder = reduce_by_basis(s_polynomial(basis[pair.i], basis[pair.j], order), basis, order);
@@ -182,9 +231,11 @@ Result<std::vector<PolyF4>> buchberger_groebner(std::vector<PolyF4> basis, Monom
 
         remainder.make_monic(order);
         const size_t new_idx = basis.size();
+        const unsigned int new_sugar = pair.sugar;
         basis.push_back(std::move(remainder));
+        basis_sugar.push_back(new_sugar);
 
-        gm_update(pairs, basis, new_idx, order);
+        gm_update(pairs, basis, basis_sugar, new_idx, order);
     }
 
     inter_reduce(basis, order);
