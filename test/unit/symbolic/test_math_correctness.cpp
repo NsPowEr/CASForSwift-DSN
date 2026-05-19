@@ -102,6 +102,36 @@ TEST_F(MathCorrectnessTest, ExpLnLiteralPositiveCollapses) {
     if (i != nullptr) EXPECT_FALSE(i->value.is_zero() || i->value.is_negative());
 }
 
+// F1.1.2: 0^0 is mathematically indeterminate. The simplifier must NOT
+// silently return 1. Acceptable post-fix outcomes:
+//   - Pow(0,0) kept symbolic (deferred indeterminate; caller decides)
+//   - Explicit Undefined error
+//
+// What is REJECTED: silent collapse to IntegerLit(1), because downstream
+// code relying on that value silently propagates a wrong answer.
+TEST_F(MathCorrectnessTest, ZeroToZeroIsIndeterminate) {
+    ExprPtr expr = parse("0^0");
+    auto res = ctx.simplify(expr);
+    if (res.is_ok()) {
+        auto* i = expr_cast<IntegerLit>(res.value());
+        if (i != nullptr) {
+            EXPECT_FALSE(i->value == BigInt(1))
+                << "0^0 silently collapsed to 1 — violates indeterminate semantics. "
+                << "Maple/Mathematica/SymPy all flag this case.";
+        }
+    }
+}
+
+// F1.1.2: x^0 for nonzero literal base still collapses to 1 (correct).
+TEST_F(MathCorrectnessTest, NonzeroToZeroPowerIsOne) {
+    ExprPtr expr = parse("5^0");
+    auto res = ctx.simplify(expr);
+    ASSERT_TRUE(res.is_ok());
+    auto* i = expr_cast<IntegerLit>(res.value());
+    ASSERT_NE(i, nullptr);
+    EXPECT_EQ(i->value, BigInt(1));
+}
+
 // F1.1.1: For literal negative arg (-1), the simplification must NOT
 // produce -1 silently. Either the engine returns the symbolic form OR
 // signals an error — but it must not return the wrong real value.

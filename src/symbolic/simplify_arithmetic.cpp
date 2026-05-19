@@ -242,6 +242,16 @@ Result<ExprPtr> Simplifier::simplify_power(ExprPtr base, ExprPtr exponent, ExprP
     if (e_exact.is_error()) return fail<ExprPtr>(e_exact.error());
 
     if (b_exact.value() && e_exact.value()) {
+        // Guard 0^0: indeterminate form. Pre-fix pow_rational_nonnegative
+        // collapsed silently to 1 (mathematically false; cf. Maple,
+        // Mathematica, SymPy which flag it). We do NOT raise an error
+        // because callers like the limit engine legitimately produce
+        // 0^0 as an intermediate substitution step and resolve it via
+        // L'Hôpital / Gruntz (lim_{x→0+} x^x = 1). Instead we keep the
+        // expression symbolic — Pow(0, 0) — so the caller decides.
+        if (base_rat.value.numerator().is_zero() && exp_rat.value.numerator().is_zero()) {
+            return ok(arena_.make<Binary>(BinaryOp::Pow, base, exponent));
+        }
         if (exp_rat.value.is_integer()) {
             const BigInt power = exp_rat.value.numerator();
             if (!power.is_negative()) {
@@ -264,7 +274,19 @@ Result<ExprPtr> Simplifier::simplify_power(ExprPtr base, ExprPtr exponent, ExprP
         }
     }
 
-    if (is_zero_expr(exponent)) return traced_result(RuleId::SimplifyPowerZero, target_before, make_integer(arena_, BigInt(1)));
+    // x^0 = 1 is valid only when x ≠ 0. The limit 0^0 is mathematically
+    // indeterminate (lim_{x→0+} x^x = 1, but 0^0 has no agreed value).
+    // We keep 0^0 symbolic — the rational fast-path above already does
+    // this for the literal case; here we guard the structural case
+    // where base is structurally zero but not necessarily literal.
+    if (is_zero_expr(exponent)) {
+        if (is_zero_expr(base)) {
+            // Keep Pow(0, 0) symbolic; caller (e.g. limit engine via
+            // L'Hôpital or Gruntz) decides the indeterminate form.
+            return ok(arena_.make<Binary>(BinaryOp::Pow, base, exponent));
+        }
+        return traced_result(RuleId::SimplifyPowerZero, target_before, make_integer(arena_, BigInt(1)));
+    }
     if (is_one_expr(exponent)) return traced_result(RuleId::SimplifyPowerOne, target_before, base);
     if (is_one_expr(base)) return ok(base);
 
