@@ -122,6 +122,44 @@ TEST_F(MathCorrectnessTest, ZeroToZeroIsIndeterminate) {
     }
 }
 
+// F1.1.5: sqrt(x²) must equal |x|, not x, for arbitrary x.
+// For known-negative literal (-3)² = 9, sqrt(9) = 3 = |-3|, NOT -3.
+TEST_F(MathCorrectnessTest, SqrtOfNegativeSquaredGivesAbsoluteValue) {
+    ExprPtr expr = parse("sqrt((-3)^2)");
+    auto res = ctx.simplify(expr);
+    ASSERT_TRUE(res.is_ok());
+    auto* i = expr_cast<IntegerLit>(res.value());
+    ASSERT_NE(i, nullptr) << "Expected integer literal. Got: "
+        << formatter::TextFormatter{}.format(res.value());
+    EXPECT_EQ(i->value, BigInt(3))
+        << "sqrt((-3)²) = 3, not -3. Got: " << i->value.to_double();
+}
+
+// F1.1.5: sqrt(x²) symbolic must reduce to |x| (NOT x) without assumption.
+TEST_F(MathCorrectnessTest, SqrtOfSymbolicSquaredGivesAbs) {
+    ExprPtr expr = parse("sqrt(x^2)");
+    auto res = ctx.simplify(expr);
+    ASSERT_TRUE(res.is_ok());
+    auto formatted = formatter::TextFormatter{}.format(res.value());
+    // Acceptable: "abs(x)", "|x|" textual. Reject bare "x".
+    auto* sym = expr_cast<Symbol>(res.value());
+    EXPECT_FALSE(sym != nullptr && sym->name == "x")
+        << "sqrt(x²) collapsed to bare x. Got: " << formatted;
+}
+
+// F1.1.5: sqrt(x²) with x known nonnegative ⇒ x.
+TEST_F(MathCorrectnessTest, SqrtOfSquaredKnownNonnegative) {
+    Symbol x{"x"};
+    ctx.assumptions().assume_positive(x);
+    ExprPtr expr = parse("sqrt(x^2)");
+    auto res = ctx.simplify(expr);
+    ASSERT_TRUE(res.is_ok());
+    auto* sym = expr_cast<Symbol>(res.value());
+    EXPECT_TRUE(sym != nullptr && sym->name == "x")
+        << "Under x > 0, sqrt(x²) must reduce to x. Got: "
+        << formatter::TextFormatter{}.format(res.value());
+}
+
 // F1.1.4: x^a · x^(-a) → 1 holds only if x ≠ 0. Without the
 // nonzero assumption, x^2 · x^(-2) is undefined at x=0 (division
 // by zero hidden inside x^(-2)). The simplifier should either keep
