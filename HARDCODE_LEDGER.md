@@ -178,6 +178,37 @@ _(nessuna — ledger ripulito 2026-05-19 dopo audit + 9 fix algoritmici)_
 
 ---
 
+## Future Enhancements (NON debts — algoritmo corretto, solo performance)
+
+Queste voci NON sono hardcode né debiti. La correttezza è garantita su
+tutti gli input; questi sono upgrade prestazionali per casi specifici.
+
+### FE-001 — Block F4 (Faugère 2002 §4.3)
+- Stato: caps memoria F4 ora configurabili via `ctx.f4_max_macaulay_*`
+  (HC-016 chiuso 2026-05-19). Block decomposition vero — partition
+  monomials in LM-divisibility cones, run Gauss per blocco, merge —
+  abiliterebbe input n=6+ var, deg=6+ senza fallback a Buchberger.
+- Effort stimato: ~12h (partition helper + block dispatch).
+
+### FE-002 — van Hoeij knapsack lattice (van Hoeij 2002 Thm 4.2)
+- Stato: subset enumeration ora con Mignotte pruning (HC-015 chiuso
+  2026-05-19). Pathological Swinnerton-Dyer r≥25 resta esponenziale.
+- Trace-polynomial lattice via LLL replacerebbe enumeration con
+  ricerca polinomiale O(r⁴·N·log p^a). Infrastruttura LLL già presente
+  in `src/algebra/lattice_lll.cpp`; servono trace polys via Newton's
+  identities + lattice construction.
+- Effort stimato: ~14h. Tentativo BFS-by-size 2026-05-19 ha mostrato
+  regressione perf su input tipici (6s→28s) → richiede approccio
+  lattice puro, non solo riordino enumeration.
+
+### FE-003 — `MAX_BIGINT_LIMBS=10000` — ACCETTATO permanentemente
+- CLAUDE.md REGOLA ZERO Eccezione 4: hardware OOM safety.
+- Produce `Unimplemented` esplicito a oltrepassare bound (no silent
+  wrong result).
+- Non rimuovere senza una vera streaming-arithmetic implementation.
+
+---
+
 ## Note operative
 
 - **Cadenza revisione**: ad ogni nuova sessione, leggere questo file per primo
