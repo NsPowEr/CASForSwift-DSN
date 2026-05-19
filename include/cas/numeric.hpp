@@ -87,6 +87,25 @@ struct MultiRootOptions {
     symbolic::CASContext& ctx,
     const MultiRootOptions& options = {});
 
+// Sturm-sequence based real-root isolation for univariate rational
+// polynomials (Sturm 1829). Returns the exact list of real roots of
+// `f ∈ Q[x]` lying in `[low, high]`, isolated to within `tol`. Each
+// reported root corresponds to a distinct real zero of the squarefree
+// part of `f`; multiplicities are not exposed (use squarefree
+// decomposition upstream to recover them). Newton polish from the
+// midpoint of each isolating interval drives the final tolerance.
+//
+// `expr` must be parseable as a univariate polynomial in `variable`
+// over the rationals; non-polynomial expressions return an error and
+// the caller should fall back to grid-based numeric root finding.
+[[nodiscard]] Result<std::vector<double>> find_polynomial_roots_sturm(
+    ExprPtr expr,
+    const std::string& variable,
+    symbolic::CASContext& ctx,
+    double low,
+    double high,
+    double tol);
+
 /**
  * Integrazione numerica.
  */

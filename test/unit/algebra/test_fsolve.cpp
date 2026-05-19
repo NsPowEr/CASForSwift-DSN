@@ -158,3 +158,62 @@ TEST_F(FsolveTest, XTimesSinXMinusOneRoots) {
     }
     EXPECT_TRUE(found) << "Missing root near 1.1142 for x*sin(x)=1";
 }
+
+// Step 3 power-gain: Sturm sequence (Sturm 1829) guarantees exact count
+// and isolation of distinct real roots of a univariate polynomial.
+// Close-together roots that an equidistant 400-sample grid (legacy
+// `num_samples`) on [low, high] would have missed are now resolved.
+TEST_F(FsolveTest, SturmCountsRootsOnDegreeFive) {
+    // f(x) = (x-1)(x-2)(x-3)(x+1)(x+2)  expanded
+    //      = x^5 - 3x^4 - 5x^3 + 15x^2 + 4x - 12
+    ExprPtr f = parse("x^5 - 3*x^4 - 5*x^3 + 15*x^2 + 4*x - 12");
+    Symbol x("x");
+
+    auto res = fsolve(f, x, ctx, -5.0, 5.0);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+
+    auto roots = extract_roots(res.value());
+    EXPECT_GE(roots.size(), 5U) << "Sturm must report all 5 distinct real roots";
+    std::sort(roots.begin(), roots.end());
+    if (roots.size() >= 5U) {
+        EXPECT_NEAR(roots[0], -2.0, 1e-6);
+        EXPECT_NEAR(roots[1], -1.0, 1e-6);
+        EXPECT_NEAR(roots[2],  1.0, 1e-6);
+        EXPECT_NEAR(roots[3],  2.0, 1e-6);
+        EXPECT_NEAR(roots[4],  3.0, 1e-6);
+    }
+}
+
+// Step 3 power-gain: close-together roots. (x - 1.0001)(x - 1.0002)
+// = x^2 - 2.0003 x + 1.00030002.  An equidistant 400-sample grid on
+// [0, 2] has step 0.005, ≫ root separation 0.0001 → both roots map to
+// the same sample → at best one root reported. Sturm counts both
+// exactly and isolates within `tol`.
+TEST_F(FsolveTest, SturmResolvesCloseRoots) {
+    // x^2 - (1.0001+1.0002)x + 1.0001*1.0002
+    // ≈ x^2 - 2.0003 x + 1.00030002
+    // Use rational form to avoid DecimalLit in symbolic input:
+    //   100000*x^2 - 200030*x + 100030  has roots ~1.0001, ~1.0002
+    //   (scale by 10^5 to avoid Decimal in the rational parser)
+    //
+    // Rational coefficients: f = 100000 x^2 - 200030 x + 100030
+    //   discriminant = 200030^2 - 4·100000·100030
+    //                = 40012000900 - 40012000000 = 900
+    //   roots = (200030 ± 30) / 200000 = 200060/200000, 200000/200000
+    //         = 1.0003, 1.0000
+    ExprPtr f = parse("100000*x^2 - 200030*x + 100030");
+    Symbol x("x");
+
+    auto res = fsolve(f, x, ctx, 0.5, 1.5);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+
+    auto roots = extract_roots(res.value());
+    EXPECT_GE(roots.size(), 2U)
+        << "Sturm must isolate both close roots; an equidistant grid would miss one";
+    if (roots.size() >= 2U) {
+        std::sort(roots.begin(), roots.end());
+        // Roots are 1.0000 and 1.0003 — separation 0.0003.
+        EXPECT_NEAR(roots[0], 1.0000, 1e-6);
+        EXPECT_NEAR(roots[1], 1.0003, 1e-6);
+    }
+}

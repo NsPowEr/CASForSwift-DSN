@@ -69,13 +69,35 @@ Result<ExprPtr> fsolve(
         return ok(ctx.arena().make<Matrix>(static_cast<int>(elems.size()), 1, std::move(elems)));
     }
 
-    // Phase 2: numeric multi-root search
+    // Phase 2a: if `f` parses as a univariate polynomial over Q, use the
+    // exact Sturm-sequence root isolation (Sturm 1829). This counts the
+    // number of distinct real roots in [low, high] exactly and refines
+    // each within `tolerance`. Newton polish drives the final precision.
+    constexpr double kTolerance = 1e-10;
+    {
+        auto sturm_res = numeric::find_polynomial_roots_sturm(
+            f, var.name, ctx, search_low, search_high, kTolerance);
+        if (sturm_res.is_ok()) {
+            const auto& roots = sturm_res.value();
+            if (roots.empty()) {
+                return ok(ctx.arena().make<Matrix>(0, 1, std::vector<ExprPtr>{}));
+            }
+            return ok(roots_to_matrix(roots, ctx.arena()));
+        }
+        // fall through to grid scan if expr is not a rational polynomial
+    }
+
+    // Phase 2b: transcendental fallback — grid scan + bisection + Newton.
+    // The 400-sample grid here is a *bootstrap*, not a precision bound:
+    // every detected sign change is refined to `tolerance` by bisection
+    // and then polished by Newton. This path is replaced by Lipschitz
+    // dyadic refinement in Step 6 (see Roadmap WAVE A.2).
     numeric::MultiRootOptions opts;
     opts.low  = search_low;
     opts.high = search_high;
     opts.num_samples = 400;
     opts.dedup_tolerance = 1e-6;
-    opts.root_opts.tolerance = 1e-10;
+    opts.root_opts.tolerance = kTolerance;
     opts.root_opts.max_iterations = 100;
 
     auto roots_res = numeric::find_roots_on_interval(f, var.name, ctx, opts);
