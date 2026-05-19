@@ -348,7 +348,7 @@ add_subdirectory(tools/cas_ui)
 
 # ─── GUI OPZIONALE E STACCABILE ───
 if(CAS_ENABLE_GUI)
-    find_package(Qt6 6.7 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 Concurrent)
+    find_package(Qt6 6.7 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 Concurrent Widgets)
     set(CMAKE_AUTOMOC ON)
     qt_standard_project_setup()
     if(COMMAND qt_policy)
@@ -390,6 +390,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/symbolic/test_calculus.cpp
         test/unit/symbolic/test_calculus_f4.cpp
         test/unit/symbolic/test_multiple_integral.cpp
+        test/unit/symbolic/test_limit_tower_adaptive.cpp
         test/unit/symbolic/test_compositions.cpp
         test/unit/symbolic/test_abs_sign.cpp
         test/unit/symbolic/test_trig_identities.cpp
@@ -471,6 +472,9 @@ if(CAS_ENABLE_TESTING)
         qt_add_executable(cas_gui_vm_tests
             GUI/test/test_appcore_undo_redo.cpp
             GUI/test/test_workspace_recovery.cpp
+            GUI/test/test_workspace_layout_state.cpp
+            GUI/test/test_autocomplete_vm.cpp
+            GUI/test/test_variables_actions.cpp
         )
         target_link_libraries(cas_gui_vm_tests
             PRIVATE
@@ -496,6 +500,7 @@ if(CAS_ENABLE_TESTING)
                 Qt6::Gui
                 Qt6::Qml
                 Qt6::Concurrent
+                Qt6::Widgets
                 GTest::gtest
         )
         target_include_directories(cas_gui_qml_smoke_tests PRIVATE

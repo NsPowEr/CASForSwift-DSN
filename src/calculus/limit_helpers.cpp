@@ -4,6 +4,7 @@
 #include "cas/algebra.hpp"
 #include "cas/ast.hpp"
 
+#include <algorithm>
 #include <optional>
 #include <string>
 #include <utility>
@@ -63,6 +64,49 @@ namespace cas::calculus {
         if (call->func_id == BuiltinOp::Atan) return true;
     }
     return false;
+}
+
+[[nodiscard]] unsigned int transcendental_tower_depth(ExprPtr expr, const Symbol& var) {
+    if (!expr) return 0U;
+    if (!depends_on(expr, var)) return 0U;
+    if (expr_is<Symbol>(expr)) return 1U;
+    if (const auto* unary = expr_cast<Unary>(expr)) {
+        return transcendental_tower_depth(unary->operand, var);
+    }
+    if (const auto* bin = expr_cast<Binary>(expr)) {
+        const unsigned int lh = transcendental_tower_depth(bin->left, var);
+        const unsigned int rh = transcendental_tower_depth(bin->right, var);
+        return std::max(lh, rh);
+    }
+    if (const auto* sum = expr_cast<Sum>(expr)) {
+        unsigned int h = 0U;
+        for (auto t : sum->terms) h = std::max(h, transcendental_tower_depth(t, var));
+        return h;
+    }
+    if (const auto* prod = expr_cast<Product>(expr)) {
+        unsigned int h = 0U;
+        for (auto f : prod->factors) h = std::max(h, transcendental_tower_depth(f, var));
+        return h;
+    }
+    if (const auto* call = expr_cast<FuncCall>(expr)) {
+        unsigned int inner = 0U;
+        for (auto a : call->args) inner = std::max(inner, transcendental_tower_depth(a, var));
+        // Gruntz tower escalation: each exp(.) wrapping a var-dependent
+        // sub-expression adds one comparability level.
+        switch (call->func_id) {
+        case BuiltinOp::Exp:
+            return inner + 1U;
+        case BuiltinOp::Ln:
+        case BuiltinOp::Log:
+        case BuiltinOp::Log10:
+            // log peels one level off (asymptotically slower than its argument)
+            // but the structural depth of *evaluating* this call still counts.
+            return std::max(inner, 1U);
+        default:
+            return std::max(inner, 1U);
+        }
+    }
+    return 1U;
 }
 
 [[nodiscard]] static ExprPtr make_power(AstArena& arena, ExprPtr base, ExprPtr exponent) {

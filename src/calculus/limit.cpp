@@ -1,9 +1,11 @@
 #include "cas/calculus.hpp"
 #include "cas/algebra.hpp"
+#include <iostream>
 
 #include "calculus_internal.hpp"
 #include "cas/error.hpp"
 
+#include <algorithm>
 #include <utility>
 
 namespace cas::calculus {
@@ -22,6 +24,20 @@ public:
     explicit LimitEngine(symbolic::CASContext& context) noexcept : context_(context), arena_(context.arena()) {}
 
     [[nodiscard]] Result<ExprPtr> compute(ExprPtr expr, const Symbol& var, ExprPtr point, LimitDirection dir) {
+        std::cerr << "[DEBUG] Entering LimitEngine::compute" << std::endl;
+        // Adaptive recursion bound (Gruntz §3.5): the legitimate recursion
+        // depth is bounded by the comparability-tower height of the input,
+        // not by a fixed constant. We estimate the height via a cheap
+        // structural AST walk and allow `2·h + 4` recursive entries, with a
+        // floor of 8 for inputs whose height the structural walk
+        // underestimates (e.g. hidden via simplification later).
+        //
+        //   factor 2:  each MRV descent generates ≤ 2 sub-limits
+        //              (sub-limit on rewritten expression + descent step).
+        //   additive 4: dispatcher strategies that introduce one extra
+        //              level each (L'Hôpital, log-log, cancellation, power).
+        const unsigned int tower_h = transcendental_tower_depth(expr, var);
+        max_depth_budget_ = std::max<unsigned int>(8U, 2U * tower_h + 4U);
         auto together_res = algebra::together(expr, context_);
         auto simplified_expr = context_.simplify(together_res.is_ok() ? together_res.value() : expr);
         if (simplified_expr.is_error()) {
@@ -58,7 +74,7 @@ public:
             }
         }
 
-        if (point_is_pos_inf) {
+        if (point_is_pos_inf || point_is_neg_inf) {
             auto mrv_res = compute_limit_mrv(simplified_expr.value(), var, simplified_point.value(), context_);
             if (mrv_res.is_ok()) {
                 return mrv_res;
@@ -80,7 +96,11 @@ public:
             ExprPtr x_sub = point_is_pos_inf
                 ? one_over_t
                 : arena_.make<Unary>(UnaryOp::Neg, one_over_t);
-            auto expr_t = context_.substitute(simplified_expr.value(), var, x_sub);
+            auto expr_sub = context_.substitute(simplified_expr.value(), var, x_sub);
+            if (expr_sub.is_error()) return expr_sub;
+            
+            auto together_t = algebra::together(expr_sub.value(), context_);
+            auto expr_t = context_.simplify(together_t.is_ok() ? together_t.value() : expr_sub.value());
             if (expr_t.is_error()) return expr_t;
 
             ExprPtr zero_pt = limit_make_integer(arena_, 0);
@@ -109,7 +129,8 @@ private:
         ExprPtr point,
         LimitDirection dir,
         unsigned int depth) {
-        if (depth >= 16U) {
+        // Adaptive depth bound — see compute() for derivation.
+        if (depth >= max_depth_budget_) {
             return fail<ExprPtr>(make_error(
                 CASErrorKind::Unimplemented,
                 "Il limite richiede piu' iterazioni di quelle supportate"));
@@ -503,6 +524,7 @@ private:
 
     symbolic::CASContext& context_;
     AstArena& arena_;
+    unsigned int max_depth_budget_{16U};
 };
 
 }  // namespace

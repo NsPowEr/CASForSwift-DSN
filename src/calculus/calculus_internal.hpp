@@ -72,6 +72,20 @@ struct QuotientView {
 [[nodiscard]] bool depends_on(ExprPtr expr, const Symbol& var);
 [[nodiscard]] bool is_bounded(ExprPtr expr, const Symbol& var);
 
+// Tower height (Gruntz §3.5): maximum nesting of exp/log chain over sub-
+// expressions that depend on `var`. Structural AST walk, O(N). Used by
+// LimitEngine to derive an adaptive recursion bound from the input
+// asymptotic complexity instead of a fixed depth cap.
+//
+//   tower_height(x)                = 1
+//   tower_height(exp(f))           = tower_height(f) + 1 if f depends on var
+//   tower_height(ln(f) / log(f))   = max(tower_height(f), 1)
+//   tower_height(other functions)  = max over children
+//
+// Conservative (always ≤ true comparability tower height); a stricter bound
+// would require running the MRV algorithm itself.
+[[nodiscard]] unsigned int transcendental_tower_depth(ExprPtr expr, const Symbol& var);
+
 [[nodiscard]] Result<ExprPtr> symbolic_sum(
     ExprPtr term,
     const Symbol& var,
