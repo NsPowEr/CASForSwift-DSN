@@ -4,6 +4,7 @@
 #include "cas/result.hpp"
 #include "cas/trace.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -288,6 +289,19 @@ public:
     void set_max_trager_tower_shift_attempts(std::size_t attempts) noexcept;
     [[nodiscard]] std::size_t max_trager_tower_shift_attempts() const noexcept { return max_trager_tower_shift_attempts_; }
 
+    // F4 Macaulay-matrix memory safety caps. These are hardware guards
+    // (not algorithmic bounds) — when exceeded, the F4 step falls back
+    // to Buchberger on the original seed, which (post-Sugar) handles
+    // the seed at theoretical minimum basis cardinality. Exposed as
+    // configurable for users with larger memory budgets; defaults
+    // preserve historical behaviour.
+    void set_f4_max_macaulay_rows(std::size_t n) noexcept { f4_max_macaulay_rows_ = n; }
+    [[nodiscard]] std::size_t f4_max_macaulay_rows() const noexcept { return f4_max_macaulay_rows_; }
+    void set_f4_max_macaulay_monomials(std::size_t n) noexcept { f4_max_macaulay_monomials_ = n; }
+    [[nodiscard]] std::size_t f4_max_macaulay_monomials() const noexcept { return f4_max_macaulay_monomials_; }
+    void set_f4_max_pending_monomials(std::size_t n) noexcept { f4_max_pending_monomials_ = n; }
+    [[nodiscard]] std::size_t f4_max_pending_monomials() const noexcept { return f4_max_pending_monomials_; }
+
     // HC-004: fresh symbol generator.  Returns a Symbol whose name is unique
     // within this context across all previous make_fresh_symbol calls AND
     // does not collide with any name currently registered through `define`.
@@ -296,6 +310,10 @@ public:
     // probed against the user-defined variable map until a free slot is
     // found.
     [[nodiscard]] Symbol make_fresh_symbol(const std::string& prefix);
+
+    void interrupt() noexcept { interrupted_ = true; }
+    void clear_interrupt() noexcept { interrupted_ = false; }
+    [[nodiscard]] bool is_interrupted() const noexcept { return interrupted_; }
 
     [[nodiscard]] Result<ExprPtr> simplify(ExprPtr expr);
     [[nodiscard]] Result<ExprPtr> substitute(ExprPtr expr, const Symbol& variable, ExprPtr value);
@@ -365,8 +383,12 @@ public:
     bool expand_bessel_recurrence_{false};
     long long max_trig_power_reduction_{32LL};
     std::size_t max_trager_tower_shift_attempts_{0U};
+    std::size_t f4_max_macaulay_rows_{512U};
+    std::size_t f4_max_macaulay_monomials_{512U};
+    std::size_t f4_max_pending_monomials_{1024U};
     std::uint64_t fresh_symbol_counter_{0U};
     PostSimplifyHook post_simplify_hook_{nullptr};
+    std::atomic_bool interrupted_{false};
 
 public:
 // Performance Caches

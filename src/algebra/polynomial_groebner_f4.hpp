@@ -33,7 +33,8 @@ struct PolyF4 {
 
 Result<std::vector<PolyF4>> f4_groebner(
     std::vector<PolyF4> G,
-    MonomialOrder order = MonomialOrder::GRevLex);
+    MonomialOrder order = MonomialOrder::GRevLex,
+    symbolic::CASContext* ctx = nullptr);
 
 Result<ExprPtr> f4_to_expr(
     const PolyF4& p,

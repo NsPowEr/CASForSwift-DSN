@@ -196,24 +196,21 @@ static bool divides(const Monomial& a, const Monomial& b) {
     return true;
 }
 
-Result<std::vector<PolyF4>> f4_groebner(std::vector<PolyF4> G, MonomialOrder order) {
+Result<std::vector<PolyF4>> f4_groebner(std::vector<PolyF4> G, MonomialOrder order, symbolic::CASContext* ctx) {
     // Termination follows from the Hilbert basis theorem (every ideal in
     // K[x_1, ..., x_n] is finitely generated) and Buchberger termination
     // theorem: under sugar-ordered Gebauer-Moeller pair pruning the pair
     // queue empties in finite time. No artificial batch counter is
-    // therefore load-bearing for correctness; the previous
+    // therefore load-bearing for correctness.
     //
-    //     if (++batches > kMaxF4Batches=2048)
-    //         return buchberger_groebner(buchberger_seed, order);
-    //
-    // bail has been removed so F4 runs to completion on its own pair
-    // queue. Memory-side guards on the Macaulay matrix (rows / monomial
-    // count) remain below as a hardware safety net; on overflow we still
-    // fall back to Buchberger, which (post-Sugar) handles the seed at
-    // theoretical minimum basis cardinality.
-    constexpr std::size_t kMaxMacaulayRows = 512;
-    constexpr std::size_t kMaxMacaulayMonomials = 512;
-    constexpr std::size_t kMaxPendingMonomials = 1024;
+    // Memory-side guards on the Macaulay matrix (rows / monomial count)
+    // remain below as a hardware safety net; on overflow we still fall
+    // back to Buchberger, which (post-Sugar) handles the seed at
+    // theoretical minimum basis cardinality. The caps are configurable
+    // via CASContext for users with larger memory budgets.
+    const std::size_t kMaxMacaulayRows = ctx ? ctx->f4_max_macaulay_rows() : std::size_t{512U};
+    const std::size_t kMaxMacaulayMonomials = ctx ? ctx->f4_max_macaulay_monomials() : std::size_t{512U};
+    const std::size_t kMaxPendingMonomials = ctx ? ctx->f4_max_pending_monomials() : std::size_t{1024U};
     size_t n_vars = 0;
     if (!G.empty()) n_vars = G[0].leading_monomial(order).size();
     

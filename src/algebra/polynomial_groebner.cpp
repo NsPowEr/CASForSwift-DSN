@@ -27,7 +27,9 @@ namespace cas::algebra {
     if (F.empty()) return ok(std::vector<ExprPtr>{});
 
     // Calcola base di Gröbner (GRevLex per efficienza)
-    auto G = f4_groebner(F, MonomialOrder::GRevLex);
+    auto groebner = f4_groebner(F, MonomialOrder::GRevLex, &ctx);
+    if (groebner.is_error()) return fail<std::vector<ExprPtr>>(groebner.error());
+    auto G = std::move(groebner.value());
 
     // Inter-riduzione -> base ridotta unica
     inter_reduce(G, MonomialOrder::GRevLex);
