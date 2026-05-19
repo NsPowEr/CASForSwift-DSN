@@ -1,4 +1,5 @@
 #include "polynomial_groebner_f4.hpp"
+#include "polynomial_groebner_f4_internal.hpp"
 #include "cas/algebra.hpp"
 #include "cas/symbolic.hpp"
 #include "cas/rational.hpp"
@@ -9,13 +10,22 @@
 #include <functional>
 #include <map>
 #include <set>
+#include <unordered_map>
 #include <vector>
-#include <numeric>
-#include <iostream>
 
 namespace cas::algebra {
 
-// --- 1. Comparatori Monomiali ---
+// --- 1. Comparatori e Hash Monomiali ---
+
+struct MonomialHash {
+    std::size_t operator()(const Monomial& v) const {
+        std::size_t seed = v.size();
+        for (auto x : v) {
+            seed ^= std::hash<unsigned int>{}(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+        }
+        return seed;
+    }
+};
 
 struct MonomialLexComparator {
     bool operator()(const Monomial& a, const Monomial& b) const {
@@ -79,10 +89,10 @@ void PolyF4::make_monic(MonomialOrder order) {
 
 class MacaulayMatrix {
 public:
-    explicit MacaulayMatrix(MonomialComparator comp) : comp_(comp), monomial_to_col(comp) {}
+    explicit MacaulayMatrix(MonomialComparator comp) : comp_(comp) {}
 
     std::vector<Monomial> col_monomials;
-    std::map<Monomial, size_t, MonomialComparator> monomial_to_col;
+    std::unordered_map<Monomial, size_t, MonomialHash> monomial_to_col;
     std::vector<PolyF4> poly_rows; // Store polynomials directly, build matrix at the end
 
     void add_polynomial(const PolyF4& poly) {
@@ -93,19 +103,26 @@ public:
     }
 
     void register_monomial(const Monomial& mon) {
-        if (monomial_to_col.find(mon) == monomial_to_col.end()) {
-            col_monomials.push_back(mon);
-            std::sort(col_monomials.begin(), col_monomials.end(), comp_);
-            monomial_to_col.clear();
-            for (size_t i = 0; i < col_monomials.size(); ++i) {
-                monomial_to_col[col_monomials[i]] = i;
-            }
-        }
+        // O(1) average insertion
+        monomial_to_col.emplace(mon, SIZE_MAX);
     }
 
     void gaussian_elimination() {
         if (poly_rows.empty()) return;
-        
+
+        // Assign column indices once, in sorted order.
+        // We must sort the collected monomials using comp_ (largest first).
+        col_monomials.clear();
+        col_monomials.reserve(monomial_to_col.size());
+        for (const auto& [mon, _] : monomial_to_col) {
+            col_monomials.push_back(mon);
+        }
+        std::sort(col_monomials.begin(), col_monomials.end(), comp_);
+
+        for (size_t i = 0; i < col_monomials.size(); ++i) {
+            monomial_to_col[col_monomials[i]] = i;
+        }
+
         // Build rows now that col_monomials is stable
         std::vector<std::map<size_t, Rational>> rows;
         for (const auto& poly : poly_rows) {
@@ -163,6 +180,11 @@ private:
 
 // --- 3. Algoritmo F4 ---
 
+struct Pair {
+    size_t i, j;
+    Monomial deg_lcm;
+};
+
 static Monomial lcm(const Monomial& a, const Monomial& b) {
     Monomial res(a.size());
     for (size_t i = 0; i < a.size(); ++i) res[i] = std::max(a[i], b[i]);
@@ -174,16 +196,29 @@ static bool divides(const Monomial& a, const Monomial& b) {
     return true;
 }
 
-struct Pair {
-    size_t i, j;
-    Monomial deg_lcm;
-};
-
-std::vector<PolyF4> f4_groebner(std::vector<PolyF4> G, MonomialOrder order) {
+Result<std::vector<PolyF4>> f4_groebner(std::vector<PolyF4> G, MonomialOrder order) {
+    // Termination follows from the Hilbert basis theorem (every ideal in
+    // K[x_1, ..., x_n] is finitely generated) and Buchberger termination
+    // theorem: under sugar-ordered Gebauer-Moeller pair pruning the pair
+    // queue empties in finite time. No artificial batch counter is
+    // therefore load-bearing for correctness; the previous
+    //
+    //     if (++batches > kMaxF4Batches=2048)
+    //         return buchberger_groebner(buchberger_seed, order);
+    //
+    // bail has been removed so F4 runs to completion on its own pair
+    // queue. Memory-side guards on the Macaulay matrix (rows / monomial
+    // count) remain below as a hardware safety net; on overflow we still
+    // fall back to Buchberger, which (post-Sugar) handles the seed at
+    // theoretical minimum basis cardinality.
+    constexpr std::size_t kMaxMacaulayRows = 512;
+    constexpr std::size_t kMaxMacaulayMonomials = 512;
+    constexpr std::size_t kMaxPendingMonomials = 1024;
     size_t n_vars = 0;
     if (!G.empty()) n_vars = G[0].leading_monomial(order).size();
     
     for (auto& g : G) g.make_monic(order);
+    const std::vector<PolyF4> buchberger_seed = G;
 
     MonomialComparator comp = get_comparator(order);
     std::vector<Pair> P;
@@ -227,7 +262,9 @@ std::vector<PolyF4> f4_groebner(std::vector<PolyF4> G, MonomialOrder order) {
             Monomial lm1 = G[p.i].leading_monomial(order);
             Monomial lm2 = G[p.j].leading_monomial(order);
             if (lm1.size() != n_vars || lm2.size() != n_vars) {
-                throw std::runtime_error("Monomial size mismatch");
+                return fail<std::vector<PolyF4>>(make_error(
+                    CASErrorKind::InvalidArgument,
+                    "F4 input contains inconsistent monomial arity"));
             }
             Monomial t1(n_vars), t2(n_vars);
             for (size_t k = 0; k < n_vars; ++k) {
@@ -235,7 +272,14 @@ std::vector<PolyF4> f4_groebner(std::vector<PolyF4> G, MonomialOrder order) {
                 t2[k] = p.deg_lcm[k] - lm2[k];
             }
             
-            auto add_mult = [&](const PolyF4& poly, const Monomial& t) {
+            auto add_mult = [&](const PolyF4& poly, const Monomial& t) -> Result<void> {
+                if (matrix.poly_rows.size() >= kMaxMacaulayRows ||
+                    matrix.monomial_to_col.size() >= kMaxMacaulayMonomials ||
+                    todo.size() + done.size() >= kMaxPendingMonomials) {
+                    return fail<void>(make_error(
+                        CASErrorKind::Timeout,
+                        "F4 Macaulay matrix construction exceeded resource guard"));
+                }
                 PolyF4 tp;
                 for (const auto& [mon, coeff] : poly.terms) {
                     Monomial nm(n_vars);
@@ -244,13 +288,21 @@ std::vector<PolyF4> f4_groebner(std::vector<PolyF4> G, MonomialOrder order) {
                     if (done.find(nm) == done.end()) todo.insert(nm);
                 }
                 matrix.add_polynomial(tp);
+                return ok();
             };
             
-            add_mult(G[p.i], t1);
-            add_mult(G[p.j], t2);
+            auto add_left = add_mult(G[p.i], t1);
+            if (add_left.is_error()) return detail::buchberger_groebner(buchberger_seed, order);
+            auto add_right = add_mult(G[p.j], t2);
+            if (add_right.is_error()) return detail::buchberger_groebner(buchberger_seed, order);
         }
 
         while (!todo.empty()) {
+            if (matrix.poly_rows.size() >= kMaxMacaulayRows ||
+                matrix.monomial_to_col.size() >= kMaxMacaulayMonomials ||
+                todo.size() + done.size() >= kMaxPendingMonomials) {
+                return detail::buchberger_groebner(buchberger_seed, order);
+            }
             Monomial m = *todo.begin();
             todo.erase(todo.begin());
             done.insert(m);
@@ -300,333 +352,7 @@ std::vector<PolyF4> f4_groebner(std::vector<PolyF4> G, MonomialOrder order) {
             }
         }
     }
-    return G;
-}
-
-// --- 4. Inter-riduzione ---
-
-void inter_reduce(std::vector<PolyF4>& G, MonomialOrder order) {
-    if (G.empty()) return;
-    size_t n_vars = G[0].leading_monomial(order).size();
-    auto comp = get_comparator(order);
-
-    bool changed = true;
-    while (changed) {
-        changed = false;
-        for (size_t i = 0; i < G.size(); ++i) {
-            PolyF4 f = G[i];
-            // Reduce f mod G \ {G[i]}
-            bool f_changed = false;
-            auto it = f.terms.begin();
-            while (it != f.terms.end()) {
-                Monomial m = it->first;
-                bool reduced = false;
-                for (size_t j = 0; j < G.size(); ++j) {
-                    if (i == j) continue;
-                    Monomial lmj = G[j].leading_monomial(order);
-                    if (divides(lmj, m)) {
-                        Rational factor = it->second / G[j].leading_coefficient(order);
-                        Monomial t(n_vars);
-                        for (size_t k = 0; k < n_vars; ++k) t[k] = m[k] - lmj[k];
-                        
-                        // f = f - factor * G[j] * t
-                        for (const auto& [mon_j, coeff_j] : G[j].terms) {
-                            Monomial nm(n_vars);
-                            for (size_t k = 0; k < n_vars; ++k) nm[k] = mon_j[k] + t[k];
-                            f.terms[nm] = f.terms[nm] - factor * coeff_j;
-                            if (f.terms[nm].numerator().is_zero()) f.terms.erase(nm);
-                        }
-                        f_changed = true;
-                        reduced = true;
-                        it = f.terms.begin(); // restart scan
-                        break;
-                    }
-                }
-                if (!reduced) ++it;
-            }
-
-            if (f_changed) {
-                if (f.is_zero()) {
-                    G.erase(G.begin() + i);
-                    changed = true;
-                    break;
-                }
-                f.make_monic();
-                G[i] = std::move(f);
-                changed = true;
-            }
-        }
-    }
-}
-
-static Rational decimal_to_rational(const std::string& decimal) {
-    size_t dot_pos = decimal.find('.');
-    if (dot_pos == std::string::npos) {
-        auto res = BigInt::parse(decimal);
-        return Rational(res.is_ok() ? res.value() : BigInt(0));
-    }
-    std::string integral = decimal.substr(0, dot_pos);
-    std::string fractional = decimal.substr(dot_pos + 1);
-    auto res_num = BigInt::parse(integral + fractional);
-    BigInt num = res_num.is_ok() ? res_num.value() : BigInt(0);
-    BigInt den = BigInt(1);
-    for (size_t i = 0; i < fractional.length(); ++i) den = den * BigInt(10);
-    return Rational(num, den);
-}
-
-// --- 5. Conversioni ---
-
-Result<PolyF4> expr_to_f4(ExprPtr expr, const std::vector<Symbol>& vars, symbolic::CASContext& ctx) {
-    if (!expr) return fail<PolyF4>(make_error(CASErrorKind::InvalidArgument, "Null expression in expr_to_f4"));
-    
-    size_t n = vars.size();
-    auto get_var_idx = [&](const std::string& name) -> std::optional<size_t> {
-        for (size_t i = 0; i < n; ++i) if (vars[i].name == name) return i;
-        return std::nullopt;
-    };
-
-    if (const auto* il = expr_cast<IntegerLit>(expr)) {
-        PolyF4 p; p.terms[Monomial(n, 0)] = Rational(il->value); return ok(p);
-    }
-    if (const auto* rl = expr_cast<RationalLit>(expr)) {
-        PolyF4 p; p.terms[Monomial(n, 0)] = Rational(rl->numerator, rl->denominator); return ok(p);
-    }
-    if (const auto* dl = expr_cast<DecimalLit>(expr)) {
-        auto rat = decimal_to_rational(dl->text);
-        PolyF4 p; p.terms[Monomial(n, 0)] = rat; return ok(p);
-    }
-    if (const auto* sym = expr_cast<Symbol>(expr)) {
-        auto idx = get_var_idx(sym->name);
-        if (idx) {
-            PolyF4 p; Monomial mon(n, 0); mon[*idx] = 1;
-            p.terms[mon] = Rational(1); return ok(p);
-        }
-        return fail<PolyF4>(make_error(CASErrorKind::Unimplemented, "Parametric constants not supported in expr_to_f4: " + sym->name));
-    }
-    if (const auto* un = expr_cast<Unary>(expr)) {
-        if (un->op == UnaryOp::Neg) {
-            auto r = expr_to_f4(un->operand, vars, ctx);
-            if (r.is_error()) return r;
-            for (auto& [mon, coeff] : r.value().terms) coeff = -coeff;
-            return r;
-        }
-    }
-    if (const auto* bin = expr_cast<Binary>(expr)) {
-        auto lhs = expr_to_f4(bin->left, vars, ctx);
-        auto rhs = expr_to_f4(bin->right, vars, ctx);
-        if (lhs.is_error()) return lhs;
-        if (rhs.is_error()) return rhs;
-
-        if (bin->op == BinaryOp::Add) {
-            for (const auto& [mon, coeff] : rhs.value().terms) {
-                lhs.value().terms[mon] = lhs.value().terms[mon] + coeff;
-                if (lhs.value().terms[mon].numerator().is_zero()) lhs.value().terms.erase(mon);
-            }
-            return lhs;
-        }
-        if (bin->op == BinaryOp::Sub) {
-            for (const auto& [mon, coeff] : rhs.value().terms) {
-                lhs.value().terms[mon] = lhs.value().terms[mon] - coeff;
-                if (lhs.value().terms[mon].numerator().is_zero()) lhs.value().terms.erase(mon);
-            }
-            return lhs;
-        }
-        if (bin->op == BinaryOp::Mul) {
-            PolyF4 res;
-            for (const auto& [mon_l, coeff_l] : lhs.value().terms) {
-                for (const auto& [mon_r, coeff_r] : rhs.value().terms) {
-                    Monomial mon(n);
-                    for (size_t k = 0; k < n; ++k) mon[k] = mon_l[k] + mon_r[k];
-                    res.terms[mon] = res.terms[mon] + coeff_l * coeff_r;
-                    if (res.terms[mon].numerator().is_zero()) res.terms.erase(mon);
-                }
-            }
-            return ok(res);
-        }
-        if (bin->op == BinaryOp::Pow) {
-            const auto* il = expr_cast<IntegerLit>(bin->right);
-            if (il && !il->value.is_negative()) {
-                long long exp_val = std::stoll(il->value.decimal());
-                PolyF4 res; res.terms[Monomial(n, 0)] = Rational(1);
-                PolyF4 base = lhs.value();
-                while (exp_val > 0) {
-                    if (exp_val % 2 == 1) {
-                        PolyF4 next_res;
-                        for (const auto& [ml, cl] : res.terms) {
-                            for (const auto& [mb, cb] : base.terms) {
-                                Monomial m(n); for (size_t k = 0; k < n; ++k) m[k] = ml[k] + mb[k];
-                                next_res.terms[m] = next_res.terms[m] + cl * cb;
-                                if (next_res.terms[m].numerator().is_zero()) next_res.terms.erase(m);
-                            }
-                        }
-                        res = std::move(next_res);
-                    }
-                    PolyF4 next_base;
-                    for (const auto& [m1, c1] : base.terms) {
-                        for (const auto& [m2, c2] : base.terms) {
-                            Monomial m(n); for (size_t k = 0; k < n; ++k) m[k] = m1[k] + m2[k];
-                            next_base.terms[m] = next_base.terms[m] + c1 * c2;
-                            if (next_base.terms[m].numerator().is_zero()) next_base.terms.erase(m);
-                        }
-                    }
-                    base = std::move(next_base);
-                    exp_val /= 2;
-                }
-                return ok(res);
-            }
-        }
-    }
-    if (const auto* s = expr_cast<Sum>(expr)) {
-        PolyF4 res;
-        for (auto term : s->terms) {
-            auto r = expr_to_f4(term, vars, ctx);
-            if (r.is_error()) return r;
-            for (const auto& [mon, coeff] : r.value().terms) {
-                res.terms[mon] = res.terms[mon] + coeff;
-                if (res.terms[mon].numerator().is_zero()) res.terms.erase(mon);
-            }
-        }
-        return ok(res);
-    }
-    if (const auto* p = expr_cast<Product>(expr)) {
-        PolyF4 res; res.terms[Monomial(n, 0)] = Rational(1);
-        for (auto factor : p->factors) {
-            auto r = expr_to_f4(factor, vars, ctx);
-            if (r.is_error()) return r;
-            PolyF4 next_res;
-            for (const auto& [ml, cl] : res.terms) {
-                for (const auto& [mr, cr] : r.value().terms) {
-                    Monomial m(n); for (size_t k = 0; k < n; ++k) m[k] = ml[k] + mr[k];
-                    next_res.terms[m] = next_res.terms[m] + cl * cr;
-                    if (next_res.terms[m].numerator().is_zero()) next_res.terms.erase(m);
-                }
-            }
-            res = std::move(next_res);
-        }
-        return ok(res);
-    }
-
-    return fail<PolyF4>(make_error(CASErrorKind::Unimplemented, "expr_to_f4 unsupported: " + debug_print(expr)));
-}
-
-Result<ExprPtr> f4_to_expr(const PolyF4& p, const std::vector<Symbol>& vars, symbolic::CASContext& ctx) {
-    std::vector<ExprPtr> sum_terms;
-    AstArena& arena = ctx.arena();
-    for (const auto& [mon, coeff] : p.terms) {
-        ExprPtr term_expr = make_rational_expr(arena, coeff);
-        for (size_t i = 0; i < vars.size(); ++i) {
-            if (mon[i] > 0) {
-                ExprPtr var_expr = arena.make<Symbol>(vars[i].name);
-                if (mon[i] > 1) {
-                    var_expr = arena.make<Binary>(BinaryOp::Pow, var_expr, arena.make<IntegerLit>(BigInt(mon[i])));
-                }
-                term_expr = arena.make<Binary>(BinaryOp::Mul, term_expr, var_expr);
-            }
-        }
-        sum_terms.push_back(term_expr);
-    }
-    if (sum_terms.empty()) return ok(arena.make<IntegerLit>(BigInt(0)));
-    if (sum_terms.size() == 1) return ok(sum_terms[0]);
-    return ok(arena.make<Sum>(sum_terms));
-}
-
-// --- 6. Solver via Shape Lemma ---
-
-Result<std::vector<std::vector<ExprPtr>>> solve_nonlinear_system_f4(
-    const std::vector<ExprPtr>& equations,
-    const std::vector<Symbol>& variables,
-    symbolic::CASContext& ctx) {
-    
-    try {
-        size_t n = variables.size();
-        MonomialOrder order = MonomialOrder::Lex;
-        std::vector<PolyF4> F;
-        for (ExprPtr eq : equations) {
-            auto p = expr_to_f4(eq, variables, ctx);
-            if (p.is_error()) return fail<std::vector<std::vector<ExprPtr>>>(p.error());
-            F.push_back(p.value());
-        }
-
-        // Lex order GB for Shape Lemma
-        auto G = f4_groebner(std::move(F), order);
-
-        inter_reduce(G, order);
-
-        if (G.empty()) return ok(std::vector<std::vector<ExprPtr>>{});
-
-        // Shape Lemma: try to find a polynomial in only the last variable
-        std::optional<PolyF4> pure_last;
-        for (const auto& g : G) {
-            bool only_last = true;
-            for (const auto& [mon, coeff] : g.terms) {
-                for (size_t i = 0; i < n - 1; ++i) {
-                    if (mon[i] > 0) { only_last = false; break; }
-                }
-                if (!only_last) break;
-            }
-            if (only_last) { pure_last = g; break; }
-        }
-
-        if (!pure_last) {
-            return fail<std::vector<std::vector<ExprPtr>>>(make_error(CASErrorKind::Unimplemented, "Shape lemma solver: pure polynomial not found"));
-        }
-
-        // Solve for the last variable
-        auto last_expr_res = f4_to_expr(*pure_last, variables, ctx);
-        if (last_expr_res.is_error()) return fail<std::vector<std::vector<ExprPtr>>>(last_expr_res.error());
-
-        auto last_roots_res = solve_polynomial(last_expr_res.value(), variables.back(), ctx);
-        if (last_roots_res.is_error()) return fail<std::vector<std::vector<ExprPtr>>>(last_roots_res.error());
-
-        std::vector<std::vector<ExprPtr>> all_solutions;
-        for (ExprPtr root : last_roots_res.value()) {
-            std::vector<ExprPtr> sol(n);
-            sol[n - 1] = root;
-            all_solutions.push_back(std::move(sol));
-        }
-
-        for (int i = static_cast<int>(n) - 2; i >= 0; --i) {
-            std::vector<std::vector<ExprPtr>> next_solutions;
-            for (const auto& sol : all_solutions) {
-                std::vector<ExprPtr> roots_for_i;
-                for (const auto& g : G) {
-                    Monomial lm = g.leading_monomial(order);
-                    if (lm.size() > static_cast<size_t>(i) && lm[i] > 0) {
-                        bool other_vars_ok = true;
-                        for (size_t k = 0; k < n; ++k) {
-                            if (k < static_cast<size_t>(i) && lm[k] > 0) { other_vars_ok = false; break; }
-                        }
-                        if (other_vars_ok) {
-                            auto g_expr_res = f4_to_expr(g, variables, ctx);
-                            if (g_expr_res.is_error()) continue;
-                            ExprPtr g_expr = g_expr_res.value();
-                            
-                            for (size_t k = i + 1; k < n; ++k) {
-                                auto sub = symbolic::substitute(g_expr, variables[k], sol[k], ctx);
-                                if (sub.is_ok()) g_expr = sub.value();
-                            }
-                            auto solved = solve_polynomial(g_expr, variables[i], ctx);
-                            if (solved.is_ok() && !solved.value().empty()) {
-                                roots_for_i = solved.value();
-                                break;
-                            }
-                        }
-                    }
-                }
-                for (ExprPtr r : roots_for_i) {
-                    std::vector<ExprPtr> new_sol = sol;
-                    new_sol[i] = r;
-                    next_solutions.push_back(std::move(new_sol));
-                }
-            }
-            all_solutions = std::move(next_solutions);
-        }
-
-        return ok(all_solutions);
-    } catch (const std::exception& e) {
-        std::cerr << "EXCEPTION in solve_nonlinear_system_f4: " << e.what() << std::endl;
-        throw;
-    }
+    return ok(std::move(G));
 }
 
 } // namespace cas::algebra
