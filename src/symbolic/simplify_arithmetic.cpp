@@ -410,17 +410,19 @@ Result<ExprPtr> Simplifier::simplify_power(ExprPtr base, ExprPtr exponent, ExprP
             return simplify_expr(arena_.make<Product>(std::move(factors)));
         }
 
-        // E^(ln(x)) = x: valido per x non noto negativo/zero
+        // E^(ln(x)) = x: valido SOLO se x è dimostrabile positivo.
+        // Per x simbolico senza assumption, exp(ln(x)) NON è uguale a x
+        // nel campo complesso (branch cut su ramo principale del logaritmo).
+        // Pre-fix (bug): logica invertita `if (!is_known_nonpositive)`
+        // applicava la cancellazione anche a simboli ignoti.
+        // Riferimento math: Bronstein "Symbolic Integration" §3.3.
         const auto* call = expr_cast<FuncCall>(exponent);
         if (call != nullptr && call->func_id == BuiltinOp::Ln && call->args.size() == 1U) {
             ExprPtr arg = call->args.front();
-            LiteralRational arg_rat;
-            auto arg_exact = try_get_exact_rational(arg, arg_rat);
-            bool is_known_nonpositive = arg_exact.is_ok() && arg_exact.value() &&
-                (arg_rat.value.numerator().is_zero() || arg_rat.value.numerator().is_negative());
-            if (!is_known_nonpositive) {
+            if (is_known_positive(arg)) {
                 return traced_result(RuleId::SimplifyExpLnPositive, target_before, arg);
             }
+            // Altrimenti: mantieni forma simbolica E^(ln(arg)).
         }
     }
 

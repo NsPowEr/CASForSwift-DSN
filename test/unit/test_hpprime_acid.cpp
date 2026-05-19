@@ -411,6 +411,44 @@ TEST_F(AcidTest, Test16_BaselProblem) {
     EXPECT_TRUE(eq.value()) << "Result != pi^2 / 6";
 }
 
+TEST_F(AcidTest, Test16_ZetaEvenFamilyUsesBernoulliFormula) {
+    Symbol t("t");
+    ExprPtr t_ptr = ctx.arena().make<Symbol>("t");
+    ExprPtr term = ctx.arena().make<Binary>(BinaryOp::Div,
+        ctx.arena().make<IntegerLit>(BigInt(1)),
+        ctx.arena().make<Binary>(BinaryOp::Pow, t_ptr, ctx.arena().make<IntegerLit>(BigInt(4))));
+
+    ExprPtr lower = ctx.arena().make<IntegerLit>(BigInt(1));
+    ExprPtr upper = ctx.arena().make<Constant>(MathConstant::Infinity);
+
+    auto res = sum(term, t, lower, upper, ctx);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+
+    ExprPtr pi = ctx.arena().make<Constant>(MathConstant::Pi);
+    ExprPtr expected = ctx.arena().make<Binary>(BinaryOp::Div,
+        ctx.arena().make<Binary>(BinaryOp::Pow, pi, ctx.arena().make<IntegerLit>(BigInt(4))),
+        ctx.arena().make<IntegerLit>(BigInt(90)));
+
+    auto eq = mathematically_equal(res.value(), expected, ctx);
+    ASSERT_TRUE(eq.is_ok()) << eq.error().message;
+    EXPECT_TRUE(eq.value()) << "Expected zeta(4)=pi^4/90, got " << debug_print(res.value());
+}
+
+TEST_F(AcidTest, Test16_OddPSeriesStaysHonestUnimplemented) {
+    Symbol n("n");
+    ExprPtr n_ptr = ctx.arena().make<Symbol>("n");
+    ExprPtr term = ctx.arena().make<Binary>(BinaryOp::Div,
+        ctx.arena().make<IntegerLit>(BigInt(1)),
+        ctx.arena().make<Binary>(BinaryOp::Pow, n_ptr, ctx.arena().make<IntegerLit>(BigInt(3))));
+
+    ExprPtr lower = ctx.arena().make<IntegerLit>(BigInt(1));
+    ExprPtr upper = ctx.arena().make<Constant>(MathConstant::Infinity);
+
+    auto res = sum(term, n, lower, upper, ctx);
+    ASSERT_TRUE(res.is_error());
+    EXPECT_EQ(res.error().kind, CASErrorKind::Unimplemented);
+}
+
 // --- TEST 17: SQUEEZE THEOREM LIMIT (Calculus Blindspot) ---
 // limit(x * sin(1/x), x, 0) = 0
 TEST_F(AcidTest, Test17_SqueezeTheoremLimit) {
@@ -459,6 +497,28 @@ TEST_F(AcidTest, Test18_SymbolicComplexResidues) {
     auto eq = mathematically_equal(res.value(), expected, ctx);
     ASSERT_TRUE(eq.is_ok()) << eq.error().message;
     EXPECT_TRUE(eq.value()) << "Result != -I / 4";
+}
+
+TEST_F(AcidTest, Test18_ResidueUsesLocalSeriesBeyondOrderThree) {
+    Symbol x("x");
+    ExprPtr x_ptr = ctx.arena().make<Symbol>("x");
+    ExprPtr one = ctx.arena().make<IntegerLit>(BigInt(1));
+    ExprPtr numerator = ctx.arena().make<Binary>(
+        BinaryOp::Pow,
+        x_ptr,
+        ctx.arena().make<IntegerLit>(BigInt(3)));
+    ExprPtr denominator = ctx.arena().make<Binary>(
+        BinaryOp::Pow,
+        ctx.arena().make<Binary>(BinaryOp::Sub, x_ptr, one),
+        ctx.arena().make<IntegerLit>(BigInt(4)));
+    ExprPtr expr = ctx.arena().make<Binary>(BinaryOp::Div, numerator, denominator);
+
+    auto res = residue(expr, x, one, ctx);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+
+    auto eq = mathematically_equal(res.value(), one, ctx);
+    ASSERT_TRUE(eq.is_ok()) << eq.error().message;
+    EXPECT_TRUE(eq.value()) << "Expected residue coefficient of x^3/(x-1)^4 at x=1 to be 1";
 }
 
 // --- TEST 19: PATHOLOGICAL GRÖBNER SYSTEM (Algebraic Geometry) ---
@@ -544,8 +604,14 @@ TEST_F(AcidTest, Test25_IdentityTrapLnSqrtE) {
 
 // --- TEST 26: SCHANUEL'S CONJECTURE LIMITS ---
 // DIAGNOSI: e^(pi + ln(x)) / x = e^pi * x / x = e^pi  ⟹  espressione - e^pi = 0
-// Richiede la regola e^(ln(x)) = x (per variabili simboliche).
+// MATH NOTE: e^(ln(x)) = x è valido SOLO per x > 0 (branch cut su complessi).
+// L'identità deve essere richiesta esplicitamente via `assume_positive`.
+// Pre-fix il sistema applicava la cancellazione senza assumption (bug
+// semantico: cf. simplify_arithmetic.cpp F1.1.1). Test aggiornato per
+// dichiarare il dominio esplicitamente.
 TEST_F(AcidTest, Test26_SchanuelLimits) {
+    Symbol x_sym{"x"};
+    ctx.assumptions().assume_positive(x_sym);  // required for e^(ln(x)) = x
     ExprPtr x_ptr    = ctx.arena().make<Symbol>("x");
     ExprPtr pi_const = ctx.arena().make<Constant>(MathConstant::Pi);
     ExprPtr e_const  = ctx.arena().make<Constant>(MathConstant::E);
