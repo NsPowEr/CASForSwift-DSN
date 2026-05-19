@@ -106,6 +106,20 @@ struct MultiRootOptions {
     double high,
     double tol);
 
+// Lipschitz dyadic refinement (Hansen-style interval narrowing).
+// Robust root finder for *transcendental* univariate functions on a
+// compact interval [low, high] in which `f` is continuously differentiable.
+// Caller supplies a pre-computed symbolic derivative `fp`. Each
+// sub-interval is excluded when |f(midpoint)| > L * (width / 2), where L
+// is a local 3-point sample of |f'|; sign-change descents and Lipschitz
+// exclusion together remove the equispaced-grid blind spot for
+// densely-oscillating functions (e.g. sin(1000x)). Tolerance and depth
+// derive from the problem: tol = ctx-controlled root precision,
+// max_depth = ceil(log2((high-low)/tol)) + a small safety constant.
+[[nodiscard]] Result<std::vector<double>> lipschitz_refine_roots(
+    ExprPtr f, ExprPtr fp, const std::string& variable,
+    double low, double high, double tol, unsigned int max_depth);
+
 /**
  * Integrazione numerica.
  */

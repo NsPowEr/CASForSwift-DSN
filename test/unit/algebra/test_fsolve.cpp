@@ -184,6 +184,27 @@ TEST_F(FsolveTest, SturmCountsRootsOnDegreeFive) {
     }
 }
 
+// Step 6 power-gain: Lipschitz dyadic refinement for densely-oscillating
+// transcendental f. sin(c·x) on [0, 1] for moderately large c has many
+// roots equally spaced at π/c. With a fixed grid of 400 samples (step
+// 1/400) and c=50, sample step (1/400) ≈ root spacing (π/50 ≈ 0.063)
+// is on the edge of resolution; with c large, samples merge roots.
+// Lipschitz refinement resolves all roots regardless of c (limited only
+// by `tol`).
+TEST_F(FsolveTest, LipschitzResolvesDenseTranscendentalRoots) {
+    // sin(50 x) on [0, 1] has 50/π · 1 ≈ 15.92 → 15 or 16 zeros.
+    ExprPtr f = parse("sin(50*x)");
+    Symbol x("x");
+
+    auto res = fsolve(f, x, ctx, 0.0, 1.0);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+
+    auto roots = extract_roots(res.value());
+    EXPECT_GE(roots.size(), 15U)
+        << "sin(50x) has ~16 roots in [0,1]; Lipschitz must find them all";
+    EXPECT_LE(roots.size(), 17U) << "no spurious roots beyond expected count";
+}
+
 // Step 3 power-gain: close-together roots. (x - 1.0001)(x - 1.0002)
 // = x^2 - 2.0003 x + 1.00030002.  An equidistant 400-sample grid on
 // [0, 2] has step 0.005, ≫ root separation 0.0001 → both roots map to

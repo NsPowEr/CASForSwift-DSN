@@ -206,6 +206,7 @@ set(CAS_NUMERIC_SOURCES
     src/numeric/evaluator.cpp
     src/numeric/solvers.cpp
     src/numeric/sturm.cpp
+    src/numeric/lipschitz.cpp
     src/numeric/integration.cpp
     src/numeric/ode.cpp
     src/numeric/sampler.cpp

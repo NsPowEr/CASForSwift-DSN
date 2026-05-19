@@ -1,4 +1,5 @@
 #include "cas/algebra.hpp"
+#include "cas/calculus.hpp"
 #include "cas/numeric.hpp"
 #include "cas/symbolic.hpp"
 #include "cas/ast.hpp"
@@ -87,11 +88,28 @@ Result<ExprPtr> fsolve(
         // fall through to grid scan if expr is not a rational polynomial
     }
 
-    // Phase 2b: transcendental fallback — grid scan + bisection + Newton.
-    // The 400-sample grid here is a *bootstrap*, not a precision bound:
-    // every detected sign change is refined to `tolerance` by bisection
-    // and then polished by Newton. This path is replaced by Lipschitz
-    // dyadic refinement in Step 6 (see Roadmap WAVE A.2).
+    // Phase 2b: transcendental path — Lipschitz dyadic refinement.
+    // Precompute symbolic derivative once, then descend with sign-change +
+    // Lipschitz exclusion. Depth bound derives from interval width / tol.
+    auto deriv_res = calculus::diff(f, var, 1, ctx);
+    if (deriv_res.is_ok()) {
+        const double width_ratio = (search_high - search_low) / std::max(kTolerance, 1e-300);
+        const unsigned int max_depth = static_cast<unsigned int>(
+            std::ceil(std::log2(std::max(width_ratio, 2.0)))) + 4U;
+        auto lip_res = numeric::lipschitz_refine_roots(
+            f, deriv_res.value(), var.name,
+            search_low, search_high, kTolerance, max_depth);
+        if (lip_res.is_ok()) {
+            const auto& roots = lip_res.value();
+            if (roots.empty()) {
+                return ok(ctx.arena().make<Matrix>(0, 1, std::vector<ExprPtr>{}));
+            }
+            return ok(roots_to_matrix(roots, ctx.arena()));
+        }
+    }
+
+    // Phase 2c: ultimate fallback — legacy grid scan (only reached if
+    // both Sturm and Lipschitz paths fail to start).
     numeric::MultiRootOptions opts;
     opts.low  = search_low;
     opts.high = search_high;
