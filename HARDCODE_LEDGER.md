@@ -178,6 +178,47 @@ _(nessuna — ledger ripulito 2026-05-19 dopo audit + 9 fix algoritmici)_
 
 ---
 
+## Algorithm Fidelity Audit (2026-05-19)
+
+Onestà rispetto a citazioni letterarie nei commit message:
+
+### Implementati al massimo (5)
+- **Sturm 1829** (HC-012, commit `1108880`): sequence + V(a)-V(b) +
+  bisection rationale + Newton polish + squarefree decomp completi.
+- **Knuth TAOCP §4.6.2 Mignotte** (HC-007, commit `cce829b` e
+  HC-015, commit `6c809cd`): formula applicata correttamente.
+- **GMNR Sugar 1991 variante inhomogena** (HC-011, commit `43dd1fb`):
+  formula S-poly sugar + selezione lex implementate. Variante
+  omogena richiederebbe `homogenize()` infrastructure (assente).
+- **Hilbert basis theorem** (HC-013, commit `fb23498`): invocazione
+  corretta come giustificazione, niente algoritmo da implementare.
+- **Buchberger 1985 on-fly tail-reduction** (commit successivo a
+  questa audit): variante sicura aggiunta ex-post. NB: piena
+  minimization durante run NON sicura — minimization vera resta
+  post-loop in `inter_reduce`.
+
+### Implementati semplificati / approssimati (3)
+- **Gruntz 1996 §3.5** (HC-010, commit `a8d3e75`): mio contributo =
+  helper `transcendental_tower_depth` + bound adattivo. L'algoritmo
+  Gruntz MRV vero PREESISTEVA in `limit_mrv.cpp`. Ho sbloccato la
+  profondità di ricorsione, non implementato Gruntz da zero.
+- **Hansen 1992 interval Newton** (HC-014, commit `5f5e068`): ho
+  implementato float-Lipschitz refinement ("Hansen-style"), NON
+  interval arithmetic rigoroso. Cap Lipschitz da 3-point sample
+  estimate. Vero Hansen richiede MPFR interval lib (futuro L3-01).
+- **Lecerf 2007 §3 pruning** (HC-015, commit `6c809cd`): Mignotte
+  bound pruning implementato. Variante polynomial-time Lecerf con
+  LLL NON implementata.
+
+### Nominali (3) — citati nei plan, NON nel codice
+- **Faugère 2002 Block F4 §4.3**: documentato FE-001. NON
+  implementato. Solo termination cap rimosso (commit `fb23498`).
+- **van Hoeij 2002 Theorem 4.2**: documentato FE-002. Tentativo
+  BFS-by-size 2026-05-19 → regressione perf → rolled back.
+- **Belabas-vH-Klüners-Steel 2004**: citato nei piani, NON nel codice.
+
+---
+
 ## Future Enhancements (NON debts — algoritmo corretto, solo performance)
 
 Queste voci NON sono hardcode né debiti. La correttezza è garantita su
