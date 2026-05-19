@@ -407,6 +407,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/symbolic/test_mrv_cancellation_probe.cpp
         test/unit/calculus/test_risch_logarithmic_probe.cpp
         test/unit/algebra/test_cyclotomic_mobius.cpp
+        test/unit/algebra/test_berlekamp_probe.cpp
         test/unit/symbolic/test_math_correctness.cpp
         test/unit/symbolic/test_compositions.cpp
         test/unit/symbolic/test_abs_sign.cpp
