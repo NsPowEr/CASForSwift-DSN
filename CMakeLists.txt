@@ -404,6 +404,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/symbolic/test_calculus_f4.cpp
         test/unit/symbolic/test_multiple_integral.cpp
         test/unit/symbolic/test_limit_tower_adaptive.cpp
+        test/unit/algebra/test_cyclotomic_mobius.cpp
         test/unit/symbolic/test_math_correctness.cpp
         test/unit/symbolic/test_compositions.cpp
         test/unit/symbolic/test_abs_sign.cpp
