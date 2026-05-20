@@ -132,7 +132,7 @@
 | CAS-L3-17 | LinAlg | Decomposizioni Matriciali Avanzate | L3 | Aperta | L3-01 | Medio | LU/QR/SVD symbolic-numeric |
 | CAS-L3-18 | Algebra | Toolkit Galois Base | L3 | Aperta | L3-06, L3-16 | Medio | Galois group/resolventi base |
 | CAS-L3-19 | Solving | Solving Polinomiale in Chiusura | L3 | Aperta | L3-16 | Alto | Grado >4 in estensioni algebriche |
-| CAS-L3-20 | Polynomial | Ordinamenti Monomiali Custom | L3 | Aperta | L3-09 | Basso | Estensione oltre grevlex/lex |
+| CAS-L3-20 | Polynomial | Ordinamenti Monomiali Custom | L3 | Risolta (3 ordini) | L3-09 | Basso | **2026-05-20 (STEP 19)**: aggiunto `MonomialOrder::GLex` accanto a Lex/GRevLex. Comparator `MonomialGLexComparator` in `polynomial_groebner_f4.cpp`: total degree first, lex tie-break. Dispatch via `get_comparator`. 4 test: leading monomial lex vs glex vs grevlex su x²y+xy²+1, GLex prefers higher total degree (y³ over x²), anti-hardcode su 3 ordini distinti (x+y²+y), GLex su linear (deg-1 tie via lex). Custom weighted orders deferred follow-up. |
 
 ---
 

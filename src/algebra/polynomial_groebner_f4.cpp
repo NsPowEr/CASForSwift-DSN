@@ -49,10 +49,25 @@ struct MonomialGRevLexComparator {
     }
 };
 
+// Graded lex: order by total degree first, then lex on ties.
+struct MonomialGLexComparator {
+    bool operator()(const Monomial& a, const Monomial& b) const {
+        unsigned int da = 0; for (unsigned int x : a) da += x;
+        unsigned int db = 0; for (unsigned int x : b) db += x;
+        if (da != db) return da > db;
+        for (size_t i = 0; i < a.size(); ++i) {
+            if (a[i] > b[i]) return true;
+            if (a[i] < b[i]) return false;
+        }
+        return false;
+    }
+};
+
 using MonomialComparator = std::function<bool(const Monomial&, const Monomial&)>;
 
 static MonomialComparator get_comparator(MonomialOrder order) {
     if (order == MonomialOrder::Lex) return MonomialLexComparator();
+    if (order == MonomialOrder::GLex) return MonomialGLexComparator();
     return MonomialGRevLexComparator();
 }
 

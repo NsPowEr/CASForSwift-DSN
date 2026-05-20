@@ -418,6 +418,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/numeric/test_float_contextual.cpp
         test/unit/symbolic/test_units.cpp
         test/unit/symbolic/test_piecewise.cpp
+        test/unit/algebra/test_monomial_orders.cpp
         test/unit/algebra/test_cyclotomic_mobius.cpp
         test/unit/algebra/test_berlekamp_probe.cpp
         test/unit/symbolic/test_math_correctness.cpp

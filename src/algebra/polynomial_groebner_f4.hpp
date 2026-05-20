@@ -16,8 +16,9 @@ namespace algebra {
 using Monomial = std::vector<unsigned int>;
 
 enum class MonomialOrder {
-    Lex,
-    GRevLex
+    Lex,      // lex (a > b iff first differing exponent has a > b)
+    GLex,     // graded lex (total degree first, lex tie-break)
+    GRevLex   // graded reverse lex (total degree first, reverse lex tie-break)
 };
 
 struct PolyF4 {
