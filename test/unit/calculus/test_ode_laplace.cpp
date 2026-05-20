@@ -54,24 +54,24 @@ TEST_F(OdeLaplaceTest, FirstOrderHomogeneous) {
     EXPECT_TRUE(equiv(r.value(), expected));
 }
 
-TEST_F(OdeLaplaceTest, DISABLED_FirstOrderForced) {
-    // DISABLED: y' + y = 1, y(0)=0 → y = 1 - exp(-t).
-    // Y(s) = 1/(s(s+1)) PFD path failure — partial_fractions returns
-    // form non gestita dal pattern matcher dell'inverse Laplace.
-    // Follow-up: harden PFD-to-pattern bridge.
+TEST_F(OdeLaplaceTest, FirstOrderForced) {
+    // y' + y = 1, y(0)=0 → y = 1 - exp(-t).
+    // Y(s) = 1/(s(s+1)) gestito via PFD + Unary(Neg) bridge.
     std::vector<ExprPtr> coeffs = {int_e(1), int_e(1)};
     ExprPtr f = int_e(1);
     std::vector<ExprPtr> ics = {int_e(0)};
     auto r = solve_ode_laplace(coeffs, f, ics, t, ctx);
-    if (r.is_ok()) {
-        auto d = calculus::diff(r.value(), t, 1U, ctx);
-        ASSERT_TRUE(d.is_ok());
-        ExprPtr lhs = ctx.arena().make<Binary>(BinaryOp::Add, d.value(), r.value());
-        auto tog = algebra::together(lhs, ctx);
-        auto simp = ctx.simplify(tog.is_ok() ? tog.value() : lhs);
-        auto* lit = expr_cast<IntegerLit>(simp.value());
-        EXPECT_TRUE(lit != nullptr && lit->value == BigInt(1));
-    }
+    ASSERT_TRUE(r.is_ok()) << r.error().message;
+    // Verify y' + y = 1.
+    auto d = calculus::diff(r.value(), t, 1U, ctx);
+    ASSERT_TRUE(d.is_ok());
+    ExprPtr lhs = ctx.arena().make<Binary>(BinaryOp::Add, d.value(), r.value());
+    auto tog = algebra::together(lhs, ctx);
+    auto simp = ctx.simplify(tog.is_ok() ? tog.value() : lhs);
+    ASSERT_TRUE(simp.is_ok());
+    auto* lit = expr_cast<IntegerLit>(simp.value());
+    EXPECT_TRUE(lit != nullptr && lit->value == BigInt(1))
+        << "y' + y should equal 1";
 }
 
 TEST_F(OdeLaplaceTest, SecondOrderHarmonicOscillator) {

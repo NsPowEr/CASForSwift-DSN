@@ -319,6 +319,13 @@ namespace {
         return ctx.simplify(arena.make<Sum>(std::move(terms)));
     }
 
+    // Unary(Neg, X) → -L⁻¹{X}
+    if (const auto* un = expr_cast<Unary>(expr); un && un->op == UnaryOp::Neg) {
+        auto inner = inverse_laplace_transform(un->operand, s, t, ctx);
+        if (inner.is_error()) return inner;
+        return ctx.simplify(arena.make<Unary>(UnaryOp::Neg, inner.value()));
+    }
+
     // Constant scalar factor: c · F(s) → c · L⁻¹{F(s)}
     if (const auto* prod = expr_cast<Product>(expr)) {
         std::vector<ExprPtr> consts, vars;
