@@ -456,7 +456,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/symbolic/test_mathematical_equality.cpp
         test/unit/symbolic/test_property_based.cpp
         test/unit/symbolic/test_regression.cpp
-        # test/unit/symbolic/test_quantity.cpp
+        test/unit/symbolic/test_quantity.cpp
         # test/unit/symbolic/test_assumptions_advanced.cpp
         # test/unit/symbolic/test_assumptions_advanced_new.cpp
         test/unit/symbolic/test_assumptions_relational.cpp

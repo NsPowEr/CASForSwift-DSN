@@ -338,6 +338,14 @@ int canonical_compare(ExprPtr lhs, ExprPtr rhs) noexcept {
         return canonical_compare(lhs_unary->operand, rhs_unary->operand);
     }
 
+    // L3-08 Quantity: order by SI dimensions first, then by value.
+    if (const auto* lhs_qty = expr_cast<Quantity>(lhs)) {
+        const auto* rhs_qty = expr_cast<Quantity>(rhs);
+        if (lhs_qty->dimensions < rhs_qty->dimensions) return -1;
+        if (rhs_qty->dimensions < lhs_qty->dimensions) return 1;
+        return canonical_compare(lhs_qty->value, rhs_qty->value);
+    }
+
     if (const auto* lhs_binary = expr_cast<Binary>(lhs)) {
         const auto* rhs_binary = expr_cast<Binary>(rhs);
         if (lhs_binary->op < rhs_binary->op) return -1;

@@ -50,6 +50,35 @@ Result<ExprPtr> Simplifier::simplify_sum_terms(const std::vector<ExprPtr>& terms
         }
     }
 
+    // L3-08 Quantity addition: group Quantity terms by SI dimension and
+    // sum values. Different dimensions kept as separate Quantity instances
+    // (dimensional mismatch is an algebraic incompatibility, not an error).
+    {
+        std::map<SIDimensions, std::vector<ExprPtr>> by_dim;
+        std::vector<ExprPtr> non_qty;
+        for (ExprPtr t : flat_terms) {
+            if (auto* q = expr_cast<Quantity>(t)) {
+                by_dim[q->dimensions].push_back(q->value);
+            } else {
+                non_qty.push_back(t);
+            }
+        }
+        if (!by_dim.empty() && (by_dim.size() > 1 || by_dim.begin()->second.size() > 1)) {
+            std::vector<ExprPtr> rebuilt = std::move(non_qty);
+            for (auto& [dim, vals] : by_dim) {
+                ExprPtr summed;
+                if (vals.size() == 1U) {
+                    summed = vals[0];
+                } else {
+                    auto s = simplify_sum_terms(vals, ExprPtr{}, false);
+                    summed = s.is_ok() ? s.value() : arena_.make<Sum>(std::move(vals));
+                }
+                rebuilt.push_back(arena_.make<Quantity>(summed, dim));
+            }
+            flat_terms = std::move(rebuilt);
+        }
+    }
+
     Rational constant(BigInt(0));
     std::map<MonomialKey, Rational> collected;
     bool has_infinity = false;
@@ -342,6 +371,50 @@ Result<ExprPtr> Simplifier::simplify_product_factors(const std::vector<ExprPtr>&
             symbolic.erase(symbolic.begin() + si);
             auto sin2x_s = simplify_expr(sin2x);
             symbolic.push_back({sin2x_s.is_ok() ? sin2x_s.value() : sin2x, BigInt(1)});
+        }
+    }
+
+    // L3-08 Quantity multiplication: combine Quantity factors into a
+    // single Quantity by multiplying values and summing SI dimensions.
+    // Power factors Quantity^n already handled by simplify_power earlier;
+    // here we accumulate only exponent-1 Quantity factors.
+    {
+        std::vector<std::size_t> qty_idx;
+        for (std::size_t i = 0; i < symbolic.size(); ++i) {
+            if (symbolic[i].second == BigInt(1)
+                && expr_is<Quantity>(symbolic[i].first)) {
+                qty_idx.push_back(i);
+            }
+        }
+        if (qty_idx.size() >= 2) {
+            SIDimensions combined_dim{};
+            std::vector<ExprPtr> values;
+            for (std::size_t k : qty_idx) {
+                const auto& q = expr_ref<Quantity>(symbolic[k].first);
+                values.push_back(q.value);
+                combined_dim.m += q.dimensions.m;
+                combined_dim.kg += q.dimensions.kg;
+                combined_dim.s += q.dimensions.s;
+                combined_dim.A += q.dimensions.A;
+                combined_dim.K += q.dimensions.K;
+                combined_dim.mol += q.dimensions.mol;
+                combined_dim.cd += q.dimensions.cd;
+            }
+            // Erase in reverse to keep indices stable.
+            for (auto it = qty_idx.rbegin(); it != qty_idx.rend(); ++it) {
+                symbolic.erase(symbolic.begin() + *it);
+            }
+            // Build combined value = product of all values, then wrap.
+            ExprPtr combined_value;
+            if (values.size() == 1U) {
+                combined_value = values[0];
+            } else {
+                auto val_prod = simplify_product_factors(values, ExprPtr{}, false);
+                combined_value = val_prod.is_ok() ? val_prod.value()
+                    : arena_.make<Product>(std::move(values));
+            }
+            ExprPtr new_qty = arena_.make<Quantity>(combined_value, combined_dim);
+            symbolic.push_back({new_qty, BigInt(1)});
         }
     }
 

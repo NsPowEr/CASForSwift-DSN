@@ -192,7 +192,8 @@ TEST_F(QuantityTest, AdditionDifferentUnits) {
     // Note: TextFormatter sorts Sum terms. Quantity precedence is 100.
     // canonical_compare might put m before s or vice versa.
     std::string result = fmt.format(simplified.value());
-    EXPECT_TRUE(result == "5[m] + 2[s]" || result == "2[s] + 5[m]");
+    EXPECT_TRUE(result == "5[m] + 2[s]" || result == "2[s] + 5[m]")
+        << "got: " << result;
 }
 
 } // namespace cas
