@@ -32,15 +32,20 @@
     silenziare `[[nodiscard]]` warning.
   - `CMakeLists.txt:17-22` — restored `-Werror`, removed debt comment block.
 
-### KNOWN-DEBT-002 — Test coverage ratio 0.64 (89 test / 139 src)
-- **Categoria**: testing.
-- **Stato**: Moduli grandi senza unit test dedicato:
-  - `src/algebra/factorization_polynomials.cpp` (40.8K)
-  - `src/algebra/polynomial_gcd_multivariate.cpp` (34.4K)
-  - `src/calculus/integrate_risch.cpp` (36.8K)
-  - `src/calculus/differentiate.cpp` (24.1K)
-  - `src/calculus/limit.cpp` (25.1K)
-- **Fix**: stub happy-path test per ciascuno. Effort ~3h totale.
+### KNOWN-DEBT-002 — Test coverage ratio 0.64 (89 test / 139 src) — RISOLTO 2026-05-20
+Aggiunti 5 smoke test diretti per i moduli grandi precedentemente senza
+unit test dedicato (8+5+5+5+5 = 28 nuovi test happy-path):
+- `test/unit/calculus/test_differentiate_smoke.cpp` (8 tests)
+  → power rule, sin/cos, exp/ln, chain rule, product/quotient, costanti
+- `test/unit/calculus/test_limit_smoke.cpp` (5 tests)
+  → polinomiale, sinc, ratio polinomi @ ∞, L'Hôpital, singolarità rimovibili
+- `test/unit/calculus/test_integrate_risch_smoke.cpp` (5 tests)
+  → 1/x, exp, x/(x²+1), x·exp(x), 1/(x·ln(x)) [DEBT-004 sentinel]
+- `test/unit/algebra/test_factorization_polynomials_smoke.cpp` (5 tests)
+  → prod lineari, irriducibile Q, diff square, radici ripetute, Q-fallback
+- `test/unit/algebra/test_polynomial_gcd_multivariate_smoke.cpp` (5 tests)
+  → coprimi, common univariate, common bivariate, identità, scalar mult
+Tutti verdi con verifica D(F)=integrand o canonical-form comparison.
 
 ### KNOWN-DEBT-004 — Risch `∫ 1/(x·ln(x)) dx` produces wrong result — RISOLTO 2026-05-20
 - **File**: `src/calculus/integrate_risch.cpp` (path that handles

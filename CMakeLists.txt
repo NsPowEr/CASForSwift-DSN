@@ -397,6 +397,11 @@ if(CAS_ENABLE_TESTING)
         test/unit/symbolic/test_mrv_cancellation_probe.cpp
         test/unit/calculus/test_risch_logarithmic_probe.cpp
         test/unit/calculus/test_differential_field_probe.cpp
+        test/unit/calculus/test_differentiate_smoke.cpp
+        test/unit/calculus/test_limit_smoke.cpp
+        test/unit/calculus/test_integrate_risch_smoke.cpp
+        test/unit/algebra/test_factorization_polynomials_smoke.cpp
+        test/unit/algebra/test_polynomial_gcd_multivariate_smoke.cpp
         test/unit/algebra/test_cyclotomic_mobius.cpp
         test/unit/algebra/test_berlekamp_probe.cpp
         test/unit/symbolic/test_math_correctness.cpp
