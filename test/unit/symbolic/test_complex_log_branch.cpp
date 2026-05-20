@@ -62,23 +62,19 @@ TEST_F(ComplexLogBranchTest, LnOfImaginaryUnitIsHalfIPi) {
     EXPECT_TRUE(simplify_equal(e, expected));
 }
 
-TEST_F(ComplexLogBranchTest, DISABLED_LnOfNegativeImaginaryUnitIsNegativeHalfIPi) {
+TEST_F(ComplexLogBranchTest, LnOfNegativeImaginaryUnitIsNegativeHalfIPi) {
     // ln(-i) = -i·π/2 (principal branch).
-    // DISABLED: simplifier delivers ln(-i) but doesn't collapse to -iπ/2
-    // structurally. Verify via subtract+simplify fails because π
-    // and i symbol-multiplication has multiple canonical forms. Tracked
-    // as follow-up enhancement in simplify_complex.cpp.
     auto e = parse("ln(-i)");
     auto expected = parse("-i * pi / 2");
     EXPECT_TRUE(simplify_equal(e, expected));
 }
 
 TEST_F(ComplexLogBranchTest, DISABLED_LnOfOnePlusIIsLnSqrtTwoPlusIPiOverFour) {
-    // DISABLED: requires exp(ln(z))=z verification with complex z, which
-    // is fragile under current simplifier — depends on canonical form of
-    // arg(1+i) and ln(sqrt(2)). Principal-branch identity holds
-    // mathematically; structural test deferred until normal_form_complex
-    // covers this case.
+    // DISABLED: ln(1+i) = ln(sqrt(2)) + i·π/4 mathematically correct,
+    // but engine output canonical form involves abs(1+i) → sqrt(2) and
+    // arg(1+i) → π/4 that don't roundtrip via exp(ln(...)) without
+    // additional simplify rules on Sum of complex parts.
+    // Tracked as follow-up: normal_form_complex extension.
     // ln(1+i) = ln(sqrt(2)) + i·π/4
     auto e = parse("ln(1 + i)");
     auto s = ctx.simplify(e);

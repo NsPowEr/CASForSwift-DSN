@@ -329,6 +329,22 @@ Result<ExprPtr> Simplifier::simplify_funcall_exp_log_sqrt(
             return simplify_expr(arena_.make<Binary>(
                 BinaryOp::Div, i_pi, make_integer(arena_, BigInt(2))));
         }
+        // Complex principal branch: ln(-I) = -I·π/2.
+        // Handled separately from ln(-x) for x>0 because i is neither
+        // positive nor negative real; this is the unique branch-cut
+        // edge case at arg(-I) = -π/2.
+        if (const auto* un = expr_cast<Unary>(args.front());
+            un && un->op == UnaryOp::Neg) {
+            const auto* c = expr_cast<Constant>(un->operand);
+            if (c && c->value == MathConstant::I) {
+                ExprPtr neg_i_pi = arena_.make<Product>(std::vector<ExprPtr>{
+                    arena_.make<IntegerLit>(BigInt(-1)),
+                    arena_.make<Constant>(MathConstant::I),
+                    arena_.make<Constant>(MathConstant::Pi)});
+                return simplify_expr(arena_.make<Binary>(
+                    BinaryOp::Div, neg_i_pi, make_integer(arena_, BigInt(2))));
+            }
+        }
         // ln(-1) = I·π  (also covered by ln(-x) above, but explicit for clarity)
         if (const auto* il = expr_cast<IntegerLit>(args.front()); il && il->value == BigInt(-1)) {
             return simplify_expr(arena_.make<Product>(std::vector<ExprPtr>{
