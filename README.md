@@ -29,7 +29,7 @@ ctest --test-dir build --output-on-failure
 
 ## Optional Manual GUI Lab
 
-The `GUI/` directory is an optional, detachable manual testing lab. It is not part of the mathematical core and is disabled by default.
+The `GUI/` directory is an optional, detachable macOS Qt/QML workspace for manual CAS testing (sidebar, notebook-style cell history, inspector, command palette, and 2D plot preview). It is not part of the mathematical core and is disabled by default.
 
 ```bash
 cmake -S . -B build-gui -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCAS_ENABLE_GUI=ON

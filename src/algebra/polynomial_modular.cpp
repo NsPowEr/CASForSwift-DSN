@@ -30,6 +30,19 @@ static IntPoly poly_sub_mod(const IntPoly& a, const IntPoly& b, const BigInt& m)
     return r;
 }
 
+static IntPoly poly_add_mod(const IntPoly& a, const IntPoly& b, const BigInt& m) {
+    std::size_t sz = std::max(a.size(), b.size());
+    IntPoly r;
+    r.resize(sz, BigInt(0));
+    for (std::size_t i = 0; i < sz; ++i) {
+        BigInt ai = (i < a.size()) ? a[i] : BigInt(0);
+        BigInt bi = (i < b.size()) ? b[i] : BigInt(0);
+        r[i] = mod_bigint(ai + bi, m);
+    }
+    r.normalize([](const BigInt& v) { return v.is_zero(); });
+    return r;
+}
+
 static IntPoly poly_mul_mod(const IntPoly& a, const IntPoly& b, const BigInt& m) {
     if (a.is_zero() || b.is_zero()) return IntPoly{};
     IntPoly r;
@@ -124,7 +137,12 @@ static std::vector<IntPoly> equal_degree_factorization(IntPoly f, std::size_t d,
     if (f.degree() == d) return {f};
     
     std::vector<IntPoly> factors;
-    std::mt19937 rng(42);
+    std::size_t poly_seed = f.size();
+    for (const auto& coeff : f.coefficients()) {
+        std::uint64_t cv = coeff.to_u64();
+        poly_seed ^= cv + 0x9e3779b9ULL + (poly_seed << 6U) + (poly_seed >> 2U);
+    }
+    std::mt19937 rng(static_cast<std::uint32_t>(poly_seed));
     
     while (f.degree() > d) {
         // Choose random a(x) with deg(a) < deg(f)
@@ -160,9 +178,21 @@ static std::vector<IntPoly> equal_degree_factorization(IntPoly f, std::size_t d,
                 f = poly_div_rem_mod(f, g, p).first;
             }
         } else {
-            // p = 2 case: trace polynomial or something
-            // For now, trial division for p=2 if d is small
-            break; 
+            // p = 2 case: trace polynomial T(a) = a + a^2 + a^4 + ... + a^(2^(d-1)) mod f
+            IntPoly tr = a;
+            IntPoly current_a = a;
+            for (std::size_t i = 1; i < d; ++i) {
+                // current_a = current_a^2 mod f
+                current_a = poly_mul_mod(current_a, current_a, p);
+                current_a = poly_div_rem_mod(current_a, f, p).second;
+                tr = poly_add_mod(tr, current_a, p);
+            }
+            
+            g = poly_gcd_mod(f, tr, p);
+            if (g.degree() > 0 && g.degree() < f.degree()) {
+                for (auto&& fact : equal_degree_factorization(g, d, p)) factors.push_back(fact);
+                f = poly_div_rem_mod(f, g, p).first;
+            }
         }
     }
     factors.push_back(f);

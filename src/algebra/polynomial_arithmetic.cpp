@@ -168,7 +168,9 @@ void append_product_factors(std::vector<ExprPtr>& out, ExprPtr expr) {
                 exp /= 2;
                 if (exp > 0) base_poly = base_poly * base_poly;
             }
-            return multivariate_to_expr(res_poly, ctx);
+            auto expr_res = multivariate_to_expr(res_poly, ctx);
+            if (expr_res.is_error()) return expr_res;
+            return simplify_expr(expr_res.value(), ctx);
         }
     }
 
@@ -309,6 +311,17 @@ void append_product_factors(std::vector<ExprPtr>& out, ExprPtr expr) {
             }
             return simplify_expr(ctx.arena().make<Binary>(BinaryOp::Mod, lhs.value(), rhs.value()), ctx);
         }
+        case BinaryOp::Equal:
+        case BinaryOp::Less:
+        case BinaryOp::Greater:
+        case BinaryOp::LessEqual:
+        case BinaryOp::GreaterEqual: {
+            auto lhs = expand_expr_impl(binary->left, ctx);
+            if (lhs.is_error()) return fail<ExprPtr>(lhs.error());
+            auto rhs = expand_expr_impl(binary->right, ctx);
+            if (rhs.is_error()) return fail<ExprPtr>(rhs.error());
+            return simplify_expr(ctx.arena().make<Binary>(binary->op, lhs.value(), rhs.value()), ctx);
+        }
         }
     }
 
@@ -439,7 +452,9 @@ Result<ExprPtr> collect(ExprPtr expr, const Symbol& var, symbolic::CASContext& c
         return fail<ExprPtr>(poly.error());
     }
 
-    return polynomial_to_expr(poly.value(), var, ctx);
+    auto expr_res = polynomial_to_expr(poly.value(), var, ctx);
+    if (expr_res.is_error()) return expr_res;
+    return ctx.simplify(expr_res.value());
 }
 
 } // namespace cas::algebra

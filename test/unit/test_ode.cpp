@@ -52,3 +52,47 @@ TEST_F(OdeTest, ConstantCoeffNonHomogeneous) {
     ASSERT_TRUE(res.is_ok()) << res.error().message;
     std::cout << "ODE Solution: " << debug_print(res.value()) << std::endl;
 }
+
+TEST_F(OdeTest, Linear3rdOrderMultiplicity) {
+    // y''' - 3y'' + 3y' - y = 0
+    // L'equazione caratteristica r^3 - 3r^2 + 3r - 1 = (r-1)^3
+    // Radice ripetuta r=1 (molteplicità 3). Soluzione generale: (C1 + C2*x + C3*x^2)*e^x
+    Symbol y("y");
+    Symbol x("x");
+    AstArena& arena = ctx.arena();
+    
+    ExprPtr y_ppp = arena.make<Derivative>(arena.make<Symbol>("y"), Symbol("x"), 3);
+    ExprPtr y_pp = arena.make<Derivative>(arena.make<Symbol>("y"), Symbol("x"), 2);
+    ExprPtr y_p = arena.make<Derivative>(arena.make<Symbol>("y"), Symbol("x"), 1);
+    ExprPtr y_s = arena.make<Symbol>("y");
+    
+    ExprPtr eq = arena.make<Sum>(std::vector<ExprPtr>{
+        y_ppp,
+        arena.make<Unary>(UnaryOp::Neg, arena.make<Binary>(BinaryOp::Mul, arena.make<IntegerLit>(BigInt(3)), y_pp)),
+        arena.make<Binary>(BinaryOp::Mul, arena.make<IntegerLit>(BigInt(3)), y_p),
+        arena.make<Unary>(UnaryOp::Neg, y_s)
+    });
+    
+    auto res = solve_ode(eq, y, x, ctx);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+    std::cout << "ODE 3rd Order Solution: " << debug_print(res.value()) << std::endl;
+}
+
+TEST_F(OdeTest, Linear2ndOrderParticularComplex) {
+    // y'' + y = x
+    Symbol y("y");
+    Symbol x("x");
+    AstArena& arena = ctx.arena();
+    
+    ExprPtr y_pp = arena.make<Derivative>(arena.make<Symbol>("y"), Symbol("x"), 2);
+    ExprPtr y_s = arena.make<Symbol>("y");
+    
+    ExprPtr eq = arena.make<Binary>(BinaryOp::Equal,
+        arena.make<Binary>(BinaryOp::Add, y_pp, y_s),
+        arena.make<Symbol>("x"));
+    
+    auto res = solve_ode(eq, y, x, ctx);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+    std::cout << "ODE 2nd Order Particular Solution: " << debug_print(res.value()) << std::endl;
+}
+

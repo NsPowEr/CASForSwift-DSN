@@ -1,4 +1,5 @@
 #include "cas/linalg/Matrix.hpp"
+#include "matrix_structured_determinant.hpp"
 
 #include <optional>
 #include <string>
@@ -24,22 +25,6 @@ namespace {
     return ctx.simplify(expr);
 }
 
-[[nodiscard]] Result<ExprPtr> add_expr(symbolic::CASContext& ctx, ExprPtr lhs, ExprPtr rhs) {
-    return simplify(ctx, ctx.arena().make<Binary>(BinaryOp::Add, lhs, rhs));
-}
-
-[[nodiscard]] Result<ExprPtr> sub_expr(symbolic::CASContext& ctx, ExprPtr lhs, ExprPtr rhs) {
-    return simplify(ctx, ctx.arena().make<Binary>(BinaryOp::Sub, lhs, rhs));
-}
-
-[[nodiscard]] Result<ExprPtr> mul_expr(symbolic::CASContext& ctx, ExprPtr lhs, ExprPtr rhs) {
-    return simplify(ctx, ctx.arena().make<Binary>(BinaryOp::Mul, lhs, rhs));
-}
-
-[[nodiscard]] Result<ExprPtr> div_expr(symbolic::CASContext& ctx, ExprPtr lhs, ExprPtr rhs) {
-    return simplify(ctx, ctx.arena().make<Binary>(BinaryOp::Div, lhs, rhs));
-}
-
 [[nodiscard]] bool is_zero_expr(ExprPtr expr) {
     if (const auto* integer_lit = expr_cast<IntegerLit>(expr)) {
         return integer_lit->value.is_zero();
@@ -48,6 +33,42 @@ namespace {
         return rational_lit->numerator.is_zero();
     }
     return false;
+}
+
+[[nodiscard]] bool is_one_expr(ExprPtr expr) {
+    if (const auto* integer_lit = expr_cast<IntegerLit>(expr)) {
+        return integer_lit->value == BigInt(1);
+    }
+    if (const auto* rational_lit = expr_cast<RationalLit>(expr)) {
+        return rational_lit->numerator == BigInt(1) && rational_lit->denominator == BigInt(1);
+    }
+    return false;
+}
+
+[[nodiscard]] Result<ExprPtr> add_expr(symbolic::CASContext& ctx, ExprPtr lhs, ExprPtr rhs) {
+    if (is_zero_expr(lhs)) return ok(rhs);
+    if (is_zero_expr(rhs)) return ok(lhs);
+    return simplify(ctx, ctx.arena().make<Binary>(BinaryOp::Add, lhs, rhs));
+}
+
+[[nodiscard]] Result<ExprPtr> sub_expr(symbolic::CASContext& ctx, ExprPtr lhs, ExprPtr rhs) {
+    if (is_zero_expr(rhs)) return ok(lhs);
+    if (lhs == rhs) return ok(integer(ctx, 0));
+    return simplify(ctx, ctx.arena().make<Binary>(BinaryOp::Sub, lhs, rhs));
+}
+
+[[nodiscard]] Result<ExprPtr> mul_expr(symbolic::CASContext& ctx, ExprPtr lhs, ExprPtr rhs) {
+    if (is_zero_expr(lhs) || is_zero_expr(rhs)) return ok(integer(ctx, 0));
+    if (is_one_expr(lhs)) return ok(rhs);
+    if (is_one_expr(rhs)) return ok(lhs);
+    return simplify(ctx, ctx.arena().make<Binary>(BinaryOp::Mul, lhs, rhs));
+}
+
+[[nodiscard]] Result<ExprPtr> div_expr(symbolic::CASContext& ctx, ExprPtr lhs, ExprPtr rhs) {
+    if (is_zero_expr(lhs)) return ok(integer(ctx, 0));
+    if (is_one_expr(rhs)) return ok(lhs);
+    if (lhs == rhs) return ok(integer(ctx, 1));
+    return simplify(ctx, ctx.arena().make<Binary>(BinaryOp::Div, lhs, rhs));
 }
 
 [[nodiscard]] std::size_t estimate_complexity(ExprPtr expr) {
@@ -98,10 +119,6 @@ namespace {
     return !is_zero_expr(expr);
 }
 
-[[nodiscard]] bool is_known_nonzero_expr(ExprPtr expr) {
-    return is_structurally_nonzero(expr);
-}
-
 [[nodiscard]] Result<MatrixExpr> require_same_shape(const MatrixExpr& a, const MatrixExpr& b, std::string operation) {
     if (a.rows() != b.rows() || a.cols() != b.cols()) {
         return fail<MatrixExpr>(make_error(
@@ -109,23 +126,6 @@ namespace {
             "Matrix dimensions must match for " + operation));
     }
     return ok(MatrixExpr(0U, 0U));
-}
-
-[[nodiscard]] Result<MatrixExpr> minor_matrix(const MatrixExpr& matrix, std::size_t skip_row, std::size_t skip_col) {
-    const std::size_t n = matrix.rows();
-    MatrixExpr result(n - 1U, n - 1U);
-    std::size_t target_row = 0U;
-    for (std::size_t row = 0; row < n; ++row) {
-        if (row == skip_row) continue;
-        std::size_t target_col = 0U;
-        for (std::size_t col = 0; col < n; ++col) {
-            if (col == skip_col) continue;
-            result(target_row, target_col) = matrix(row, col);
-            ++target_col;
-        }
-        ++target_row;
-    }
-    return ok(std::move(result));
 }
 
 }  // namespace
@@ -212,6 +212,11 @@ Result<ExprPtr> determinant(const MatrixExpr& matrix, symbolic::CASContext& ctx)
     const std::size_t n = matrix.rows();
     if (n == 0U) return ok(integer(ctx, 1));
     if (n == 1U) return ok(matrix(0U, 0U));
+    auto structured = detail::determinant_tridiagonal_if_applicable(matrix, ctx);
+    if (structured.is_error()) return fail<ExprPtr>(structured.error());
+    if (structured.value().has_value()) {
+        return ok(*structured.value());
+    }
 
     std::vector<std::vector<ExprPtr>> work(n, std::vector<ExprPtr>(n));
     for (std::size_t row = 0; row < n; ++row) {
@@ -283,80 +288,6 @@ Result<ExprPtr> determinant(const MatrixExpr& matrix, symbolic::CASContext& ctx)
         det = simplified.value();
     }
     return ok(det);
-}
-
-Result<MatrixExpr> inverse(const MatrixExpr& matrix, symbolic::CASContext& ctx) {
-    if (matrix.rows() != matrix.cols()) {
-        return fail<MatrixExpr>(make_error(CASErrorKind::InvalidArgument, "Inverse requires a square matrix"));
-    }
-
-    const std::size_t n = matrix.rows();
-    if (n == 0U) return ok(MatrixExpr(0U, 0U));
-
-    // For small matrices, use adjugate matrix (cofactors) to get cleaner formulas
-    // that play better with symbolic equality tests.
-    if (n <= 3U) {
-        auto det = determinant(matrix, ctx);
-        if (det.is_error()) return fail<MatrixExpr>(det.error());
-        if (is_zero_expr(det.value())) {
-            return fail<MatrixExpr>(make_error(CASErrorKind::Undefined, "Singular matrix has no inverse"));
-        }
-
-        MatrixExpr result(n, n);
-        if (n == 1U) {
-            auto val = div_expr(ctx, integer(ctx, 1), matrix(0U, 0U));
-            if (val.is_error()) return fail<MatrixExpr>(val.error());
-            result(0U, 0U) = val.value();
-            return ok(std::move(result));
-        }
-
-        for (std::size_t row = 0; row < n; ++row) {
-            for (std::size_t col = 0; col < n; ++col) {
-                auto minor = minor_matrix(matrix, row, col);
-                auto cofactor = determinant(minor.value(), ctx);
-                if (cofactor.is_error()) return fail<MatrixExpr>(cofactor.error());
-                ExprPtr val = cofactor.value();
-                if (((row + col) % 2U) != 0U) {
-                    auto negated = simplify(ctx, neg(ctx, val));
-                    if (negated.is_error()) return fail<MatrixExpr>(negated.error());
-                    val = negated.value();
-                }
-                auto entry = div_expr(ctx, val, det.value());
-                if (entry.is_error()) return fail<MatrixExpr>(entry.error());
-                result(col, row) = entry.value();
-            }
-        }
-        return ok(std::move(result));
-    }
-
-    // For larger matrices, use Gauss-Jordan elimination on augmented matrix [A | I]
-    MatrixExpr augmented(n, 2U * n);
-    for (std::size_t row = 0; row < n; ++row) {
-        for (std::size_t col = 0; col < n; ++col) {
-            augmented(row, col) = matrix(row, col);
-        }
-        for (std::size_t col = 0; col < n; ++col) {
-            augmented(row, n + col) = integer(ctx, (row == col) ? 1 : 0);
-        }
-    }
-
-    auto reduced_res = rref(augmented, ctx);
-    if (reduced_res.is_error()) return fail<MatrixExpr>(reduced_res.error());
-    const auto& reduced = reduced_res.value();
-
-    for (std::size_t i = 0; i < n; ++i) {
-        if (!is_known_nonzero_expr(reduced(i, i))) {
-            return fail<MatrixExpr>(make_error(CASErrorKind::Undefined, "Singular matrix has no inverse"));
-        }
-    }
-
-    MatrixExpr result(n, n);
-    for (std::size_t row = 0; row < n; ++row) {
-        for (std::size_t col = 0; col < n; ++col) {
-            result(row, col) = reduced(row, n + col);
-        }
-    }
-    return ok(std::move(result));
 }
 
 Result<std::size_t> rank(const MatrixExpr& matrix, symbolic::CASContext& ctx) {

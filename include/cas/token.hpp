@@ -29,6 +29,12 @@ enum class TokenKind : std::uint8_t {
     Comma,
     Semicolon,
 
+    Less,
+    Greater,
+    LessEqual,
+    GreaterEqual,
+    DoubleEqual,
+
     Integral,
     Derivative,
     Limit,

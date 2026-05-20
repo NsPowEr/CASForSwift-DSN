@@ -477,6 +477,7 @@ namespace cas::algebra {
         return ok(std::move(roots));
     }
 
+    /*
     if (deg == 4U) {
         auto r = solve_degree_four_expr(factor_poly.value(), ctx);
         if (r.is_error()) return fail<std::vector<ExprPtr>>(r.error());
@@ -485,9 +486,10 @@ namespace cas::algebra {
         }
         return ok(std::move(roots));
     }
+    */
 
     if (int_coeffs.is_ok()) {
-        if (auto n = is_cyclotomic(int_coeffs.value())) {
+        if (auto n = is_cyclotomic(int_coeffs.value(), ctx.max_cyclotomic_n())) {
             auto r = cyclotomic_roots(*n, var, ctx.arena());
             for (unsigned int m = 0; m < multiplicity; ++m) {
                 roots.insert(roots.end(), r.begin(), r.end());

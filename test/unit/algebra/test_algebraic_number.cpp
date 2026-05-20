@@ -46,4 +46,31 @@ TEST(AlgebraicNumberTest, Inversion) {
     EXPECT_EQ(identity.value(), expected_identity);
 }
 
+TEST(AlgebraicNumberTest, CubicExtensionReductionAndDivision) {
+    // Q(alpha), alpha^3 = 2
+    std::vector<Rational> min_poly = {
+        Rational(BigInt(-2)),
+        Rational(BigInt(0)),
+        Rational(BigInt(0)),
+        Rational(BigInt(1))
+    };
+
+    AlgebraicNumber alpha({Rational(BigInt(0)), Rational(BigInt(1))}, min_poly);
+    auto alpha_cubed = alpha.pow(3U);
+    ASSERT_TRUE(alpha_cubed.is_ok());
+    EXPECT_EQ(alpha_cubed.value().value(), std::vector<Rational>({Rational(BigInt(2))}));
+
+    AlgebraicNumber one_plus_alpha({Rational(BigInt(1)), Rational(BigInt(1))}, min_poly);
+    auto inv_res = one_plus_alpha.inverse();
+    ASSERT_TRUE(inv_res.is_ok());
+
+    auto quotient_res = one_plus_alpha.div(one_plus_alpha);
+    ASSERT_TRUE(quotient_res.is_ok());
+    EXPECT_EQ(quotient_res.value().value(), std::vector<Rational>({Rational(BigInt(1))}));
+
+    auto identity = one_plus_alpha * inv_res.value();
+    EXPECT_EQ(identity.value(), std::vector<Rational>({Rational(BigInt(1))}));
+    EXPECT_FALSE(alpha.is_zero());
+}
+
 } // namespace cas::test

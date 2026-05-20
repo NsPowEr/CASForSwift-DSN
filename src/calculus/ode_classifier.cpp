@@ -3,6 +3,7 @@
 #include "cas/algebra.hpp"
 #include "cas/ast_debug.hpp"
 #include "../algebra/polynomial_internal.hpp"
+#include <functional>
 
 namespace cas::calculus {
 
@@ -67,6 +68,49 @@ namespace cas::calculus {
     });
 }
 
+[[nodiscard]] static std::optional<uint32_t> find_max_order(ExprPtr expr, const Symbol& y, const Symbol& x) {
+    uint32_t max_order = 0;
+    bool found = false;
+
+    std::function<void(ExprPtr)> visit = [&](ExprPtr e) {
+        if (const auto* deriv = expr_cast<Derivative>(e)) {
+            if (const auto* sym = expr_cast<Symbol>(deriv->expression)) {
+                if (sym->name == y.name && deriv->variable.name == x.name) {
+                    if (deriv->order > max_order) max_order = deriv->order;
+                    found = true;
+                }
+            }
+        } else if (const auto* sym = expr_cast<Symbol>(e)) {
+            if (sym->name == y.name) {
+                found = true;
+            }
+        }
+        
+        if (const auto* un = expr_cast<Unary>(e)) visit(un->operand);
+        else if (const auto* bin = expr_cast<Binary>(e)) { visit(bin->left); visit(bin->right); }
+        else if (const auto* sum = expr_cast<Sum>(e)) { for (auto t : sum->terms) visit(t); }
+        else if (const auto* prod = expr_cast<Product>(e)) { for (auto f : prod->factors) visit(f); }
+        else if (const auto* func = expr_cast<FuncCall>(e)) { for (auto a : func->args) visit(a); }
+        else if (const auto* intg = expr_cast<Integral>(e)) { visit(intg->integrand); }
+        else if (const auto* der = expr_cast<Derivative>(e)) { visit(der->expression); }
+    };
+    visit(expr);
+    
+    if (found) return max_order;
+    return std::nullopt;
+}
+
+[[nodiscard]] static Result<ExprPtr> substitute_y_derivatives(ExprPtr E, const std::vector<ExprPtr>& y_ders, const std::vector<ExprPtr>& vals, symbolic::CASContext& ctx) {
+    ExprPtr res = E;
+    // Sostituzione in ordine inverso: partiamo dalle derivate più alte
+    for (int i = static_cast<int>(y_ders.size()) - 1; i >= 0; --i) {
+        auto sub_res = substitute_any(res, y_ders[i], vals[i], ctx);
+        if (sub_res.is_error()) return sub_res;
+        res = sub_res.value();
+    }
+    return ctx.simplify(res);
+}
+
 [[nodiscard]] Result<OdeClassification> classify_ode(
     ExprPtr equation,
     const Symbol& y,
@@ -87,60 +131,93 @@ namespace cas::calculus {
     if (E_res.is_error()) return fail<OdeClassification>(E_res.error());
     ExprPtr E = E_res.value();
 
-    ExprPtr y_ptr = arena.make<Symbol>(y.name);
-    ExprPtr y_p = arena.make<Derivative>(y_ptr, Symbol(x.name), 1);
-    ExprPtr y_pp = arena.make<Derivative>(y_ptr, Symbol(x.name), 2);
-
-    auto get_val = [&](long long v2, long long v1, long long v0) -> Result<ExprPtr> {
-        auto res = substitute_any(E, y_pp, algebra::poly_make_integer(arena, v2), ctx);
-        if (res.is_error()) return res;
-        res = substitute_any(res.value(), y_p, algebra::poly_make_integer(arena, v1), ctx);
-        if (res.is_error()) return res;
-        res = substitute_any(res.value(), y_ptr, algebra::poly_make_integer(arena, v0), ctx);
-        if (res.is_error()) return res;
-        return ctx.simplify(res.value());
-    };
-
-    auto v000 = get_val(0, 0, 0); if (v000.is_error()) return fail<OdeClassification>(v000.error());
-    auto v100 = get_val(1, 0, 0); if (v100.is_error()) return fail<OdeClassification>(v100.error());
-    auto v010 = get_val(0, 1, 0); if (v010.is_error()) return fail<OdeClassification>(v010.error());
-    auto v001 = get_val(0, 0, 1); if (v001.is_error()) return fail<OdeClassification>(v001.error());
-
-    auto a2 = ctx.simplify(arena.make<Binary>(BinaryOp::Sub, v100.value(), v000.value()));
-    auto a1 = ctx.simplify(arena.make<Binary>(BinaryOp::Sub, v010.value(), v000.value()));
-    auto a0 = ctx.simplify(arena.make<Binary>(BinaryOp::Sub, v001.value(), v000.value()));
+    auto max_order_opt = find_max_order(E, y, x);
+    if (!max_order_opt) return ok(OdeClassification(OdeType::Unknown, equation, y, x));
     
-    if (a2.is_error() || a1.is_error() || a0.is_error()) return fail<OdeClassification>(make_error(CASErrorKind::InternalError, "Extraction error"));
-
-    ExprPtr L = arena.make<Sum>(std::vector<ExprPtr>{
-        arena.make<Binary>(BinaryOp::Mul, a2.value(), y_pp),
-        arena.make<Binary>(BinaryOp::Mul, a1.value(), y_p),
-        arena.make<Binary>(BinaryOp::Mul, a0.value(), y_ptr),
-        v000.value()
-    });
-
+    uint32_t n = *max_order_opt;
+    
+    std::vector<ExprPtr> y_ders;
+    y_ders.push_back(arena.make<Symbol>(y.name));
+    for (uint32_t i = 1; i <= n; ++i) {
+        y_ders.push_back(arena.make<Derivative>(y_ders[0], Symbol(x.name), i));
+    }
+    
+    auto get_val = [&](const std::vector<long long>& vals) -> Result<ExprPtr> {
+        std::vector<ExprPtr> sub_vals;
+        for (long long v : vals) {
+            sub_vals.push_back(algebra::poly_make_integer(arena, v));
+        }
+        return substitute_y_derivatives(E, y_ders, sub_vals, ctx);
+    };
+    
+    std::vector<long long> zero_vals(n + 1, 0);
+    auto v0_res = get_val(zero_vals);
+    if (v0_res.is_error()) return fail<OdeClassification>(v0_res.error());
+    ExprPtr v0 = v0_res.value();
+    
+    std::vector<ExprPtr> coeffs(n + 1);
+    for (uint32_t i = 0; i <= n; ++i) {
+        std::vector<long long> one_vals(n + 1, 0);
+        one_vals[i] = 1;
+        auto vi_res = get_val(one_vals);
+        if (vi_res.is_error()) return fail<OdeClassification>(vi_res.error());
+        
+        auto a_i = ctx.simplify(arena.make<Binary>(BinaryOp::Sub, vi_res.value(), v0));
+        if (a_i.is_error()) return fail<OdeClassification>(a_i.error());
+        coeffs[i] = a_i.value();
+    }
+    
+    std::vector<ExprPtr> L_terms;
+    for (uint32_t i = 0; i <= n; ++i) {
+        L_terms.push_back(arena.make<Binary>(BinaryOp::Mul, coeffs[i], y_ders[i]));
+    }
+    L_terms.push_back(v0);
+    ExprPtr L = arena.make<Sum>(std::move(L_terms));
+    
     auto diff_res = algebra::expand(arena.make<Binary>(BinaryOp::Sub, E, L), ctx);
     if (diff_res.is_error() || !is_zero_expr(diff_res.value(), ctx)) {
         return ok(OdeClassification(OdeType::Unknown, equation, y, x));
     }
-
+    
     auto deps_y = [&](ExprPtr e) { return depends_on(e, y); };
-    if (deps_y(a2.value()) || deps_y(a1.value()) || deps_y(a0.value()) || deps_y(v000.value())) {
-        return ok(OdeClassification(OdeType::Unknown, equation, y, x));
+    if (deps_y(v0)) return ok(OdeClassification(OdeType::Unknown, equation, y, x));
+    for (const auto& a_i : coeffs) {
+        if (deps_y(a_i)) return ok(OdeClassification(OdeType::Unknown, equation, y, x));
     }
-
-    if (depends_on(a2.value(), x) || depends_on(a1.value(), x) || depends_on(a0.value(), x)) {
-        OdeClassification res(OdeType::Linear2ndOrderRationalCoeff, equation, y, x);
-        res.components = {a2.value(), a1.value(), a0.value(), ctx.simplify(arena.make<Unary>(UnaryOp::Neg, v000.value())).value()};
-        return ok(res);
+    
+    bool constant_coeffs = true;
+    for (const auto& a_i : coeffs) {
+        if (depends_on(a_i, x)) {
+            constant_coeffs = false;
+            break;
+        }
     }
-
-    if (!is_zero_expr(a2.value(), ctx)) {
-        OdeClassification res(OdeType::Linear2ndOrderConstantCoeff, equation, y, x);
-        res.components = {a2.value(), a1.value(), a0.value(), ctx.simplify(arena.make<Unary>(UnaryOp::Neg, v000.value())).value()};
-        return ok(res);
+    
+    if (n >= 1 && !is_zero_expr(coeffs[n], ctx)) {
+        if (constant_coeffs) {
+            OdeType t = OdeType::LinearNthOrderConstantCoeff;
+            if (n == 1) t = OdeType::Linear1stOrder;
+            else if (n == 2) t = OdeType::Linear2ndOrderConstantCoeff;
+            
+            OdeClassification res(t, equation, y, x);
+            // Salva come a_n, a_{n-1}, ..., a_0, e infine f(x) = -v0
+            for (int i = static_cast<int>(n); i >= 0; --i) {
+                res.components.push_back(coeffs[i]);
+            }
+            res.components.push_back(ctx.simplify(arena.make<Unary>(UnaryOp::Neg, v0)).value());
+            return ok(res);
+        } else {
+             if (n == 2) {
+                 OdeClassification res(OdeType::Linear2ndOrderRationalCoeff, equation, y, x);
+                 for (int i = 2; i >= 0; --i) {
+                     res.components.push_back(coeffs[i]);
+                 }
+                 res.components.push_back(ctx.simplify(arena.make<Unary>(UnaryOp::Neg, v0)).value());
+                 return ok(res);
+             }
+        }
     }
-
+    
     return ok(OdeClassification(OdeType::Unknown, equation, y, x));
 }
 
@@ -159,6 +236,7 @@ namespace cas::calculus {
             
         case OdeType::Linear2ndOrderConstantCoeff:
         case OdeType::Linear2ndOrderRationalCoeff:
+        case OdeType::LinearNthOrderConstantCoeff:
             return solve_ode_advanced(classification, ctx);
             
         default:

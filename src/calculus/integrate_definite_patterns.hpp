@@ -32,6 +32,7 @@ using DefinitePatternFn = Result<std::optional<ExprPtr>> (*)(const DefiniteConte
 
 // Individual patterns exported for direct unit testing / registration.
 [[nodiscard]] Result<std::optional<ExprPtr>> pattern_gaussian_full_line(const DefiniteContext& dc);
+[[nodiscard]] Result<std::optional<ExprPtr>> pattern_rational_full_real_line(const DefiniteContext& dc);
 [[nodiscard]] Result<std::optional<ExprPtr>> pattern_bessel_orthogonality(const DefiniteContext& dc);
 [[nodiscard]] Result<std::optional<ExprPtr>> pattern_legendre_orthogonality(const DefiniteContext& dc);
 [[nodiscard]] Result<std::optional<ExprPtr>> pattern_hermite_h_orthogonality(const DefiniteContext& dc);

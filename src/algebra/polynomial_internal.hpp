@@ -217,7 +217,8 @@ void lll_reduction(LatticeMatrix& b, double delta = 0.75);
     const IntPoly& f,
     const IntPoly& g,
     const BigInt& pk,
-    std::size_t max_deg);
+    std::size_t max_deg,
+    double delta = 0.75);
 
 [[nodiscard]] std::optional<IntPoly> find_factor_by_hensel_recombination(
     const IntPoly& f,
@@ -230,7 +231,8 @@ void lll_reduction(LatticeMatrix& b, double delta = 0.75);
 [[nodiscard]] Result<std::vector<IntPoly>> factor_polynomial_mod_p(IntPoly f, const BigInt& p);
 
 // Cyclotomic Polynomials
-[[nodiscard]] std::optional<int> is_cyclotomic(const IntPoly& poly);
+// max_n: upper bound on n to check; -1 = derive from degree (φ(n)=d → n ≤ 2*(d+1))
+[[nodiscard]] std::optional<int> is_cyclotomic(const IntPoly& poly, int max_n = -1);
 [[nodiscard]] std::vector<ExprPtr> cyclotomic_roots(int n, const Symbol& var, AstArena& arena);
 
 }  // namespace algebra

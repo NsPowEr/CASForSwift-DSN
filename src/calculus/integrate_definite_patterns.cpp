@@ -1,6 +1,7 @@
 #include "integrate_definite_patterns.hpp"
 
 #include "cas/rational.hpp"
+#include "cas/residue_theorem.hpp"
 
 #include <optional>
 
@@ -99,9 +100,22 @@ namespace {
     return ok(std::optional<ExprPtr>(simplified.value()));
 }
 
+[[nodiscard]] Result<std::optional<ExprPtr>> pattern_rational_full_real_line(const DefiniteContext& dc) {
+    if (!is_neg_infinity(dc.lower) || !is_pos_infinity(dc.upper))
+        return ok(std::optional<ExprPtr>{});
+    auto result = integrate_rational_full_real_line(dc.integrand_normalized, dc.var, dc.ctx);
+    if (result.is_error()) {
+        if (result.error().kind == CASErrorKind::Unimplemented)
+            return ok(std::optional<ExprPtr>{});
+        return fail<std::optional<ExprPtr>>(result.error());
+    }
+    return ok(std::optional<ExprPtr>(result.value()));
+}
+
 const std::vector<DefinitePatternFn>& definite_patterns() {
     static const std::vector<DefinitePatternFn> registry = {
         &pattern_gaussian_full_line,
+        &pattern_rational_full_real_line,
         &pattern_bessel_orthogonality,
         &pattern_legendre_orthogonality,
         &pattern_hermite_h_orthogonality,

@@ -30,3 +30,21 @@ jobs:
           path: |
             build-bench-ci/current.txt
             build-bench-ci/report.json
+
+  gui-smoke:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: brew install qt6 ninja
+
+      - name: Configure
+        run: cmake -S . -B build_gui -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCAS_ENABLE_GUI=ON -DCMAKE_PREFIX_PATH=$(brew --prefix qt6)
+
+      - name: Build cas_gui_vm_tests
+        run: cmake --build build_gui --target cas_gui_vm_tests
+
+      - name: Test cas_gui_vm_tests
+        run: QT_QPA_PLATFORM=offscreen ctest --test-dir build_gui -R GuiUndoRedo --output-on-failure

@@ -1,5 +1,7 @@
 #include "cas/algebra.hpp"
 #include "cas/symbolic.hpp"
+#include "cas/builtin_functions.hpp"
+#include "cas/ast_debug.hpp"
 #include "algebra_internal.hpp"
 #include "polynomial_internal.hpp"
 
@@ -35,7 +37,7 @@ namespace {
 [[nodiscard]] Result<PolyExpr> poly_derivative_lrt(const PolyExpr& poly, symbolic::CASContext& ctx) {
     if (poly.empty()) return ok(PolyExpr{});
     PolyExpr result;
-    result.resize(poly.size() - 1, nullptr);
+    result.resize(poly.size() - 1, poly_make_integer(ctx.arena(), 0));
     for (std::size_t i = 1; i < poly.size(); ++i) {
         if (!poly[i]) continue;
         ExprPtr i_expr = poly_make_integer(ctx.arena(), static_cast<long long>(i));
@@ -63,7 +65,6 @@ namespace {
         std::size_t deg_r = poly_degree(R);
         ExprPtr lc_r_before = leading_coefficient(R);  // save before scaling
 
-        // Scale R by b_n
         for (auto& coeff : R.coefficients()) {
             if (coeff) {
                 auto s = poly_simplify_expr(mul_expr_lrt(ctx.arena(), coeff, b_n), ctx);
@@ -106,8 +107,6 @@ struct SubresultantStep {
         std::size_t deg1 = poly_degree(P1);
         std::size_t deg2 = poly_degree(P2);
         if (deg1 < deg2) {
-             // In regular PRS deg1 > deg2. If not, swap or handle.
-             // For LRT, target_poly deg < Q deg usually.
              std::swap(P1, P2);
              std::swap(deg1, deg2);
         }
@@ -146,8 +145,6 @@ struct SubresultantStep {
             if (h_next.is_error()) return fail<std::vector<SubresultantStep>>(h_next.error());
             h = h_next.value();
         } else {
-            // d == 0: case where deg(P1) == deg(P2). h doesn't update or updates differently.
-            // In standard algorithm d >= 1. 
             h = g; 
         }
         
@@ -158,12 +155,12 @@ struct SubresultantStep {
 }
 
 [[nodiscard]] Result<ExprPtr> rioboo_conversion(ExprPtr R_i_z, PolyExpr G_z_x, const Symbol& var, const Symbol& z_var, symbolic::CASContext& ctx) {
+    if (!R_i_z) return ok(ExprPtr{});
     auto r_poly_res = parse_polynomial(R_i_z, z_var, ctx);
     if (r_poly_res.is_error()) return fail<ExprPtr>(r_poly_res.error());
     PolyExpr r_poly = r_poly_res.value();
     
     if (poly_degree(r_poly) == 1) {
-        // z - c = 0 => z = c
         auto coeffs = poly_to_rational_poly(r_poly);
         if (coeffs.is_error()) return fail<ExprPtr>(coeffs.error());
         Rational c = -coeffs.value().constant_term() / coeffs.value().leading_coeff();
@@ -174,12 +171,14 @@ struct SubresultantStep {
                 auto sub = ctx.substitute(coeff, z_var, make_rational_expr(ctx.arena(), c));
                 if (sub.is_error()) return fail<ExprPtr>(sub.error());
                 coeff = sub.value();
+            } else {
+                coeff = poly_make_integer(ctx.arena(), 0);
             }
         }
         auto G_expr = polynomial_to_expr(G_c, var, ctx);
         if (G_expr.is_error()) return fail<ExprPtr>(G_expr.error());
         
-        ExprPtr ln_G = ctx.arena().make<FuncCall>("ln", std::vector<ExprPtr>{G_expr.value()});
+        ExprPtr ln_G = ctx.arena().make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{G_expr.value()});
         return ok(mul_expr_lrt(ctx.arena(), make_rational_expr(ctx.arena(), c), ln_G));
     }
     
@@ -193,8 +192,8 @@ struct SubresultantStep {
         Rational b = r_coeffs[0] / lc;
         
         PolyExpr Q1, Q0;
-        Q1.resize(G_z_x.size(), nullptr);
-        Q0.resize(G_z_x.size(), nullptr);
+        Q1.resize(G_z_x.size(), poly_make_integer(ctx.arena(), 0));
+        Q0.resize(G_z_x.size(), poly_make_integer(ctx.arena(), 0));
         
         for (std::size_t i = 0; i < G_z_x.size(); ++i) {
             if (!G_z_x[i]) continue;
@@ -203,11 +202,13 @@ struct SubresultantStep {
             auto g_i_z = poly_to_rational_poly(g_i_z_res.value());
             if (g_i_z.is_error()) continue;
             
-            // rem = g_i(z) mod (z^2 + az + b)
             RatPoly monic_r({b, a, Rational(1)});
             auto [quot, rem] = div_rem_rational_poly(g_i_z.value(), monic_r);
             if (rem.size() > 0) Q0[i] = make_rational_expr(ctx.arena(), rem[0]);
+            else Q0[i] = make_integer(ctx.arena(), 0);
+            
             if (rem.size() > 1) Q1[i] = make_rational_expr(ctx.arena(), rem[1]);
+            else Q1[i] = make_integer(ctx.arena(), 0);
         }
         normalize_poly(Q1);
         normalize_poly(Q0);
@@ -220,22 +221,24 @@ struct SubresultantStep {
         ExprPtr a_expr = make_rational_expr(ctx.arena(), a);
         ExprPtr b_expr = make_rational_expr(ctx.arena(), b);
         
-        // D = 4b - a^2
-        ExprPtr disc_expr = ctx.simplify(ctx.arena().make<Binary>(BinaryOp::Sub,
+        auto disc_res = ctx.simplify(ctx.arena().make<Binary>(BinaryOp::Sub,
             mul_expr_lrt(ctx.arena(), make_integer(ctx.arena(), 4), b_expr),
-            mul_expr_lrt(ctx.arena(), a_expr, a_expr))).value();
+            mul_expr_lrt(ctx.arena(), a_expr, a_expr)));
+        if (disc_res.is_error()) return fail<ExprPtr>(disc_res.error());
+        ExprPtr disc_expr = disc_res.value();
         
-        ExprPtr sqrt_disc = ctx.arena().make<FuncCall>("sqrt", std::vector<ExprPtr>{disc_expr});
+        ExprPtr sqrt_disc = ctx.arena().make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{disc_expr});
         
-        // Norm = Q0^2 - a Q1 Q0 + b Q1^2
-        ExprPtr norm = ctx.simplify(ctx.arena().make<Sum>(std::vector<ExprPtr>{
+        auto norm_res = ctx.simplify(ctx.arena().make<Sum>(std::vector<ExprPtr>{
             mul_expr_lrt(ctx.arena(), Q0_x, Q0_x),
             mul_expr_lrt(ctx.arena(), ctx.arena().make<Unary>(UnaryOp::Neg, a_expr), mul_expr_lrt(ctx.arena(), Q1_x, Q0_x)),
             mul_expr_lrt(ctx.arena(), b_expr, mul_expr_lrt(ctx.arena(), Q1_x, Q1_x))
-        })).value();
+        }));
+        if (norm_res.is_error()) return fail<ExprPtr>(norm_res.error());
+        ExprPtr norm = norm_res.value();
         
         ExprPtr ln_term = mul_expr_lrt(ctx.arena(), make_rational_expr(ctx.arena(), -a/Rational(2)),
-            ctx.arena().make<FuncCall>("ln", std::vector<ExprPtr>{norm}));
+            ctx.arena().make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{norm}));
             
         ExprPtr atan_arg = div_expr_lrt(ctx.arena(),
             mul_expr_lrt(ctx.arena(), sqrt_disc, Q1_x),
@@ -244,12 +247,21 @@ struct SubresultantStep {
                 mul_expr_lrt(ctx.arena(), a_expr, Q1_x)));
         
         ExprPtr atan_term = mul_expr_lrt(ctx.arena(), ctx.arena().make<Unary>(UnaryOp::Neg, sqrt_disc),
-            ctx.arena().make<FuncCall>("arctan", std::vector<ExprPtr>{atan_arg}));
+            ctx.arena().make<FuncCall>(BuiltinOp::Atan, std::vector<ExprPtr>{atan_arg}));
             
         return ok(ctx.arena().make<Sum>(std::vector<ExprPtr>{ln_term, atan_term}));
     }
     
-    // Fallback: sum over roots
+    auto G_expr_res = polynomial_to_expr(G_z_x, var, ctx);
+    if (G_expr_res.is_ok()) {
+        ExprPtr G_expr = G_expr_res.value();
+        ExprPtr ln_G = ctx.arena().make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{G_expr});
+        ExprPtr z_sym = ctx.arena().make<Symbol>(z_var.name);
+        ExprPtr term = mul_expr_lrt(ctx.arena(), z_sym, ln_G);
+        
+        return ok(ctx.arena().make<FuncCall>(BuiltinOp::RootSum, std::vector<ExprPtr>{R_i_z, z_sym, term}));
+    }
+
     auto roots_res = solve_polynomial(R_i_z, z_var, ctx);
     if (roots_res.is_error()) return fail<ExprPtr>(roots_res.error());
     std::vector<ExprPtr> terms;
@@ -264,7 +276,7 @@ struct SubresultantStep {
         }
         auto G_expr = polynomial_to_expr(G_root, var, ctx);
         if (G_expr.is_error()) return fail<ExprPtr>(G_expr.error());
-        ExprPtr ln_G = ctx.arena().make<FuncCall>("ln", std::vector<ExprPtr>{G_expr.value()});
+        ExprPtr ln_G = ctx.arena().make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{G_expr.value()});
         terms.push_back(mul_expr_lrt(ctx.arena(), root, ln_G));
     }
     return ok(ctx.arena().make<Sum>(std::move(terms)));
@@ -318,10 +330,6 @@ Result<ExprPtr> integrate_rational_lrt(ExprPtr P_expr, ExprPtr Q_expr, const Sym
     std::vector<ExprPtr> integral_terms;
     for (const auto& fact : r_fact_res.value().factors) {
         PolyExpr Gd;
-
-        // Iterate in reverse (from low-degree steps to high-degree steps).
-        // Gd = first step (lowest degree) where the factor does NOT divide all coefficients.
-        // Steps ordered high→low degree, so reverse = low→high.
         for (auto it = prs.rbegin(); it != prs.rend(); ++it) {
             const auto& step = *it;
             bool divides_all = true;
@@ -332,7 +340,6 @@ Result<ExprPtr> integrate_rational_lrt(ExprPtr P_expr, ExprPtr Q_expr, const Sym
                     if (!coeff) continue;
                     auto c_z_res = parse_polynomial(coeff, z_var, ctx);
                     if (c_z_res.is_error()) { divides_all = false; break; }
-
                     auto div = divide_poly_with_remainder(c_z_res.value(), f_z_res.value(), ctx);
                     if (div.is_error() || !is_zero_poly(div.value().remainder)) {
                         divides_all = false;
@@ -349,13 +356,16 @@ Result<ExprPtr> integrate_rational_lrt(ExprPtr P_expr, ExprPtr Q_expr, const Sym
         if (is_zero_poly(Gd)) continue;
 
         auto conversion = rioboo_conversion(fact.factor, Gd, var, z_var, ctx);
-        if (conversion.is_ok()) {
+        if (conversion.is_ok() && conversion.value()) {
             integral_terms.push_back(conversion.value());
         }
     }
     
-    auto final_res = ctx.simplify(ctx.arena().make<Sum>(std::move(integral_terms)));
-    return ok(final_res.is_ok() ? final_res.value() : make_integer(ctx.arena(), 0));
+    if (integral_terms.empty()) return ok(make_integer(ctx.arena(), 0));
+    if (integral_terms.size() == 1U) return ok(integral_terms.front());
+    
+    auto sum_node = ctx.arena().make<Sum>(std::move(integral_terms));
+    return ctx.simplify(sum_node);
 }
 
 } // namespace cas::algebra

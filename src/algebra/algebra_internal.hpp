@@ -76,5 +76,6 @@ struct IntegerSquareFreeFactor {
 
 [[nodiscard]] Result<std::vector<IntegerSquareFreeFactor>> square_free_factorize_integer_poly(const IntPoly& primitive, symbolic::CASContext& ctx);
 [[nodiscard]] Result<void> append_integer_factor_component(Factorization& factorization, const IntPoly& component, unsigned int multiplicity, const Symbol& var, symbolic::CASContext& ctx);
+[[nodiscard]] BigInt select_factorization_prime(const IntPoly& f);
 
 } // namespace cas::algebra

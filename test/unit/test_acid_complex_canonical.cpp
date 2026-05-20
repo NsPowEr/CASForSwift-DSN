@@ -46,16 +46,27 @@ TEST_F(AcidComplexTest, IntegrationExp) {
 }
 
 TEST_F(AcidComplexTest, IntegrationLn) {
-    // x*ln(x) - x
-    std::string res = format(simplify(integrate("ln(x)", "x")));
-    EXPECT_TRUE(res.find("ln(x)") != std::string::npos);
-    EXPECT_TRUE(res.find("x") != std::string::npos);
+    // ∫ln(x)dx = x*ln(x) - x  — verify by differentiation
+    ExprPtr result = simplify(integrate("ln(x)", "x"));
+    auto d_res = cas::calculus::diff(result, Symbol("x"), 1U, ctx);
+    ASSERT_TRUE(d_res.is_ok());
+    auto simplified_deriv = ctx.simplify(d_res.value());
+    ASSERT_TRUE(simplified_deriv.is_ok());
+    auto eq = mathematically_equal(simplified_deriv.value(), parse("ln(x)"), ctx);
+    ASSERT_TRUE(eq.is_ok());
+    EXPECT_TRUE(eq.value());
 }
 
 TEST_F(AcidComplexTest, IntegrationRationalSimple) {
-    // 1/(x^2+1) -> arctan(x) or LRT form
-    std::string res = format(simplify(integrate("1/(x^2+1)", "x")));
-    EXPECT_TRUE(res.find("arctan") != std::string::npos || res.find("ln") != std::string::npos);
+    // ∫1/(x^2+1)dx = arctan(x) — verify by differentiation
+    ExprPtr result = simplify(integrate("1/(x^2+1)", "x"));
+    auto d_res = cas::calculus::diff(result, Symbol("x"), 1U, ctx);
+    ASSERT_TRUE(d_res.is_ok());
+    auto simplified_deriv = ctx.simplify(d_res.value());
+    ASSERT_TRUE(simplified_deriv.is_ok());
+    auto eq = mathematically_equal(simplified_deriv.value(), parse("1/(x^2+1)"), ctx);
+    ASSERT_TRUE(eq.is_ok());
+    EXPECT_TRUE(eq.value());
 }
 
 TEST_F(AcidComplexTest, IntegrationRationalComplex) {
@@ -103,40 +114,47 @@ TEST_F(AcidComplexTest, AssumptionsEnhancements) {
 
 TEST_F(AcidComplexTest, PolynomialGcdRobustness) {
     EXPECT_EQ(format(simplify(parse("(x^2-1)/(x-1)"))), "x + 1");
-    std::string res = format(simplify(parse("(x^10-1)/(x^8-1)")));
-    EXPECT_TRUE(res.find("x^8") != std::string::npos);
-    EXPECT_TRUE(res.find("x^6") != std::string::npos);
+    // (x^10-1)/(x^8-1) = (x^8+x^6+x^4+x^2+1)/(x^6+x^4+x^2+1) after canceling gcd(x^10-1,x^8-1)=x^2-1
+    ExprPtr result = simplify(parse("(x^10-1)/(x^8-1)"));
+    ExprPtr expected = parse("(x^8+x^6+x^4+x^2+1)/(x^6+x^4+x^2+1)");
+    auto eq = mathematically_equal(result, expected, ctx);
+    ASSERT_TRUE(eq.is_ok());
+    EXPECT_TRUE(eq.value());
 }
+
+namespace {
+// Returns true if any root in `roots` is mathematically equal to `expected`.
+bool roots_contain(const std::vector<ExprPtr>& roots, ExprPtr expected, CASContext& ctx) {
+    for (auto r : roots) {
+        auto eq = mathematically_equal(r, expected, ctx);
+        if (eq.is_ok() && eq.value()) return true;
+    }
+    return false;
+}
+} // namespace
 
 TEST_F(AcidComplexTest, PolynomialSolve) {
     auto res1 = cas::algebra::solve_polynomial(parse("x^2 + 1"), Symbol("x"), ctx);
     ASSERT_TRUE(res1.is_ok());
-    std::vector<std::string> roots1;
-    for(auto r : res1.value()) roots1.push_back(format(r));
-    EXPECT_TRUE(std::find(roots1.begin(), roots1.end(), "I") != roots1.end());
-    EXPECT_TRUE(std::find(roots1.begin(), roots1.end(), "-I") != roots1.end());
+    EXPECT_TRUE(roots_contain(res1.value(), parse("i"), ctx));
+    EXPECT_TRUE(roots_contain(res1.value(), parse("-i"), ctx));
 
     auto res2 = cas::algebra::solve_polynomial(parse("x^3 - 1"), Symbol("x"), ctx);
     ASSERT_TRUE(res2.is_ok());
-    std::vector<std::string> roots2;
-    for(auto r : res2.value()) roots2.push_back(format(r));
-    EXPECT_TRUE(std::find(roots2.begin(), roots2.end(), "1") != roots2.end());
+    EXPECT_TRUE(roots_contain(res2.value(), parse("1"), ctx));
 
     auto res3 = cas::algebra::solve_polynomial(parse("x^4 - 1"), Symbol("x"), ctx);
     ASSERT_TRUE(res3.is_ok());
-    std::vector<std::string> roots3;
-    for(auto r : res3.value()) roots3.push_back(format(r));
-    EXPECT_TRUE(std::find(roots3.begin(), roots3.end(), "1") != roots3.end());
-    EXPECT_TRUE(std::find(roots3.begin(), roots3.end(), "-1") != roots3.end());
-    EXPECT_TRUE(std::find(roots3.begin(), roots3.end(), "I") != roots3.end());
-    EXPECT_TRUE(std::find(roots3.begin(), roots3.end(), "-I") != roots3.end());
+    EXPECT_TRUE(roots_contain(res3.value(), parse("1"), ctx));
+    EXPECT_TRUE(roots_contain(res3.value(), parse("-1"), ctx));
+    EXPECT_TRUE(roots_contain(res3.value(), parse("i"), ctx));
+    EXPECT_TRUE(roots_contain(res3.value(), parse("-i"), ctx));
 
+    // x^5+x+1 = (x^2+x+1)(x^3-x^2+1): solver must produce exactly 5 roots
+    // (solver may use explicit Cardano forms for cubic instead of RootOf)
     auto res4 = cas::algebra::solve_polynomial(parse("x^5 + x + 1"), Symbol("x"), ctx);
     ASSERT_TRUE(res4.is_ok());
-    ASSERT_EQ(res4.value().size(), 5U);
-    for(auto r : res4.value()) {
-        EXPECT_EQ(r->kind, ExprKind::RootOf);
-    }
+    EXPECT_EQ(res4.value().size(), 5U);
 }
 
 TEST_F(AcidComplexTest, SquareFreeFactorization) {

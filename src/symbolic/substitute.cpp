@@ -115,6 +115,20 @@ private:
         return ok(original);
     }
 
+    [[nodiscard]] Result<ExprPtr> substitute_node(ExprPtr original, const Quantity& node) {
+        ScopedFrame frame(*this, [this, dimensions = node.dimensions](ExprPtr value) {
+            return context_.arena().make<Quantity>(value, dimensions);
+        });
+        auto value = substitute_expr(node.value);
+        if (value.is_error()) {
+            return value;
+        }
+        if (value.value() == node.value) {
+            return ok(original);
+        }
+        return ok(context_.arena().make<Quantity>(value.value(), node.dimensions));
+    }
+
     [[nodiscard]] Result<ExprPtr> substitute_node(ExprPtr, const ExprNode&) {
         return fail<ExprPtr>(make_error(CASErrorKind::InvalidArgument, "Cannot substitute inside null expression node"));
     }

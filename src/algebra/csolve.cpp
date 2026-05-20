@@ -62,25 +62,19 @@ namespace {
         polys.push_back(to_poly_form(eq, ctx));
     }
 
-    try {
-        auto sol_res = solve_nonlinear_system_f4(polys, vars, ctx);
-        if (sol_res.is_error()) return fail<ExprPtr>(sol_res.error());
+    auto sol_res = solve_nonlinear_system_f4(polys, vars, ctx);
+    if (sol_res.is_error()) return fail<ExprPtr>(sol_res.error());
 
-        const auto& solutions = sol_res.value();
-        std::vector<ExprPtr> flat_elements;
-        flat_elements.reserve(solutions.size() * vars.size());
-        for (const auto& sol : solutions) {
-            for (auto val : sol) {
-                flat_elements.push_back(val);
-            }
+    const auto& solutions = sol_res.value();
+    std::vector<ExprPtr> flat_elements;
+    flat_elements.reserve(solutions.size() * vars.size());
+    for (const auto& sol : solutions) {
+        for (auto val : sol) {
+            flat_elements.push_back(val);
         }
-
-        return ok(ctx.arena().make<Matrix>(solutions.size(), vars.size(), std::move(flat_elements)));
-    } catch (const std::exception& e) {
-        return fail<ExprPtr>(make_error(CASErrorKind::InternalError, std::string("C++ Exception in csolve: ") + e.what()));
-    } catch (...) {
-        return fail<ExprPtr>(make_error(CASErrorKind::InternalError, "Unknown Exception in csolve"));
     }
+
+    return ok(ctx.arena().make<Matrix>(solutions.size(), vars.size(), std::move(flat_elements)));
 }
 
 } // namespace cas::algebra

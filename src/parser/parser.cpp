@@ -231,6 +231,16 @@ Result<ExprPtr> Parser::parse_infix(ExprPtr left, int precedence) {
         return Result<ExprPtr>(arena_.make<Binary>(BinaryOp::Pow, left, right.value()));
     case TokenKind::Percent:
         return Result<ExprPtr>(arena_.make<Binary>(BinaryOp::Mod, left, right.value()));
+    case TokenKind::Less:
+        return Result<ExprPtr>(arena_.make<Binary>(BinaryOp::Less, left, right.value()));
+    case TokenKind::Greater:
+        return Result<ExprPtr>(arena_.make<Binary>(BinaryOp::Greater, left, right.value()));
+    case TokenKind::LessEqual:
+        return Result<ExprPtr>(arena_.make<Binary>(BinaryOp::LessEqual, left, right.value()));
+    case TokenKind::GreaterEqual:
+        return Result<ExprPtr>(arena_.make<Binary>(BinaryOp::GreaterEqual, left, right.value()));
+    case TokenKind::DoubleEqual:
+        return Result<ExprPtr>(arena_.make<Binary>(BinaryOp::Equal, left, right.value()));
     default:
         return Result<ExprPtr>(make_parse_error(ParseError::UnexpectedToken, op, "Unexpected infix operator"));
     }

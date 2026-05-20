@@ -15,6 +15,10 @@ bool BigInt::is_zero() const noexcept {
     return limbs_.empty();
 }
 
+bool BigInt::is_positive() const noexcept {
+    return !negative_ && !limbs_.empty();
+}
+
 std::size_t BigInt::bit_length() const noexcept {
     if (is_zero()) {
         return 0U;

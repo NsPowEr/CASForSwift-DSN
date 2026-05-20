@@ -22,6 +22,7 @@ public:
     [[nodiscard]] const std::string& decimal() const;
     [[nodiscard]] bool is_negative() const noexcept;
     [[nodiscard]] bool is_zero() const noexcept;
+    [[nodiscard]] bool is_positive() const noexcept;
     [[nodiscard]] std::size_t hash() const noexcept;
 
     [[nodiscard]] BigInt operator-() const;

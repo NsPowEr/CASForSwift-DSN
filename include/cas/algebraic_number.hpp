@@ -27,7 +27,9 @@ public:
 
     [[nodiscard]] const CoeffVec& value() const noexcept { return value_; }
     [[nodiscard]] const CoeffVec& min_poly() const noexcept { return min_poly_; }
+    [[nodiscard]] bool is_zero() const noexcept;
 
+    [[nodiscard]] AlgebraicNumber operator-() const;
     [[nodiscard]] AlgebraicNumber operator+(const AlgebraicNumber& other) const;
     [[nodiscard]] AlgebraicNumber operator-(const AlgebraicNumber& other) const;
     [[nodiscard]] AlgebraicNumber operator*(const AlgebraicNumber& other) const;
@@ -40,6 +42,8 @@ public:
      * @return s(x) such that s(x)p(x) + t(x)m(x) = 1.
      */
     [[nodiscard]] Result<AlgebraicNumber> inverse() const;
+    [[nodiscard]] Result<AlgebraicNumber> div(const AlgebraicNumber& other) const;
+    [[nodiscard]] Result<AlgebraicNumber> pow(std::size_t exponent) const;
 
 private:
     CoeffVec value_;

@@ -1,5 +1,7 @@
 # Build directories
 build/
+build-*/
+build_*/
 build-ast/
 bin/
 lib/
@@ -7,6 +9,14 @@ lib/
 *.a
 *.so
 *.dylib
+
+# Cmake auto-generated cache (when invoked from repo root by mistake)
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Testing/
+.qt/
+.rcc/
 
 # IDE and System files
 .DS_Store
@@ -27,6 +37,28 @@ repro_limit.cpp
 debug_limit.cpp
 print_gcd.cpp
 test_csolve_nd.cpp
+debug_mrv.cpp
+test_complex.cpp
+test_debug.cpp
+test_expand_multiterm.cpp
+test_hermite_p1
+test_hermite_p1.cpp
+test_math_equal
+test_math_equal.cpp
+test_pf_debug
+test_pf_debug.cpp
+audit.py
+audit_results.md
+run_audit.py
+run_lldb.sh
+CMakeLists.txt_parser_fix
+.mcp.json
+.antigravitycli/
+\!_VECCHI\ DOCUMENTI/
+
+# macOS finder duplicate copies (filename with " 2" suffix)
+* 2.*
+* 3.*
 
 # Hooks
 rtk

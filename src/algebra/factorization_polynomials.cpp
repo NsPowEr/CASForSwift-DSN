@@ -4,6 +4,7 @@
 #include "cas/rational.hpp"
 #include "algebra_internal.hpp"
 #include "polynomial_internal.hpp"
+#include <algorithm>
 #include <vector>
 
 namespace cas::algebra {
@@ -245,6 +246,14 @@ Result<RationalParts> split_num_den(ExprPtr expr, symbolic::CASContext& ctx) {
             return fail<RationalParts>(make_error(
                 CASErrorKind::Unimplemented,
                 "Il modulo non e' supportato in apart_num_den"));
+        case BinaryOp::Equal:
+        case BinaryOp::Less:
+        case BinaryOp::Greater:
+        case BinaryOp::LessEqual:
+        case BinaryOp::GreaterEqual:
+            return fail<RationalParts>(make_error(
+                CASErrorKind::InvalidArgument,
+                "Comparison operators not supported in apart_num_den"));
         }
     }
 
@@ -370,16 +379,23 @@ Result<ExprPtr> polynomial_gcd(ExprPtr p, ExprPtr q, const Symbol& var, symbolic
         std::sort(vars.begin(), vars.end(), [](const auto& a, const auto& b){ return a.name < b.name; });
         vars.erase(std::unique(vars.begin(), vars.end(), [](const auto& a, const auto& b){ return a.name == b.name; }), vars.end());
 
-        if (vars.size() > 1 || (vars.size() == 1 && vars[0].name != var.name)) {
-            // Use Heuristic GCD
-            auto gcd_res = gcd_heuristic(p_multi.value(), q_multi.value());
-            if (gcd_res.is_error()) {
-                // Fallback to Modular GCD
-                gcd_res = gcd_modular(p_multi.value(), q_multi.value());
+        auto contains_non_main_var = [&](const MultivariatePolynomial& poly) {
+            for (const Symbol& candidate : poly.variables()) {
+                if (candidate.name != var.name) {
+                    return true;
+                }
             }
+            return false;
+        };
 
+        if (contains_non_main_var(p_multi.value()) && contains_non_main_var(q_multi.value())) {
+            auto gcd_res = gcd_multivariate_eval_interp(p_multi.value(), q_multi.value(), ctx);
             if (gcd_res.is_ok()) {
-                return multivariate_to_expr(gcd_res.value(), ctx);
+                auto gcd_expr = multivariate_to_expr(gcd_res.value(), ctx);
+                if (gcd_expr.is_error()) {
+                    return fail<ExprPtr>(gcd_expr.error());
+                }
+                return ctx.simplify(gcd_expr.value());
             }
         }
     }
@@ -396,6 +412,8 @@ Result<ExprPtr> polynomial_gcd(ExprPtr p, ExprPtr q, const Symbol& var, symbolic
     auto left_integer = poly_to_integer_poly(left.value());
     auto right_integer = poly_to_integer_poly(right.value());
     if (left_integer.is_ok() && right_integer.is_ok()) {
+        const BigInt left_content = integer_content(left_integer.value());
+        const BigInt right_content = integer_content(right_integer.value());
         IntegerGcdResult gcd_result =
             gcd_integer_poly_with_subresultant(left_integer.value(), right_integer.value());
         IntPoly gcd_poly = std::move(gcd_result.gcd);
@@ -426,7 +444,16 @@ Result<ExprPtr> polynomial_gcd(ExprPtr p, ExprPtr q, const Symbol& var, symbolic
             return fail<ExprPtr>(gcd_expr.error());
         }
 
-        auto traced_result = ctx.simplify(gcd_expr.value());
+        Result<ExprPtr> traced_result = ctx.simplify(gcd_expr.value());
+        if (left_content == right_content && traced_result.is_ok()) {
+            auto parsed_gcd = parse_polynomial(traced_result.value(), var, ctx);
+            if (parsed_gcd.is_ok()) {
+                auto monic = normalize_poly_monic(parsed_gcd.value(), ctx);
+                if (monic.is_ok()) {
+                    traced_result = polynomial_to_expr(monic.value(), var, ctx);
+                }
+            }
+        }
         if (traced_result.is_ok()) {
             record_trace(path_rule, traced_result.value());
         }
@@ -616,6 +643,38 @@ struct ExtensionInfo {
         if (func->func_id == BuiltinOp::Sqrt && func->args.size() == 1) {
             if (auto info = try_parse_radical(func->args[0], ctx.arena().make<RationalLit>(BigInt(1), BigInt(2)))) return ok(*info);
         }
+    }
+    if (const auto* root = expr_cast<RootOf>(extension)) {
+        auto parsed = parse_polynomial(root->polynomial, root->variable, ctx);
+        if (parsed.is_error()) {
+            return fail<ExtensionInfo>(parsed.error());
+        }
+        auto rational_poly = poly_to_rational_poly(parsed.value());
+        if (rational_poly.is_error()) {
+            return fail<ExtensionInfo>(make_error(
+                CASErrorKind::Unimplemented,
+                "RootOf extension requires a rational minimal polynomial"));
+        }
+        RatPoly min_poly = rational_poly.value();
+        normalize_rational_coefficients(min_poly);
+        if (min_poly.empty() || min_poly.is_zero() || min_poly.degree() == 0U) {
+            return fail<ExtensionInfo>(make_error(
+                CASErrorKind::InvalidArgument,
+                "RootOf extension requires a non-constant minimal polynomial"));
+        }
+        const Rational leading = min_poly.leading_coeff();
+        if (leading.numerator().is_zero()) {
+            return fail<ExtensionInfo>(make_error(
+                CASErrorKind::InvalidArgument,
+                "RootOf minimal polynomial must have non-zero leading coefficient"));
+        }
+        if (leading != Rational(BigInt(1))) {
+            for (auto& coefficient : min_poly.coefficients()) {
+                coefficient = coefficient / leading;
+            }
+            normalize_rational_coefficients(min_poly);
+        }
+        return ok(ExtensionInfo{Symbol{"__alpha"}, min_poly, extension});
     }
 
     // Se l'estensione è già un simbolo, forse il polinomio minimo è fornito altrove?
@@ -827,6 +886,20 @@ struct ExtensionInfo {
     return normalize_poly_monic(A, ctx);
 }
 
+[[nodiscard]] std::size_t trager_shift_attempt_bound(
+    const PolyExpr& polynomial,
+    const RatPoly& min_poly,
+    const symbolic::CASContext& ctx) {
+    const std::size_t polynomial_degree = std::max<std::size_t>(1U, poly_degree(polynomial));
+    const std::size_t extension_degree = std::max<std::size_t>(1U, min_poly.degree());
+    const std::size_t discriminant_collision_bound =
+        2U * polynomial_degree * extension_degree * (polynomial_degree + extension_degree);
+    const std::size_t context_bound = static_cast<std::size_t>(std::max(1, ctx.max_simplification_depth()));
+    return std::max<std::size_t>(
+        polynomial_degree + extension_degree + 1U,
+        std::min(discriminant_collision_bound + 1U, context_bound));
+}
+
 } // namespace
 
 Result<Factorization> factor_polynomial(
@@ -864,8 +937,8 @@ Result<Factorization> factor_polynomial(
     }
     auto m_y_expr = polynomial_to_expr(PolyExpr(m_coeffs), ext_info.var, ctx).value();
     
-    int s = 0;
-    while (s < 10) {
+    const std::size_t max_shift_attempts = trager_shift_attempt_bound(f_poly, ext_info.min_poly, ctx);
+    for (std::size_t s = 0U; s < max_shift_attempts; ++s) {
         // g(x) = Norm(f(x - sy, y))
         ExprPtr f_shifted_expr;
         if (s == 0) {
@@ -897,7 +970,7 @@ Result<Factorization> factor_polynomial(
             }
         }
 
-        if (square_free || s > 5) {
+        if (square_free) {
             // 4. GCD: f_i(x, y) = gcd(f(x, y), g_i(x + sy, y))
             Factorization result;
             result.content = make_integer(ctx.arena(), 1); // Trager usually returns monic factors
@@ -923,10 +996,9 @@ Result<Factorization> factor_polynomial(
             }
             return ok(result);
         }
-        s++;
     }
 
-    return fail<Factorization>(make_error(CASErrorKind::InternalError, "Impossibile trovare uno shift per la fattorizzazione di Trager"));
+    return fail<Factorization>(make_error(CASErrorKind::Unimplemented, "Impossibile trovare uno shift square-free per la fattorizzazione di Trager entro il budget configurato"));
 }
 
 

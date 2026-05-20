@@ -6,15 +6,60 @@
 namespace cas {
 namespace algebra {
 
+namespace {
+
+[[nodiscard]] RatPoly normalize_monic_min_poly(AlgebraicNumber::CoeffVec coefficients) {
+    RatPoly polynomial(std::move(coefficients));
+    normalize_rational_coefficients(polynomial);
+    if (!polynomial.empty()) {
+        const Rational leading = polynomial.leading_coeff();
+        if (!leading.numerator().is_zero() && leading != Rational(BigInt(1))) {
+            for (auto& coefficient : polynomial.coefficients()) {
+                coefficient = coefficient / leading;
+            }
+            normalize_rational_coefficients(polynomial);
+        }
+    }
+    return polynomial;
+}
+
+[[nodiscard]] AlgebraicNumber::CoeffVec reduce_coefficients(
+    AlgebraicNumber::CoeffVec value,
+    const AlgebraicNumber::CoeffVec& min_poly) {
+    RatPoly v(std::move(value));
+    normalize_rational_coefficients(v);
+
+    RatPoly mp(min_poly);
+    normalize_rational_coefficients(mp);
+    if (mp.empty() || mp.is_zero()) {
+        return v.coefficients();
+    }
+
+    auto [quotient, remainder] = div_rem_rational_poly(v, mp);
+    (void)quotient;
+    normalize_rational_coefficients(remainder);
+    return remainder.coefficients();
+}
+
+} // namespace
+
 AlgebraicNumber::AlgebraicNumber(CoeffVec value, CoeffVec min_poly)
     : value_(std::move(value)), min_poly_(std::move(min_poly)) {
-    RatPoly v(value_);
-    normalize_rational_coefficients(v);
-    value_ = v.coefficients();
-
-    RatPoly mp(min_poly_);
-    normalize_rational_coefficients(mp);
+    RatPoly mp = normalize_monic_min_poly(std::move(min_poly_));
     min_poly_ = mp.coefficients();
+    value_ = reduce_coefficients(std::move(value_), min_poly_);
+}
+
+bool AlgebraicNumber::is_zero() const noexcept {
+    return value_.empty() || (value_.size() == 1U && value_.front().numerator().is_zero());
+}
+
+AlgebraicNumber AlgebraicNumber::operator-() const {
+    CoeffVec negated = value_;
+    for (auto& coefficient : negated) {
+        coefficient = -coefficient;
+    }
+    return AlgebraicNumber(std::move(negated), min_poly_);
 }
 
 AlgebraicNumber AlgebraicNumber::operator+(const AlgebraicNumber& other) const {
@@ -70,6 +115,34 @@ Result<AlgebraicNumber> AlgebraicNumber::inverse() const {
     RatPoly inv_poly(inv_coeffs);
     auto [q, rem] = div_rem_rational_poly(inv_poly, mp);
     return ok(AlgebraicNumber(rem.coefficients(), min_poly_));
+}
+
+Result<AlgebraicNumber> AlgebraicNumber::div(const AlgebraicNumber& other) const {
+    auto inverse_res = other.inverse();
+    if (inverse_res.is_error()) {
+        return fail<AlgebraicNumber>(inverse_res.error());
+    }
+    return ok((*this) * inverse_res.value());
+}
+
+Result<AlgebraicNumber> AlgebraicNumber::pow(std::size_t exponent) const {
+    AlgebraicNumber result({Rational(BigInt(1))}, min_poly_);
+    if (exponent == 0U) {
+        return ok(result);
+    }
+
+    AlgebraicNumber base = *this;
+    std::size_t power = exponent;
+    while (power > 0U) {
+        if ((power & 1U) != 0U) {
+            result = result * base;
+        }
+        power >>= 1U;
+        if (power > 0U) {
+            base = base * base;
+        }
+    }
+    return ok(result);
 }
 
 } // namespace algebra

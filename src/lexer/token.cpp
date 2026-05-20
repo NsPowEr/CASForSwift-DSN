@@ -42,6 +42,16 @@ std::string_view token_kind_name(TokenKind kind) noexcept {
         return "Comma";
     case TokenKind::Semicolon:
         return "Semicolon";
+    case TokenKind::Less:
+        return "Less";
+    case TokenKind::Greater:
+        return "Greater";
+    case TokenKind::LessEqual:
+        return "LessEqual";
+    case TokenKind::GreaterEqual:
+        return "GreaterEqual";
+    case TokenKind::DoubleEqual:
+        return "DoubleEqual";
     case TokenKind::Integral:
         return "Integral";
     case TokenKind::Derivative:

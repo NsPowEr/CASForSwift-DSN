@@ -210,6 +210,12 @@ private:
             return differentiate_power(binary, var);
         case BinaryOp::Mod:
             return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Modulo differentiation is not implemented"));
+        case BinaryOp::Equal:
+        case BinaryOp::Less:
+        case BinaryOp::Greater:
+        case BinaryOp::LessEqual:
+        case BinaryOp::GreaterEqual:
+            return ok(arena_.make<IntegerLit>(BigInt(0)));
         }
 
         return fail<ExprPtr>(make_error(CASErrorKind::InternalError, "Unknown binary operator"));
@@ -460,13 +466,26 @@ private:
 };
 
 }  // namespace
-
 Result<ExprPtr> diff(ExprPtr expr, const Symbol& var, unsigned int order, symbolic::CASContext& ctx) {
+    if (ctx.is_caching_enabled()) {
+        auto key = symbolic::CASContext::DiffKey{expr, var.name, order};
+        if (auto cached = ctx.diff_cache_.get(key)) {
+            return ok(*cached);
+        }
+    }
+
     auto differentiated = Differentiator(ctx).differentiate(expr, var, order);
     if (differentiated.is_error()) {
         return differentiated;
     }
-    return symbolic::materialize_expr(differentiated.value(), ctx.arena());
+
+    auto result = differentiated.value();
+    if (ctx.is_caching_enabled()) {
+        auto key = symbolic::CASContext::DiffKey{expr, var.name, order};
+        ctx.diff_cache_.put(key, result);
+    }
+
+    return symbolic::materialize_expr(result, ctx.arena());
 }
 
 Result<ExprPtr> partial_diff(ExprPtr expr, const Symbol& var, symbolic::CASContext& ctx) {

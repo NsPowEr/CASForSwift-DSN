@@ -21,11 +21,9 @@ void lll_reduction(LatticeMatrix& b, double delta_val) {
     if (n == 0) return;
     std::size_t m = b[0].size();
     
-    Rational delta = Rational(BigInt(75), BigInt(100)); // Using 0.75 as default
-    if (delta_val != 0.75) {
-        // Convert double to Rational if needed, but 0.75 is the usual value.
-        // For simplicity, we stick to Rational(75, 100).
-    }
+    const long long kDeltaDen = 1000000LL;
+    const long long kDeltaNum = static_cast<long long>(delta_val * static_cast<double>(kDeltaDen) + 0.5);
+    Rational delta = Rational(BigInt(kDeltaNum), BigInt(kDeltaDen));
 
     LatticeMatrix b_star(n, LatticeVector(m));
     std::vector<std::vector<Rational>> mu(n, std::vector<Rational>(n));
@@ -81,7 +79,8 @@ std::optional<IntPoly> find_factor_lll(
     const IntPoly& f,
     const IntPoly& g,
     const BigInt& pk,
-    std::size_t max_deg) {
+    std::size_t max_deg,
+    double delta) {
     
     std::size_t d = g.degree();
     if (max_deg < d) max_deg = d;
@@ -104,7 +103,7 @@ std::optional<IntPoly> find_factor_lll(
             }
         }
         
-        lll_reduction(basis);
+        lll_reduction(basis, delta);
         
         // Shortest vector is in basis[0]
         IntPoly h;

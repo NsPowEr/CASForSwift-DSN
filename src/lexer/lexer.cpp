@@ -152,6 +152,40 @@ Result<std::vector<Token>> Lexer::tokenize() const {
             push_token(TokenKind::Bang, position++, 1U, token_line, token_column);
             ++column;
             continue;
+        case '<':
+            if (position + 1U < input_.size() && input_[position + 1U] == '=') {
+                push_token(TokenKind::LessEqual, position, 2U, token_line, token_column);
+                position += 2U;
+                column += 2U;
+            } else {
+                push_token(TokenKind::Less, position++, 1U, token_line, token_column);
+                ++column;
+            }
+            continue;
+        case '>':
+            if (position + 1U < input_.size() && input_[position + 1U] == '=') {
+                push_token(TokenKind::GreaterEqual, position, 2U, token_line, token_column);
+                position += 2U;
+                column += 2U;
+            } else {
+                push_token(TokenKind::Greater, position++, 1U, token_line, token_column);
+                ++column;
+            }
+            continue;
+        case '=':
+            if (position + 1U < input_.size() && input_[position + 1U] == '=') {
+                push_token(TokenKind::DoubleEqual, position, 2U, token_line, token_column);
+                position += 2U;
+                column += 2U;
+            } else {
+                // In some CAS, '=' is used for assignment or equality. 
+                // We'll treat a single '=' as TokenKind::DoubleEqual for now if that's what is expected in assumptions,
+                // or we could add a dedicated Equal token. 
+                // BinaryOp::Equal exists.
+                push_token(TokenKind::DoubleEqual, position++, 1U, token_line, token_column);
+                ++column;
+            }
+            continue;
         case '(':
             push_token(TokenKind::LParen, position++, 1U, token_line, token_column);
             ++column;

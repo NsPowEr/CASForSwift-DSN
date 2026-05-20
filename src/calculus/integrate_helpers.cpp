@@ -221,15 +221,77 @@ namespace cas::calculus::integrate_detail {
     return is_one(b->left) && matches_square_of_variable(b->right, var);
 }
 
-[[nodiscard]] bool matches_square_plus_constant_square([[maybe_unused]] ExprPtr expr, [[maybe_unused]] const Symbol& var, [[maybe_unused]] ExprPtr& constant_base) {
+// Try to extract C from C^2 (the constant factor in x^2 ± C^2 patterns).
+// Returns true and sets base=C if the expression is C^2 with C independent of var.
+[[nodiscard]] static bool extract_constant_squared(ExprPtr expr, const Symbol& var, ExprPtr& base) {
+    if (depends_on(expr, var)) return false;
+    if (const auto* bp = expr_cast<Binary>(expr); bp && bp->op == BinaryOp::Pow) {
+        if (is_rational_value(bp->right, 2, 1) && !depends_on(bp->left, var)) {
+            base = bp->left;
+            return true;
+        }
+    }
+    // Accept any constant expression C — note: the caller uses base as-is in 1/(2*base),
+    // so only accept when we know base itself (not base^2). For plain symbols/integers, use sqrt.
+    // Conservative: only accept the Binary(Pow, C, 2) form.
     return false;
 }
 
-[[nodiscard]] bool matches_square_minus_constant_square([[maybe_unused]] ExprPtr expr, [[maybe_unused]] const Symbol& var, [[maybe_unused]] ExprPtr& constant_base) {
+[[nodiscard]] bool matches_square_plus_constant_square(ExprPtr expr, const Symbol& var, ExprPtr& constant_base) {
+    // Matches x^2 + C^2 in Sum form (after simplification)
+    if (const auto* sum = expr_cast<Sum>(expr); sum && sum->terms.size() == 2U) {
+        if (matches_square_of_variable(sum->terms[0], var) && extract_constant_squared(sum->terms[1], var, constant_base)) return true;
+        if (matches_square_of_variable(sum->terms[1], var) && extract_constant_squared(sum->terms[0], var, constant_base)) return true;
+    }
+    // Binary Add form
+    if (const auto* b = expr_cast<Binary>(expr); b && b->op == BinaryOp::Add) {
+        if (matches_square_of_variable(b->left, var) && extract_constant_squared(b->right, var, constant_base)) return true;
+        if (matches_square_of_variable(b->right, var) && extract_constant_squared(b->left, var, constant_base)) return true;
+    }
     return false;
 }
 
-[[nodiscard]] bool matches_constant_square_minus_variable_square([[maybe_unused]] ExprPtr expr, [[maybe_unused]] const Symbol& var, [[maybe_unused]] ExprPtr& constant_base) {
+[[nodiscard]] bool matches_square_minus_constant_square(ExprPtr expr, const Symbol& var, ExprPtr& constant_base) {
+    // Matches x^2 - C^2: Binary(Sub) form or Sum([x^2, Unary(Neg, C^2)]) form
+    if (const auto* b = expr_cast<Binary>(expr); b && b->op == BinaryOp::Sub) {
+        if (matches_square_of_variable(b->left, var) && extract_constant_squared(b->right, var, constant_base)) return true;
+    }
+    if (const auto* sum = expr_cast<Sum>(expr); sum && sum->terms.size() == 2U) {
+        for (int i = 0; i < 2; ++i) {
+            ExprPtr t_sq = sum->terms[i];
+            ExprPtr t_neg = sum->terms[1-i];
+            if (!matches_square_of_variable(t_sq, var)) continue;
+            // t_neg should be Unary(Neg, C^2) or Product([-1, C^2])
+            ExprPtr inner{};
+            if (const auto* u = expr_cast<Unary>(t_neg); u && u->op == UnaryOp::Neg) inner = u->operand;
+            else if (const auto* p = expr_cast<Product>(t_neg); p && p->factors.size() == 2U) {
+                if (is_negative_one(p->factors[0])) inner = p->factors[1];
+                else if (is_negative_one(p->factors[1])) inner = p->factors[0];
+            }
+            if (inner && extract_constant_squared(inner, var, constant_base)) return true;
+        }
+    }
+    return false;
+}
+
+[[nodiscard]] bool matches_constant_square_minus_variable_square(ExprPtr expr, const Symbol& var, ExprPtr& constant_base) {
+    // Matches C^2 - x^2: Binary(Sub) form or Sum([C^2, Unary(Neg, x^2)])
+    if (const auto* b = expr_cast<Binary>(expr); b && b->op == BinaryOp::Sub) {
+        if (extract_constant_squared(b->left, var, constant_base) && matches_square_of_variable(b->right, var)) return true;
+    }
+    if (const auto* sum = expr_cast<Sum>(expr); sum && sum->terms.size() == 2U) {
+        for (int i = 0; i < 2; ++i) {
+            ExprPtr t_csq = sum->terms[i];
+            ExprPtr t_neg = sum->terms[1-i];
+            ExprPtr inner{};
+            if (const auto* u = expr_cast<Unary>(t_neg); u && u->op == UnaryOp::Neg) inner = u->operand;
+            else if (const auto* p = expr_cast<Product>(t_neg); p && p->factors.size() == 2U) {
+                if (is_negative_one(p->factors[0])) inner = p->factors[1];
+                else if (is_negative_one(p->factors[1])) inner = p->factors[0];
+            }
+            if (inner && extract_constant_squared(t_csq, var, constant_base) && matches_square_of_variable(inner, var)) return true;
+        }
+    }
     return false;
 }
 

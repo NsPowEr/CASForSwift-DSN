@@ -41,12 +41,24 @@ namespace cas::algebra {
                 if (const auto* sym = expr_cast<Symbol>(bp->left); sym && sym->name == var.name) {
                     auto expo = poly_parse_nonnegative_integer_exponent(bp->right);
                     if (expo.is_error()) return fail<std::pair<std::size_t, ExprPtr>>(expo.error());
+                    if (poly_depends_on(b_mul->left, var.name)) {
+                        return fail<std::pair<std::size_t, ExprPtr>>(CASError{
+                            .kind = CASErrorKind::Unimplemented,
+                            .message = "Coefficiente polinomiale dipende dalla variabile: non è un polinomio",
+                        });
+                    }
                     ExprPtr c = negate ? ctx.arena().make<Unary>(UnaryOp::Neg, b_mul->left) : b_mul->left;
                     auto cs = ctx.simplify(c);
                     if (cs.is_error()) return fail<std::pair<std::size_t, ExprPtr>>(cs.error());
                     return ok(std::make_pair(expo.value(), cs.value()));
                 }
             } else if (const auto* sym = expr_cast<Symbol>(b_mul->right); sym && sym->name == var.name) {
+                if (poly_depends_on(b_mul->left, var.name)) {
+                    return fail<std::pair<std::size_t, ExprPtr>>(CASError{
+                        .kind = CASErrorKind::Unimplemented,
+                        .message = "Coefficiente polinomiale dipende dalla variabile: non è un polinomio",
+                    });
+                }
                 ExprPtr c = negate ? ctx.arena().make<Unary>(UnaryOp::Neg, b_mul->left) : b_mul->left;
                 auto cs = ctx.simplify(c);
                 if (cs.is_error()) return fail<std::pair<std::size_t, ExprPtr>>(cs.error());
@@ -69,6 +81,14 @@ namespace cas::algebra {
                 if (!is_var_pow) coeff_factors.push_back(f);
             }
             if (!coeff_factors.empty() && deg > 0) {
+                for (ExprPtr cf : coeff_factors) {
+                    if (poly_depends_on(cf, var.name)) {
+                        return fail<std::pair<std::size_t, ExprPtr>>(CASError{
+                            .kind = CASErrorKind::Unimplemented,
+                            .message = "Fattore coefficiente dipende dalla variabile: non è un polinomio",
+                        });
+                    }
+                }
                 ExprPtr c = coeff_factors.size() == 1U
                     ? coeff_factors.front()
                     : static_cast<ExprPtr>(ctx.arena().make<Product>(std::move(coeff_factors)));
@@ -81,6 +101,12 @@ namespace cas::algebra {
         if (const auto* sym = expr_cast<Symbol>(term); sym && sym->name == var.name) {
             ExprPtr c = poly_make_integer(ctx.arena(), negate ? -1 : 1);
             return ok(std::make_pair(1UL, c));
+        }
+        if (poly_depends_on(term, var.name)) {
+            return fail<std::pair<std::size_t, ExprPtr>>(CASError{
+                .kind = CASErrorKind::Unimplemented,
+                .message = "Termine non polinomiale dipendente dalla variabile: espressione trascendente non supportata",
+            });
         }
         ExprPtr c = negate ? ctx.arena().make<Unary>(UnaryOp::Neg, term) : term;
         auto cs = ctx.simplify(c);
@@ -127,7 +153,7 @@ namespace cas::algebra {
     if (poly.is_zero()) return ok(poly_make_integer(ctx.arena(), 0));
     std::vector<ExprPtr> terms;
     for (std::size_t i = 0; i < poly.size(); ++i) {
-        if (poly_is_zero_expr(poly[i])) continue;
+        if (!poly[i] || poly_is_zero_expr(poly[i])) continue;
         ExprPtr term;
         if (i == 0) {
             term = poly[i];
@@ -136,9 +162,9 @@ namespace cas::algebra {
                                         : ctx.arena().make<Binary>(BinaryOp::Pow, ctx.arena().make<Symbol>(var.name), poly_make_integer(ctx.arena(), i));
             if (poly_is_one_expr(poly[i])) term = var_part;
             else if (poly_is_minus_one_expr(poly[i])) term = ctx.arena().make<Unary>(UnaryOp::Neg, var_part);
-            else term = ctx.arena().make<Binary>(BinaryOp::Mul, poly[i], var_part);
+            else term = ctx.arena().make<Product>(std::vector<ExprPtr>{poly[i], var_part});
         }
-        terms.push_back(term);
+        if (term) terms.push_back(term);
     }
     if (terms.empty()) return ok(poly_make_integer(ctx.arena(), 0));
     if (terms.size() == 1) return ok(terms[0]);
@@ -148,6 +174,12 @@ namespace cas::algebra {
 
 // --- 3. Arithmetic (Expr based) ---
 
+namespace {
+[[nodiscard]] ExprPtr coeff_or_zero(ExprPtr c, AstArena& arena) {
+    return c ? c : poly_make_integer(arena, 0);
+}
+}
+
 void normalize_poly(PolyExpr& poly) {
     poly.normalize([](ExprPtr e) { return !e || poly_is_zero_expr(e); });
 }
@@ -156,8 +188,8 @@ void normalize_poly(PolyExpr& poly) {
     PolyExpr res;
     std::size_t n = std::max(lhs.size(), rhs.size());
     for (std::size_t i = 0; i < n; ++i) {
-        ExprPtr l = (i < lhs.size()) ? lhs[i] : poly_make_integer(ctx.arena(), 0);
-        ExprPtr r = (i < rhs.size()) ? rhs[i] : poly_make_integer(ctx.arena(), 0);
+        ExprPtr l = (i < lhs.size()) ? coeff_or_zero(lhs[i], ctx.arena()) : poly_make_integer(ctx.arena(), 0);
+        ExprPtr r = (i < rhs.size()) ? coeff_or_zero(rhs[i], ctx.arena()) : poly_make_integer(ctx.arena(), 0);
         auto sum = ctx.simplify(ctx.arena().make<Binary>(BinaryOp::Add, l, r));
         if (sum.is_error()) return fail<PolyExpr>(sum.error());
         res.push_back(sum.value());
@@ -170,8 +202,8 @@ void normalize_poly(PolyExpr& poly) {
     PolyExpr res;
     std::size_t n = std::max(lhs.size(), rhs.size());
     for (std::size_t i = 0; i < n; ++i) {
-        ExprPtr l = (i < lhs.size()) ? lhs[i] : poly_make_integer(ctx.arena(), 0);
-        ExprPtr r = (i < rhs.size()) ? rhs[i] : poly_make_integer(ctx.arena(), 0);
+        ExprPtr l = (i < lhs.size()) ? coeff_or_zero(lhs[i], ctx.arena()) : poly_make_integer(ctx.arena(), 0);
+        ExprPtr r = (i < rhs.size()) ? coeff_or_zero(rhs[i], ctx.arena()) : poly_make_integer(ctx.arena(), 0);
         auto sub = ctx.simplify(ctx.arena().make<Binary>(BinaryOp::Sub, l, r));
         if (sub.is_error()) return fail<PolyExpr>(sub.error());
         res.push_back(sub.value());
@@ -183,7 +215,7 @@ void normalize_poly(PolyExpr& poly) {
 [[nodiscard]] Result<PolyExpr> poly_negate(const PolyExpr& poly, symbolic::CASContext& ctx) {
     PolyExpr res;
     for (auto c : poly.coefficients()) {
-        auto neg = ctx.simplify(ctx.arena().make<Unary>(UnaryOp::Neg, c));
+        auto neg = ctx.simplify(ctx.arena().make<Unary>(UnaryOp::Neg, coeff_or_zero(c, ctx.arena())));
         if (neg.is_error()) return fail<PolyExpr>(neg.error());
         res.push_back(neg.value());
     }
@@ -198,9 +230,9 @@ void normalize_poly(PolyExpr& poly) {
         if (poly_is_zero_expr(lhs[i])) continue;
         for (std::size_t j = 0; j < rhs.size(); ++j) {
             if (poly_is_zero_expr(rhs[j])) continue;
-            auto prod = ctx.simplify(ctx.arena().make<Binary>(BinaryOp::Mul, lhs[i], rhs[j]));
+            auto prod = ctx.simplify(ctx.arena().make<Binary>(BinaryOp::Mul, coeff_or_zero(lhs[i], ctx.arena()), coeff_or_zero(rhs[j], ctx.arena())));
             if (prod.is_error()) return fail<PolyExpr>(prod.error());
-            auto sum = ctx.simplify(ctx.arena().make<Binary>(BinaryOp::Add, res[i + j], prod.value()));
+            auto sum = ctx.simplify(ctx.arena().make<Binary>(BinaryOp::Add, coeff_or_zero(res[i + j], ctx.arena()), prod.value()));
             if (sum.is_error()) return fail<PolyExpr>(sum.error());
             res[i + j] = sum.value();
         }
@@ -212,7 +244,7 @@ void normalize_poly(PolyExpr& poly) {
 [[nodiscard]] Result<PolyExpr> poly_divide_by_scalar(const PolyExpr& poly, ExprPtr scalar, symbolic::CASContext& ctx) {
     PolyExpr res;
     for (auto c : poly.coefficients()) {
-        auto div = ctx.simplify(ctx.arena().make<Binary>(BinaryOp::Div, c, scalar));
+        auto div = ctx.simplify(ctx.arena().make<Binary>(BinaryOp::Div, coeff_or_zero(c, ctx.arena()), scalar));
         if (div.is_error()) return fail<PolyExpr>(div.error());
         res.push_back(div.value());
     }

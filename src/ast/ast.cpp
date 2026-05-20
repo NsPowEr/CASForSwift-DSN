@@ -88,6 +88,9 @@ void destroy_node(ExprNode* node) noexcept {
     case ExprKind::SeriesExp:
         static_cast<SeriesExp*>(node)->~SeriesExp();
         break;
+    case ExprKind::Quantity:
+        static_cast<Quantity*>(node)->~Quantity();
+        break;
     case ExprKind::Null:
         break;
     }
@@ -282,6 +285,11 @@ bool structural_equal(ExprPtr lhs, ExprPtr rhs) noexcept {
         }
         return true;
     }
+    case ExprKind::Quantity: {
+        const auto& l = expr_ref<Quantity>(lhs);
+        const auto& r = expr_ref<Quantity>(rhs);
+        return l.dimensions == r.dimensions && structural_equal(l.value, r.value);
+    }
     case ExprKind::Null:
         return false;
     }
@@ -396,6 +404,18 @@ std::size_t expr_hash(ExprPtr expr) noexcept {
         }
         break;
     }
+    case ExprKind::Quantity: {
+        const auto& node = expr_ref<Quantity>(expr);
+        hash_combine(seed, expr_hash(node.value));
+        hash_combine(seed, static_cast<std::size_t>(node.dimensions.m));
+        hash_combine(seed, static_cast<std::size_t>(node.dimensions.kg));
+        hash_combine(seed, static_cast<std::size_t>(node.dimensions.s));
+        hash_combine(seed, static_cast<std::size_t>(node.dimensions.A));
+        hash_combine(seed, static_cast<std::size_t>(node.dimensions.K));
+        hash_combine(seed, static_cast<std::size_t>(node.dimensions.mol));
+        hash_combine(seed, static_cast<std::size_t>(node.dimensions.cd));
+        break;
+    }
     case ExprKind::Null:
         break;
     }
@@ -441,6 +461,8 @@ std::string_view expr_kind_name(ExprKind kind) noexcept {
         return "Matrix";
     case ExprKind::SeriesExp:
         return "SeriesExp";
+    case ExprKind::Quantity:
+        return "Quantity";
     }
 
     return "Unknown";
@@ -565,6 +587,11 @@ ExprPtr clone_into_arena(ExprPtr expr, AstArena& target, std::unordered_map<Expr
             cloned_terms.push_back({exp, clone_into_arena(coeff, target, cache)});
         }
         cloned = target.make<SeriesExp>(Symbol(node.var.name), clone_into_arena(node.point, target, cache), std::move(cloned_terms), node.order);
+        break;
+    }
+    case ExprKind::Quantity: {
+        const auto& node = expr_ref<Quantity>(expr);
+        cloned = target.make<Quantity>(clone_into_arena(node.value, target, cache), node.dimensions);
         break;
     }
     case ExprKind::Null:
