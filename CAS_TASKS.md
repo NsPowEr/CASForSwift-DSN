@@ -1,7 +1,7 @@
 # CAS ENGINE — Sistema Task Unificato
 ## Controllo Avanzamento verso HP Prime G2
 
-> Aggiornato: 2026-05-15b (Frobenius + L2-22 residui + L2-11 PV + L3-04 Gamma/erf + L3-06 simplify_polynomial_in_x_over_q_alpha)
+> Aggiornato: 2026-05-20 (DEBT-001..004 closure + Risch log-deriv recognizer + Sturm/Lipschitz fsolve + Buchberger Sugar GMNR + F4 Hilbert termination + Mignotte rigoroso GCDHEU + Cyclotomic Möbius + 5 smoke suite +28 test + -Werror restored + DISABLED→CAS_TASKS link)
 > Progetto: REAL CAS ENGINE C++  
 > Protocollo: Unificato Anti-Hardcode (Rigorosa validazione simbolica)
 
@@ -64,9 +64,9 @@
 | CAS-L0-11 | Performance | Performance Instrumentation Hooks | L0 | Risolta | — | Basso | Verificata |
 | CAS-L0-12 | Symbolic | Profondità Semplificazione Adattiva | L0 | Risolta | L0-10 | Medio | Verificata |
 | CAS-L0-13 | Performance | Timeout Check Interval Configurabile | L0 | Risolta | — | Basso | Verificata |
-| CAS-L0-14 | Parser | Conversione Automatica DecimalLit→Rational | L0 | Risolta | — | Medio | Verificata |
-| CAS-L1-01 | Calculus | Gruntz MRV Completo | L1 | Parziale avanzata | L0-01 | Molto Alto | `GruntzTest.*`, `LimitMrvTest.*` e `AcidTest.Test1_GruntzLimit` passano; aggiunta valuation Laurent/quozienti. Non promossa a Risolta finché manca prova/corpus più ampio su Gruntz generale |
-| CAS-L1-02 | Calculus | Risch Trascendente | L1 | Parziale avanzata | L1-01 | Molto Alto | **2026-05-15**: Aggiunto `integrate_log_polynomial_part`. **2026-05-16**: Sostituito inline solve_risch_de (richiedeva f costante) con `solve_risch_de_poly_q(f, g, var, ctx)`: solver Bronstein-degree-bound + sistema lineare su Q per `y' + f·y = g` con f, g polinomiali. Gestisce qualsiasi polinomio f (incluso u non-lineare in exp(u)). Inoltre fixed bug: `poly_integral_part` ora passa per `from_field_generators` (precedente leak di Symbol(t_k) nel risultato finale). Test: ∫x·exp(x²)=exp(x²)/2, ∫(3x³+x)·exp(x²)=((3/2)x²-1)·exp(x²), ∫x²·exp(x³), ∫x³·exp(x⁴), ∫x³·exp(x), ∫x·exp(-x), ∫x³·ln(x), ∫ln(x)³ — 14/14 oracle PASS. **2026-05-16 (rational)**: aggiunto `solve_risch_de_rational_q` (parse num/den + linsys Q su numeratori) e dispatcher `solve_risch_de_q` (poly fast-path → rational fallback). Together-simplify su coeff post divide_poly_with_remainder e su P post poly division (forza P≡0 quando rem≡0); short-circuit Hermite/Trager quando P≡0. Test: ∫exp(1/x)/x² = -exp(1/x) PASS. Resta — perimetro reale: (a) **Hermite reduction su torri exp+log profonde**: richiede differential field tower con multiple estensioni e Hermite reduction iterativa per ogni livello. Implementabile come refactor di `integrate_hermite.cpp` su `DifferentialFieldTower` (~6-8h dedicate). (b) **Mix log-exp simultanei** nello stesso integrando (es. `∫exp(x)·ln(x) dx`): pattern di integration-by-parts riconoscibile, ma chiusura generale richiede structure theorem. (c) **Risch structure theorem completo** (Bronstein cap. 9): determinare se exp(g) o log(g) introducono una nuova estensione algebricamente indipendente dalla torre corrente — multi-mese di lavoro research-grade. Roadmap pragmatica: chiudere (a) e (b) come step incrementali; (c) marker permanente come "research target". |
+| CAS-L0-14 | Parser | Conversione Automatica DecimalLit→Rational | L0 | Parziale | — | Medio | `decimal_to_rational` esiste in `src/symbolic/simplify_utils.cpp:99` (post-parse). Manca conversione AL PARSER come previsto dal piano CLAUDE.md (regola DecimalLit→core). Pianificato STEP 2 della pianificazione 2026-05-20 — `PLAN_NEXT_STEPS_2026-05-20.md`. |
+| CAS-L1-01 | Calculus | Gruntz MRV Completo | L1 | Parziale avanzata | L0-01 | Molto Alto | `GruntzTest.*`, `LimitMrvTest.*` e `AcidTest.Test1_GruntzLimit` passano; aggiunta valuation Laurent/quozienti. **2026-05-20** (`commit a8d3e75`): tower-adaptive depth bound (Gruntz §3.5) con 3 budget separati (strategy/MRV/composition) e cycle detection via canonical_hash. Bound dinamico `2*tower_h + 2`. Non promossa a Risolta finché manca prova/corpus più ampio su Gruntz generale. |
+| CAS-L1-02 | Calculus | Risch Trascendente | L1 | Parziale avanzata | L1-01 | Molto Alto | **2026-05-15**: Aggiunto `integrate_log_polynomial_part`. **2026-05-16**: Sostituito inline solve_risch_de (richiedeva f costante) con `solve_risch_de_poly_q(f, g, var, ctx)`: solver Bronstein-degree-bound + sistema lineare su Q per `y' + f·y = g` con f, g polinomiali. Gestisce qualsiasi polinomio f (incluso u non-lineare in exp(u)). Inoltre fixed bug: `poly_integral_part` ora passa per `from_field_generators` (precedente leak di Symbol(t_k) nel risultato finale). Test: ∫x·exp(x²)=exp(x²)/2, ∫(3x³+x)·exp(x²)=((3/2)x²-1)·exp(x²), ∫x²·exp(x³), ∫x³·exp(x⁴), ∫x³·exp(x), ∫x·exp(-x), ∫x³·ln(x), ∫ln(x)³ — 14/14 oracle PASS. **2026-05-16 (rational)**: aggiunto `solve_risch_de_rational_q` (parse num/den + linsys Q su numeratori) e dispatcher `solve_risch_de_q` (poly fast-path → rational fallback). Together-simplify su coeff post divide_poly_with_remainder e su P post poly division (forza P≡0 quando rem≡0); short-circuit Hermite/Trager quando P≡0. Test: ∫exp(1/x)/x² = -exp(1/x) PASS. Resta — perimetro reale: (a) **Hermite reduction su torri exp+log profonde**: richiede differential field tower con multiple estensioni e Hermite reduction iterativa per ogni livello. Implementabile come refactor di `integrate_hermite.cpp` su `DifferentialFieldTower` (~6-8h dedicate). (b) **Mix log-exp simultanei** nello stesso integrando (es. `∫exp(x)·ln(x) dx`): pattern di integration-by-parts riconoscibile, ma chiusura generale richiede structure theorem. (c) **Risch structure theorem completo** (Bronstein cap. 9): determinare se exp(g) o log(g) introducono una nuova estensione algebricamente indipendente dalla torre corrente — multi-mese di lavoro research-grade. Roadmap pragmatica: chiudere (a) e (b) come step incrementali; (c) marker permanente come "research target". **2026-05-20** (`commit d99cb2a`, DEBT-004): logarithmic-derivative recognizer (Risch structure theorem step) chiude `∫1/(x·ln(x)) dx = ln(ln(x))`. Algoritmo: per ogni extension generator t (log/exp), costruisce candidato `F=ln(g)` con g=ln(u) per log ext o g=exp(u) per exp ext, cerca costante c∈{±1,±1/2,±2} tale che c·D(F)≡integrand dopo together()+simplify(). Side fix: IBP ora verifica D(result)=integrand via together(), rifiuta partial/cyclic returns. Probe `IntegralOfReciprocalOfXLnX` asserisce diff-inverse invariant. STEP 5 pianificato chiude perimetro (b) tramite dispatch `Product(f,exp(g))` → `solve_risch_de_q`. |
 | CAS-L1-03 | Calculus | RootSum in LRT | L1 | Risolta | L1-05 | Alto | Verificata |
 | CAS-L1-04 | Algebra | EDF p=2 | L1 | Risolta | — | Medio | Verificata (trace polynomial branch in equal_degree_factorization per p=2, test FactorPolynomialP2 × 3) |
 | CAS-L1-05 | Symbolic | RootOf Algebra/Eval | L1 | Parziale avanzata | — | Alto | **2026-05-15**: Bridge `RootOf↔AlgebraicNumber` completato (`include/cas/algebraic_number_bridge.hpp`): `rootof_min_poly`, `alpha_from_rootof`, `try_express_in_q_alpha`, `algebraic_number_to_expr[_raw]`, `try_reduce_in_q_alpha`, `simplify_in_q_alpha`. 17 test bridge passano (sqrt(2), cuberoot(2), divisioni, round-trip). RootOf^n via poly remainder già OK; eval numerico base OK; bridge usato in `null_space_over_extension`. Resta: auto-trigger del bridge nel simplifier pubblico (post-pass) ed estensione a generatori radicali (Pow(c, 1/n), sqrt) per allargare coverage. |
@@ -81,9 +81,9 @@
 | CAS-L1-14 | Calculus | Composizioni Inverse (sqrt∘sqrt, sin∘arcsin) | L1 | Risolta | L1-13 | Medio | Verificata (sin/cos/tan(arc*) + arc*(sin/cos/tan) con assumptions, sqrt∘sqrt, test_compositions.cpp 3/3) |
 | CAS-L1-15 | Algebra | Resultante e Discriminante | L1 | Risolta | — | Medio | Verificata (normalizzazione via ctx.simplify() applicata, test anti-hardcode L1-15) |
 | CAS-L1-16 | Symbolic | Caching/Memoization Expression | L1 | Risolta | — | Medio | Verificata (LRU + metriche + eviction configurabile + GC-safe, 5 test CASCachingTest) |
-| CAS-L1-17 | LinAlg | Pivot Bareiss Euristica Contestuale | L1 | Risolta | — | Medio | Verificata |
-| CAS-L1-18 | Calculus | Budget Integrazione Configurabile | L1 | Risolta | L1-02 | Alto | Verificata |
-| CAS-L1-19 | Algebra | GCD Euristico Padding Adattivo | L1 | Risolta | L1-08 | Medio | Verificata |
+| CAS-L1-17 | LinAlg | Pivot Bareiss Euristica Contestuale | L1 | Risolta | — | Medio | **2026-05-20** (`commit 2892492`): `PivotScore` struct sostituisce costanti magiche (1000/500/0). Score domain-aware via `is_known_nonzero(assumptions)`, complexity penalty proporzionale a `expr_size`, bonus per `is_known_positive`. Anti-hardcode: nessun cap fisso 500. |
+| CAS-L1-18 | Calculus | Budget Integrazione Configurabile | L1 | Risolta | L1-02 | Alto | `max_integration_depth_` esposto in CASContext (default 32, configurabile). |
+| CAS-L1-19 | Algebra | GCD Euristico Padding Adattivo | L1 | Risolta | L1-08 | Medio | **2026-05-20** (`commit cce829b`): Mignotte rigoroso sostituisce `B<1000` override. Bound `B ≥ 2·2^deg·max_coeff` per Knuth TAOCP §4.6.2. Anti-hardcode: nessuna costante 1000. |
 | CAS-L1-20 | Algebra | Valutazione Multivariata su Q | L1 | Risolta | — | Alto | Verificata (evaluate_at_rational, parziale: variabili residue non ancora supportate) |
 | CAS-L1-21 | Algebra | Campioni GCD Confidence-Based | L1 | Risolta | L1-08 | Basso | Verificata |
 | CAS-L2-01 | Calculus | ODE 2° Ordine e Ordine N | L2 | Parziale avanzata | L1-02 | Alto | **2026-05-15**: `solve_ode_frobenius_at_zero` implementato in `src/calculus/ode_solver_frobenius.cpp` con API esplicita in `include/cas/ode.hpp`. Algoritmo: p=a₁/a₂, q=a₀/a₂, p̃=x·p, q̃=x²·q canonicalizzati via `algebra::together`+`expand`+`simplify`, indicial r²+(p₀-1)r+q₀=0 via solve_polynomial, ricorrenza c_n=-Σ((n-k+r)p_k+q_k)c_{n-k}/I(n+r). Test 3/3 PASS: Euler x²y''-6y=0 → x³+x⁻²; 3x²y''-4xy'+2y=0 → x²+x^(1/3); x²y''+xy'-y=0 → x±¹. Resta: caso roots-differ-by-integer con log term (Unimplemented diagnostico), resonance generale. Var. parametri esistente non toccata. |
@@ -91,7 +91,7 @@
 | CAS-L2-03 | LinAlg | Jordan Form | L2 | Risolta | — | Medio | jordan_normal_form() implementata in matrix_jordan.cpp; extend_basis definita (righe 80-92); catene di Jordan via kernel iterato |
 | CAS-L2-04 | LinAlg | Smith Normal Form | L2 | Risolta | — | Medio | smith_normal_form() implementata in matrix_smith.cpp; algoritmo PID con elementary divisors e extended GCD |
 | CAS-L2-05 | Calculus | Serie Laurent | L2 | Risolta | L1-01 | Alto | **2026-05-17**: chiuso il path generale via `src/calculus/laurent_general.cpp`. `laurent_series` mantiene il fast-path razionale (apart_num_den + rational_laurent_from_series) e cade sul nuovo `laurent_series_general` quando il denominatore è trascendente. L'algoritmo Taylor-espande N e D al centro, individua l'ordine k dello zero di D come esponente principale della sua serie, e inverte D via geometric series `1/D = (x-c)^{-k}·(1/c_k)·Σ_{j≥0}(-u)^j` troncata a `positive_order + 4`. Test 9/9 PASS: razionali pre-esistenti + 1/sin(x) (csc), 1/(x²·sin(x)), cos(x)/sin(x) (cot), anti-hardcode 1/sin(x) attorno a π/2 (sec). Resta nota: poli di ordine > 4 richiederebbero un budget di buco dinamico (segnalano Unimplemented esplicito senza silenzi). |
-| CAS-L2-06 | Solving | Trascendenti Ibridi | L2 | Risolta | L1-02 | Alto | **2026-05-18**: `fsolve(equation, var, ctx, low, high)` in `src/algebra/fsolve.cpp` (dichiarato in `include/cas/algebra.hpp`). Pipeline: (1) converte `f(x)=g(x)` → `f(x)-g(x)=0`; (2) tenta `solve_polynomial` simbolico (radici esatte per polinomi); (3) fallback `find_roots_on_interval` in `src/numeric/solvers.cpp`: scansiona 400 campioni su [low,high], localizza sign-changes via bisection, polish Newton-Raphson; deduplica radici entro 1e-6. Derivata simbolica pre-calcolata una volta via `calculus::diff`. `MultiRootOptions` espone tutti i parametri (campioni, tolleranza, range). 6 test PASS: `SinXEqualsHalfXThreeRoots` (3 radici di sin(x)=x/2 trovate), `EquationFormSinEqualsX` (sin(x)=x → x=0), `PolynomialEquationExactSolve` (x²-4 → ±2 simbolici), `ExpTranscendentalOneRoot` (exp(x)=2 → ln(2)), `NoRootsReturnsEmptyMatrix` (exp(x)+1=0 → ∅), `XTimesSinXMinusOneRoots` (x·sin(x)=1 → ≈1.1142). |
+| CAS-L2-06 | Solving | Trascendenti Ibridi | L2 | Risolta | L1-02 | Alto | **2026-05-18**: `fsolve(equation, var, ctx, low, high)` in `src/algebra/fsolve.cpp` (dichiarato in `include/cas/algebra.hpp`). Pipeline: (1) converte `f(x)=g(x)` → `f(x)-g(x)=0`; (2) tenta `solve_polynomial` simbolico (radici esatte per polinomi); (3) fallback root finder transcendental. **2026-05-20** (`commit 1108880` + `5f5e068`): hardcode `num_samples=400` + `tolerance=1e-10` + `max_iterations=100` rimossi. Path polinomiale ora usa **Sturm sequence** (Sturm 1829): squarefree decomposition + isolazione intervalli via variazioni di segno + Newton polishing con quadratic-convergence iter count derivato. Path trascendentale usa **Lipschitz dyadic refinement** (Hansen interval-style): bound L=max(|f'|) campionato in 3 punti per intervallo, refinement ricorsivo con tolerance configurabile via `ctx.numeric_tolerance()`. 6 test PASS originali + nuovi anti-hardcode. |
 | CAS-L2-07 | Symbolic | Trig Identities | L2 | Risolta | — | Medio | **2026-05-18**: Addition formula in `simplify_funcall_trig`: detecta Sum arg con componente π-razionale esatta, applica sin(x+kπ/n)=sin(x)cos(kπ/n)+cos(x)sin(kπ/n) algoritmicamente (no lookup). Double-angle compaction in `simplify_product_factors`: sin(x)·cos(x)→(1/2)·sin(2x). Power reduction sin²/cos² già presente. 13 test `test_trig_identities.cpp` PASS: phase shifts (±π/2, ±π), espansione pi/3, pi/6, anti-hardcode pi/5 (Gauss), 2sin·cos→sin(2x). 124/124 symbolic regression PASS. |
 | CAS-L2-08 | Complex | Polar/Log Completo | L2 | Parziale avanzata | — | Medio | **2026-05-15b**: `simplify_functions.cpp` ora gestisce `abs(a + b·i)` → `sqrt(a²+b²)` via `extract_complex`. `arg` aggiunto come BuiltinOp::Arg + parser + simplify rules: arg(0)=0, arg(positivo)=0, arg(negativo)=π, arg(i)=π/2, arg(-i)=-π/2, arg(a+bi) con a>0 → atan(b/a), a<0 → atan(b/a)±π, a=0 → ±π/2. Aggiunti special values atan(0/±1) → 0, ±π/4 + atan odd. `ln(i)=iπ/2`, `ln(-1)=iπ` (branch principale). 13/13 test ComplexPolar PASS. Resta: `ln(a+b·i)` generale = ln|z| + i·arg(z), branch cuts globali (→ L2-17), atan(√3)/atan(1/√3). |
 | CAS-L2-09 | Calculus | Integrali Multipli | L2 | Risolta | L1-02, L1-06 | Alto | **2026-05-19**: `multiple_integral(integrand, specs, ctx)` e `fubini_swap(f, x, ax, bx, y, ay, by, ctx)` in `src/calculus/multiple_integral.cpp` (dichiarati in `include/cas/calculus.hpp`). `IntegralSpec{var, lower, upper}` specifica ogni strato di integrazione (innermost first). `multiple_integral` itera `definite_integral` dal più interno al più esterno. `fubini_swap` verifica dominio rettangolare via `contains_var` (substitute-based structural check) e calcola ∫_ay^by ∫_ax^bx f dx dy; fallisce con `Unimplemented` su domini non-rettangolari. 7 test PASS: area unitaria=1, ∫∫xy=9, triplo=1, bordo dipendente da variabile esterna (∫_0^1 ∫_0^y x dx dy = 1/6), Fubini su [0,1]²= 1/4, Fubini rifiuta bordo dipendente, bounds simbolici a²b³. |
@@ -105,7 +105,7 @@
 | CAS-L2-17 | Complex | Logaritmo complesso multivalore e branch | L2 | Aperta | L2-08 | Medio | Riemann surface handling |
 | CAS-L2-18 | Polynomial | Polinomi multivariati interpolazione avanzata | L2 | Aperta | — | Medio | Oltre Kronecker: sparse interpolation |
 | CAS-L2-19 | Symbolic | Equivalenza Matematica Trascendente | L2 | Risolta (subset Risch decidibile) | L1-07 | Alto | `are_equal` su exp/log/trig. **Nota di realtà (Richardson 1968)**: equivalenza generale indecidibile. **2026-05-17 (chiusura subset)**: implementato `mathematically_equal_subset_risch(lhs, rhs, ctx)` in `src/algebra/algebraic_equal.cpp` (header `include/cas/symbolic.hpp`). Pipeline: (1) `expand_log_walker` applica log(x·y)=log(x)+log(y), log(x^n)=n·log(x), log(x/y)=log(x)−log(y) solo sotto x>0 / y>0 (n libero per il caso power); (2) `expand_exp_walker` applica exp(x+y)=exp(x)·exp(y) (sempre), exp(ln(x))=x e exp(c·ln(x))=x^c (qualsiasi scalar c) sotto x>0; (3) delega a `mathematically_equal`. **2026-05-18 (audit fix)**: 6 bug critici/alti chiusi: B1 walker rispetta REGOLA 2 Structural Sharing (return identity ExprPtr quando children invariati); B2 walker post-transform si riapplica ricorsivamente al sottoalbero riscritto (fixpoint locale); B3 `try_match_scalar_times_log` accetta Product di qualsiasi arità + scalar razionale (no integer constraint); B4 dropping `n integer` per exp(c·ln(x)) — l'identità vale per qualsiasi c real con x>0; B5 `infer_positive` esteso con inferenze strutturali (exp(real)>0, cosh(real)>0, sqrt(>0)>0, sum of positives, even-power of nonzero, product of positives); B6 rimosso test fake "Schanuel" — sostituito con reflexivity + 4 oracle tests reali (B2/B3/B4/B5 covered). Test 12/12 PASS + 1 DISABLED (branch-cut strict mode = task futuro su simplifier). |
-| CAS-L2-20 | Algebra | Groebner Buchberger Criteria | L2 | Risolta | L0-06 | Medio | **2026-05-18**: Gebauer-Moeller pair pruning implementato in `src/algebra/polynomial_groebner_f4_buchberger.cpp`. (1) Product criterion: `coprime(lm_i, lm_j)` → scarta coppia senza calcolare S-poly (Buchberger criterio 1). (2) Gebauer-Moeller criterion per nuove coppie: rimuove `(i, new)` se ∃`(j, new)` con `lm_j | lcm(lm_i, lm_new)` e `lcm(j,new) ≠ lcm(i,new)`. (3) Chain criterion su coppie esistenti: rimuove `(i,j)` se `lm_new | lcm(i,j)` e `lcm(i,new) ≠ lcm(i,j)` e `lcm(j,new) ≠ lcm(i,j)`. (4) Selezione greed: `select_pair` sceglie coppia con lcm di grado minimo (normal selection strategy). Inizializzazione via `gm_update` iterativo per tutti i generatori iniziali. 3 test nuovi: `GmProductCriterionCoprimePair` (verifica basis corretta con coppia coprima pruned), `GmChainCriterionCyclic3` (cyclic-3 in 926ms), `GmFourGeneratorSystemSatisfiesBuchbergerCriterion`. 15/15 PASS. |
+| CAS-L2-20 | Algebra | Groebner Buchberger Criteria | L2 | Risolta | L0-06 | Medio | **2026-05-18**: Gebauer-Moeller pair pruning implementato in `src/algebra/polynomial_groebner_f4_buchberger.cpp` (product criterion + GM criterion + chain criterion + select min-lcm-deg). 15/15 PASS. **2026-05-20** (`commit 43dd1fb`): aggiunto **Sugar selection** (Giovini-Mora-Niesi-Robbiano 1991): pair queue ordinata per sugar (deg^h omogeneizzato), tie-break su deg(lcm). Garantisce progresso monotonico per degree, rimuove `kMaxBuchbergerPairs=8192` cap. Sugar field propagato in `Pair` e `PolyF4`. On-fly tail-reduction (Buchberger 1985) mantiene basis minimal post-aggiunta. Cyclic-4 ora completa <5s (era borderline). |
 | CAS-L2-21 | Complex | Branch Cuts Globali | L2 | Aperta | L2-17 | Medio | Policy coerente ramo principale |
 | CAS-L2-22 | Calculus | Integrali Definiti via Residui | L2 | Parziale avanzata | L2-11, L2-05 | Alto | **2026-05-15**: `integrate_rational_full_real_line` in `src/calculus/residue_theorem.cpp` (header `include/cas/residue_theorem.hpp`). Pipeline: apart_num_den → degree check → factor Q su Q[x] → per ogni fattore quadratico irriducibile con Δ<0, costruisce α=RootOf, calcola residue via `simplify_in_q_alpha` + `try_express_in_q_alpha` per estrarre coefficienti, somma contributo reale `-π·f·√(-Δ)`. **2026-05-17**: chiuso il caso biquadratic irriducibile a₄·x⁴+a₂·x²+a₀ via `contribution_from_irreducible_biquadratic`. Per b²-4c<0 e c>0 monicizzati, residuo r(α)=c₀+c₁α+c₂α²+c₃α³ in Q(α) (min_poly grado 4 = [c,0,b,0,1]) si combina con `Σ_upper = (2c₀-b·c₂) + i·√(2√c+b)·(c₁+c₃·(√c-b))`, dando contribuzione reale `-2π·√(2√c+b)·(c₁+c₃·(√c-b))` nel tower Q(√c, √(2√c+b)). Test 7/7 PASS: 1/(1+x⁴)=π/√2, 1/(x⁴+4)=π/4, x²/(x⁴+1)=π/√2, anti-hardcode 1/(x⁴+2) nested radical, 1/(x⁴+x²+1)=π/√3 (reducible), rejection 1/(x⁴-1) (real poles) e 1/(x⁴+x³+1) (non-biquadratic). Resta: quartici non-biquadratic (a₁≠0 o a₃≠0), grado ≥5 generale, multiplicity ≥2 su biquadratic. |
 | CAS-L2-23 | Calculus | Jacobian e Hessian | L2 | Risolta | — | Medio | jacobian() e hessian() implementati in differentiate.cpp; gradient e partial_diff funzionanti |
@@ -158,29 +158,13 @@
         3. Al ritorno (RAII): rimuovere `e` dal set.
         4. Test: costruire espressione con regola A→B e regola B→A; verificare terminazione invece di stack overflow.
 *   **CAS-L0-11 (Performance)**: Aggiungere performance instrumentation hooks (timer per solver, contatori nodi visitati). Base minima per profiling sistematico. (COMPLETATA)
-*   **CAS-L0-12 (Symbolic)**: Profondità semplificazione adattiva. **(APERTA)**
-    *   **Problema**: `MAX_SIMPLIFICATION_DEPTH = 300` in `simplify_impl.hpp:17` blocca computazioni legittime profonde. Determinante di una matrice simbolica 5×5 richiede centinaia di passi di semplificazione; liste di equazioni normalizzate; espansioni polinomiali su molte variabili. Distinto da L0-10 (che rileva cicli `f→g→f`): qui i passi sono tutti distinti e legittimi.
-    *   **Piano di risoluzione**:
-        1. Aggiungere campo `max_simplification_depth` a `CASContext` con default 300.
-        2. Distinguere "ciclo" (stesso nodo visitato due volte — rilevato da fingerprint L0-10) da "profondità legittima" (albero grande ma aciclico).
-        3. Per contesti di algebra lineare (rilevabile tramite flag in CASContext), usare limite aumentato (1000-3000).
-        4. Esporre API: `ctx.set_simplification_depth(n)`.
-        5. Test: `simplify(det(A_5x5))` con matrice simbolica 5×5 deve completare senza troncarsi.
-*   **CAS-L0-13 (Performance)**: Timeout check interval configurabile. **(APERTA)**
-    *   **Problema**: `kTimeoutCheckInterval = 1024U` in `symbolic_internal.hpp:49`. Su operazioni pesanti (GCD di grandi polinomi, Groebner complessi), 1024 "operazioni" possono durare secondi — il timeout viene controllato troppo raramente.
-    *   **Piano di risoluzione**:
-        1. Rendere `kTimeoutCheckInterval` configurabile via `CASContext` (default 1024, min 64).
-        2. Per algoritmi noti come pesanti (Groebner F4, GCD euristico, Hensel), usare intervallo ridotto (128-256).
-        3. Alternativa: misurare durata dell'ultimo ciclo e adattare l'intervallo automaticamente.
-        4. Test: verifica che un timeout di 100ms venga rispettato entro 200ms su un calcolo Groebner lungo.
-*   **CAS-L0-14 (Parser)**: Conversione automatica DecimalLit→Rational al confine di input. **(APERTA)**
-    *   **Problema**: `0.5*x` → `Unimplemented` in `differentiate.cpp:114` e `integrate_core.cpp:142`. Per CLAUDE.md il CORE non deve gestire DecimalLit; ma la conversione può avvenire nel PARSER prima di raggiungere il core.
-    *   **Piano di risoluzione**:
-        1. In `parser_support.cpp` o `lexer.cpp`: aggiungere pass di conversione DecimalLit → RationalLit.
-        2. Qualsiasi decimale finito `d` con `k` cifre decimali = `d * 10^k / 10^k` → esatto. Esempi: `0.5 → 1/2`, `0.25 → 1/4`, `0.1 → 1/10`.
-        3. Implementare via analisi della rappresentazione stringa del DecimalLit: contare cifre dopo punto, moltiplicare, ridurre con GCD.
-        4. Non toccare il CORE — la regola CLAUDE.md rimane: se un DecimalLit arriva al core, è Unimplemented.
-        5. Test: `diff(0.5*x^2, x) → x`; `integrate(0.25*x, x) → x^2/8`; `diff(sqrt(2.0)*x, x) → sqrt(2)` (sqrt(2.0) non è DecimalLit — la radice è irrazionale, conversione non applicabile).
+*   **CAS-L0-12 (Symbolic)**: Profondità semplificazione adattiva. **(COMPLETATA — 2026-05-20)**
+    *   **Implementazione**: `max_simplification_depth_` esposto in `include/cas/symbolic.hpp:246-247` con default 300, min 10 (`src/symbolic/context_core.cpp:396-398`). API pubblica `ctx.set_max_simplification_depth(n)` + getter. Cicli distinti da profondità legittima via cycle-detection L0-10 separato.
+*   **CAS-L0-13 (Performance)**: Timeout check interval configurabile. **(COMPLETATA — 2026-05-20)**
+    *   **Implementazione**: `timeout_check_interval_` esposto in `include/cas/symbolic.hpp:243-244` (default 1024, min 64 in `src/symbolic/context_core.cpp:392-394`). API pubblica `ctx.set_timeout_check_interval(n)` + getter. Algoritmi heavy possono usare intervallo ridotto.
+*   **CAS-L0-14 (Parser)**: Conversione automatica DecimalLit→Rational al confine di input. **(PARZIALE — pianificato STEP 2 della pianificazione 2026-05-20)**
+    *   **Stato corrente**: `decimal_to_rational(DecimalLit&)` esistente in `src/symbolic/simplify_utils.cpp:99` ma applicato POST-PARSE dal simplifier. `diff(0.5*x, x)` / `integrate(0.25*x, x)` falliscono ancora con Unimplemented PRIMA di raggiungere il simplifier.
+    *   **STEP 2 pianificato** (riferimento `PLAN_NEXT_STEPS_2026-05-20.md` § STEP 2): conversione al parser/lexer, edge case scientific notation, sign handling, gcd reduction. Test anti-hardcode su decimali random finiti. Effort ~2-3h.
 
 ### FASE 1: Core Algoritmico
 *   **CAS-L1-01 (Gruntz)**: MRV ricorsivo esteso per x→±∞, torri esponenziali e comparabili dello stesso ordine con coefficiente leader esatto. **(PARZIALE AVANZATA)**
@@ -214,86 +198,33 @@
         4. Integrare nel simplifier: `simplify(RootOf(x^2-2, 0)^2) → 2`.
         5. Test: `alpha = RootOf(x^2-2); verify(alpha^2 - 2 == 0)`, `N(RootOf(x^3-2))` restituisce approssimazione.
 *   **CAS-L1-06 (Singolarità Definiti)**: Rilevazione esatta dei poli razionali in intervalli finiti prima del TFC; rifiuta poli interni/endpoint e consente singolarità rimovibili cancellate da normalizzazione razionale. Resta parziale: radici algebriche non razionali, singolarità trascendenti, impropri/PV e classificazione via Laurent/residui sono fuori copertura.
-*   **CAS-L1-07 (Normal Form Trascendente)**: Normal form per funzioni trascendenti. **(APERTA — IMPLEMENTAZIONE ASSENTE)**
-    *   **Problema**: `normal_form.cpp` implementa solo `polynomial_normal_form()`. Nessuna logica per log/exp/trig.
-    *   **Piano di risoluzione**:
-        1. Aggiungere `transcendental_normal_form(ExprPtr e, CASContext& ctx)` in nuovo file `src/symbolic/normal_form_transcendental.cpp`.
-        2. **Regole log**: `log(a*b) → log(a)+log(b)` se `a>0, b>0` (via Assumptions); `log(a^n) → n*log(a)` se `a>0`; `log(1) → 0`; `log(exp(x)) → x` se `x ∈ ℝ`.
-        3. **Regole exp**: `exp(log(x)) → x` se `x>0`; `exp(a+b) → exp(a)*exp(b)`; `exp(0) → 1`.
-        4. **Regole trig**: seno/coseno di multipli di π → valori esatti; composizioni `sin(arcsin(x)) → x` con assumptions.
-        5. Integrare come pass nel simplifier dopo la fase polinomiale.
-        6. Test: `normal_form(log(a*b))` con `a>0,b>0` → `log(a)+log(b)`; `normal_form(exp(log(x)))` con `x>0` → `x`.
+*   **CAS-L1-07 (Normal Form Trascendente)**: Normal form per funzioni trascendenti. **(COMPLETATA)**
+    *   **Implementazione**: `transcendental_normal_form` integrato come pass nel simplifier. Regole log Product/Binary/Div/Pow expand + exp/ln inv. cancellazioni sotto positivity assumption. 5 test anti-hardcode L1-07. **2026-05-20 (DEBT-004 side fix)**: `exp(ln(x))` collapse richiede `is_known_positive(x)`; `0^0` mantenuto simbolico (era silently collapsed a 1); `sqrt(x²)→|x|` documentato come comportamento corretto sotto branch cut reale.
 *   **CAS-L1-08 (GCD Multivariato)**: Path certificato per casi bivariati e trivariati lineari comuni, con dispatcher conservativo e preservazione dei contratti univariati/traccia. Resta parziale: non è ancora un modular GCD/Hensel multivariato generale.
-*   **CAS-L1-09 (Deduzione Disequazioni)**: Motore inferenziale su assumptions. **(PARZIALE)**
-    *   **Problema residuo**: Solo conflict detection. Regole di deduzione transitiva assenti: `x>0,y>0 ⇒ x*y>0` non inferito; `x>0 ⇒ x+1>0` non inferito; `x>y, y>z ⇒ x>z` non inferito.
-    *   **Piano di risoluzione**:
-        1. Creare `InferenceEngine` in `src/symbolic/assumptions_inference.cpp` con regole forward-chaining.
-        2. Regole minime: **Prodotto** (`pos*pos→pos`), **Somma** (`pos+pos→pos`, `pos+noneg→pos`), **Potenza** (`pos^n→pos`), **Transitività** (`a>b, b>c ⇒ a>c`).
-        3. Implementare `infer(ExprPtr expr)` → `TruthValue {True, False, Unknown}` via pattern matching sull'AST + query alle regole.
-        4. Integrare in `simplify_arithmetic.cpp`: usare `infer` per semplificare `abs(x)→x` quando `infer(x>0)==True`.
-        5. Test: `assume(x>0); assume(y>0); EXPECT_TRUE(infer(x*y > 0))`; `assume(x>2); EXPECT_TRUE(infer(x > 1))`.
+*   **CAS-L1-09 (Deduzione Disequazioni)**: Motore inferenziale su assumptions. **(COMPLETATA)**
+    *   **Implementazione**: `is_nonzero` deriva da grafo relazionale. `x*y>0` inferito via prodotto positivi. Transitività 3-hop (`a>b ∧ b>c ⇒ a>c`). 6 test anti-hardcode L1-09. **2026-05-20 (DEBT-004)**: aggiunto recognizer per inferenze strutturali estese: `exp(real)>0`, `cosh(real)>0`, `sqrt(>0)>0`, sum of positives, even-power of nonzero, product of positives.
 *   **CAS-L1-10 (Domini Globali)**: Introdurre un sistema di domini coerente (reale/positivo/non-zero/intervallo) con rilevazione contraddizioni.
-*   **CAS-L1-11 (Asintoti)**: Riconoscere e classificare asintoti verticali, orizzontali e obliqui. **(PARZIALE)**
-    *   **Problema residuo**: Solo `x→+∞` analizzato. `x→-∞` non gestito. Classificazione fragile su funzioni razionali con grado uguale numeratore/denominatore.
-    *   **Piano di risoluzione**:
-        1. In `asymptotes.cpp`: duplicare l'analisi orizzontale/obliqua per `x→-∞` usando `limit(f, x, -oo)` e `limit(f/x, x, -oo)`.
-        2. Unificare risultati: se limite a +∞ e -∞ coincidono → asintoto unico; altrimenti separati.
-        3. Aggiungere test con `f(x) = e^(-x)` (asintoto a +∞ ma non -∞) e funzioni razionali con comportamento asimmetrico.
-*   **CAS-L1-12 (Denesting Radicali)**: Semplificazione radicali annidati. **(PARZIALE)**
-    *   **Problema residuo**: Solo `sqrt(a+b*sqrt(c))` con a,b,c razionali (1 livello di annidamento). Manca denesting ricorsivo per `sqrt(2+sqrt(2+sqrt(3)))`.
-    *   **Piano di risoluzione**:
-        1. Applicare denesting ricorsivamente: prima semplificare l'argomento interno, poi tentare denesting esterno.
-        2. Limite sicuro: max 3 livelli di ricorsione per evitare esplosione.
-        3. Test: `simplify(sqrt(2+sqrt(2+sqrt(3))))` deve ridursi; `simplify(sqrt(5+2*sqrt(6)))` deve dare `sqrt(2)+sqrt(3)`.
+*   **CAS-L1-11 (Asintoti)**: Riconoscere e classificare asintoti verticali, orizzontali e obliqui. **(COMPLETATA)**
+    *   **Implementazione**: `x→-∞` aggiunto, deduplicazione simmetrica +∞/-∞, test anti-hardcode su `e^(-x)` (asintoto solo a +∞) e funzioni razionali con comportamento asimmetrico.
+*   **CAS-L1-12 (Denesting Radicali)**: Semplificazione radicali annidati. **(PARZIALE — pianificato STEP 3 della pianificazione 2026-05-20)**
+    *   **Stato corrente**: `extract_square_factor` (algoritmo generale anti-hardcode): `sqrt(12)→2sqrt(3)`, `sqrt(75)→5sqrt(3)`. Forma Borodin-Fagin-Hopcroft-Tompa `sqrt(a+b·sqrt(c))→sqrt(p)+sqrt(q)` ASSENTE.
+    *   **STEP 3 pianificato** (riferimento `PLAN_NEXT_STEPS_2026-05-20.md` § STEP 3): denesting ricorsivo con teorema BFHT (1985), condizione `a²-b²c quadrato perfetto in Q`, budget `max_denesting_depth` configurabile (default 3). Test anti-hardcode su famiglie non-denestable per evitare false positive. Effort ~3h.
 *   **CAS-L1-13 (Semplificazione abs/sign)**: Regole di semplificazione avanzata per `abs` e `sign` integrate con deduzione domini.
-*   **CAS-L1-14 (Composizioni Inverse)**: Normal form per composizioni inverse. **(PARZIALE)**
-    *   **Problema residuo**: Solo `sqrt(sqrt(x))→x^(1/4)` implementato. `sin(arcsin(x))→x`, `cos(arccos(x))→x`, `arctan(tan(x))→x` (con dominio) assenti.
-    *   **Piano di risoluzione**:
-        1. In `simplify_functions.cpp`: aggiungere regole per tutte le funzioni trig inverse con check dominio.
-        2. `sin(arcsin(x))→x` se `x ∈ [-1,1]`; senza assumptions → lasciare inerte.
-        3. `arcsin(sin(x))→x` se `x ∈ [-π/2, π/2]` (più restrittivo).
-        4. Analogo per cos/arccos, tan/arctan, exp/log.
-        5. Test con assumptions: `assume(-1<=x, x<=1); simplify(sin(arcsin(x)))` → `x`; senza assumptions → inerte.
-*   **CAS-L1-15 (Resultante/Discriminante)**: Resultante e discriminante via subresultante. **(PARZIALE)**
-    *   **Problema residuo**: Implementazione funzionante ma output non normalizzato. Risultato può avere fattori razionali superflui non cancellati.
-    *   **Piano di risoluzione**:
-        1. Aggiungere `make_primitive()` al risultato finale in `polynomial_resultant.cpp` per rimuovere il content.
-        2. Per discriminante: scalare per `(-1)^(n*(n-1)/2) / lc(p)` per forma canonica.
-        3. Test: `discriminant(x^2+bx+c) == b^2 - 4c`; `resultant(x-a, x-b) == b-a`.
+*   **CAS-L1-14 (Composizioni Inverse)**: Normal form per composizioni inverse. **(COMPLETATA)**
+    *   **Implementazione**: sin/cos/tan(arc*) + arc*(sin/cos/tan) con assumptions di dominio, sqrt∘sqrt. `test_compositions.cpp` 3/3 verde.
+*   **CAS-L1-15 (Resultante/Discriminante)**: Resultante e discriminante via subresultante. **(COMPLETATA)**
+    *   **Implementazione**: Normalizzazione via `ctx.simplify()` applicata al risultato finale. Test anti-hardcode L1-15: `discriminant(x²+bx+c) == b² − 4c`, `resultant(x−a, x−b) == b−a`.
 *   **CAS-L1-16 (Caching/Memoization)**: Memoization per `simplify`, `differentiate` e `integrate` in `CASContext`, con `clear_caches()` e migrazione durante `collect_garbage()`. Resta parziale finché non esiste benchmark gate dedicato e policy di dimensionamento/eviction.
-*   **CAS-L1-17 (LinAlg)**: Pivot Bareiss euristica contestuale. **(APERTA)**
-    *   **Problema**: Scoring pivot in `matrix_bareiss.cpp:110-115` usa costanti magiche: `IntegerLit/RationalLit → 1000`, `nonzero simbolico → 500 - min(400, complexity)`, `zero/unknown → 0`. Non tiene conto delle assumptions: un'espressione simbolica `known_positive` è un pivot superiore a un intero positivo piccolo.
-    *   **Piano di risoluzione**:
-        1. Aumentare score per `is_known_nonzero(val, ctx.assumptions())` da 500 a 800.
-        2. Aggiungere bonus per `is_known_positive` (certezza di segno → meno ambiguità in divisioni simboliche).
-        3. Penalizzare pivot che contengono `RootOf` non valutabili (aumenta complessità algebrica).
-        4. Test: matrice con `assume(a>0, b>0)` → pivot scelto da colonna `a+b` (nonzero certo) invece di una colonna non-assumed.
-*   **CAS-L1-18 (Calculus)**: Budget integrazione configurabile. **(APERTA)**
-    *   **Problema**: `depth >= 16U → Unimplemented` in `integrate_core.cpp:17-18`. `∫x^n*exp(x)dx` richiede n passi di integrazione per parti → fallisce per n > 14-15.
-    *   **Piano di risoluzione**:
-        1. Aggiungere `max_integration_depth` a `CASContext` con default 16, max 128.
-        2. Distinguere ricorsione "produttiva" (il grado della parte da integrare decresce) da "stagnante" (grado costante) → interrompere solo la stagnante.
-        3. Test: `integrate(x^20 * exp(x), x)` deve restituire il risultato esatto (non Unimplemented).
-        4. Test anti-hardcode: `integrate(x^n * exp(x), x)` con n parametrico da assumere positivo intero.
-*   **CAS-L1-19 (Algebra)**: GCD euristico padding adattivo. **(APERTA)**
-    *   **Problema**: In `polynomial_gcd_heuristic.cpp:146-151`: `B = 2*max_coeff + 100; B *= 1000`. Per coefficienti > 10^6 il padding di 100 non previene collisioni hash nel recupero del GCD via immagini numeriche. La costante 1000 è arbitraria.
-    *   **Piano di risoluzione**:
-        1. Sostituire `100` con `max(100, 2 * deg_f * deg_g * log2(max_coeff + 1))` (bound basato su crescita coefficienti GCD).
-        2. Sostituire il moltiplicatore `1000` con `max_coeff_bound_gcd` calcolato via disuguaglianza di Mignotte: `B ≥ 2^(deg) * max_coeff`.
-        3. Test: `gcd` di polinomi con coefficienti nell'ordine di 10^8 deve dare risultato corretto.
-*   **CAS-L1-20 (Algebra)**: Valutazione multivariata su Q ed estensioni. **(APERTA)**
-    *   **Problema**: `algebra_core.cpp:311` accetta solo `IntegerLit` come valori di sostituzione → `evaluate(x^2 + y, {x: 1/2, y: 3/4})` fallisce.
-    *   **Piano di risoluzione**:
-        1. Estendere il check da `expr_cast<IntegerLit>` a `expr_cast<IntegerLit> || expr_cast<RationalLit>`.
-        2. Implementare aritmetica `MultivariatePolynomial` su `Rational` (somma, prodotto, potenza).
-        3. Per `RootOf` come valore: aggiungere path separato (dopo che L1-05 è Risolta).
-        4. Test: `evaluate(2*x^2 - y, {x: 1/2, y: 1/4}) → 1/4`; `evaluate(x*y + 1, {x: 2/3, y: 3/2}) → 2`.
-*   **CAS-L1-21 (Algebra)**: Campioni GCD confidence-based. **(APERTA)**
-    *   **Problema**: `max_samples = required_samples + 8U` in `polynomial_gcd_multivariate.cpp:741`. Il "+8" è una costante arbitraria che non garantisce alcun livello di confidenza formale.
-    *   **Piano di risoluzione**:
-        1. Sostituire con formula probabilistica: `max_samples = required_samples + ceil(log(delta) / log(1 - p_hit))` dove `delta = 0.001` (confidenza 99.9%) e `p_hit >= 0.5` (stima conservativa).
-        2. Rendere `delta` configurabile in `CASContext` come `gcd_error_probability`.
-        3. Test: eseguire GCD probabilistico 1000 volte su un caso limite → errori < `delta * 1000`.
+*   **CAS-L1-17 (LinAlg)**: Pivot Bareiss euristica contestuale. **(COMPLETATA — 2026-05-20)**
+    *   **Implementazione** (`commit 2892492`): `PivotScore` struct (cat./complexity/sign) sostituisce costanti magiche 1000/500/0. Score `is_known_nonzero(assumptions)` privilegiato, bonus `is_known_positive`, penalità `RootOf` non valutabili. Anti-hardcode: nessuna costante fissa superabile.
+*   **CAS-L1-18 (Calculus)**: Budget integrazione configurabile. **(COMPLETATA)**
+    *   **Implementazione**: `max_integration_depth_` esposto in CASContext (default 32). API pubblica `ctx.set_max_integration_depth(n)`. Anti-hardcode: nessun limite di `16U` non-configurabile.
+*   **CAS-L1-19 (Algebra)**: GCD euristico padding adattivo. **(COMPLETATA — 2026-05-20)**
+    *   **Implementazione** (`commit cce829b`): Mignotte rigoroso `B ≥ 2·2^deg·max_coeff` (Knuth TAOCP §4.6.2). Sostituisce `B<1000` override. Test su coefficienti `≥ 10^8` certificati.
+*   **CAS-L1-20 (Algebra)**: Valutazione multivariata su Q ed estensioni. **(COMPLETATA — parziale per RootOf)**
+    *   **Implementazione**: `evaluate_at_rational` accetta IntegerLit + RationalLit. Test verde su input Q. Path RootOf-as-value rimane parziale (dipende da chiusura L3-16).
+*   **CAS-L1-21 (Algebra)**: Campioni GCD confidence-based. **(COMPLETATA)**
+    *   **Implementazione**: Formula probabilistica `max_samples = required + ceil(log(δ)/log(1-p_hit))` con `δ=ctx.gcd_error_probability()` esposto in CASContext. Anti-hardcode: nessun "+8" arbitrario.
 
 ### FASE 2: Estensione Matematica
 *   **CAS-L2-01 (ODE 2° Ordine)**: Variazione parametri N-esima implementata. **(PARZIALE)**
