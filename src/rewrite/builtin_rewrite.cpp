@@ -176,16 +176,6 @@ enum class SquareFunctionKind : std::uint8_t {
     return SquareFunctionKind::None;
 }
 
-[[nodiscard]] ExprPtr square_function_argument(ExprPtr expr, SquareFunctionKind kind) {
-    if (square_function_kind(expr) != kind) {
-        return ExprPtr{};
-    }
-
-    const auto* power = expr_cast<Binary>(expr);
-    const auto* call = power != nullptr ? expr_cast<FuncCall>(power->left) : nullptr;
-    return call != nullptr && call->args.size() == 1U ? call->args.front() : ExprPtr{};
-}
-
 [[nodiscard]] bool may_match_builtin_rewrite(ExprPtr expr) {
     if (const auto* binary = expr_cast<Binary>(expr)) {
         if (binary->op == BinaryOp::Div) {

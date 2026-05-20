@@ -39,6 +39,10 @@ std::string LaTeXFormatter::format(ExprPtr expr) {
                 case BinaryOp::Mod: return format(node.left) + " \\pmod{" + format(node.right) + "}";
                 case BinaryOp::Pow: return "{" + format(node.left) + "}^{" + format(node.right) + "}";
                 case BinaryOp::Equal: return format(node.left) + " = " + format(node.right);
+                case BinaryOp::Less: return format(node.left) + " < " + format(node.right);
+                case BinaryOp::Greater: return format(node.left) + " > " + format(node.right);
+                case BinaryOp::LessEqual: return format(node.left) + " \\le " + format(node.right);
+                case BinaryOp::GreaterEqual: return format(node.left) + " \\ge " + format(node.right);
             }
             return "?";
         } else if constexpr (std::is_same_v<NodeT, Sum>) {

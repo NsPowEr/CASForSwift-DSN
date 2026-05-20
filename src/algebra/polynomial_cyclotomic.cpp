@@ -179,7 +179,7 @@ std::optional<int> is_cyclotomic(const IntPoly& poly, int max_n) {
     return std::nullopt;
 }
 
-std::vector<ExprPtr> cyclotomic_roots(int n, const Symbol& var, AstArena& arena) {
+std::vector<ExprPtr> cyclotomic_roots(int n, const Symbol& /*var*/, AstArena& arena) {
     std::vector<ExprPtr> roots;
     // Primitive n-th roots of unity: exp(2*pi*i*k/n) where gcd(k, n) == 1
     auto gcd = [](int a, int b) {

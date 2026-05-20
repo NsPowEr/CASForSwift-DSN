@@ -23,12 +23,6 @@ namespace {
     return IntPoly(std::move(bs));
 }
 
-[[nodiscard]] bool poly_eq(const IntPoly& a, const IntPoly& b) {
-    if (a.size() != b.size()) return false;
-    for (std::size_t i = 0; i < a.size(); ++i) if (a[i] != b[i]) return false;
-    return true;
-}
-
 }  // namespace
 
 // Φ_1(x) = x - 1

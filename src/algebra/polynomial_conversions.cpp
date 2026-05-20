@@ -124,6 +124,7 @@ ExprPtr poly_make_integer(AstArena& arena, long long value) {
 }
 
 bool poly_is_zero_expr(ExprPtr expr) {
+    if (!expr) return true;
     if (const auto* integer = expr_cast<IntegerLit>(expr)) {
         return integer->value.is_zero();
     }
@@ -134,6 +135,7 @@ bool poly_is_zero_expr(ExprPtr expr) {
 }
 
 bool poly_is_one_expr(ExprPtr expr) {
+    if (!expr) return false;
     static const BigInt one(1);
     if (const auto* integer = expr_cast<IntegerLit>(expr)) {
         return integer->value == one;
@@ -145,6 +147,7 @@ bool poly_is_one_expr(ExprPtr expr) {
 }
 
 bool poly_is_minus_one_expr(ExprPtr expr) {
+    if (!expr) return false;
     static const BigInt minus_one(-1);
     if (const auto* integer = expr_cast<IntegerLit>(expr)) {
         return integer->value == minus_one;
@@ -224,6 +227,9 @@ bool poly_depends_on(ExprPtr expr, const std::string& variable_name) {
         }
         return false;
     }
+    case ExprKind::SeriesExp:
+    case ExprKind::Quantity:
+        return false;
     }
 
     return false;

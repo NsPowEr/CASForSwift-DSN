@@ -138,6 +138,10 @@ std::string TextFormatter::format_internal(ExprPtr expr, std::unordered_map<Expr
                 case BinaryOp::Mod: op_str = " % "; break;
                 case BinaryOp::Pow: return format_child(expr, node.left) + "^" + format_child(expr, node.right, true);
                 case BinaryOp::Equal: op_str = " = "; break;
+                case BinaryOp::Less: op_str = " < "; break;
+                case BinaryOp::Greater: op_str = " > "; break;
+                case BinaryOp::LessEqual: op_str = " <= "; break;
+                case BinaryOp::GreaterEqual: op_str = " >= "; break;
             }
             return format_child(expr, node.left) + op_str + format_child(expr, node.right, true);
         } else if constexpr (std::is_same_v<NodeT, Sum>) {

@@ -112,6 +112,10 @@ LayoutBox Ascii2DFormatter::layout(ExprPtr expr) {
                 case BinaryOp::Mod: op_str = " % "; break;
                 case BinaryOp::Pow: op_str = "^"; break;
                 case BinaryOp::Equal: op_str = " = "; break;
+                case BinaryOp::Less: op_str = " < "; break;
+                case BinaryOp::Greater: op_str = " > "; break;
+                case BinaryOp::LessEqual: op_str = " <= "; break;
+                case BinaryOp::GreaterEqual: op_str = " >= "; break;
                 case BinaryOp::Div: return make_fraction(layout(node.left), layout(node.right));
             }
             return join_horizontal(layout(node.left), layout(node.right), op_str);

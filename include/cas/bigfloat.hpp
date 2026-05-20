@@ -5,7 +5,7 @@
 #include <cstdint>
 
 // Forward declarations
-namespace cas { class BigInt; struct Rational; }
+namespace cas { class BigInt; class Rational; }
 
 namespace cas {
 

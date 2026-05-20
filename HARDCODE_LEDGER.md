@@ -17,17 +17,20 @@
 
 ## Voci aperte
 
-### KNOWN-DEBT-001 — `-Werror` disabilitato (CMakeLists.txt:21)
-- **File**: `CMakeLists.txt:21` (non-MSVC branch).
-- **Categoria**: build hygiene; CLAUDE.md § REGOLA ZERO richiede zero
-  warning compilation.
-- **Stato**: ~6 pre-existing warnings impediscono restore immediato:
-  - `src/rewrite/builtin_rewrite.cpp:179` — unused-function
-  - `src/algebra/polynomial_cyclotomic.cpp:11,101` — unused-function /
-    -parameter
-  - `src/algebra/polynomial_conversions.cpp:170` — non-exhaustive switch
-  - `libcas_symbolic.a(functions_special.cpp.o)` — empty TU
-- **Fix**: pulire warnings + restore `-Werror`. Effort stimato ~1h.
+### KNOWN-DEBT-001 — `-Werror` disabilitato (CMakeLists.txt:21) — RISOLTO 2026-05-20
+- **Stato pre-fix**: ~9 warning preesistenti impedivano build con `-Werror`.
+- **Fix applicato**:
+  - `src/rewrite/builtin_rewrite.cpp:179` — rimossa `square_function_argument` (unused).
+  - `src/algebra/polynomial_cyclotomic.cpp:182` — parametro `var` rinominato `/*var*/`.
+  - `src/algebra/polynomial_conversions.cpp:170` — aggiunti case `SeriesExp`/`Quantity`
+    al switch `poly_depends_on`.
+  - `include/cas/bigfloat.hpp:8` — forward-decl `struct Rational` → `class Rational`.
+  - `src/formatter/{text,latex,ascii}.cpp` — aggiunti case `Less`/`Greater`/`LessEqual`/
+    `GreaterEqual` ai 3 switch su `BinaryOp` (non-exhaustive).
+  - `test/unit/algebra/test_cyclotomic_mobius.cpp:26` — rimossa `poly_eq` (unused).
+  - `test/unit/symbolic/test_caching.cpp` — 14× `(void)ctx.simplify(...)` per
+    silenziare `[[nodiscard]]` warning.
+  - `CMakeLists.txt:17-22` — restored `-Werror`, removed debt comment block.
 
 ### KNOWN-DEBT-002 — Test coverage ratio 0.64 (89 test / 139 src)
 - **Categoria**: testing.

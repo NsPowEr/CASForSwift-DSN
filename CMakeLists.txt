@@ -15,21 +15,11 @@ option(ENABLE_SANITIZERS "Compatibility alias for milestone scripts and legacy d
 set(CAS_ENABLE_SANITIZERS "${ENABLE_SANITIZERS}")
 
 # ─── ZERO WARNING POLICY OBBLIGATORIA ───
-#
-# DEBT: `-Werror` is disabled on non-MSVC builds pending a cleanup of
-# ~6 pre-existing warnings inherited from earlier commits:
-#   * src/rewrite/builtin_rewrite.cpp:179 — unused-function
-#   * src/algebra/polynomial_cyclotomic.cpp:11,101 — unused-function / -parameter
-#   * src/algebra/polynomial_conversions.cpp:170 — non-exhaustive switch
-#   * libcas_symbolic.a(functions_special.cpp.o) — empty TU (no symbols)
-#
-# Tracked in HARDCODE_LEDGER.md as KNOWN-DEBT-001. Once these are
-# fixed, restore `-Werror` here and remove this comment block.
 # CLAUDE.md § REGOLA ZERO requires zero warning compilation.
 if(MSVC)
     add_compile_options(/W4 /WX)
 else()
-    add_compile_options(-Wall -Wextra -Wpedantic) # -Werror restored after KNOWN-DEBT-001
+    add_compile_options(-Wall -Wextra -Wpedantic -Werror)
 endif()
 
 # ─── SANITIZERS (abilitati in Debug / RelWithDebInfo, anche multi-config) ───
