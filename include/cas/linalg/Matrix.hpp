@@ -32,6 +32,19 @@ Result<ExprPtr> determinant(const MatrixExpr& matrix, symbolic::CASContext& ctx)
 Result<MatrixExpr> inverse(const MatrixExpr& matrix, symbolic::CASContext& ctx);
 Result<MatrixExpr> rref(const MatrixExpr& matrix, symbolic::CASContext& ctx);
 Result<MatrixExpr> bareiss(const MatrixExpr& matrix, symbolic::CASContext& ctx);
+
+// CAS-L3-17 — Symbolic LU decomposition (Doolittle form).
+// Returns (L, U) such that A = L · U (no pivoting). Fails if a zero
+// pivot is encountered. For numerical stability/robustness use the
+// permuted variant LU_with_pivoting (TODO follow-up).
+//   L: lower triangular with unit diagonal (size n×n)
+//   U: upper triangular (size n×n)
+struct LUDecomposition {
+    MatrixExpr L;
+    MatrixExpr U;
+};
+[[nodiscard]] Result<LUDecomposition> lu_decompose(const MatrixExpr& matrix,
+                                                    symbolic::CASContext& ctx);
 Result<std::vector<ExprPtr>> linsolve(const MatrixExpr& a, const std::vector<ExprPtr>& b, symbolic::CASContext& ctx);
 Result<std::size_t> rank(const MatrixExpr& matrix, symbolic::CASContext& ctx);
 Result<ExprPtr> trace(const MatrixExpr& matrix, symbolic::CASContext& ctx);

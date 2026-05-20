@@ -208,6 +208,7 @@ set(CAS_LINALG_SOURCES
     src/linalg/matrix_determinant_modular.cpp
     src/linalg/matrix_structured_determinant.cpp
     src/linalg/matrix_bareiss.cpp
+    src/linalg/matrix_lu.cpp
 )
 
 set(CAS_NUMERIC_SOURCES
@@ -425,6 +426,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/numeric/test_interval.cpp
         test/unit/calculus/test_numeric_diff.cpp
         test/unit/symbolic/test_branch_cuts_global.cpp
+        test/unit/linalg/test_lu_decomposition.cpp
         test/unit/algebra/test_cyclotomic_mobius.cpp
         test/unit/algebra/test_berlekamp_probe.cpp
         test/unit/symbolic/test_math_correctness.cpp
