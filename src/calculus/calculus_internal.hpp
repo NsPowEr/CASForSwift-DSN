@@ -55,6 +55,11 @@ enum class FiniteDiffOrder {
     ExprPtr expr, const Symbol& var, ExprPtr h,
     FiniteDiffOrder order, symbolic::CASContext& ctx);
 
+/// @brief Laplace transform L{f(t)}(s) elementary-pattern table (L3-07).
+[[nodiscard]] Result<ExprPtr> laplace_transform(
+    ExprPtr expr, const Symbol& t, const Symbol& s,
+    symbolic::CASContext& ctx);
+
 [[nodiscard]] ExprPtr limit_make_integer(AstArena& arena, long long value);
 [[nodiscard]] ExprPtr limit_make_binary(AstArena& arena, BinaryOp op, ExprPtr lhs, ExprPtr rhs);
 [[nodiscard]] bool limit_is_zero(ExprPtr expr);

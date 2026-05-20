@@ -148,6 +148,7 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/ode_solver_frobenius.cpp
     src/calculus/asymptotes.cpp
     src/calculus/numeric_diff.cpp
+    src/calculus/laplace_transform.cpp
 )
 
 set(CAS_NUMTHEORY_SOURCES
@@ -427,6 +428,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/calculus/test_numeric_diff.cpp
         test/unit/symbolic/test_branch_cuts_global.cpp
         test/unit/linalg/test_lu_decomposition.cpp
+        test/unit/calculus/test_laplace.cpp
         test/unit/algebra/test_cyclotomic_mobius.cpp
         test/unit/algebra/test_berlekamp_probe.cpp
         test/unit/symbolic/test_math_correctness.cpp
