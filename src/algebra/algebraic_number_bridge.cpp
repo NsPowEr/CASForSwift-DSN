@@ -2,6 +2,7 @@
 
 #include "cas/error.hpp"
 #include "cas/result.hpp"
+#include "cas/formatter.hpp"
 
 #include "algebra_internal.hpp"
 #include "polynomial_internal.hpp"
@@ -413,6 +414,90 @@ void collect_distinct_rootofs(ExprPtr expr, std::vector<ExprPtr>& out) {
     return ok(rendered);
 }
 
+[[nodiscard]] static bool is_algebraic_generator(ExprPtr expr) {
+    if (expr_is<RootOf>(expr)) return true;
+    if (const auto* call = expr_cast<FuncCall>(expr); call && call->func_id == BuiltinOp::Sqrt && call->args.size() == 1U) {
+        if (const auto* il = expr_cast<IntegerLit>(call->args[0])) return il->value.is_positive();
+        if (const auto* rl = expr_cast<RationalLit>(call->args[0])) return rl->numerator.is_positive();
+    }
+    if (const auto* bin = expr_cast<Binary>(expr); bin && bin->op == BinaryOp::Pow) {
+        bool base_ok = false;
+        if (const auto* il = expr_cast<IntegerLit>(bin->left)) base_ok = il->value.is_positive();
+        else if (const auto* rl = expr_cast<RationalLit>(bin->left)) base_ok = rl->numerator.is_positive();
+        if (base_ok) {
+            if (const auto* rl = expr_cast<RationalLit>(bin->right)) {
+                return rl->numerator == BigInt(1) && rl->denominator > BigInt(1);
+            }
+        }
+    }
+    return false;
+}
+
+static void collect_algebraic_generators(ExprPtr expr, std::vector<ExprPtr>& out, symbolic::CASContext& ctx) {
+    if (!expr) return;
+    if (out.size() >= 2U) return;
+    if (is_algebraic_generator(expr)) {
+        for (ExprPtr existing : out) {
+            if (same_generator_expr(existing, expr, ctx)) return;
+        }
+        out.push_back(expr);
+        if (expr_is<RootOf>(expr)) {
+            const auto& root = expr_ref<RootOf>(expr);
+            collect_algebraic_generators(root.polynomial, out, ctx);
+        }
+        return;
+    }
+
+    visit_expr(expr, [&](const auto& node) {
+        using Node = std::decay_t<decltype(node)>;
+        if constexpr (std::is_same_v<Node, Unary>) {
+            collect_algebraic_generators(node.operand, out, ctx);
+        } else if constexpr (std::is_same_v<Node, Binary>) {
+            collect_algebraic_generators(node.left, out, ctx);
+            collect_algebraic_generators(node.right, out, ctx);
+        } else if constexpr (std::is_same_v<Node, FuncCall>) {
+            for (ExprPtr arg : node.args) collect_algebraic_generators(arg, out, ctx);
+        } else if constexpr (std::is_same_v<Node, Sum>) {
+            for (ExprPtr t : node.terms) collect_algebraic_generators(t, out, ctx);
+        } else if constexpr (std::is_same_v<Node, Product>) {
+            for (ExprPtr f : node.factors) collect_algebraic_generators(f, out, ctx);
+        } else if constexpr (std::is_same_v<Node, Integral>) {
+            collect_algebraic_generators(node.integrand, out, ctx);
+            if (node.lower.has_value()) collect_algebraic_generators(*node.lower, out, ctx);
+            if (node.upper.has_value()) collect_algebraic_generators(*node.upper, out, ctx);
+        } else if constexpr (std::is_same_v<Node, Derivative>) {
+            collect_algebraic_generators(node.expression, out, ctx);
+        } else if constexpr (std::is_same_v<Node, Limit>) {
+            collect_algebraic_generators(node.expression, out, ctx);
+            collect_algebraic_generators(node.point, out, ctx);
+        } else if constexpr (std::is_same_v<Node, Matrix>) {
+            for (ExprPtr e : node.elements) collect_algebraic_generators(e, out, ctx);
+        }
+    });
+}
+
+[[nodiscard]] static Result<std::vector<Rational>> generator_min_poly(ExprPtr expr, symbolic::CASContext& ctx) {
+    if (const auto* root = expr_cast<RootOf>(expr)) {
+        return rootof_min_poly(*root, ctx);
+    }
+    Rational c;
+    BigInt n;
+    if (const auto* call = expr_cast<FuncCall>(expr); call && call->func_id == BuiltinOp::Sqrt) {
+        if (const auto* il = expr_cast<IntegerLit>(call->args[0])) c = Rational(il->value);
+        else if (const auto* rl = expr_cast<RationalLit>(call->args[0])) c = Rational(rl->numerator, rl->denominator);
+        n = BigInt(2);
+    } else if (const auto* bin = expr_cast<Binary>(expr); bin && bin->op == BinaryOp::Pow) {
+        if (const auto* il = expr_cast<IntegerLit>(bin->left)) c = Rational(il->value);
+        else if (const auto* rl = expr_cast<RationalLit>(bin->left)) c = Rational(rl->numerator, rl->denominator);
+        n = expr_cast<RationalLit>(bin->right)->denominator;
+    }
+    // minimal polynomial x^n - c -> coefficients are [-c, 0, ..., 0, 1]
+    std::vector<Rational> coeffs(n.to_u64() + 1, Rational(0));
+    coeffs[0] = -c;
+    coeffs[n.to_u64()] = Rational(1);
+    return ok(std::move(coeffs));
+}
+
 [[nodiscard]] Result<ExprPtr> simplify_in_q_alpha(
     ExprPtr expr,
     symbolic::CASContext& ctx) {
@@ -424,8 +509,27 @@ void collect_distinct_rootofs(ExprPtr expr, std::vector<ExprPtr>& out) {
     return ctx.simplify(reduced.value());
 }
 
+#include <cstdio>
+
 void register_algebraic_simplify_hook(symbolic::CASContext& ctx) {
     ctx.set_post_simplify_hook([](ExprPtr e, symbolic::CASContext& c) -> Result<ExprPtr> {
+        std::vector<ExprPtr> gens;
+        collect_algebraic_generators(e, gens, c);
+        if (gens.size() == 1U) {
+            ExprPtr alpha_expr = gens.front();
+            if (!expr_is<RootOf>(alpha_expr)) {
+                auto mp_res = generator_min_poly(alpha_expr, c);
+                if (mp_res.is_ok()) {
+                    auto an_res = try_express_in_q_alpha(e, alpha_expr, mp_res.value(), c);
+                    if (an_res.is_ok() && an_res.value().has_value()) {
+                        ExprPtr rendered = algebraic_number_to_expr_raw(an_res.value().value(), alpha_expr, c.arena());
+                        if (!structural_equal(rendered, e)) {
+                            return ok(rendered);
+                        }
+                    }
+                }
+            }
+        }
         return try_reduce_in_q_alpha(e, c);
     });
 }

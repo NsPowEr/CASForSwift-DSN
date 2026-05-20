@@ -1,5 +1,6 @@
 #include "cas/symbolic.hpp"
 #include "cas/rational.hpp"
+#include "cas/algebraic_number_bridge.hpp"
 #include "symbolic_internal.hpp"
 #include <algorithm>
 #include <chrono>
@@ -332,7 +333,9 @@ namespace cas::symbolic {
         });
 }
 
-CASContext::CASContext() : rewrite_provider_(&default_rewrite_provider()) {}
+CASContext::CASContext() : rewrite_provider_(&default_rewrite_provider()) {
+    ::cas::algebra::register_algebraic_simplify_hook(*this);
+}
 
 void CASContext::define(const Symbol& symbol, ExprPtr value) {
     variables_[symbol.name] = value;
