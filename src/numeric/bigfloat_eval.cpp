@@ -1,5 +1,6 @@
 #include "cas/bigfloat.hpp"
 #include "cas/numeric.hpp"
+#include "cas/symbolic.hpp"
 #include "cas/ast.hpp"
 #include "cas/result.hpp"
 #include <cmath>
@@ -192,6 +193,12 @@ Result<std::string> eval_mpfr(ExprPtr expr, unsigned int decimal_digits,
     auto result = eval_bigfloat(expr, bits, env);
     if (result.is_error()) return fail<std::string>(result.error());
     return ok(result.value().to_string(static_cast<int>(decimal_digits)));
+}
+
+// L3-03 overload context-aware: applica precision dal CASContext.
+Result<std::string> eval_mpfr(ExprPtr expr, symbolic::CASContext& ctx,
+    const NumericEnv& env) {
+    return eval_mpfr(expr, ctx.numeric_precision_digits(), env);
 }
 
 } // namespace cas::numeric

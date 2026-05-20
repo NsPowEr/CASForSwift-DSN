@@ -46,6 +46,14 @@ private:
     const NumericEnv& env = {});
 
 /**
+ * Overload context-aware: usa `ctx.numeric_precision_digits()` come
+ * default. L3-03 Float contestuale.
+ */
+[[nodiscard]] Result<std::string> eval_mpfr(ExprPtr expr,
+    symbolic::CASContext& ctx,
+    const NumericEnv& env = {});
+
+/**
  * Root finding numerico.
  */
 struct RootFindingOptions {

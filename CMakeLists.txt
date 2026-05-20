@@ -413,6 +413,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/algebra/test_gaussian_int.cpp
         test/unit/calculus/test_weierstrass_substitution.cpp
         test/unit/symbolic/test_complex_log_branch.cpp
+        test/unit/numeric/test_float_contextual.cpp
         test/unit/algebra/test_cyclotomic_mobius.cpp
         test/unit/algebra/test_berlekamp_probe.cpp
         test/unit/symbolic/test_math_correctness.cpp

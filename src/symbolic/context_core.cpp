@@ -410,6 +410,13 @@ void CASContext::set_gcd_error_probability(double prob) noexcept {
     gcd_error_probability_ = prob;
 }
 
+void CASContext::set_numeric_precision_digits(unsigned int digits) noexcept {
+    // Clamp: minimum 6 digits (≈ 20 bits MPFR), maximum 10000 (~ 33k bits).
+    if (digits < 6U) digits = 6U;
+    if (digits > 10000U) digits = 10000U;
+    numeric_precision_digits_ = digits;
+}
+
 void CASContext::set_max_rootof_explicit_degree(std::size_t deg) noexcept {
     max_rootof_explicit_degree_ = (deg < 1U) ? 1U : deg;
 }
