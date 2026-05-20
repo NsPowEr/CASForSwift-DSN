@@ -186,6 +186,20 @@ Result<ExprPtr> integrate_weierstrass(ExprPtr expr, const Symbol& var,
     auto in_t_simp = ctx.simplify(in_t);
     if (in_t_simp.is_ok()) in_t = in_t_simp.value();
 
+    // Decompose into clean (numerator/denominator) so downstream
+    // integrate_linear_over_quadratic / partial_fractions can pattern-
+    // match against polynomials directly. Without this, in_t may stay
+    // as a Product of mixed Pow factors that breaks dispatch.
+    if (auto parts = algebra::apart_num_den(in_t, ctx); parts.is_ok()) {
+        ExprPtr num = parts.value().numerator;
+        ExprPtr den = parts.value().denominator;
+        auto num_simp = ctx.simplify(num);
+        auto den_simp = ctx.simplify(den);
+        if (num_simp.is_ok()) num = num_simp.value();
+        if (den_simp.is_ok()) den = den_simp.value();
+        in_t = arena.make<Binary>(BinaryOp::Div, num, den);
+    }
+
     auto integ = calculus::integrate(in_t, t, ctx);
     if (integ.is_error()) {
         return fail<ExprPtr>(CASError{
