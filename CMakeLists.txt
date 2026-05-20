@@ -49,6 +49,7 @@ set(CAS_PUBLIC_HEADERS
     include/cas/expr.hpp
     include/cas/formatter.hpp
     include/cas/gaussian_int.hpp
+    include/cas/galois.hpp
     include/cas/interval.hpp
     include/cas/lexer.hpp
     include/cas/linalg/Matrix.hpp
@@ -196,6 +197,7 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/polynomial_gcd_core.cpp
     src/algebra/polynomial_cyclotomic.cpp
     src/algebra/gaussian_int.cpp
+    src/algebra/galois.cpp
 )
 
 set(CAS_LINALG_SOURCES
@@ -429,6 +431,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/symbolic/test_branch_cuts_global.cpp
         test/unit/linalg/test_lu_decomposition.cpp
         test/unit/calculus/test_laplace.cpp
+        test/unit/algebra/test_galois.cpp
         test/unit/algebra/test_cyclotomic_mobius.cpp
         test/unit/algebra/test_berlekamp_probe.cpp
         test/unit/symbolic/test_math_correctness.cpp
