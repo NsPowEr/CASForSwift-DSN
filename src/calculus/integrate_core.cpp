@@ -44,6 +44,17 @@ Result<ExprPtr> Integrator::integrate(ExprPtr expr, const Symbol& var) {
         }
     }
 
+    // 4. Weierstrass substitution for rational R(sin x, cos x) integrands
+    //    that Risch's trig handling cannot decompose. Generic algorithm —
+    //    not a pattern table — driven by structural detection of sin/cos
+    //    of var only.
+    {
+        auto weier_result = integrate_weierstrass(expr, var, context_);
+        if (weier_result.is_ok()) {
+            return context_.simplify(weier_result.value());
+        }
+    }
+
     return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
         "Symbolic integration failed: no applicable strategy"));
 }

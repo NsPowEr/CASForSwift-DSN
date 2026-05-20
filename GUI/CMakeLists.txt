@@ -1,5 +1,33 @@
 cmake_minimum_required(VERSION 3.25)
 
+# ─── Platform-native layer (macOS only) ──────────────────────────────────────
+# Compiled separately so that Objective-C++ does not contaminate the main
+# C++20 translation units.  Wrapped in if(APPLE) so the library is a no-op
+# on hypothetical future non-Apple platforms.
+if(APPLE)
+    add_library(cas_platform_macos STATIC
+        macos-cpp/src/platform/macos/NativeWindow.mm
+        macos-cpp/src/platform/macos/NativeWindow.h
+    )
+    set_source_files_properties(
+        macos-cpp/src/platform/macos/NativeWindow.mm
+        PROPERTIES COMPILE_FLAGS "-fobjc-arc -fobjc-weak"
+    )
+    target_include_directories(cas_platform_macos
+        PUBLIC
+            ${CMAKE_CURRENT_SOURCE_DIR}/macos-cpp/src/platform/macos
+    )
+    target_link_libraries(cas_platform_macos
+        PUBLIC
+            Qt6::Gui
+            "-framework AppKit"
+            "-framework Cocoa"
+            "-framework CoreServices"
+            "-framework QuartzCore"
+    )
+    target_compile_features(cas_platform_macos PUBLIC cxx_std_20)
+endif()
+
 # Libreria riusabile del layer GUI locale (AppCore/ViewModel/QML items)
 qt_add_library(cas_gui_vm STATIC
     macos-cpp/src/core/kernel/KernelDispatcher.h
@@ -35,6 +63,7 @@ target_include_directories(cas_gui_vm
         ${CMAKE_CURRENT_SOURCE_DIR}/macos-cpp/src
         ${CMAKE_CURRENT_SOURCE_DIR}/macos-cpp/src/viewmodels
         ${CMAKE_CURRENT_SOURCE_DIR}/macos-cpp/src/qml-items
+        ${CMAKE_CURRENT_SOURCE_DIR}/macos-cpp/src/platform/macos
 )
 
 # Modulo QML
@@ -71,6 +100,11 @@ target_link_libraries(cas_gui_vm
         Qt6::QuickControls2
         Qt6::Concurrent
 )
+
+# Link the platform library only when it was actually built (macOS).
+if(APPLE)
+    target_link_libraries(cas_gui_vm PUBLIC cas_platform_macos)
+endif()
 
 target_compile_features(cas_gui_vm PUBLIC cxx_std_20)
 

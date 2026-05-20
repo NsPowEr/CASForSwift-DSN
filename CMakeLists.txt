@@ -122,6 +122,7 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/integrate_product_power.cpp
     src/calculus/integrate_substitution.cpp
     src/calculus/integrate_trig_substitution.cpp
+    src/calculus/integrate_weierstrass.cpp
     src/calculus/integrate_hermite.cpp
     src/calculus/integrate_risch.cpp
     src/calculus/differential_field.cpp
@@ -410,6 +411,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/calculus/test_integrate_risch_exp_mix.cpp
         test/unit/numeric/test_mpfr_foundation.cpp
         test/unit/algebra/test_gaussian_int.cpp
+        test/unit/calculus/test_weierstrass_substitution.cpp
         test/unit/algebra/test_cyclotomic_mobius.cpp
         test/unit/algebra/test_berlekamp_probe.cpp
         test/unit/symbolic/test_math_correctness.cpp

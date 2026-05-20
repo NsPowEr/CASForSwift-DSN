@@ -38,6 +38,12 @@ struct QuotientView {
     const Symbol& var,
     symbolic::CASContext& context);
 
+/// @brief Weierstrass substitution t = tan(x/2) for ∫ R(sin x, cos x) dx.
+[[nodiscard]] Result<ExprPtr> integrate_weierstrass(
+    ExprPtr expr,
+    const Symbol& var,
+    symbolic::CASContext& ctx);
+
 [[nodiscard]] ExprPtr limit_make_integer(AstArena& arena, long long value);
 [[nodiscard]] ExprPtr limit_make_binary(AstArena& arena, BinaryOp op, ExprPtr lhs, ExprPtr rhs);
 [[nodiscard]] bool limit_is_zero(ExprPtr expr);
