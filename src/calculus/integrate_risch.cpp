@@ -647,6 +647,71 @@ Result<ExprPtr> integrate_risch(ExprPtr expr, const Symbol& var, symbolic::CASCo
         }
     }
 
+    // 2c. Product(f, exp(g)) Risch DE shortcut (Bronstein cap. 6).
+    // For integrand = f(x)·exp(g(x)) with f, g polynomial in var, the
+    // antiderivative has the form y(x)·exp(g(x)) where y satisfies the
+    // Risch differential equation:
+    //   Dy + g'·y = f
+    // The polynomial-coefficient solver solve_risch_de_q already handles
+    // the linear-system reduction over Q. This step wires it in as a
+    // top-level dispatch before Hermite/Rothstein-Trager, eliminating the
+    // need to descend through the full field-tower decomposition for the
+    // common case ∫ f(x)·exp(g(x)) dx with f, g ∈ Q[x].
+    {
+        // Match expr as Product([poly_factors..., exp(g)]) or exp(g) alone.
+        ExprPtr exp_arg;
+        std::vector<ExprPtr> poly_factors;
+        if (const auto* call = expr_cast<FuncCall>(expr);
+            call && call->func_id == BuiltinOp::Exp && call->args.size() == 1U) {
+            exp_arg = call->args[0];
+        } else if (const auto* prod = expr_cast<Product>(expr)) {
+            for (ExprPtr f : prod->factors) {
+                if (const auto* c2 = expr_cast<FuncCall>(f);
+                    c2 && c2->func_id == BuiltinOp::Exp && c2->args.size() == 1U) {
+                    if (exp_arg) { exp_arg = nullptr; break; }
+                    exp_arg = c2->args[0];
+                } else {
+                    poly_factors.push_back(f);
+                }
+            }
+        }
+        if (exp_arg) {
+            ExprPtr f_poly = poly_factors.empty()
+                ? static_cast<ExprPtr>(arena.make<IntegerLit>(BigInt(1)))
+                : (poly_factors.size() == 1U
+                    ? poly_factors[0]
+                    : static_cast<ExprPtr>(arena.make<Product>(std::move(poly_factors))));
+            auto f_simp = context.simplify(f_poly);
+            if (f_simp.is_ok()) f_poly = f_simp.value();
+            auto g_simp = context.simplify(exp_arg);
+            if (g_simp.is_ok()) exp_arg = g_simp.value();
+            auto g_prime = diff(exp_arg, var, 1U, context);
+            if (g_prime.is_ok()) {
+                // y satisfying y' + g'·y = f, computed over Q[x].
+                auto y_res = solve_risch_de_q(g_prime.value(), f_poly, var, context);
+                if (y_res.is_ok()) {
+                    ExprPtr exp_g = arena.make<FuncCall>(BuiltinOp::Exp,
+                        std::vector<ExprPtr>{exp_arg});
+                    ExprPtr antider = arena.make<Binary>(BinaryOp::Mul, y_res.value(), exp_g);
+                    // Verify D(antider) = expr structurally before commit.
+                    auto D_check = diff(antider, var, 1U, context);
+                    if (D_check.is_ok()) {
+                        ExprPtr delta = arena.make<Binary>(BinaryOp::Sub, D_check.value(), expr);
+                        auto delta_tog = algebra::together(delta, context);
+                        if (delta_tog.is_ok()) {
+                            auto delta_simp = context.simplify(delta_tog.value());
+                            if (delta_simp.is_ok()
+                                && expr_is<IntegerLit>(delta_simp.value())
+                                && expr_ref<IntegerLit>(delta_simp.value()).value.is_zero()) {
+                                return context.simplify(antider);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // 3. Decompose into P/Q with respect to the topmost generator t_n
     Symbol t_top = field.extensions().empty() ? var : field.extensions().back().t_var;
 
