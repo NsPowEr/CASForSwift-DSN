@@ -44,6 +44,17 @@ struct QuotientView {
     const Symbol& var,
     symbolic::CASContext& ctx);
 
+/// @brief Finite-difference symbolic derivative formulas (L3-12).
+enum class FiniteDiffOrder {
+    Forward1,   // O(h)
+    Central2,   // O(h²)
+    Central4,   // O(h⁴)
+};
+
+[[nodiscard]] Result<ExprPtr> numeric_diff(
+    ExprPtr expr, const Symbol& var, ExprPtr h,
+    FiniteDiffOrder order, symbolic::CASContext& ctx);
+
 [[nodiscard]] ExprPtr limit_make_integer(AstArena& arena, long long value);
 [[nodiscard]] ExprPtr limit_make_binary(AstArena& arena, BinaryOp op, ExprPtr lhs, ExprPtr rhs);
 [[nodiscard]] bool limit_is_zero(ExprPtr expr);

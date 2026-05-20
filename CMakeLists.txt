@@ -147,6 +147,7 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/ode_solver_advanced.cpp
     src/calculus/ode_solver_frobenius.cpp
     src/calculus/asymptotes.cpp
+    src/calculus/numeric_diff.cpp
 )
 
 set(CAS_NUMTHEORY_SOURCES
@@ -422,6 +423,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/symbolic/test_piecewise.cpp
         test/unit/algebra/test_monomial_orders.cpp
         test/unit/numeric/test_interval.cpp
+        test/unit/calculus/test_numeric_diff.cpp
         test/unit/algebra/test_cyclotomic_mobius.cpp
         test/unit/algebra/test_berlekamp_probe.cpp
         test/unit/symbolic/test_math_correctness.cpp
