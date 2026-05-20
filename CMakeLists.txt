@@ -432,6 +432,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/linalg/test_lu_decomposition.cpp
         test/unit/calculus/test_laplace.cpp
         test/unit/algebra/test_galois.cpp
+        test/unit/algebra/test_solve_closure.cpp
         test/unit/algebra/test_cyclotomic_mobius.cpp
         test/unit/algebra/test_berlekamp_probe.cpp
         test/unit/symbolic/test_math_correctness.cpp
