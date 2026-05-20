@@ -60,6 +60,11 @@ enum class FiniteDiffOrder {
     ExprPtr expr, const Symbol& t, const Symbol& s,
     symbolic::CASContext& ctx);
 
+/// @brief Inverse Laplace L⁻¹{F(s)}(t) elementary-pattern table (L3-07).
+[[nodiscard]] Result<ExprPtr> inverse_laplace_transform(
+    ExprPtr expr, const Symbol& s, const Symbol& t,
+    symbolic::CASContext& ctx);
+
 [[nodiscard]] ExprPtr limit_make_integer(AstArena& arena, long long value);
 [[nodiscard]] ExprPtr limit_make_binary(AstArena& arena, BinaryOp op, ExprPtr lhs, ExprPtr rhs);
 [[nodiscard]] bool limit_is_zero(ExprPtr expr);

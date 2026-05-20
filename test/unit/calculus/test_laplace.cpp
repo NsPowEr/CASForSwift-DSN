@@ -107,6 +107,63 @@ TEST_F(LaplaceTest, ConstantScalarFactor) {
     EXPECT_TRUE(equiv(r.value(), expected));
 }
 
+TEST_F(LaplaceTest, InverseLaplaceOneOverS_To_One) {
+    // L⁻¹{1/s} = 1
+    auto F = parse("1/s");
+    auto r = inverse_laplace_transform(F, s, t, ctx);
+    ASSERT_TRUE(r.is_ok());
+    EXPECT_TRUE(equiv(r.value(), parse("1")));
+}
+
+TEST_F(LaplaceTest, InverseLaplaceOneOverSPower_To_TPowerOverFactorial) {
+    // L⁻¹{1/s³} = t²/2! = t²/2
+    auto F = parse("1/s^3");
+    auto r = inverse_laplace_transform(F, s, t, ctx);
+    ASSERT_TRUE(r.is_ok());
+    EXPECT_TRUE(equiv(r.value(), parse("t^2 / 2")));
+}
+
+TEST_F(LaplaceTest, InverseLaplaceExpPattern) {
+    // L⁻¹{1/(s-3)} = exp(3t)
+    auto F = parse("1/(s - 3)");
+    auto r = inverse_laplace_transform(F, s, t, ctx);
+    ASSERT_TRUE(r.is_ok());
+    // Verify via re-forward: laplace(exp(3t)) should equal F.
+    auto back = laplace_transform(r.value(), t, s, ctx);
+    ASSERT_TRUE(back.is_ok());
+    EXPECT_TRUE(equiv(back.value(), F));
+}
+
+TEST_F(LaplaceTest, InverseLaplaceCosPattern) {
+    // L⁻¹{s/(s²+4)} = cos(2t)
+    auto F = parse("s/(s^2 + 4)");
+    auto r = inverse_laplace_transform(F, s, t, ctx);
+    ASSERT_TRUE(r.is_ok());
+    auto back = laplace_transform(r.value(), t, s, ctx);
+    ASSERT_TRUE(back.is_ok());
+    EXPECT_TRUE(equiv(back.value(), F));
+}
+
+TEST_F(LaplaceTest, InverseLaplaceSinPattern) {
+    // L⁻¹{2/(s²+4)} = sin(2t)
+    auto F = parse("2/(s^2 + 4)");
+    auto r = inverse_laplace_transform(F, s, t, ctx);
+    ASSERT_TRUE(r.is_ok());
+    auto back = laplace_transform(r.value(), t, s, ctx);
+    ASSERT_TRUE(back.is_ok());
+    EXPECT_TRUE(equiv(back.value(), F));
+}
+
+TEST_F(LaplaceTest, InverseLaplaceLinearityRoundtrip) {
+    // L⁻¹{3/s² + 5/(s-1)} = 3t + 5exp(t)
+    auto F = parse("3/s^2 + 5/(s-1)");
+    auto r = inverse_laplace_transform(F, s, t, ctx);
+    ASSERT_TRUE(r.is_ok());
+    auto back = laplace_transform(r.value(), t, s, ctx);
+    ASSERT_TRUE(back.is_ok());
+    EXPECT_TRUE(equiv(back.value(), F));
+}
+
 TEST_F(LaplaceTest, AntiHardcodeNonElementaryRejected) {
     // L{ln(t)} non in table → Unimplemented (or returns weird).
     // Anti-hardcode: must NOT silently return wrong value.
