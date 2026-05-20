@@ -257,6 +257,14 @@ public:
     void set_numeric_precision_digits(unsigned int digits) noexcept;
     [[nodiscard]] unsigned int numeric_precision_digits() const noexcept { return numeric_precision_digits_; }
 
+    // L2-21 Branch cuts globali — quando true, identities che richiedono
+    // dominio principale (ln(x·y)=ln(x)+ln(y), exp(ln(x))=x, sqrt(x²)=x)
+    // sono rifiutate senza positivity assumption esplicita. Default false
+    // mantiene comportamento storico: identità applicate sotto assunzione
+    // implicita di reale principale.
+    void set_strict_branch_cuts(bool strict) noexcept { strict_branch_cuts_ = strict; }
+    [[nodiscard]] bool strict_branch_cuts() const noexcept { return strict_branch_cuts_; }
+
     void set_max_trig_power_reduction(long long n) noexcept { max_trig_power_reduction_ = n; }
     [[nodiscard]] long long max_trig_power_reduction() const noexcept { return max_trig_power_reduction_; }
 
@@ -393,6 +401,7 @@ public:
     std::size_t max_integration_depth_{16U};
     double gcd_error_probability_{0.001};
     unsigned int numeric_precision_digits_{15U};
+    bool strict_branch_cuts_{false};
     std::size_t max_rootof_explicit_degree_{2U};
     std::size_t max_gcd_recursion_depth_{16U};
     std::size_t min_gcd_division_steps_{8U};
