@@ -171,9 +171,68 @@ namespace {
     // Constant scalar product: c · f(t) → c · L{f(t)} when c indep of t.
     if (const auto* prod = expr_cast<Product>(expr)) {
         std::vector<ExprPtr> consts, vars;
+        ExprPtr exp_factor = nullptr;
+        ExprPtr exp_arg = nullptr;
+        std::vector<ExprPtr> non_exp_vars;
         for (ExprPtr f : prod->factors) {
-            if (depends_on_t(f, t)) vars.push_back(f);
+            if (depends_on_t(f, t)) {
+                vars.push_back(f);
+                // Detect exp(a·t) factor for frequency-shift rule.
+                if (auto* call = expr_cast<FuncCall>(f);
+                    call && call->func_id == BuiltinOp::Exp && call->args.size() == 1U) {
+                    if (!exp_factor) {
+                        exp_factor = f;
+                        exp_arg = call->args[0];
+                        continue;
+                    }
+                }
+                non_exp_vars.push_back(f);
+            }
             else consts.push_back(f);
+        }
+        // Frequency shift: L{exp(a·t)·g(t)} = G(s - a)
+        // where a must be constant in t and a = coefficient of t in exp_arg.
+        if (exp_factor && !non_exp_vars.empty()) {
+            // Extract a from a·t pattern.
+            ExprPtr a = nullptr;
+            if (is_sym(exp_arg, t)) {
+                a = make_int(ctx, 1);
+            } else if (auto* p_arg = expr_cast<Product>(exp_arg)) {
+                std::vector<ExprPtr> a_factors;
+                bool found_t = false;
+                bool ok = true;
+                for (auto pf : p_arg->factors) {
+                    if (is_sym(pf, t)) {
+                        if (found_t) { ok = false; break; }
+                        found_t = true;
+                    } else if (!depends_on_t(pf, t)) {
+                        a_factors.push_back(pf);
+                    } else { ok = false; break; }
+                }
+                if (ok && found_t) {
+                    a = a_factors.empty() ? make_int(ctx, 1)
+                        : (a_factors.size() == 1 ? a_factors[0]
+                           : static_cast<ExprPtr>(arena.make<Product>(std::move(a_factors))));
+                }
+            }
+            if (a) {
+                // Compute L{g(t)} = G(s), then substitute s → s - a.
+                ExprPtr g_only = non_exp_vars.size() == 1
+                    ? non_exp_vars[0]
+                    : static_cast<ExprPtr>(arena.make<Product>(std::move(non_exp_vars)));
+                auto Gs = laplace_transform(g_only, t, s, ctx);
+                if (Gs.is_ok()) {
+                    ExprPtr s_minus_a = arena.make<Binary>(BinaryOp::Sub,
+                        arena.make<Symbol>(s), a);
+                    auto shifted = symbolic::substitute(Gs.value(), s, s_minus_a, ctx);
+                    if (shifted.is_ok()) {
+                        consts.push_back(shifted.value());
+                        return ctx.simplify(consts.size() == 1
+                            ? consts[0]
+                            : static_cast<ExprPtr>(arena.make<Product>(std::move(consts))));
+                    }
+                }
+            }
         }
         if (!consts.empty() && !vars.empty()) {
             ExprPtr f_only = vars.size() == 1 ? vars[0]

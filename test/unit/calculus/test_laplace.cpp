@@ -107,6 +107,24 @@ TEST_F(LaplaceTest, ConstantScalarFactor) {
     EXPECT_TRUE(equiv(r.value(), expected));
 }
 
+TEST_F(LaplaceTest, FrequencyShiftExpTimesT) {
+    // L{exp(a·t) · t} = 1/(s-a)²
+    auto f = parse("exp(3*t) * t");
+    auto r = laplace_transform(f, t, s, ctx);
+    ASSERT_TRUE(r.is_ok());
+    auto expected = parse("1 / (s - 3)^2");
+    EXPECT_TRUE(equiv(r.value(), expected));
+}
+
+TEST_F(LaplaceTest, FrequencyShiftExpTimesCos) {
+    // L{exp(2t) · cos(3t)} = (s-2)/((s-2)² + 9)
+    auto f = parse("exp(2*t) * cos(3*t)");
+    auto r = laplace_transform(f, t, s, ctx);
+    ASSERT_TRUE(r.is_ok());
+    auto expected = parse("(s - 2) / ((s - 2)^2 + 9)");
+    EXPECT_TRUE(equiv(r.value(), expected));
+}
+
 TEST_F(LaplaceTest, InverseLaplaceOneOverS_To_One) {
     // L⁻¹{1/s} = 1
     auto F = parse("1/s");
