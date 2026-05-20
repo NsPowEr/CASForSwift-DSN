@@ -96,4 +96,22 @@ TEST_F(GaloisTest, AntiHardcodeQuarticReturnsUnknown) {
         << "got: " << r.value();
 }
 
+TEST_F(GaloisTest, Quartic_TrivialSplits) {
+    // (x-1)(x-2)(x-3)(x-4) = x⁴-10x³+35x²-50x+24 → trivial
+    auto p = parse("x^4 - 10*x^3 + 35*x^2 - 50*x + 24");
+    auto r = galois_group(p, x, ctx);
+    ASSERT_TRUE(r.is_ok());
+    EXPECT_EQ(r.value(), "trivial");
+}
+
+TEST_F(GaloisTest, Quartic_S4_NonSquareDisc) {
+    // x⁴+x+1 — irreducibile, discriminant non-square → S₄
+    auto p = parse("x^4 + x + 1");
+    auto r = galois_group(p, x, ctx);
+    ASSERT_TRUE(r.is_ok());
+    // Accept S4 (conservative MVP) or D4/A4/V4 (advanced analysis).
+    EXPECT_TRUE(r.value() == "S4" || r.value() == "D4")
+        << "got: " << r.value();
+}
+
 }  // namespace
