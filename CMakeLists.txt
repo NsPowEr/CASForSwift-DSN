@@ -57,6 +57,7 @@ set(CAS_PUBLIC_HEADERS
     include/cas/result.hpp
     include/cas/symbolic.hpp
     include/cas/token.hpp
+    include/cas/units.hpp
 )
 
 set(CAS_FOUNDATION_SOURCES
@@ -105,6 +106,7 @@ set(CAS_SYMBOLIC_SOURCES
     src/symbolic/functions_special.cpp
     src/symbolic/series_arithmetic.cpp
     src/symbolic/normal_form.cpp
+    src/symbolic/units.cpp
 )
 
 set(CAS_CALCULUS_SOURCES
@@ -414,6 +416,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/calculus/test_weierstrass_substitution.cpp
         test/unit/symbolic/test_complex_log_branch.cpp
         test/unit/numeric/test_float_contextual.cpp
+        test/unit/symbolic/test_units.cpp
         test/unit/algebra/test_cyclotomic_mobius.cpp
         test/unit/algebra/test_berlekamp_probe.cpp
         test/unit/symbolic/test_math_correctness.cpp
