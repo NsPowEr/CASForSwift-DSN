@@ -13,6 +13,7 @@
 
 #include <gtest/gtest.h>
 
+#include "cas/algebra.hpp"
 #include "cas/calculus.hpp"
 #include "cas/formatter.hpp"
 #include "cas/lexer.hpp"
@@ -53,37 +54,34 @@ TEST_F(RischLogarithmicProbeTest, IntegralOfXOverXSquaredPlusOne) {
 }
 
 // ∫ 1/(x · ln(x)) dx = ln(ln(x)). Pure u = ln(x) substitution.
-// Tests if engine handles nested transcendental logarithm.
 //
-// KNOWN BUG (DEBT-NEW-001 filed 2026-05-20): engine returns
-// `ln(x)^(-1) * ln(abs(x))` which simplifies to 1 for x>0, not
-// ln(ln(x)). The differentiate-inverse check confirms wrong:
-//   diff(1, x) = 0 ≠ 1/(x·ln(x)).
-// Fix requires Risch table-substitution / Liouvillian extension
-// handler that recognises u = ln(x) as a transcendental tower.
-// Filed for follow-up; this probe documents the failure mode but
-// does NOT assert the wrong output to avoid green-bar deception.
-TEST_F(RischLogarithmicProbeTest, IntegralOfReciprocalOfXLnX_KNOWN_BUG) {
+// Fixed by Risch logarithmic-derivative recognizer (structure
+// theorem step): given integrand 1/(x·ln(x)), the engine detects
+// integrand = D(ln(x))/ln(x) for extension generator t = ln(x)
+// and returns c · ln(t) = ln(ln(x)). Previously the engine fell
+// through to IBP + Hermite/RT and produced ln(x)^(-1)·ln|x|,
+// which is wrong (diff back doesn't match the integrand).
+TEST_F(RischLogarithmicProbeTest, IntegralOfReciprocalOfXLnX) {
     auto e = parse("1 / (x * ln(x))");
     auto r = integrate(e, x, ctx);
     ASSERT_TRUE(r.is_ok()) << r.error().message;
     auto formatted = formatter::TextFormatter{}.format(r.value());
-    std::cout << "[KNOWN BUG] ∫ 1/(x ln(x)) dx = " << formatted
-              << "  (correct: ln(ln(x))). See DEBT-NEW-001." << std::endl;
-    // Verify the diff-inverse invariant fails — proof of the bug.
+    std::cout << "[PROBE] ∫ 1/(x ln(x)) dx = " << formatted << std::endl;
+    // Verify by differentiation: D(result) - integrand must reduce to 0
+    // after together() normalization (raw simplify alone cannot match
+    // (1/x)(1/y) against 1/(xy)).
     auto d_back = diff(r.value(), x, 1, ctx);
-    if (d_back.is_ok()) {
-        // Compare diff(result) with original integrand.
-        // If they match, the result is correct (despite weird form).
-        // If they don't, this is a genuine bug.
-        auto diff_minus_orig = ctx.simplify(
-            ctx.arena().make<Binary>(BinaryOp::Sub, d_back.value(), e));
-        if (diff_minus_orig.is_ok()) {
-            auto check = formatter::TextFormatter{}.format(diff_minus_orig.value());
-            std::cout << "[INVARIANT] diff(result) - integrand = " << check
-                      << " (should be 0 for correct integral)" << std::endl;
-        }
-    }
+    ASSERT_TRUE(d_back.is_ok());
+    auto delta = ctx.arena().make<Binary>(BinaryOp::Sub, d_back.value(), e);
+    auto delta_tog = algebra::together(delta, ctx);
+    ASSERT_TRUE(delta_tog.is_ok());
+    auto delta_simp = ctx.simplify(delta_tog.value());
+    ASSERT_TRUE(delta_simp.is_ok());
+    auto* lit = expr_cast<IntegerLit>(delta_simp.value());
+    ASSERT_NE(lit, nullptr)
+        << "D(result) - integrand did not reduce to a literal";
+    EXPECT_TRUE(lit->value.is_zero())
+        << "D(result) ≠ integrand: " << formatter::TextFormatter{}.format(delta_simp.value());
 }
 
 // ∫ 1/(x³-1) dx requires partial fractions; the log part involves

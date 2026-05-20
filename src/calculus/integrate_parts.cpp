@@ -1,4 +1,5 @@
 #include "calculus_internal.hpp"
+#include "cas/algebra.hpp"
 #include "cas/error.hpp"
 
 #include <algorithm>
@@ -163,10 +164,36 @@ Result<ExprPtr> integrate_by_parts(
     }
     ExprPtr int_vdu = int_vdu_res.value();
 
-    return ok(arena.make<Sum>(std::vector<ExprPtr>{
+    ExprPtr ibp_result = arena.make<Sum>(std::vector<ExprPtr>{
         uv,
         arena.make<Unary>(UnaryOp::Neg, int_vdu)
-    }));
+    });
+
+    // Verification by differentiation: IBP returns uv - ∫v·du; if the
+    // recursive ∫v·du did not actually close (e.g. budget exhausted with
+    // a partial/zero stub), the algebraic identity D(result) = integrand
+    // breaks. Without this guard, callers like ∫ 1/(x·ln(x)) receive
+    // the wrong closed form ln(x)^-1·ln|x| instead of falling through
+    // to the Risch logarithmic-derivative recognizer.
+    auto D_res = diff(ibp_result, var, 1U, context);
+    if (D_res.is_ok()) {
+        ExprPtr delta = arena.make<Binary>(BinaryOp::Sub, D_res.value(), expr);
+        auto delta_tog = algebra::together(delta, context);
+        ExprPtr delta_for_simp = delta_tog.is_ok() ? delta_tog.value() : delta;
+        auto delta_simp = context.simplify(delta_for_simp);
+        bool is_zero = delta_simp.is_ok()
+            && expr_is<IntegerLit>(delta_simp.value())
+            && expr_ref<IntegerLit>(delta_simp.value()).value.is_zero();
+        if (!is_zero) {
+            return fail<ExprPtr>(CASError{
+                .kind = CASErrorKind::Unimplemented,
+                .message = "Integration by parts: recursive sub-integral did not close (D(result) != integrand)",
+                .hint = "fallback to algorithmic strategy (Risch/Hermite/RT) required",
+            });
+        }
+    }
+
+    return ok(ibp_result);
 }
 
 }  // namespace cas::calculus

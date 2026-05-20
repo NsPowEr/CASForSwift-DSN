@@ -5,9 +5,11 @@
 #include "cas/error.hpp"
 #include "../algebra/polynomial_internal.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace cas::calculus {
@@ -589,6 +591,61 @@ Result<ExprPtr> integrate_risch(ExprPtr expr, const Symbol& var, symbolic::CASCo
     auto gen_expr_res = field.to_field_generators(expr, context);
     if (gen_expr_res.is_error()) return fail<ExprPtr>(gen_expr_res.error());
     ExprPtr gen_expr = gen_expr_res.value();
+
+    // 2b. Logarithmic-derivative recognition (Risch structure theorem).
+    // If integrand == c · D(g)/g for some generator g in the field tower
+    // and c constant, then ∫ = c · ln(g). Handles ∫ 1/(x·ln(x)) dx = ln(ln(x))
+    // and similar nested-log cases that Hermite/Rothstein-Trager cannot
+    // express (resultant root is non-constant rational function of x).
+    //
+    // Verification by differentiation roundtrip: candidate F = c·ln(g);
+    // accept iff D(F) - gen_expr simplifies to 0. This bypasses fragile
+    // shape inspection on the candidate constant c.
+    // Try each extension as candidate g such that integrand = c · D(g)/g
+    // for some constant c. For pragmatic detection, try small rational
+    // constants (c ∈ {1, -1, 1/2, 2, -1/2, -2}) and verify by subtraction.
+    auto try_constant = [&](ExprPtr cF, ExprPtr DF_val) -> Result<ExprPtr> {
+        ExprPtr delta = arena.make<Binary>(BinaryOp::Sub, DF_val, expr);
+        // together() reduces rational sub-expressions over a common
+        // denominator before simplify — required because raw simplify
+        // does not commute the (1/x)·(1/y) → 1/(xy) transform that the
+        // subtraction needs to reach zero.
+        auto delta_tog = algebra::together(delta, context);
+        if (delta_tog.is_error()) return fail<ExprPtr>(delta_tog.error());
+        auto delta_simp = context.simplify(delta_tog.value());
+        if (delta_simp.is_error()) return fail<ExprPtr>(delta_simp.error());
+        if (expr_is<IntegerLit>(delta_simp.value())
+            && expr_ref<IntegerLit>(delta_simp.value()).value.is_zero()) {
+            return context.simplify(cF);
+        }
+        return fail<ExprPtr>(CASError{CASErrorKind::Unimplemented, "no match", std::nullopt});
+    };
+    const std::array<std::pair<long long, long long>, 6> trial_consts = {{
+        {1, 1}, {-1, 1}, {1, 2}, {2, 1}, {-1, 2}, {-2, 1},
+    }};
+    for (const auto& ext : field.extensions()) {
+        ExprPtr g;
+        if (ext.type == ExtensionType::Logarithmic) {
+            g = arena.make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{ext.argument});
+        } else if (ext.type == ExtensionType::Exponential) {
+            g = arena.make<FuncCall>(BuiltinOp::Exp, std::vector<ExprPtr>{ext.argument});
+        } else {
+            continue;
+        }
+        ExprPtr F_unit = arena.make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{g});
+        auto DF_res = diff(F_unit, var, 1U, context);
+        if (DF_res.is_error()) continue;
+        ExprPtr DF = DF_res.value();
+        for (const auto& [num, den] : trial_consts) {
+            ExprPtr c_const = (den == 1)
+                ? static_cast<ExprPtr>(arena.make<IntegerLit>(BigInt(num)))
+                : static_cast<ExprPtr>(arena.make<RationalLit>(BigInt(num), BigInt(den)));
+            ExprPtr cF = arena.make<Binary>(BinaryOp::Mul, c_const, F_unit);
+            ExprPtr cDF = arena.make<Binary>(BinaryOp::Mul, c_const, DF);
+            auto res = try_constant(cF, cDF);
+            if (res.is_ok()) return res;
+        }
+    }
 
     // 3. Decompose into P/Q with respect to the topmost generator t_n
     Symbol t_top = field.extensions().empty() ? var : field.extensions().back().t_var;
