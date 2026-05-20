@@ -63,6 +63,38 @@ namespace {
     }
 
     auto sol_res = solve_nonlinear_system_f4(polys, vars, ctx);
+    // L2-13 fallback: 2-variable resultant elimination when F4 fails.
+    // For systems [f(x,y), g(x,y)], compute h(x) = resultant_y(f, g);
+    // solve h(x)=0 → x roots; for each x root, back-substitute and
+    // solve g(x,y)=0 in y. Robust for low-arity systems where F4
+    // struggles with coefficient swell.
+    if (sol_res.is_error() && polys.size() == 2U && vars.size() == 2U) {
+        ExprPtr f = polys[0];
+        ExprPtr g = polys[1];
+        // Eliminate vars[1] via resultant wrt vars[1].
+        auto res_h = polynomial_resultant(f, g, vars[1], ctx);
+        if (res_h.is_ok()) {
+            auto x_roots = solve_polynomial(res_h.value(), vars[0], ctx);
+            if (x_roots.is_ok()) {
+                std::vector<ExprPtr> flat;
+                AstArena& arena = ctx.arena();
+                for (auto x_val : x_roots.value()) {
+                    // Substitute x into g and solve for y.
+                    auto g_sub = symbolic::substitute(g, vars[0], x_val, ctx);
+                    if (g_sub.is_error()) continue;
+                    auto y_roots = solve_polynomial(g_sub.value(), vars[1], ctx);
+                    if (y_roots.is_error()) continue;
+                    for (auto y_val : y_roots.value()) {
+                        flat.push_back(x_val);
+                        flat.push_back(y_val);
+                    }
+                }
+                std::size_t n_sols = flat.size() / 2U;
+                return ok(arena.make<Matrix>(n_sols, 2U, std::move(flat)));
+            }
+        }
+        return fail<ExprPtr>(sol_res.error());
+    }
     if (sol_res.is_error()) return fail<ExprPtr>(sol_res.error());
 
     const auto& solutions = sol_res.value();
