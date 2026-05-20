@@ -49,6 +49,7 @@ set(CAS_PUBLIC_HEADERS
     include/cas/expr.hpp
     include/cas/formatter.hpp
     include/cas/gaussian_int.hpp
+    include/cas/interval.hpp
     include/cas/lexer.hpp
     include/cas/linalg/Matrix.hpp
     include/cas/numtheory.hpp
@@ -218,6 +219,7 @@ set(CAS_NUMERIC_SOURCES
     src/numeric/sampler.cpp
     src/numeric/bigfloat.cpp
     src/numeric/bigfloat_eval.cpp
+    src/numeric/interval.cpp
 )
 
 set(CAS_FORMATTER_SOURCES
@@ -419,6 +421,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/symbolic/test_units.cpp
         test/unit/symbolic/test_piecewise.cpp
         test/unit/algebra/test_monomial_orders.cpp
+        test/unit/numeric/test_interval.cpp
         test/unit/algebra/test_cyclotomic_mobius.cpp
         test/unit/algebra/test_berlekamp_probe.cpp
         test/unit/symbolic/test_math_correctness.cpp
