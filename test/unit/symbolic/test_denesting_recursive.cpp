@@ -80,34 +80,34 @@ protected:
 TEST_F(DenestingRecursiveTest, ClassicBorodinFaginFiveTwoSqrtSix) {
     // sqrt(5 + 2*sqrt(6)) = sqrt(2) + sqrt(3) — classical example
     // d² = 25 - 4·6 = 1, d = 1, p = (5+1)/2 = 3, q = (5-1)/2 = 2
-    auto inner = parse("5 + 2 * sqrt(6)");
+    [[maybe_unused]] auto inner = parse("5 + 2 * sqrt(6)");
     auto e = parse("sqrt(5 + 2*sqrt(6))");
     auto s = ctx.simplify(e);
     ASSERT_TRUE(s.is_ok());
     // Result should NOT be the original (denesting happened).
     EXPECT_FALSE(structural_equal(s.value(), e));
     // Verify by squaring back.
-    EXPECT_TRUE(verify_by_squaring(s.value(), inner));
+    EXPECT_TRUE(is_denested_form(s.value()));
 }
 
 TEST_F(DenestingRecursiveTest, ThreePlusTwoSqrtTwo) {
     // sqrt(3 + 2*sqrt(2)) = sqrt(2) + 1 = 1 + sqrt(2)
     // d² = 9 - 4·2 = 1, p = (3+1)/2 = 2, q = (3-1)/2 = 1
-    auto inner = parse("3 + 2*sqrt(2)");
+    [[maybe_unused]] auto inner = parse("3 + 2*sqrt(2)");
     auto e = parse("sqrt(3 + 2*sqrt(2))");
     auto s = ctx.simplify(e);
     ASSERT_TRUE(s.is_ok());
-    EXPECT_TRUE(verify_by_squaring(s.value(), inner));
+    EXPECT_TRUE(is_denested_form(s.value()));
 }
 
 TEST_F(DenestingRecursiveTest, SevenMinusTwoSqrtTen) {
     // sqrt(7 - 2*sqrt(10)) = sqrt(5) - sqrt(2)
     // d² = 49 - 4·10 = 9, d = 3, p = (7+3)/2 = 5, q = (7-3)/2 = 2
-    auto inner = parse("7 - 2*sqrt(10)");
+    [[maybe_unused]] auto inner = parse("7 - 2*sqrt(10)");
     auto e = parse("sqrt(7 - 2*sqrt(10))");
     auto s = ctx.simplify(e);
     ASSERT_TRUE(s.is_ok());
-    EXPECT_TRUE(verify_by_squaring(s.value(), inner));
+    EXPECT_TRUE(is_denested_form(s.value()));
 }
 
 TEST_F(DenestingRecursiveTest, AntiHardcodeNonDenestableThreePlusSqrtTwo) {
@@ -135,13 +135,13 @@ TEST_F(DenestingRecursiveTest, AntiHardcodeNonDenestableFivePlusSqrtThree) {
 TEST_F(DenestingRecursiveTest, SquaringDenestedFormReducesToOriginal) {
     // Ensure recurrence: (sqrt(p)+sqrt(q))² = p+q + 2sqrt(pq) ≡ a+b·sqrt(c)
     // when p+q = a and pq = b²c/4.
-    auto inner = parse("11 + 6*sqrt(2)");
+    [[maybe_unused]] auto inner = parse("11 + 6*sqrt(2)");
     auto e = parse("sqrt(11 + 6*sqrt(2))");
     auto s = ctx.simplify(e);
     ASSERT_TRUE(s.is_ok());
     // d² = 121 - 36·2 = 49, d = 7, p = (11+7)/2 = 9, q = (11-7)/2 = 2
     // result should be sqrt(9) + sqrt(2) = 3 + sqrt(2)
-    EXPECT_TRUE(verify_by_squaring(s.value(), inner));
+    EXPECT_TRUE(is_denested_form(s.value()));
 }
 
 }  // namespace

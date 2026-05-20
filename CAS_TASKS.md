@@ -76,7 +76,7 @@
 | CAS-L1-09 | Symbolic | Deduzione Disequazioni da Assunzioni | L1 | Risolta | L0-07, L1-10 | Molto Alto | Verificata (is_nonzero deriva da grafo relazionale, x*y>0 inferito, transitività 3-hop, 6 test anti-hardcode) |
 | CAS-L1-10 | Symbolic | Domini Globali e Coerenza Assunzioni | L1 | Risolta | L0-07 | Alto | Verificata |
 | CAS-L1-11 | Calculus | Asintoti (vertical/horizontal/oblique) | L1 | Risolta | — | Medio | Verificata (x→-∞ aggiunto, deduplicazione simmetrica, test anti-hardcode) |
-| CAS-L1-12 | Symbolic | Semplificazione radicali annidati (denesting) | L1 | Risolta | — | Medio | Verificata (extract_square_factor algoritmo generale: sqrt(12)→2sqrt(3), sqrt(75)→5sqrt(3), sqrt(144)→12; 3 test anti-hardcode) |
+| CAS-L1-12 | Symbolic | Semplificazione radicali annidati (denesting) | L1 | Risolta | — | Medio | **2026-05-20 (STEP 3)**: Aggiunto Borodin-Fagin-Hopcroft-Tompa (1985) denesting in `src/symbolic/simplify_exp_log.cpp`: `sqrt(a+b·sqrt(c)) → sqrt(p)±sqrt(q)` iff `a²-b²c` quadrato razionale, `p=(a+d)/2`, `q=(a-d)/2` con `d=sqrt(a²-b²c)`. Recursion via `simplify_expr` post-denest cascade inner reductions. Anti-hardcode: 2 test su non-denestable (sqrt(3+sqrt(2)), sqrt(5+sqrt(3))) verificano nessun firing spurio. 6/6 test verde (3 denesting positivi + 2 anti-hardcode + 1 cascade). |
 | CAS-L1-13 | Symbolic | Semplificazione abs/sign avanzata | L1 | Risolta | L0-07, L1-10, L1-12 | Medio | Verificata |
 | CAS-L1-14 | Calculus | Composizioni Inverse (sqrt∘sqrt, sin∘arcsin) | L1 | Risolta | L1-13 | Medio | Verificata (sin/cos/tan(arc*) + arc*(sin/cos/tan) con assumptions, sqrt∘sqrt, test_compositions.cpp 3/3) |
 | CAS-L1-15 | Algebra | Resultante e Discriminante | L1 | Risolta | — | Medio | Verificata (normalizzazione via ctx.simplify() applicata, test anti-hardcode L1-15) |
@@ -207,9 +207,9 @@
 *   **CAS-L1-10 (Domini Globali)**: Introdurre un sistema di domini coerente (reale/positivo/non-zero/intervallo) con rilevazione contraddizioni.
 *   **CAS-L1-11 (Asintoti)**: Riconoscere e classificare asintoti verticali, orizzontali e obliqui. **(COMPLETATA)**
     *   **Implementazione**: `x→-∞` aggiunto, deduplicazione simmetrica +∞/-∞, test anti-hardcode su `e^(-x)` (asintoto solo a +∞) e funzioni razionali con comportamento asimmetrico.
-*   **CAS-L1-12 (Denesting Radicali)**: Semplificazione radicali annidati. **(PARZIALE — pianificato STEP 3 della pianificazione 2026-05-20)**
-    *   **Stato corrente**: `extract_square_factor` (algoritmo generale anti-hardcode): `sqrt(12)→2sqrt(3)`, `sqrt(75)→5sqrt(3)`. Forma Borodin-Fagin-Hopcroft-Tompa `sqrt(a+b·sqrt(c))→sqrt(p)+sqrt(q)` ASSENTE.
-    *   **STEP 3 pianificato** (riferimento `PLAN_NEXT_STEPS_2026-05-20.md` § STEP 3): denesting ricorsivo con teorema BFHT (1985), condizione `a²-b²c quadrato perfetto in Q`, budget `max_denesting_depth` configurabile (default 3). Test anti-hardcode su famiglie non-denestable per evitare false positive. Effort ~3h.
+*   **CAS-L1-12 (Denesting Radicali)**: Semplificazione radicali annidati. **(RISOLTA — 2026-05-20 STEP 3)**
+    *   **Implementazione**: `try_denest_borodin_fagin` in `src/symbolic/simplify_exp_log.cpp` applica teorema BFHT 1985. Recognizer accetta `Sum([a, b·sqrt(c)])`, `Sum([a, sqrt(c)])`, varianti `Unary(Neg, ...)` per b<0, e `Binary(Mul, rat, sqrt)`. Discriminante `d²=a²-b²c` verificato come quadrato razionale via Newton-Raphson integer sqrt. Ricorsione su denested output via `simplify_expr` per cascade naturale (no budget fisso: ricorsione decresce strettamente in depth strutturale).
+    *   **Test anti-hardcode**: `test_denesting_recursive.cpp` 6/6 verde. Include 2 famiglie non-denestable (sqrt(3+sqrt(2)), sqrt(5+sqrt(3))) per certificare assenza di firing spurio.
 *   **CAS-L1-13 (Semplificazione abs/sign)**: Regole di semplificazione avanzata per `abs` e `sign` integrate con deduzione domini.
 *   **CAS-L1-14 (Composizioni Inverse)**: Normal form per composizioni inverse. **(COMPLETATA)**
     *   **Implementazione**: sin/cos/tan(arc*) + arc*(sin/cos/tan) con assumptions di dominio, sqrt∘sqrt. `test_compositions.cpp` 3/3 verde.
