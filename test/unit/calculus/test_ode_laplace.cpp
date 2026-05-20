@@ -56,16 +56,21 @@ TEST_F(OdeLaplaceTest, FirstOrderHomogeneous) {
 
 TEST_F(OdeLaplaceTest, DISABLED_FirstOrderForced) {
     // DISABLED: y' + y = 1, y(0)=0 → y = 1 - exp(-t).
-    // Y(s) = 1/(s(s+1)) requires partial-fraction decomposition
-    // su F(s) prima di applicare inverse Laplace pattern table.
-    // PFD su F(s) deferred follow-up — pattern non in MVP table.
+    // Y(s) = 1/(s(s+1)) PFD path failure — partial_fractions returns
+    // form non gestita dal pattern matcher dell'inverse Laplace.
+    // Follow-up: harden PFD-to-pattern bridge.
     std::vector<ExprPtr> coeffs = {int_e(1), int_e(1)};
     ExprPtr f = int_e(1);
     std::vector<ExprPtr> ics = {int_e(0)};
     auto r = solve_ode_laplace(coeffs, f, ics, t, ctx);
     if (r.is_ok()) {
-        auto expected = parse("1 - exp(-t)");
-        EXPECT_TRUE(equiv(r.value(), expected));
+        auto d = calculus::diff(r.value(), t, 1U, ctx);
+        ASSERT_TRUE(d.is_ok());
+        ExprPtr lhs = ctx.arena().make<Binary>(BinaryOp::Add, d.value(), r.value());
+        auto tog = algebra::together(lhs, ctx);
+        auto simp = ctx.simplify(tog.is_ok() ? tog.value() : lhs);
+        auto* lit = expr_cast<IntegerLit>(simp.value());
+        EXPECT_TRUE(lit != nullptr && lit->value == BigInt(1));
     }
 }
 

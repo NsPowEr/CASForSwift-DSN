@@ -475,6 +475,30 @@ namespace {
         }
     }
 
+    // PFD fallback: if F(s) is rational in s, decompose via partial
+    // fractions and apply pattern table per term.
+    if (num_extracted && den_extracted) {
+        // Build expr = num/den as Binary(Div) for partial_fractions.
+        ExprPtr rational_expr = arena.make<Binary>(BinaryOp::Div,
+            num_extracted, den_extracted);
+        auto pfd_res = algebra::partial_fractions(rational_expr, s, ctx);
+        if (pfd_res.is_ok()) {
+            const auto& terms = pfd_res.value();
+            if (terms.size() >= 2U) {
+                std::vector<ExprPtr> inverse_terms;
+                bool all_ok = true;
+                for (auto term : terms) {
+                    auto inv = inverse_laplace_transform(term, s, t, ctx);
+                    if (inv.is_error()) { all_ok = false; break; }
+                    inverse_terms.push_back(inv.value());
+                }
+                if (all_ok) {
+                    return ctx.simplify(arena.make<Sum>(std::move(inverse_terms)));
+                }
+            }
+        }
+    }
+
     return fail<ExprPtr>(CASError{
         CASErrorKind::Unimplemented,
         "Inverse Laplace: pattern not in elementary table",
