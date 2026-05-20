@@ -336,10 +336,46 @@ namespace {
         }
     }
 
-    // 1 / Q(s) patterns.
+    // 1 / Q(s) patterns. Detect both Binary(Div, num, den) AND
+    // Binary(Pow, den, -1) (== 1/den).
+    ExprPtr num_extracted = nullptr;
+    ExprPtr den_extracted = nullptr;
     if (const auto* bin = expr_cast<Binary>(expr); bin && bin->op == BinaryOp::Div) {
-        ExprPtr num = bin->left;
-        ExprPtr den = bin->right;
+        num_extracted = bin->left;
+        den_extracted = bin->right;
+    } else if (const auto* bin = expr_cast<Binary>(expr); bin && bin->op == BinaryOp::Pow) {
+        if (auto* exp_lit = expr_cast<IntegerLit>(bin->right);
+            exp_lit && exp_lit->value == BigInt(-1)) {
+            num_extracted = arena.make<IntegerLit>(BigInt(1));
+            den_extracted = bin->left;
+        }
+    } else if (const auto* prod = expr_cast<Product>(expr)) {
+        // Detect Product with Pow(_, -1) factor as denominator.
+        std::vector<ExprPtr> num_factors;
+        ExprPtr den = nullptr;
+        bool ok2 = true;
+        for (auto f : prod->factors) {
+            if (auto* pb = expr_cast<Binary>(f); pb && pb->op == BinaryOp::Pow) {
+                if (auto* el = expr_cast<IntegerLit>(pb->right);
+                    el && el->value == BigInt(-1)) {
+                    if (den) { ok2 = false; break; }
+                    den = pb->left;
+                    continue;
+                }
+            }
+            num_factors.push_back(f);
+        }
+        if (ok2 && den) {
+            num_extracted = num_factors.empty()
+                ? static_cast<ExprPtr>(arena.make<IntegerLit>(BigInt(1)))
+                : (num_factors.size() == 1 ? num_factors[0]
+                   : static_cast<ExprPtr>(arena.make<Product>(std::move(num_factors))));
+            den_extracted = den;
+        }
+    }
+    if (num_extracted && den_extracted) {
+        ExprPtr num = num_extracted;
+        ExprPtr den = den_extracted;
 
         // num must be constant in s for most patterns; or s for cos pattern.
         bool num_is_s = false;
@@ -373,13 +409,38 @@ namespace {
             }
         }
 
-        // 1/(s-a) → exp(a·t)
-        if (const auto* den_bin = expr_cast<Binary>(den);
-            den_bin && den_bin->op == BinaryOp::Sub) {
-            if (is_sym(den_bin->left, s) && !depends_on_t(den_bin->right, s)
-                && !depends_on_t(num, s)) {
-                ExprPtr a = den_bin->right;
-                ExprPtr at = arena.make<Product>(std::vector<ExprPtr>{a, t_expr});
+        // 1/(s-a) → exp(a·t).  Detect den == Binary(Sub, s, a) OR
+        // den == Sum([s + c]) where c constant (then a = -c).
+        auto try_match_s_minus_a = [&](ExprPtr d) -> ExprPtr {
+            if (const auto* db = expr_cast<Binary>(d);
+                db && db->op == BinaryOp::Sub
+                && is_sym(db->left, s) && !depends_on_t(db->right, s)) {
+                return db->right;
+            }
+            if (const auto* sm = expr_cast<Sum>(d); sm && sm->terms.size() == 2) {
+                ExprPtr s_term = nullptr;
+                ExprPtr c_term = nullptr;
+                for (auto term : sm->terms) {
+                    if (is_sym(term, s)) {
+                        if (s_term) return nullptr;
+                        s_term = term;
+                    } else if (!depends_on_t(term, s)) {
+                        if (c_term) return nullptr;
+                        c_term = term;
+                    } else {
+                        return nullptr;
+                    }
+                }
+                if (!s_term || !c_term) return nullptr;
+                // den = s + c → a = -c
+                return arena.make<Unary>(UnaryOp::Neg, c_term);
+            }
+            return nullptr;
+        };
+        if (!depends_on_t(num, s)) {
+            ExprPtr a_extract = try_match_s_minus_a(den);
+            if (a_extract) {
+                ExprPtr at = arena.make<Product>(std::vector<ExprPtr>{a_extract, t_expr});
                 ExprPtr exp_at = arena.make<FuncCall>(BuiltinOp::Exp,
                     std::vector<ExprPtr>{at});
                 ExprPtr scaled = arena.make<Product>(std::vector<ExprPtr>{num, exp_at});

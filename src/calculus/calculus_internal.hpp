@@ -65,6 +65,16 @@ enum class FiniteDiffOrder {
     ExprPtr expr, const Symbol& s, const Symbol& t,
     symbolic::CASContext& ctx);
 
+/// @brief ODE Laplace solver (L3-10).
+/// Risolve linear ODE coefficienti costanti: Σ coeffs[k]·y^(k) = forcing(t).
+/// initial_conditions[j] = y^(j)(0), j=0..n-1.
+[[nodiscard]] Result<ExprPtr> solve_ode_laplace(
+    const std::vector<ExprPtr>& coeffs,
+    ExprPtr forcing,
+    const std::vector<ExprPtr>& initial_conditions,
+    const Symbol& t,
+    symbolic::CASContext& ctx);
+
 [[nodiscard]] ExprPtr limit_make_integer(AstArena& arena, long long value);
 [[nodiscard]] ExprPtr limit_make_binary(AstArena& arena, BinaryOp op, ExprPtr lhs, ExprPtr rhs);
 [[nodiscard]] bool limit_is_zero(ExprPtr expr);
