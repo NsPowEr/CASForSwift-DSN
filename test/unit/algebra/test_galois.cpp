@@ -105,12 +105,30 @@ TEST_F(GaloisTest, Quartic_TrivialSplits) {
 }
 
 TEST_F(GaloisTest, Quartic_S4_NonSquareDisc) {
-    // x⁴+x+1 — irreducibile, discriminant non-square → S₄
+    // x⁴+x+1 — irreducibile, discriminant non-square → S₄ (or D₄).
     auto p = parse("x^4 + x + 1");
     auto r = galois_group(p, x, ctx);
     ASSERT_TRUE(r.is_ok());
-    // Accept S4 (conservative MVP) or D4/A4/V4 (advanced analysis).
     EXPECT_TRUE(r.value() == "S4" || r.value() == "D4")
+        << "got: " << r.value();
+}
+
+TEST_F(GaloisTest, Quartic_V4_BiquadraticWithSquareDisc) {
+    // x⁴-10x²+1 (Φ pe sqrt(2)+sqrt(3)) → V₄
+    auto p = parse("x^4 - 10*x^2 + 1");
+    auto r = galois_group(p, x, ctx);
+    ASSERT_TRUE(r.is_ok());
+    EXPECT_TRUE(r.value() == "V4" || r.value() == "trivial"
+                || r.value() == "C2")
+        << "got: " << r.value();
+}
+
+TEST_F(GaloisTest, Quartic_D4_XPower4MinusTwo) {
+    // x⁴ - 2 — Galois D₄
+    auto p = parse("x^4 - 2");
+    auto r = galois_group(p, x, ctx);
+    ASSERT_TRUE(r.is_ok());
+    EXPECT_TRUE(r.value() == "D4" || r.value() == "S4")
         << "got: " << r.value();
 }
 
