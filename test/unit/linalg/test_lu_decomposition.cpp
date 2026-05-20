@@ -116,6 +116,31 @@ TEST_F(LUTest, ZeroPivotRejected) {
     EXPECT_TRUE(r.is_error()) << "Zero pivot should fail without pivoting";
 }
 
+TEST_F(LUTest, LUSolveBasic2x2) {
+    // A·x = b: A = [[2,3],[4,7]], b = [5, 11] → solve
+    // Det = 14-12 = 2. Inverse = (1/2)·[[7,-3],[-4,2]]. x = (1/2)·[7·5-3·11, -4·5+2·11] = (1/2)·[2, 2] = [1, 1]
+    auto A = from_rows({{2, 3}, {4, 7}});
+    auto r = lu_decompose(A, ctx);
+    ASSERT_TRUE(r.is_ok());
+    std::vector<ExprPtr> b = {lit(5), lit(11)};
+    auto sol = lu_solve(r.value(), b, ctx);
+    ASSERT_TRUE(sol.is_ok());
+    ASSERT_EQ(sol.value().size(), 2U);
+    EXPECT_TRUE(entries_equal(sol.value()[0], lit(1)));
+    EXPECT_TRUE(entries_equal(sol.value()[1], lit(1)));
+}
+
+TEST_F(LUTest, LUSolveIdentity) {
+    auto I = from_rows({{1, 0}, {0, 1}});
+    auto r = lu_decompose(I, ctx);
+    ASSERT_TRUE(r.is_ok());
+    std::vector<ExprPtr> b = {lit(7), lit(-3)};
+    auto sol = lu_solve(r.value(), b, ctx);
+    ASSERT_TRUE(sol.is_ok());
+    EXPECT_TRUE(entries_equal(sol.value()[0], lit(7)));
+    EXPECT_TRUE(entries_equal(sol.value()[1], lit(-3)));
+}
+
 TEST_F(LUTest, AntiHardcodeNonSingular4x4) {
     auto A = from_rows({{1, 2, 3, 4},
                         {2, 5, 7, 8},

@@ -45,6 +45,12 @@ struct LUDecomposition {
 };
 [[nodiscard]] Result<LUDecomposition> lu_decompose(const MatrixExpr& matrix,
                                                     symbolic::CASContext& ctx);
+
+// Solve A·x = b via existing LU factorization: forward-substitute L·y=b
+// then back-substitute U·x=y. Returns x as vector of n ExprPtr.
+[[nodiscard]] Result<std::vector<ExprPtr>> lu_solve(
+    const LUDecomposition& lu, const std::vector<ExprPtr>& b,
+    symbolic::CASContext& ctx);
 Result<std::vector<ExprPtr>> linsolve(const MatrixExpr& a, const std::vector<ExprPtr>& b, symbolic::CASContext& ctx);
 Result<std::size_t> rank(const MatrixExpr& matrix, symbolic::CASContext& ctx);
 Result<ExprPtr> trace(const MatrixExpr& matrix, symbolic::CASContext& ctx);

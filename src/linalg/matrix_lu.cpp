@@ -105,4 +105,49 @@ Result<LUDecomposition> lu_decompose(const MatrixExpr& matrix,
     return ok(LUDecomposition{std::move(L), std::move(U)});
 }
 
+Result<std::vector<ExprPtr>> lu_solve(const LUDecomposition& lu,
+                                       const std::vector<ExprPtr>& b,
+                                       symbolic::CASContext& ctx) {
+    const std::size_t n = lu.L.rows();
+    if (lu.L.cols() != n || lu.U.rows() != n || lu.U.cols() != n) {
+        return fail<std::vector<ExprPtr>>(CASError{
+            CASErrorKind::InvalidArgument,
+            "lu_solve: non-square factors", std::nullopt});
+    }
+    if (b.size() != n) {
+        return fail<std::vector<ExprPtr>>(CASError{
+            CASErrorKind::InvalidArgument,
+            "lu_solve: b size mismatch", std::nullopt});
+    }
+    AstArena& arena = ctx.arena();
+    // Forward substitution: L·y = b. L unit triangular → y[i] = b[i] - Σ L[i][j] y[j]
+    std::vector<ExprPtr> y(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        ExprPtr sum = arena.make<IntegerLit>(BigInt(0));
+        for (std::size_t j = 0; j < i; ++j) {
+            ExprPtr prod = arena.make<Binary>(BinaryOp::Mul, lu.L(i, j), y[j]);
+            sum = arena.make<Binary>(BinaryOp::Add, sum, prod);
+        }
+        ExprPtr yi = arena.make<Binary>(BinaryOp::Sub, b[i], sum);
+        auto simp = ctx.simplify(yi);
+        y[i] = simp.is_ok() ? simp.value() : yi;
+    }
+    // Back substitution: U·x = y. x[i] = (y[i] - Σ_{j>i} U[i][j] x[j]) / U[i][i]
+    std::vector<ExprPtr> x(n);
+    for (std::ptrdiff_t i = static_cast<std::ptrdiff_t>(n) - 1; i >= 0; --i) {
+        ExprPtr sum = arena.make<IntegerLit>(BigInt(0));
+        for (std::size_t j = static_cast<std::size_t>(i) + 1; j < n; ++j) {
+            ExprPtr prod = arena.make<Binary>(BinaryOp::Mul, lu.U(i, j), x[j]);
+            sum = arena.make<Binary>(BinaryOp::Add, sum, prod);
+        }
+        ExprPtr num = arena.make<Binary>(BinaryOp::Sub, y[i], sum);
+        ExprPtr quot = arena.make<Binary>(BinaryOp::Div, num, lu.U(i, i));
+        auto t = algebra::together(quot, ctx);
+        ExprPtr norm = t.is_ok() ? t.value() : quot;
+        auto simp = ctx.simplify(norm);
+        x[i] = simp.is_ok() ? simp.value() : norm;
+    }
+    return ok(x);
+}
+
 }  // namespace cas::linalg
