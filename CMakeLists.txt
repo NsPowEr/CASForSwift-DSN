@@ -48,6 +48,7 @@ set(CAS_PUBLIC_HEADERS
     include/cas/error.hpp
     include/cas/expr.hpp
     include/cas/formatter.hpp
+    include/cas/gaussian_int.hpp
     include/cas/lexer.hpp
     include/cas/linalg/Matrix.hpp
     include/cas/numtheory.hpp
@@ -188,6 +189,7 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/polynomial_conversions.cpp
     src/algebra/polynomial_gcd_core.cpp
     src/algebra/polynomial_cyclotomic.cpp
+    src/algebra/gaussian_int.cpp
 )
 
 set(CAS_LINALG_SOURCES
@@ -407,6 +409,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/symbolic/test_rootof_auto_trigger.cpp
         test/unit/calculus/test_integrate_risch_exp_mix.cpp
         test/unit/numeric/test_mpfr_foundation.cpp
+        test/unit/algebra/test_gaussian_int.cpp
         test/unit/algebra/test_cyclotomic_mobius.cpp
         test/unit/algebra/test_berlekamp_probe.cpp
         test/unit/symbolic/test_math_correctness.cpp
