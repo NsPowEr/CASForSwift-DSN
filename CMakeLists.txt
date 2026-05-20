@@ -213,6 +213,7 @@ set(CAS_LINALG_SOURCES
     src/linalg/matrix_structured_determinant.cpp
     src/linalg/matrix_bareiss.cpp
     src/linalg/matrix_lu.cpp
+    src/linalg/matrix_qr.cpp
 )
 
 set(CAS_NUMERIC_SOURCES
@@ -436,6 +437,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/algebra/test_solve_closure.cpp
         test/unit/calculus/test_ode_laplace.cpp
         test/unit/symbolic/test_jacobi.cpp
+        test/unit/linalg/test_qr_decomposition.cpp
         test/unit/algebra/test_cyclotomic_mobius.cpp
         test/unit/algebra/test_berlekamp_probe.cpp
         test/unit/symbolic/test_math_correctness.cpp

@@ -63,6 +63,17 @@ struct PLUDecomposition {
 };
 [[nodiscard]] Result<PLUDecomposition> lu_decompose_pivoted(
     const MatrixExpr& matrix, symbolic::CASContext& ctx);
+
+// L3-17 — QR decomposition via classical Gram-Schmidt (symbolic).
+// A = Q · R where Q has orthonormal columns and R upper triangular.
+// MVP: supporta solo matrici a coefficienti razionali; le entry di Q
+// possono coinvolgere sqrt() simbolico per le norme.
+struct QRDecomposition {
+    MatrixExpr Q;
+    MatrixExpr R;
+};
+[[nodiscard]] Result<QRDecomposition> qr_decompose(
+    const MatrixExpr& matrix, symbolic::CASContext& ctx);
 Result<std::vector<ExprPtr>> linsolve(const MatrixExpr& a, const std::vector<ExprPtr>& b, symbolic::CASContext& ctx);
 Result<std::size_t> rank(const MatrixExpr& matrix, symbolic::CASContext& ctx);
 Result<ExprPtr> trace(const MatrixExpr& matrix, symbolic::CASContext& ctx);
