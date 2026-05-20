@@ -273,6 +273,46 @@ Result<ExprPtr> Simplifier::simplify_funcall_bessel_orthogonal(
         }
     }
 
+    // L3-04 Laguerre L_n(x) — classical recurrence (Abramowitz-Stegun 22.7.12).
+    //   L_0 = 1, L_1 = 1 - x
+    //   (n+1)·L_{n+1} = (2n+1-x)·L_n - n·L_{n-1}
+    if (op == BuiltinOp::LaguerreL && args.size() == 2U) {
+        if (const auto* il = expr_cast<IntegerLit>(args[0]);
+            il != nullptr && il->value >= BigInt(0)) {
+            if (il->value.bit_length() > 16)
+                return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
+                    "LaguerreL: degree too large"));
+            const std::uint64_t n = il->value.to_u64();
+            ExprPtr x = args[1];
+            if (n == 0U) return ok(make_integer(arena_, BigInt(1)));
+            ExprPtr one_minus_x = arena_.make<Binary>(BinaryOp::Sub,
+                make_integer(arena_, BigInt(1)), x);
+            if (n == 1U) return ok(one_minus_x);
+            ExprPtr l_prev = make_integer(arena_, BigInt(1));
+            ExprPtr l_curr = one_minus_x;
+            for (std::uint64_t k = 1U; k < n; ++k) {
+                // L_{k+1} = ((2k+1 - x)·L_k - k·L_{k-1}) / (k+1)
+                ExprPtr two_k_plus_1 = make_integer(arena_,
+                    BigInt(static_cast<std::int64_t>(2*k + 1)));
+                ExprPtr two_k_plus_1_minus_x = arena_.make<Binary>(BinaryOp::Sub,
+                    two_k_plus_1, x);
+                ExprPtr term1 = arena_.make<Product>(std::vector<ExprPtr>{
+                    two_k_plus_1_minus_x, l_curr});
+                ExprPtr k_e = make_integer(arena_, BigInt(static_cast<std::int64_t>(k)));
+                ExprPtr term2 = arena_.make<Product>(std::vector<ExprPtr>{k_e, l_prev});
+                ExprPtr numer = arena_.make<Binary>(BinaryOp::Sub, term1, term2);
+                ExprPtr k_plus_1 = make_integer(arena_,
+                    BigInt(static_cast<std::int64_t>(k + 1)));
+                ExprPtr next = arena_.make<Binary>(BinaryOp::Div, numer, k_plus_1);
+                auto simp = simplify_expr(next);
+                if (simp.is_error()) return simp;
+                l_prev = l_curr;
+                l_curr = simp.value();
+            }
+            return ok(l_curr);
+        }
+    }
+
     // L3-04 Jacobi P_n^{(α,β)}(x) — Bonnet recurrence (Abramowitz-Stegun 22.7.1).
     // Args: JacobiP(n, α, β, x).
     //   P_0 = 1

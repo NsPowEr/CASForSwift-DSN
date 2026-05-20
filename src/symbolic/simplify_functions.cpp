@@ -81,6 +81,7 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const FuncCall& node
     case BuiltinOp::HermiteH:
     case BuiltinOp::HermiteHe:
     case BuiltinOp::JacobiP:
+    case BuiltinOp::LaguerreL:
     case BuiltinOp::LegendreP:
         return simplify_funcall_bessel_orthogonal(original, op, std::move(args), target_before);
 

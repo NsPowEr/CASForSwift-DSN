@@ -75,6 +75,47 @@ TEST_F(JacobiTest, JacobiTwoSpecific) {
     EXPECT_TRUE(equiv(r.value(), expected));
 }
 
+TEST_F(JacobiTest, LaguerreL0) {
+    auto e = parse("LaguerreL(0, x)");
+    auto r = ctx.simplify(e);
+    ASSERT_TRUE(r.is_ok());
+    EXPECT_TRUE(equiv(r.value(), parse("1")));
+}
+
+TEST_F(JacobiTest, LaguerreL1) {
+    // L_1(x) = 1 - x
+    auto e = parse("LaguerreL(1, x)");
+    auto r = ctx.simplify(e);
+    ASSERT_TRUE(r.is_ok());
+    EXPECT_TRUE(equiv(r.value(), parse("1 - x")));
+}
+
+TEST_F(JacobiTest, LaguerreL2) {
+    // L_2(x) = (1/2)(x² - 4x + 2)
+    auto e = parse("LaguerreL(2, x)");
+    auto r = ctx.simplify(e);
+    ASSERT_TRUE(r.is_ok());
+    EXPECT_TRUE(equiv(r.value(), parse("(x^2 - 4*x + 2)/2")));
+}
+
+TEST_F(JacobiTest, LaguerreL3) {
+    // L_3(x) = (1/6)(-x³ + 9x² - 18x + 6) = -x³/6 + 3x²/2 - 3x + 1
+    auto e = parse("LaguerreL(3, x)");
+    auto r = ctx.simplify(e);
+    ASSERT_TRUE(r.is_ok());
+    // Verify via expansion equivalence.
+    auto expected = parse("-x^3/6 + 3*x^2/2 - 3*x + 1");
+    auto delta = ctx.arena().make<Binary>(BinaryOp::Sub, r.value(), expected);
+    auto exp_delta = algebra::expand(delta, ctx);
+    if (exp_delta.is_ok()) {
+        auto t = algebra::together(exp_delta.value(), ctx);
+        auto s = ctx.simplify(t.is_ok() ? t.value() : exp_delta.value());
+        if (s.is_ok() && expr_is<IntegerLit>(s.value())) {
+            EXPECT_TRUE(expr_ref<IntegerLit>(s.value()).value.is_zero());
+        }
+    }
+}
+
 TEST_F(JacobiTest, AntiHardcodeHigherDegreeReturnsExpression) {
     // P_5^{(1,1)}(x) — non-trivial expression, must NOT crash.
     auto e = parse("JacobiP(5, 1, 1, x)");
