@@ -403,6 +403,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/algebra/test_factorization_polynomials_smoke.cpp
         test/unit/algebra/test_polynomial_gcd_multivariate_smoke.cpp
         test/unit/parser/test_decimal_to_rational.cpp
+        test/unit/symbolic/test_denesting_recursive.cpp
         test/unit/algebra/test_cyclotomic_mobius.cpp
         test/unit/algebra/test_berlekamp_probe.cpp
         test/unit/symbolic/test_math_correctness.cpp
