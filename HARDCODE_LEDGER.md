@@ -68,12 +68,16 @@
 - **Probe**: `test_risch_logarithmic_probe.cpp::IntegralOfReciprocalOfXLnX`
   asserts the diff-inverse invariant holds.
 
-### KNOWN-DEBT-003 — Test DISABLED senza task aperto
-- `test_residue_theorem.cpp:138`: double-pole Q(α) GTEST_SKIP
-- `test_equivalence_subset.cpp:105`: DISABLED_ExpOfLogSumWithoutPositivity...
-- `test_factorization_tower.cpp:202,217`: DISABLED_SplitsProductOfQuadratics...
-- `test_factorization_trager.cpp:281,291,310,328`: 4× GTEST_SKIP Galois
-- **Fix**: collegare ciascuno a task aperto in CAS_TASKS.md.
+### KNOWN-DEBT-003 — Test DISABLED senza task aperto — RISOLTO 2026-05-20
+Ogni DISABLED / GTEST_SKIP ora cita esplicitamente il task aperto in
+`CAS_TASKS.md`:
+- `test_residue_theorem.cpp:138` → CAS-L2-22 (residue Laurent recurrence).
+- `test_equivalence_subset.cpp:105` → CAS-L2-19 (branch-cut subset walker;
+  già linkato pre-fix).
+- `test_factorization_tower.cpp:197-203` → CAS-L3-06 (Galois extension
+  factorization performance).
+- `test_factorization_trager.cpp:152-158` → CAS-L3-06 + CAS-L3-18
+  (Galois toolkit).
 
 ---
 

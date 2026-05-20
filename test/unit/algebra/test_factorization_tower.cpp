@@ -199,6 +199,8 @@ TEST_F(FactorizationTowerTest, RejectsNonRationalCoefficientPolynomial) {
 // under ASan instrumentation exceeds the lite regression budget.  Run
 // explicitly via --gtest_also_run_disabled_tests when validating the slow
 // path end-to-end.
+// Tracked by CAS-L3-06 (factor_polynomial_tower performance — sparse
+// resultant + parallelizable norm computation).
 TEST_F(FactorizationTowerTest, DISABLED_SplitsProductOfQuadraticsOverQSqrt2Sqrt3) {
     auto gens = biquadratic_gens(2, 3);
     ctx->set_timeout(std::chrono::minutes(10));

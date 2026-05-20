@@ -150,6 +150,11 @@ TEST(FactorPolynomialTrager, FactorX3Minus2OverCubicRootOfExtension) {
 // Tests are pure verification: they MUST NOT depend on any specific
 // internal representation. If a case is currently unsupported, the test
 // documents the gap with GTEST_SKIP rather than passing trivially.
+//
+// Gaps still tracked: GTEST_SKIP sites below correspond to known
+// limitations of factor_polynomial / Trager-norm pipeline filed under
+// CAS-L3-06 (Galois extension factorization) + CAS-L3-18 (Galois
+// toolkit for finite/cyclic/general groups).
 // ---------------------------------------------------------------------------
 
 [[nodiscard]] ExprPtr build_raw_product(

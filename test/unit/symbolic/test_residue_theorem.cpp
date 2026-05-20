@@ -135,7 +135,8 @@ TEST_F(ResidueTheoremTest, DoublePoleOneOverXsqPlusOneSquared) {
     if (result.is_ok()) {
         expect_equal(result.value(), "pi/2");
     } else {
-        GTEST_SKIP() << "Double-pole case not yet supported by residue() through Q(α) reduction: "
+        GTEST_SKIP() << "Double-pole case not yet supported by residue() through Q(α) reduction. "
+                     << "Tracked by CAS-L2-22 (residue Laurent recurrence for higher poles). Error: "
                      << result.error().message;
     }
 }
