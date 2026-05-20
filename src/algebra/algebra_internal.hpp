@@ -63,6 +63,7 @@ void append_factor_with_multiplicity(std::vector<PolynomialFactor>& factors, Exp
 
 [[nodiscard]] Result<MultivariatePolynomial> gcd_heuristic(const MultivariatePolynomial& P, const MultivariatePolynomial& Q);
 [[nodiscard]] Result<MultivariatePolynomial> gcd_modular(const MultivariatePolynomial& P, const MultivariatePolynomial& Q);
+[[nodiscard]] Result<MultivariatePolynomial> gcd_probabilistic(const MultivariatePolynomial& P, const MultivariatePolynomial& Q);
 [[nodiscard]] Result<MultivariatePolynomial> gcd_multivariate_eval_interp(
     const MultivariatePolynomial& P,
     const MultivariatePolynomial& Q,
