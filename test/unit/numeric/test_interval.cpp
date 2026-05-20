@@ -117,6 +117,23 @@ TEST(IntervalTest, AntiHardcodeBoundPropagation) {
     EXPECT_TRUE(f.contains(bf(3.0)));
 }
 
+TEST(IntervalTest, SinCriticalPointDetection) {
+    // [0, π] contains π/2 (max sin = 1). Expected: hi == 1, lo = min(sin(0), sin(π)) = 0.
+    Interval x(bf(0.0), BigFloat::pi());
+    Interval s = Interval::sin(x);
+    EXPECT_TRUE(s.contains(bf(1.0))) << "should contain critical max 1";
+    EXPECT_TRUE(s.contains(bf(0.5)));
+}
+
+TEST(IntervalTest, SinMonotonicNoExpansion) {
+    // [0, π/4]: monotone, no critical point inside. Result [sin(0), sin(π/4)] = [0, ~0.707].
+    Interval x(bf(0.0), BigFloat::pi() / bf(4.0));
+    Interval s = Interval::sin(x);
+    EXPECT_TRUE(s.contains(bf(0.3)));
+    EXPECT_FALSE(s.contains(bf(0.8)))  // 0.707 < 0.8
+        << "no critical point → tight bound";
+}
+
 TEST(IntervalTest, IsPositiveNegativeZero) {
     Interval pos(bf(1.0), bf(3.0));
     Interval neg(bf(-3.0), bf(-1.0));

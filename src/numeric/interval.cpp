@@ -7,6 +7,7 @@
 #include "cas/interval.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 namespace cas::numeric {
 
@@ -122,8 +123,12 @@ Interval Interval::ln(const Interval& x) {
 }
 
 Interval Interval::sin(const Interval& x) {
-    // Conservative bound: [-1, 1] if width >= 2π. Otherwise sample lo/hi
-    // and check critical points π/2 + kπ in [lo, hi].
+    // L3-13 + A2 fix: critical point refinement on sin.
+    // Max sin = 1 at π/2 + 2πk; min sin = -1 at -π/2 + 2πk = 3π/2 + 2πk.
+    // For interval [lo, hi]:
+    //   1. sample sin(lo) and sin(hi)
+    //   2. detect crossing of critical points in [lo, hi]
+    //   3. expand bounds accordingly
     BigFloat two_pi = BigFloat::pi() * BigFloat::from_double(2.0);
     if (!(x.width() < two_pi)) {
         return Interval(BigFloat::from_double(-1.0), BigFloat::from_double(1.0));
@@ -132,13 +137,31 @@ Interval Interval::sin(const Interval& x) {
     BigFloat s_hi = BigFloat::sin(x.hi_);
     BigFloat lo = min_of(s_lo, s_hi);
     BigFloat hi = max_of(s_lo, s_hi);
-    // Critical points: π/2 + 2πk (max sin = 1), -π/2 + 2πk (min sin = -1).
-    // Simplified: check whether interval crosses π/2 or 3π/2 modulo 2π.
-    // For MVP: conservative widen to [-1, 1] if width > π.
     BigFloat pi = BigFloat::pi();
-    if (!(x.width() < pi)) {
-        return Interval(BigFloat::from_double(-1.0), BigFloat::from_double(1.0));
-    }
+    BigFloat half_pi = pi / BigFloat::from_double(2.0);
+    BigFloat three_half_pi = half_pi * BigFloat::from_double(3.0);
+    // Detect if any critical point π/2 + kπ falls in [lo, hi].
+    // For sin, max at π/2+2πk, min at 3π/2+2πk.
+    // Floor-shift: k_max = floor((lo - π/2) / (2π)) + 1; check if
+    // candidate π/2 + 2πk lies in [lo, hi].
+    BigFloat one(BigFloat::from_double(1.0));
+    BigFloat neg_one(BigFloat::from_double(-1.0));
+    // Check max: any π/2 + 2πk ∈ [lo, hi]?
+    // (lo - π/2)/2π ≤ k ≤ (hi - π/2)/2π → exists integer k.
+    auto contains_critical = [&](const BigFloat& base) -> bool {
+        BigFloat diff_lo = x.lo_ - base;
+        BigFloat diff_hi = x.hi_ - base;
+        // diff_lo/2π ≤ k ≤ diff_hi/2π → ceil(diff_lo/2π) ≤ floor(diff_hi/2π)
+        BigFloat k_lo = diff_lo / two_pi;
+        BigFloat k_hi = diff_hi / two_pi;
+        // floor(k_hi) >= ceil(k_lo) ⇔ exists integer k in [k_lo, k_hi].
+        double k_lo_d = k_lo.to_double();
+        double k_hi_d = k_hi.to_double();
+        // Permettere arrotondamento: cast +- 1 di sicurezza.
+        return std::ceil(k_lo_d) <= std::floor(k_hi_d) + 1e-12;
+    };
+    if (contains_critical(half_pi)) hi = one;
+    if (contains_critical(three_half_pi)) lo = neg_one;
     return Interval(lo, hi);
 }
 
