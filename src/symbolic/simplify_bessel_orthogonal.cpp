@@ -273,6 +273,33 @@ Result<ExprPtr> Simplifier::simplify_funcall_bessel_orthogonal(
         }
     }
 
+    // L3-04 LambertW(z) — solution of w·exp(w) = z, principal branch W₀.
+    //   W(0) = 0,  W(e) = 1,  W(x · exp(x)) = x  per x ≥ 0.
+    if (op == BuiltinOp::LambertW && args.size() == 1U) {
+        ExprPtr arg = args[0];
+        if (is_zero_expr(arg))
+            return ok(make_integer(arena_, BigInt(0)));
+        if (is_constant_expr(arg, MathConstant::E))
+            return ok(make_integer(arena_, BigInt(1)));
+        // W(x·exp(x)) → x se x ≥ 0. Pattern: Product[X, exp(X)] o exp(X)·X.
+        if (const auto* prod = expr_cast<Product>(arg); prod && prod->factors.size() == 2U) {
+            ExprPtr a = prod->factors[0];
+            ExprPtr b = prod->factors[1];
+            auto match = [&](ExprPtr x_cand, ExprPtr exp_cand) -> ExprPtr {
+                const auto* fc = expr_cast<FuncCall>(exp_cand);
+                if (fc && fc->func_id == BuiltinOp::Exp && fc->args.size() == 1U) {
+                    if (structural_equal(fc->args[0], x_cand)
+                        && is_known_nonnegative(x_cand)) {
+                        return x_cand;
+                    }
+                }
+                return nullptr;
+            };
+            if (ExprPtr m = match(a, b)) return ok(m);
+            if (ExprPtr m = match(b, a)) return ok(m);
+        }
+    }
+
     // L3-04 Laguerre L_n(x) — classical recurrence (Abramowitz-Stegun 22.7.12).
     //   L_0 = 1, L_1 = 1 - x
     //   (n+1)·L_{n+1} = (2n+1-x)·L_n - n·L_{n-1}

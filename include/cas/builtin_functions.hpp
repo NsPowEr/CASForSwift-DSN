@@ -65,6 +65,7 @@ enum class BuiltinOp : std::uint16_t {
     Piecewise,
     JacobiP,
     LaguerreL,
+    LambertW,
 };
 
 [[nodiscard]] constexpr BuiltinOp get_builtin_op(std::string_view name) noexcept {
@@ -127,6 +128,7 @@ enum class BuiltinOp : std::uint16_t {
     if (name == "piecewise" || name == "Piecewise") return BuiltinOp::Piecewise;
     if (name == "JacobiP" || name == "jacobiP") return BuiltinOp::JacobiP;
     if (name == "LaguerreL" || name == "laguerreL") return BuiltinOp::LaguerreL;
+    if (name == "LambertW" || name == "lambertW" || name == "W") return BuiltinOp::LambertW;
     return BuiltinOp::Unknown;
 }
 
@@ -190,6 +192,7 @@ enum class BuiltinOp : std::uint16_t {
         case BuiltinOp::Piecewise: return "piecewise";
         case BuiltinOp::JacobiP: return "JacobiP";
         case BuiltinOp::LaguerreL: return "LaguerreL";
+        case BuiltinOp::LambertW: return "LambertW";
         case BuiltinOp::Unknown: return "unknown";
     }
     return "unknown";

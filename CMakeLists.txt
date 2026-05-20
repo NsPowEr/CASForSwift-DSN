@@ -439,6 +439,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/symbolic/test_jacobi.cpp
         test/unit/linalg/test_qr_decomposition.cpp
         test/unit/calculus/test_pfd_inverse_laplace.cpp
+        test/unit/symbolic/test_lambert_w.cpp
         test/unit/algebra/test_cyclotomic_mobius.cpp
         test/unit/algebra/test_berlekamp_probe.cpp
         test/unit/symbolic/test_math_correctness.cpp
