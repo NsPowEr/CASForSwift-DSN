@@ -178,6 +178,7 @@ namespace {
     case BuiltinOp::RootSum:    return 26;
     case BuiltinOp::N:          return 25;
 
+    case BuiltinOp::Piecewise:  return 5;
     case BuiltinOp::Unknown:    return 1;
     }
     // Unreachable: enum is exhaustive above. Return a deterministic low rank

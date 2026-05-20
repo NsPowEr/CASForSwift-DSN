@@ -158,6 +158,48 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const FuncCall& node
         if (val.is_ok()) return ok(arena_.make<DecimalLit>(val.value()));
     }
 
+    // L2-26 Piecewise: piecewise(cond_1, expr_1, ..., cond_k, expr_k, default).
+    // args.size() must be odd: even index = condition, odd index = branch
+    // expression, last arg = default fallback. Walk conditions; if exact
+    // True (IntegerLit 1) return that branch; if exact False (IntegerLit 0)
+    // drop pair; otherwise keep undecided pair. If no decided branch and
+    // all dropped, return default.
+    if (op == BuiltinOp::Piecewise && args.size() >= 1U && args.size() % 2U == 1U) {
+        // Only default branch → return it directly.
+        if (args.size() == 1U) return ok(args[0]);
+        std::vector<ExprPtr> remaining;
+        ExprPtr default_branch = args.back();
+        bool any_dropped_or_decided = false;
+        for (std::size_t i = 0; i + 1 < args.size(); i += 2) {
+            ExprPtr cond = args[i];
+            ExprPtr branch = args[i + 1];
+            if (const auto* il = expr_cast<IntegerLit>(cond)) {
+                any_dropped_or_decided = true;
+                if (!il->value.is_zero()) {
+                    // Definitely true → branch selected. Pre-pending remaining
+                    // pairs ahead of selected branch is impossible (earlier
+                    // ones must be evaluated first); they're still undecided.
+                    if (remaining.empty()) return ok(branch);
+                    // Otherwise: append branch as new default; further pairs
+                    // ignored (sequential semantics).
+                    remaining.push_back(arena_.make<IntegerLit>(BigInt(1)));
+                    remaining.push_back(branch);
+                    default_branch = branch;
+                    break;
+                }
+                // false → drop pair
+                continue;
+            }
+            remaining.push_back(cond);
+            remaining.push_back(branch);
+        }
+        if (any_dropped_or_decided) {
+            if (remaining.empty()) return ok(default_branch);
+            remaining.push_back(default_branch);
+            return ok(arena_.make<FuncCall>(BuiltinOp::Piecewise, std::move(remaining)));
+        }
+    }
+
     if (expr_ptr_sequence_identical(args, node.args)) return ok(original);
     return ok(arena_.make<FuncCall>(node.func_id, std::move(args)));
 }
