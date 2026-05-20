@@ -144,4 +144,23 @@ TEST_F(DenestingRecursiveTest, SquaringDenestedFormReducesToOriginal) {
     EXPECT_TRUE(is_denested_form(s.value()));
 }
 
+TEST_F(DenestingRecursiveTest, StrictSquaringBackToOriginalFiveTwoSqrtSix) {
+    // Strict roundtrip: post L1-12 strengthening (sqrt(p)·sqrt(q)→sqrt(pq))
+    // squaring sqrt(2)+sqrt(3) should reduce to 5+2·sqrt(6) exactly.
+    auto inner = parse("5 + 2 * sqrt(6)");
+    auto e = parse("sqrt(5 + 2*sqrt(6))");
+    auto s = ctx.simplify(e);
+    ASSERT_TRUE(s.is_ok());
+    EXPECT_TRUE(verify_by_squaring(s.value(), inner))
+        << "sqrt mul rule should allow exact roundtrip";
+}
+
+TEST_F(DenestingRecursiveTest, StrictSquaringBackToOriginalSevenMinusTwoSqrtTen) {
+    auto inner = parse("7 - 2*sqrt(10)");
+    auto e = parse("sqrt(7 - 2*sqrt(10))");
+    auto s = ctx.simplify(e);
+    ASSERT_TRUE(s.is_ok());
+    EXPECT_TRUE(verify_by_squaring(s.value(), inner));
+}
+
 }  // namespace

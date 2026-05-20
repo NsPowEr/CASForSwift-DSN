@@ -345,6 +345,60 @@ Result<ExprPtr> Simplifier::simplify_product_factors(const std::vector<ExprPtr>&
         }
     }
 
+    // L1-12 strengthening: merge sqrt(rat_pos) · sqrt(rat_pos) → sqrt(prod).
+    // Strict to non-negative rational arguments to avoid branch-cut
+    // violations (sqrt(-1)·sqrt(-1) ≠ sqrt(1)).
+    {
+        auto get_rat_pos = [](ExprPtr e) -> std::optional<Rational> {
+            const auto* fc = expr_cast<FuncCall>(e);
+            if (!fc || fc->func_id != BuiltinOp::Sqrt || fc->args.size() != 1U)
+                return std::nullopt;
+            if (const auto* il = expr_cast<IntegerLit>(fc->args[0])) {
+                if (il->value.is_negative()) return std::nullopt;
+                return Rational(il->value, BigInt(1));
+            }
+            if (const auto* rl = expr_cast<RationalLit>(fc->args[0])) {
+                if (rl->numerator.is_negative()) return std::nullopt;
+                return Rational(rl->numerator, rl->denominator);
+            }
+            return std::nullopt;
+        };
+        bool merged_any = true;
+        while (merged_any) {
+            merged_any = false;
+            for (std::size_t i = 0; i < symbolic.size() && !merged_any; ++i) {
+                if (symbolic[i].second != BigInt(1)) continue;
+                auto ra = get_rat_pos(symbolic[i].first);
+                if (!ra) continue;
+                for (std::size_t j = i + 1; j < symbolic.size(); ++j) {
+                    if (symbolic[j].second != BigInt(1)) continue;
+                    auto rb = get_rat_pos(symbolic[j].first);
+                    if (!rb) continue;
+                    Rational prod = (*ra) * (*rb);
+                    ExprPtr arg = (prod.denominator() == BigInt(1))
+                        ? static_cast<ExprPtr>(arena_.make<IntegerLit>(prod.numerator()))
+                        : static_cast<ExprPtr>(arena_.make<RationalLit>(
+                            prod.numerator(), prod.denominator()));
+                    ExprPtr new_sqrt_raw = arena_.make<FuncCall>(BuiltinOp::Sqrt,
+                        std::vector<ExprPtr>{arg});
+                    auto new_sqrt = simplify_expr(new_sqrt_raw);
+                    ExprPtr replacement = new_sqrt.is_ok() ? new_sqrt.value() : new_sqrt_raw;
+                    symbolic.erase(symbolic.begin() + j);
+                    symbolic.erase(symbolic.begin() + i);
+                    LiteralRational rep_rat;
+                    auto rep_check = try_get_exact_rational(replacement, rep_rat);
+                    if (rep_check.is_ok() && rep_check.value()) {
+                        coefficient *= rep_rat.value;
+                    } else {
+                        symbolic.push_back({replacement, BigInt(1)});
+                    }
+                    merged_any = true;
+                    break;
+                }
+            }
+        }
+    }
+
     // Distribute over Sum
     ExprPtr sum_factor = nullptr;
     std::size_t sum_idx = 0;
