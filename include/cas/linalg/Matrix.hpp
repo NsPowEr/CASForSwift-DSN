@@ -51,6 +51,18 @@ struct LUDecomposition {
 [[nodiscard]] Result<std::vector<ExprPtr>> lu_solve(
     const LUDecomposition& lu, const std::vector<ExprPtr>& b,
     symbolic::CASContext& ctx);
+
+// L3-17 — Permuted LU with partial pivoting: P·A = L·U.
+// Risolve matrici con zero (o near-zero) pivots scegliendo riga via
+// PivotScore (preferisce IntegerLit/RationalLit, poi nonzero certo,
+// poi simbolico). P = permutation as vector of row indices.
+struct PLUDecomposition {
+    std::vector<std::size_t> P;  // row permutation: P[i] = original row at position i
+    MatrixExpr L;
+    MatrixExpr U;
+};
+[[nodiscard]] Result<PLUDecomposition> lu_decompose_pivoted(
+    const MatrixExpr& matrix, symbolic::CASContext& ctx);
 Result<std::vector<ExprPtr>> linsolve(const MatrixExpr& a, const std::vector<ExprPtr>& b, symbolic::CASContext& ctx);
 Result<std::size_t> rank(const MatrixExpr& matrix, symbolic::CASContext& ctx);
 Result<ExprPtr> trace(const MatrixExpr& matrix, symbolic::CASContext& ctx);

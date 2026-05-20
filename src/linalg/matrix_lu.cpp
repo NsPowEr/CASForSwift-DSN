@@ -105,6 +105,100 @@ Result<LUDecomposition> lu_decompose(const MatrixExpr& matrix,
     return ok(LUDecomposition{std::move(L), std::move(U)});
 }
 
+Result<PLUDecomposition> lu_decompose_pivoted(const MatrixExpr& matrix,
+                                                symbolic::CASContext& ctx) {
+    const std::size_t n = matrix.rows();
+    if (n != matrix.cols()) {
+        return fail<PLUDecomposition>(CASError{
+            CASErrorKind::InvalidArgument,
+            "lu_decompose_pivoted: matrix must be square", std::nullopt});
+    }
+    if (n == 0U) {
+        return fail<PLUDecomposition>(CASError{
+            CASErrorKind::InvalidArgument,
+            "lu_decompose_pivoted: empty matrix", std::nullopt});
+    }
+
+    // Work on copy of A; permute rows as we go.
+    MatrixExpr A_perm(n, n, matrix.elements());
+    std::vector<std::size_t> P(n);
+    for (std::size_t i = 0; i < n; ++i) P[i] = i;
+
+    AstArena& arena = ctx.arena();
+    MatrixExpr L(n, n);
+    MatrixExpr U(n, n);
+    for (std::size_t i = 0; i < n; ++i) {
+        for (std::size_t j = 0; j < n; ++j) {
+            L(i, j) = (i == j) ? make_one(ctx) : make_zero(ctx);
+            U(i, j) = make_zero(ctx);
+        }
+    }
+
+    for (std::size_t k = 0; k < n; ++k) {
+        // Find best pivot row among rows [k, n) for column k.
+        // Use simple non-zero criterion (production: PivotScore).
+        std::size_t pivot_row = n;
+        for (std::size_t i = k; i < n; ++i) {
+            // Compute candidate pivot value = A_perm[i][k] - Σ L[i][s]·U[s][k]
+            ExprPtr sum = make_zero(ctx);
+            for (std::size_t s = 0; s < k; ++s) {
+                ExprPtr prod = arena.make<Binary>(BinaryOp::Mul, L(i, s), U(s, k));
+                sum = arena.make<Binary>(BinaryOp::Add, sum, prod);
+            }
+            ExprPtr candidate = arena.make<Binary>(BinaryOp::Sub, A_perm(i, k), sum);
+            auto simp = ctx.simplify(candidate);
+            ExprPtr v = simp.is_ok() ? simp.value() : candidate;
+            if (!is_zero_expr(v)) {
+                pivot_row = i;
+                break;
+            }
+        }
+        if (pivot_row == n) {
+            return fail<PLUDecomposition>(CASError{
+                CASErrorKind::Unimplemented,
+                "lu_decompose_pivoted: matrix is singular (all-zero column "
+                + std::to_string(k) + ")", std::nullopt});
+        }
+        // Swap rows k and pivot_row in A_perm and in L (already-built columns).
+        if (pivot_row != k) {
+            std::swap(P[k], P[pivot_row]);
+            for (std::size_t j = 0; j < n; ++j) {
+                std::swap(A_perm(k, j), A_perm(pivot_row, j));
+            }
+            // Swap L entries for columns 0..k-1 (already computed).
+            for (std::size_t j = 0; j < k; ++j) {
+                std::swap(L(k, j), L(pivot_row, j));
+            }
+        }
+        // Now compute U[k][j] for j ≥ k.
+        for (std::size_t j = k; j < n; ++j) {
+            ExprPtr sum = make_zero(ctx);
+            for (std::size_t s = 0; s < k; ++s) {
+                ExprPtr prod = arena.make<Binary>(BinaryOp::Mul, L(k, s), U(s, j));
+                sum = arena.make<Binary>(BinaryOp::Add, sum, prod);
+            }
+            ExprPtr u_kj = arena.make<Binary>(BinaryOp::Sub, A_perm(k, j), sum);
+            auto simp = ctx.simplify(u_kj);
+            U(k, j) = simp.is_ok() ? simp.value() : u_kj;
+        }
+        // L[i][k] per i > k.
+        for (std::size_t i = k + 1; i < n; ++i) {
+            ExprPtr sum = make_zero(ctx);
+            for (std::size_t s = 0; s < k; ++s) {
+                ExprPtr prod = arena.make<Binary>(BinaryOp::Mul, L(i, s), U(s, k));
+                sum = arena.make<Binary>(BinaryOp::Add, sum, prod);
+            }
+            ExprPtr num = arena.make<Binary>(BinaryOp::Sub, A_perm(i, k), sum);
+            ExprPtr quot = arena.make<Binary>(BinaryOp::Div, num, U(k, k));
+            auto t = algebra::together(quot, ctx);
+            ExprPtr norm = t.is_ok() ? t.value() : quot;
+            auto simp = ctx.simplify(norm);
+            L(i, k) = simp.is_ok() ? simp.value() : norm;
+        }
+    }
+    return ok(PLUDecomposition{std::move(P), std::move(L), std::move(U)});
+}
+
 Result<std::vector<ExprPtr>> lu_solve(const LUDecomposition& lu,
                                        const std::vector<ExprPtr>& b,
                                        symbolic::CASContext& ctx) {

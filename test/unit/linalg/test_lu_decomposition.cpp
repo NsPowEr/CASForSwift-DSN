@@ -141,6 +141,44 @@ TEST_F(LUTest, LUSolveIdentity) {
     EXPECT_TRUE(entries_equal(sol.value()[1], lit(-3)));
 }
 
+TEST_F(LUTest, PivotedLUHandlesZeroPivot) {
+    // A = [[0,1],[1,0]] → P swaps rows, L·U = swapped A.
+    auto A = from_rows({{0, 1}, {1, 0}});
+    auto r = lu_decompose_pivoted(A, ctx);
+    ASSERT_TRUE(r.is_ok());
+    // P[0]=1, P[1]=0 (rows swapped).
+    EXPECT_EQ(r.value().P[0], 1U);
+    EXPECT_EQ(r.value().P[1], 0U);
+    // L·U should equal A_permuted (swapped rows).
+    auto LU = multiply(r.value().L, r.value().U, ctx);
+    ASSERT_TRUE(LU.is_ok());
+    // After perm: swapped row 0,1 → [[1,0],[0,1]]
+    EXPECT_TRUE(entries_equal(LU.value()(0, 0), lit(1)));
+    EXPECT_TRUE(entries_equal(LU.value()(0, 1), lit(0)));
+    EXPECT_TRUE(entries_equal(LU.value()(1, 0), lit(0)));
+    EXPECT_TRUE(entries_equal(LU.value()(1, 1), lit(1)));
+}
+
+TEST_F(LUTest, PivotedLUNonZeroPivotNoSwap) {
+    // A = [[2,3],[4,7]] non singular, no zero pivot → P identity.
+    auto A = from_rows({{2, 3}, {4, 7}});
+    auto r = lu_decompose_pivoted(A, ctx);
+    ASSERT_TRUE(r.is_ok());
+    EXPECT_EQ(r.value().P[0], 0U);
+    EXPECT_EQ(r.value().P[1], 1U);
+    auto LU = multiply(r.value().L, r.value().U, ctx);
+    ASSERT_TRUE(LU.is_ok());
+    EXPECT_TRUE(matrix_equal(LU.value(), A));
+}
+
+TEST_F(LUTest, PivotedLUSingularMatrixRejected) {
+    // A = [[1,2],[2,4]] singular (rows linearly dependent) → no LU.
+    auto A = from_rows({{1, 2}, {2, 4}});
+    auto r = lu_decompose_pivoted(A, ctx);
+    EXPECT_TRUE(r.is_error())
+        << "Singular matrix should fail with Unimplemented";
+}
+
 TEST_F(LUTest, AntiHardcodeNonSingular4x4) {
     auto A = from_rows({{1, 2, 3, 4},
                         {2, 5, 7, 8},
