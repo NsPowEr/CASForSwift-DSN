@@ -435,6 +435,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/algebra/test_galois.cpp
         test/unit/algebra/test_solve_closure.cpp
         test/unit/calculus/test_ode_laplace.cpp
+        test/unit/symbolic/test_jacobi.cpp
         test/unit/algebra/test_cyclotomic_mobius.cpp
         test/unit/algebra/test_berlekamp_probe.cpp
         test/unit/symbolic/test_math_correctness.cpp

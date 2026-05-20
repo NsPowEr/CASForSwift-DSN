@@ -1,4 +1,5 @@
 #include "simplify_impl.hpp"
+#include "cas/algebra.hpp"
 
 namespace cas::symbolic::detail {
 
@@ -264,6 +265,93 @@ Result<ExprPtr> Simplifier::simplify_funcall_bessel_orthogonal(
                     arena_.make<Product>(std::vector<ExprPtr>{make_rational(arena_, b), p_prev}));
                 ExprPtr next = arena_.make<Sum>(std::vector<ExprPtr>{term1, neg_term2});
                 auto simp = simplify_expr(next);
+                if (simp.is_error()) return simp;
+                p_prev = p_curr;
+                p_curr = simp.value();
+            }
+            return ok(p_curr);
+        }
+    }
+
+    // L3-04 Jacobi P_n^{(α,β)}(x) — Bonnet recurrence (Abramowitz-Stegun 22.7.1).
+    // Args: JacobiP(n, α, β, x).
+    //   P_0 = 1
+    //   P_1 = (α-β)/2 + (α+β+2)·x/2
+    //   2(k+1)(k+α+β+1)(2k+α+β) · P_{k+1}
+    //     = ((2k+α+β+1)·(α²-β²) + (2k+α+β)·(2k+α+β+1)·(2k+α+β+2)·x) · P_k
+    //       - 2(k+α)(k+β)(2k+α+β+2) · P_{k-1}
+    if (op == BuiltinOp::JacobiP && args.size() == 4U) {
+        if (const auto* il = expr_cast<IntegerLit>(args[0]);
+            il != nullptr && il->value >= BigInt(0)) {
+            if (il->value.bit_length() > 16)
+                return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
+                    "JacobiP: degree too large for symbolic expansion"));
+            const std::uint64_t n = il->value.to_u64();
+            ExprPtr alpha = args[1];
+            ExprPtr beta = args[2];
+            ExprPtr x = args[3];
+            if (n == 0U) return ok(make_integer(arena_, BigInt(1)));
+            // P_1 = (α-β)/2 + (α+β+2)/2 · x
+            ExprPtr alpha_minus_beta = arena_.make<Binary>(BinaryOp::Sub, alpha, beta);
+            ExprPtr alpha_plus_beta_plus_2 = arena_.make<Sum>(std::vector<ExprPtr>{
+                alpha, beta, make_integer(arena_, BigInt(2))});
+            ExprPtr half = make_rational(arena_, Rational(BigInt(1), BigInt(2)));
+            ExprPtr p1_const = arena_.make<Product>(std::vector<ExprPtr>{half, alpha_minus_beta});
+            ExprPtr p1_xterm = arena_.make<Product>(std::vector<ExprPtr>{
+                half, alpha_plus_beta_plus_2, x});
+            ExprPtr p1_raw = arena_.make<Sum>(std::vector<ExprPtr>{p1_const, p1_xterm});
+            auto p1_simp = simplify_expr(p1_raw);
+            if (p1_simp.is_error()) return p1_simp;
+            if (n == 1U) return p1_simp;
+            ExprPtr p_prev = make_integer(arena_, BigInt(1));
+            ExprPtr p_curr = p1_simp.value();
+            for (std::uint64_t k = 1U; k < n; ++k) {
+                ExprPtr k_e = make_integer(arena_, BigInt(static_cast<std::int64_t>(k)));
+                ExprPtr two = make_integer(arena_, BigInt(2));
+                ExprPtr k_plus_1 = make_integer(arena_, BigInt(static_cast<std::int64_t>(k + 1)));
+                ExprPtr k_plus_alpha = arena_.make<Sum>(std::vector<ExprPtr>{k_e, alpha});
+                ExprPtr k_plus_beta = arena_.make<Sum>(std::vector<ExprPtr>{k_e, beta});
+                ExprPtr k_plus_alpha_beta = arena_.make<Sum>(std::vector<ExprPtr>{
+                    k_e, alpha, beta});
+                ExprPtr k_plus_alpha_beta_plus_1 = arena_.make<Sum>(std::vector<ExprPtr>{
+                    k_e, alpha, beta, make_integer(arena_, BigInt(1))});
+                ExprPtr two_k_alpha_beta = arena_.make<Product>(std::vector<ExprPtr>{
+                    two, k_plus_alpha_beta});
+                ExprPtr two_k_alpha_beta_plus_1 = arena_.make<Sum>(std::vector<ExprPtr>{
+                    two_k_alpha_beta, make_integer(arena_, BigInt(1))});
+                ExprPtr two_k_alpha_beta_plus_2 = arena_.make<Sum>(std::vector<ExprPtr>{
+                    two_k_alpha_beta, two});
+                // a_k = 2(k+1)(k+α+β+1)(2k+α+β)
+                ExprPtr a_k = arena_.make<Product>(std::vector<ExprPtr>{
+                    two, k_plus_1, k_plus_alpha_beta_plus_1, two_k_alpha_beta});
+                // alpha²-β²
+                ExprPtr alpha_sq = arena_.make<Binary>(BinaryOp::Pow, alpha, two);
+                ExprPtr beta_sq = arena_.make<Binary>(BinaryOp::Pow, beta, two);
+                ExprPtr alpha_sq_minus_beta_sq = arena_.make<Binary>(BinaryOp::Sub,
+                    alpha_sq, beta_sq);
+                // b_k = (2k+α+β+1)·(α²-β²)
+                ExprPtr b_k = arena_.make<Product>(std::vector<ExprPtr>{
+                    two_k_alpha_beta_plus_1, alpha_sq_minus_beta_sq});
+                // c_k = (2k+α+β)·(2k+α+β+1)·(2k+α+β+2)
+                ExprPtr c_k = arena_.make<Product>(std::vector<ExprPtr>{
+                    two_k_alpha_beta, two_k_alpha_beta_plus_1, two_k_alpha_beta_plus_2});
+                // d_k = 2(k+α)(k+β)(2k+α+β+2)
+                ExprPtr d_k = arena_.make<Product>(std::vector<ExprPtr>{
+                    two, k_plus_alpha, k_plus_beta, two_k_alpha_beta_plus_2});
+                // Numerator: (b_k + c_k·x) · P_k - d_k · P_{k-1}
+                ExprPtr num_term1 = arena_.make<Sum>(std::vector<ExprPtr>{
+                    b_k, arena_.make<Product>(std::vector<ExprPtr>{c_k, x})});
+                ExprPtr factor1 = arena_.make<Product>(std::vector<ExprPtr>{
+                    num_term1, p_curr});
+                ExprPtr factor2 = arena_.make<Product>(std::vector<ExprPtr>{d_k, p_prev});
+                ExprPtr numer = arena_.make<Binary>(BinaryOp::Sub, factor1, factor2);
+                ExprPtr p_next = arena_.make<Binary>(BinaryOp::Div, numer, a_k);
+                ExprPtr norm = p_next;
+                if (context_ != nullptr) {
+                    auto t = algebra::together(p_next, *context_);
+                    if (t.is_ok()) norm = t.value();
+                }
+                auto simp = simplify_expr(norm);
                 if (simp.is_error()) return simp;
                 p_prev = p_curr;
                 p_curr = simp.value();
