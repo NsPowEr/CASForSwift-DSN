@@ -1,6 +1,47 @@
 #include "simplify_impl.hpp"
+#include "simplify_trig_chebyshev_impl.hpp"
+#include "simplify_trig_tables_impl.hpp"
+
+// F1.4c — Stack depth guard for try_angle_combination.
+// Uses a thread-local counter to prevent mutual recursion:
+//   try_angle_combination → trig_exact_at_pi_multiple
+//     → cos_ref_value / sin_ref_value → try_angle_combination
+// Maximum recursion depth: kTrigCombinationMaxDepth (= 3).
+// At depth ≥ limit, try_angle_combination returns nullptr so the
+// caller falls through to the RootOf generator.
+//
+// Rationale for depth=3:
+//   Depth 0: outer call for target angle (e.g. cos(π/7))
+//   Depth 1: recursive call for sub-angle r2 = r1 - ref within the
+//            combination loop (r2 has smaller denominator than ref)
+//   Depth 2: second-level sub-angle (rare but occurs for composite q)
+//   Depth 3: guaranteed termination — denominators strictly decrease
+//            at each depth level so combinatorial explosion is bounded.
+// Reference: CLAUDE.md §REGOLA ZERO; HARDCODE_LEDGER HPP-014-c.
 
 namespace cas::symbolic::detail {
+
+// Thread-local depth guard for try_angle_combination.
+// Increment on entry, decrement on exit (RAII guard below).
+// Zero when no combination is in progress.
+static thread_local int s_trig_combination_depth = 0;
+
+// RAII guard: increments depth on construction, decrements on destruction.
+struct TrigCombinationDepthGuard {
+    TrigCombinationDepthGuard()  noexcept { ++s_trig_combination_depth; }
+    ~TrigCombinationDepthGuard() noexcept { --s_trig_combination_depth; }
+    TrigCombinationDepthGuard(const TrigCombinationDepthGuard&) = delete;
+    TrigCombinationDepthGuard& operator=(const TrigCombinationDepthGuard&) = delete;
+};
+
+// Maximum recursion depth for try_angle_combination.
+// Mathematical justification: denominators strictly decrease at each
+// recursion level (r2.denom < ref.denom ≤ kBaseAngleMaxDenom=60).
+// With 3 levels we cover all constructible angle subtractions reachable
+// without triggering exponential fan-out on non-constructible denominators
+// (q=7, q=17, q=11, ...).
+// Configurable here; see also HARDCODE_LEDGER HPP-014c.
+constexpr int kTrigCombinationMaxDepth = 3;
 
 // ── P2-005 / L2-10: Trig angle reduction helpers ────────────────────────────
 
@@ -60,110 +101,6 @@ namespace cas::symbolic::detail {
     return Rational(rem, r.denominator());
 }
 
-// Base values for constructible angles.  These are Gauss-construction
-// primitives for Fermat primes p=3,5 — NOT an exhaustive lookup table.
-// Arbitrary angles reach via half-angle recursion in cos/sin_ref_value.
-
-[[nodiscard]] static ExprPtr cos_pi_over_5(AstArena& arena) {
-    ExprPtr sqrt5 = arena.make<FuncCall>(BuiltinOp::Sqrt,
-        std::vector<ExprPtr>{make_integer(arena, BigInt(5))});
-    ExprPtr sum = arena.make<Sum>(std::vector<ExprPtr>{make_integer(arena, BigInt(1)), sqrt5});
-    return arena.make<Binary>(BinaryOp::Div, sum, make_integer(arena, BigInt(4)));
-}
-
-[[nodiscard]] static ExprPtr cos_2pi_over_5(AstArena& arena) {
-    ExprPtr sqrt5 = arena.make<FuncCall>(BuiltinOp::Sqrt,
-        std::vector<ExprPtr>{make_integer(arena, BigInt(5))});
-    ExprPtr neg_one = arena.make<Unary>(UnaryOp::Neg, make_integer(arena, BigInt(1)));
-    ExprPtr sum = arena.make<Sum>(std::vector<ExprPtr>{sqrt5, neg_one});
-    return arena.make<Binary>(BinaryOp::Div, sum, make_integer(arena, BigInt(4)));
-}
-
-[[nodiscard]] static ExprPtr sin_pi_over_5(AstArena& arena) {
-    ExprPtr sqrt5 = arena.make<FuncCall>(BuiltinOp::Sqrt,
-        std::vector<ExprPtr>{make_integer(arena, BigInt(5))});
-    ExprPtr two_sqrt5 = arena.make<Product>(std::vector<ExprPtr>{
-        make_integer(arena, BigInt(2)), sqrt5});
-    ExprPtr neg_two_sqrt5 = arena.make<Unary>(UnaryOp::Neg, two_sqrt5);
-    ExprPtr inner_sum = arena.make<Sum>(std::vector<ExprPtr>{
-        make_integer(arena, BigInt(10)), neg_two_sqrt5});
-    ExprPtr outer = arena.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{inner_sum});
-    return arena.make<Binary>(BinaryOp::Div, outer, make_integer(arena, BigInt(4)));
-}
-
-[[nodiscard]] static ExprPtr sin_2pi_over_5(AstArena& arena) {
-    ExprPtr sqrt5 = arena.make<FuncCall>(BuiltinOp::Sqrt,
-        std::vector<ExprPtr>{make_integer(arena, BigInt(5))});
-    ExprPtr two_sqrt5 = arena.make<Product>(std::vector<ExprPtr>{
-        make_integer(arena, BigInt(2)), sqrt5});
-    ExprPtr inner_sum = arena.make<Sum>(std::vector<ExprPtr>{
-        make_integer(arena, BigInt(10)), two_sqrt5});
-    ExprPtr outer = arena.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{inner_sum});
-    return arena.make<Binary>(BinaryOp::Div, outer, make_integer(arena, BigInt(4)));
-}
-
-[[nodiscard]] static ExprPtr sin_ref_value_table(Rational ref, AstArena& arena) {
-    const Rational zero(BigInt(0));
-    const Rational one_tenth(BigInt(1), BigInt(10));
-    const Rational one_sixth(BigInt(1), BigInt(6));
-    const Rational one_fifth(BigInt(1), BigInt(5));
-    const Rational one_quarter(BigInt(1), BigInt(4));
-    const Rational three_tenths(BigInt(3), BigInt(10));
-    const Rational one_third(BigInt(1), BigInt(3));
-    const Rational two_fifths(BigInt(2), BigInt(5));
-    const Rational one_half(BigInt(1), BigInt(2));
-
-    if (ref == zero)       return make_integer(arena, BigInt(0));
-    if (ref == one_tenth)  return cos_2pi_over_5(arena);
-    if (ref == one_sixth)  return make_rational(arena, Rational(BigInt(1), BigInt(2)));
-    if (ref == one_fifth)  return sin_pi_over_5(arena);
-    if (ref == one_quarter)
-        return arena.make<Binary>(BinaryOp::Div,
-            arena.make<FuncCall>(BuiltinOp::Sqrt,
-                std::vector<ExprPtr>{make_integer(arena, BigInt(2))}),
-            make_integer(arena, BigInt(2)));
-    if (ref == three_tenths) return cos_pi_over_5(arena);
-    if (ref == one_third)
-        return arena.make<Binary>(BinaryOp::Div,
-            arena.make<FuncCall>(BuiltinOp::Sqrt,
-                std::vector<ExprPtr>{make_integer(arena, BigInt(3))}),
-            make_integer(arena, BigInt(2)));
-    if (ref == two_fifths) return sin_2pi_over_5(arena);
-    if (ref == one_half)   return make_integer(arena, BigInt(1));
-    return nullptr;
-}
-
-[[nodiscard]] static ExprPtr cos_ref_value_table(Rational ref, AstArena& arena) {
-    const Rational zero(BigInt(0));
-    const Rational one_tenth(BigInt(1), BigInt(10));
-    const Rational one_sixth(BigInt(1), BigInt(6));
-    const Rational one_fifth(BigInt(1), BigInt(5));
-    const Rational one_quarter(BigInt(1), BigInt(4));
-    const Rational three_tenths(BigInt(3), BigInt(10));
-    const Rational one_third(BigInt(1), BigInt(3));
-    const Rational two_fifths(BigInt(2), BigInt(5));
-    const Rational one_half(BigInt(1), BigInt(2));
-
-    if (ref == zero)       return make_integer(arena, BigInt(1));
-    if (ref == one_tenth)  return sin_2pi_over_5(arena);
-    if (ref == one_sixth)
-        return arena.make<Binary>(BinaryOp::Div,
-            arena.make<FuncCall>(BuiltinOp::Sqrt,
-                std::vector<ExprPtr>{make_integer(arena, BigInt(3))}),
-            make_integer(arena, BigInt(2)));
-    if (ref == one_fifth)  return cos_pi_over_5(arena);
-    if (ref == one_quarter)
-        return arena.make<Binary>(BinaryOp::Div,
-            arena.make<FuncCall>(BuiltinOp::Sqrt,
-                std::vector<ExprPtr>{make_integer(arena, BigInt(2))}),
-            make_integer(arena, BigInt(2)));
-    if (ref == three_tenths) return sin_pi_over_5(arena);
-    if (ref == one_third)  return make_rational(arena, Rational(BigInt(1), BigInt(2)));
-    if (ref == two_fifths) return cos_2pi_over_5(arena);
-    if (ref == one_half)   return make_integer(arena, BigInt(0));
-    return nullptr;
-}
-
 // Forward declarations for mutual recursion.
 [[nodiscard]] static ExprPtr cos_ref_value(Rational ref, AstArena& arena);
 [[nodiscard]] static ExprPtr sin_ref_value(Rational ref, AstArena& arena);
@@ -215,9 +152,19 @@ namespace cas::symbolic::detail {
     const BigInt& p = ref.numerator();
     const BigInt& q = ref.denominator();
     if (p <= BigInt(1) || q <= BigInt(1)) {
-        // p=1 case not reachable by half-angle: try angle combination (e.g. cos(π/15)).
-        if (p == BigInt(1) && q > BigInt(1))
-            return try_angle_combination(ref, BuiltinOp::Cos, arena);
+        // p=1 case not reachable by half-angle: try angle combination (e.g. cos(π/15)),
+        // then RootOf fallback for non-constructible denominators.
+        if (p == BigInt(1) && q > BigInt(1)) {
+            if (ExprPtr combo = try_angle_combination(ref, BuiltinOp::Cos, arena))
+                return combo;
+            // F1.4b: non-constructible cos(π/q) → RootOf(Ψ_{2q}(t), t, 0) / 2.
+            if (q.bit_length() <= 16U) {
+                const auto q_u64 = q.to_u64();
+                if (q_u64 >= 2U && q_u64 <= static_cast<std::uint64_t>(kCosPolyMaxQ))
+                    return build_rootof_cos_pi_q(static_cast<int>(q_u64), arena);
+            }
+            return nullptr;
+        }
         return nullptr;
     }
     if (p.bit_length() > 16) return nullptr;
@@ -227,7 +174,18 @@ namespace cas::symbolic::detail {
         // Base angle not in half-angle reachable set; try combination path.
         if (ExprPtr combo = try_angle_combination(ref, BuiltinOp::Cos, arena))
             return combo;
-        return nullptr;
+        // F1.4b fallback: for non-constructible denominators q ≤ kCosPolyMaxQ,
+        // emit RootOf(Ψ_{2q}(t), t, 0) / 2 as the exact representation of
+        // cos(π/q).  Chebyshev T_p is then applied to this base via the loop
+        // below after returning from the p=1 early-return above.
+        // Only fires when q fits in a u64 (bit_length ≤ 16 already checked).
+        {
+            const auto q_u64 = q.to_u64();
+            if (q_u64 >= 2U && q_u64 <= static_cast<std::uint64_t>(kCosPolyMaxQ)) {
+                cos_q = build_rootof_cos_pi_q(static_cast<int>(q_u64), arena);
+            }
+        }
+        if (cos_q == nullptr) return nullptr;
     }
     const std::uint64_t p_u = p.to_u64();
     ExprPtr T_prev = make_integer(arena, BigInt(1));
@@ -267,42 +225,85 @@ namespace cas::symbolic::detail {
     return arena.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{half_arg});
 }
 
-// L2-10: angle subtraction formula for constructible angles not reachable by halving/Chebyshev.
-// Handles denominators like 15 = lcm(3,5) by expressing ref = r1 - r2 where r1 is a base
-// table angle (den ≤ 10) and r2 has strictly smaller denominator than ref.
-// cos(A-B) = cos(A)cos(B) + sin(A)sin(B), sin(A-B) = sin(A)cos(B) - cos(A)sin(B).
+// L2-10 / HPP-014 resolved: angle subtraction formula with algorithmically-generated
+// base angle set.  Replaces the closed kBaseAngles[] table (HPP-014) with all
+// constructible p/q ∈ (0,1] (gcd(p,q)=1) reachable by cos_ref_value_half_angle
+// for denominators q ≤ kBaseAngleMaxDenom.
+//
+// Constructibility criterion (Gauss, Disquisitiones Arithmeticae §VII):
+//   cos(π/q) is expressible in nested radicals over Q ⟺
+//   q = 2^a · ∏ distinct Fermat primes from {3,5,17,257,65537}.
+//   The half-angle recursion in cos_ref_value_half_angle is sound for exactly
+//   these denominators (it bottoms out at the base table values for q ∈ {1,2,3,4,5,6,10}).
+//   All other p/q are reachable as combinations of constructible angles via
+//   the subtraction formula, or fall through to the RootOf generator.
+//
+// Max denominator: kBaseAngleMaxDenom (configurable at compile time; default 60
+// covers all constructible denominators ≤ 60 = lcm(3,4,5) and handles test
+// cases cos(π/15), cos(π/17), cos(2π/7), sin(π/30) and similar).
+// Runtime cost: O(kBaseAngleMaxDenom²) angle checks per call; each check is O(1)
+// table lookup or O(log q) half-angle recursion — acceptable for q ≤ 60.
+// For larger q, the RootOf fallback in cos_ref_value handles the remainder.
+//
+// Tracked in HARDCODE_LEDGER.md: HPP-014 → Resolved (this commit).
+// Remaining open item: wire CASContext::max_trig_exact_denom() through the
+// static call chain so the limit is user-configurable at runtime (see
+// HARDCODE_LEDGER.md entry HPP-014-RT).
+constexpr int kBaseAngleMaxDenom = 60;
+
 [[nodiscard]] static ExprPtr try_angle_combination(Rational ref, BuiltinOp func, AstArena& arena) {
+    // F1.4c depth guard: bail out if mutual recursion exceeds kTrigCombinationMaxDepth.
+    // This prevents stack overflow for denominators q that are not reachable via
+    // half-angle recursion and have no direct subtraction path in kBaseAngleMaxDenom.
+    // On depth limit: return nullptr so the caller (cos_ref_value / sin_ref_value)
+    // falls through to the RootOf generator — a structurally sound Unimplemented.
+    if (s_trig_combination_depth >= kTrigCombinationMaxDepth) return nullptr;
+
+    const TrigCombinationDepthGuard depth_guard;
+
     const Rational zero(BigInt(0));
     if (ref.denominator() < BigInt(7)) return nullptr;
 
-    // Enumerates rational multiples of π with small denominators as r1 candidates.
-    static const std::pair<int,int> kBaseAngles[] = {
-        {1,2},{1,3},{2,3},{1,4},{3,4},{1,5},{2,5},{3,5},{4,5},
-        {1,6},{5,6},{1,10},{3,10},{7,10},{9,10}
+    // GCD helper for int (used in coprimality check).
+    auto igcd = [](int a, int b) -> int {
+        while (b) { a %= b; std::swap(a, b); } return a;
     };
-    for (auto [k1_i, d1_i] : kBaseAngles) {
-        auto r1 = Rational{BigInt{k1_i}, BigInt{d1_i}};
-        auto r2 = r1 - ref;
-        if (r2 <= zero) continue;
-        if (r2.denominator() >= ref.denominator()) continue;
 
-        ExprPtr c1 = trig_exact_at_pi_multiple(BuiltinOp::Cos, r1, arena);
-        ExprPtr s1 = trig_exact_at_pi_multiple(BuiltinOp::Sin, r1, arena);
-        ExprPtr c2 = trig_exact_at_pi_multiple(BuiltinOp::Cos, r2, arena);
-        ExprPtr s2 = trig_exact_at_pi_multiple(BuiltinOp::Sin, r2, arena);
-        if (!c1 || !s1 || !c2 || !s2) continue;
+    // Iterate all constructible base angles p1/q1 with 1 ≤ q1 ≤ kBaseAngleMaxDenom,
+    // 1 ≤ p1 < q1, gcd(p1,q1) = 1.  For each, check if cos_ref_value_half_angle
+    // can evaluate it (i.e. it is constructible).  If so and if r2 = r1 - ref
+    // has strictly smaller denominator than ref, apply the subtraction formula.
+    for (int q1 = 2; q1 <= kBaseAngleMaxDenom; ++q1) {
+        for (int p1 = 1; p1 < q1; ++p1) {
+            if (igcd(p1, q1) != 1) continue;
+            Rational r1{BigInt(p1), BigInt(q1)};
+            Rational r2 = r1 - ref;
+            if (r2 <= zero) continue;
+            if (r2.denominator() >= ref.denominator()) continue;
 
-        if (func == BuiltinOp::Cos) {
-            // cos(r1-r2)·π = cos(r1·π)cos(r2·π) + sin(r1·π)sin(r2·π)
-            return arena.make<Sum>(std::vector<ExprPtr>{
-                arena.make<Product>(std::vector<ExprPtr>{c1, c2}),
-                arena.make<Product>(std::vector<ExprPtr>{s1, s2})});
-        } else {
-            // sin(r1-r2)·π = sin(r1·π)cos(r2·π) - cos(r1·π)sin(r2·π)
-            return arena.make<Sum>(std::vector<ExprPtr>{
-                arena.make<Product>(std::vector<ExprPtr>{s1, c2}),
-                arena.make<Unary>(UnaryOp::Neg,
-                    arena.make<Product>(std::vector<ExprPtr>{c1, s2}))});
+            // Check that r1 is constructible: cos_ref_value_half_angle returns
+            // non-null exactly for the Gauss-constructible denominators.
+            // We only need cos/sin of r1 and r2, not r1's constructibility
+            // per se — but trig_exact_at_pi_multiple will return nullptr for
+            // non-constructible angles (correct: prevents infinite recursion).
+            ExprPtr c1 = trig_exact_at_pi_multiple(BuiltinOp::Cos, r1, arena);
+            ExprPtr s1 = trig_exact_at_pi_multiple(BuiltinOp::Sin, r1, arena);
+            ExprPtr c2 = trig_exact_at_pi_multiple(BuiltinOp::Cos, r2, arena);
+            ExprPtr s2 = trig_exact_at_pi_multiple(BuiltinOp::Sin, r2, arena);
+            if (!c1 || !s1 || !c2 || !s2) continue;
+
+            if (func == BuiltinOp::Cos) {
+                // cos((r1-r2)·π) = cos(r1·π)cos(r2·π) + sin(r1·π)sin(r2·π)
+                return arena.make<Sum>(std::vector<ExprPtr>{
+                    arena.make<Product>(std::vector<ExprPtr>{c1, c2}),
+                    arena.make<Product>(std::vector<ExprPtr>{s1, s2})});
+            } else {
+                // sin((r1-r2)·π) = sin(r1·π)cos(r2·π) - cos(r1·π)sin(r2·π)
+                return arena.make<Sum>(std::vector<ExprPtr>{
+                    arena.make<Product>(std::vector<ExprPtr>{s1, c2}),
+                    arena.make<Unary>(UnaryOp::Neg,
+                        arena.make<Product>(std::vector<ExprPtr>{c1, s2}))});
+            }
         }
     }
     return nullptr;
@@ -396,68 +397,10 @@ Result<ExprPtr> Simplifier::simplify_funcall_trig(
             return ok(call->args[0]);
     }
 
-    if (op == BuiltinOp::Asin && args.size() == 1U) {
-        // asin(sin(x)) -> x if -π/2 ≤ x ≤ π/2
-        if (const auto* call = expr_cast<FuncCall>(args.front());
-            call && call->func_id == BuiltinOp::Sin) {
-            ExprPtr x = call->args[0];
-            if (assumptions_) {
-                ExprPtr pi_2 = arena_.make<Binary>(BinaryOp::Div,
-                    arena_.make<Constant>(MathConstant::Pi), make_integer(arena_, BigInt(2)));
-                ExprPtr neg_pi_2 = arena_.make<Unary>(UnaryOp::Neg, pi_2);
-                if (assumptions_->is_greater_equal(x, neg_pi_2)
-                    && assumptions_->is_greater_equal(pi_2, x))
-                    return ok(x);
-            }
-        }
-    }
-    if (op == BuiltinOp::Acos && args.size() == 1U) {
-        // acos(cos(x)) -> x if 0 ≤ x ≤ π
-        if (const auto* call = expr_cast<FuncCall>(args.front());
-            call && call->func_id == BuiltinOp::Cos) {
-            ExprPtr x = call->args[0];
-            if (assumptions_) {
-                ExprPtr pi = arena_.make<Constant>(MathConstant::Pi);
-                ExprPtr zero = make_integer(arena_, BigInt(0));
-                if (assumptions_->is_greater_equal(x, zero)
-                    && assumptions_->is_greater_equal(pi, x))
-                    return ok(x);
-            }
-        }
-    }
-    if (op == BuiltinOp::Atan && args.size() == 1U) {
-        // atan(tan(x)) -> x if -π/2 < x < π/2
-        if (const auto* call = expr_cast<FuncCall>(args.front());
-            call && call->func_id == BuiltinOp::Tan) {
-            ExprPtr x = call->args[0];
-            if (assumptions_) {
-                ExprPtr pi_2 = arena_.make<Binary>(BinaryOp::Div,
-                    arena_.make<Constant>(MathConstant::Pi), make_integer(arena_, BigInt(2)));
-                ExprPtr neg_pi_2 = arena_.make<Unary>(UnaryOp::Neg, pi_2);
-                if (assumptions_->is_greater(x, neg_pi_2)
-                    && assumptions_->is_greater(pi_2, x))
-                    return ok(x);
-            }
-        }
-        if (is_zero_expr(args.front())) return ok(make_integer(arena_, BigInt(0)));
-        if (const auto* il = expr_cast<IntegerLit>(args.front())) {
-            if (il->value == BigInt(1))
-                return simplify_expr(arena_.make<Binary>(BinaryOp::Div,
-                    arena_.make<Constant>(MathConstant::Pi),
-                    make_integer(arena_, BigInt(4))));
-            if (il->value == BigInt(-1))
-                return simplify_expr(arena_.make<Unary>(UnaryOp::Neg,
-                    arena_.make<Binary>(BinaryOp::Div,
-                        arena_.make<Constant>(MathConstant::Pi),
-                        make_integer(arena_, BigInt(4)))));
-        }
-        // atan odd: atan(-x) = -atan(x)
-        if (const auto* un = expr_cast<Unary>(args.front()); un && un->op == UnaryOp::Neg) {
-            ExprPtr inner_atan = arena_.make<FuncCall>(
-                BuiltinOp::Atan, std::vector<ExprPtr>{un->operand});
-            return simplify_expr(arena_.make<Unary>(UnaryOp::Neg, inner_atan));
-        }
-    }
+    // Arc-trig: asin, acos, atan inverse-function rules delegated to
+    // simplify_trig_inverse.cpp (split from simplify_trig.cpp for ≤500 LOC).
+    if (op == BuiltinOp::Asin || op == BuiltinOp::Acos || op == BuiltinOp::Atan)
+        return simplify_funcall_arc_trig(original, op, std::move(args), target_before);
 
     // L2-07: Addition formula — sin/cos(x + kπ/n) where kπ/n has an exact value.
     // Only triggered when the argument is a Sum containing at least one extractable π-term.

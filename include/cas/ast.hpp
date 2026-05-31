@@ -387,6 +387,9 @@ public:
     static constexpr std::uint32_t API_VERSION = 1;
     static constexpr std::size_t DEFAULT_BLOCK_BYTES = 64U * 1024U;
 
+    // F1.3-NEW: number of interning shards. Power-of-2 for cheap modulo.
+    static constexpr std::size_t N_INTERN_SHARDS = 16U;
+
     AstArena() = default;
     ~AstArena();
     AstArena(const AstArena&) = delete;
@@ -400,38 +403,66 @@ public:
 
         T candidate(std::forward<Args>(args)...);
 
-        std::lock_guard<std::mutex> lock(mutex_);
-
-        // Path veloci per costanti calde (evitano lookup se già presenti)
+        // F1.3-NEW: fast-path for hot constants (no shard lookup needed).
+        // These are protected by the alloc_mutex_ when written; reads after
+        // first write are safe because ExprPtr is a raw-pointer wrapper —
+        // we check under the shard lock below if the fast-path misses.
         if constexpr (std::is_same_v<T, Constant>) {
-            const std::size_t index = static_cast<std::size_t>(candidate.value);
-            if (index < interned_constants_.size() && interned_constants_[index]) return interned_constants_[index];
+            const std::size_t idx = static_cast<std::size_t>(candidate.value);
+            if (idx < interned_constants_.size()) {
+                // Load with acquire so we see any previously stored value.
+                ExprPtr cached = interned_constants_[idx].load(std::memory_order_acquire);
+                if (cached) return cached;
+            }
         } else if constexpr (std::is_same_v<T, IntegerLit>) {
-            if (candidate.value.is_zero() && interned_zero_) return *interned_zero_;
-            if (candidate.value == BigInt(1) && interned_one_) return *interned_one_;
-            if (candidate.value == BigInt(-1) && interned_negative_one_) return *interned_negative_one_;
+            if (candidate.value.is_zero()) {
+                ExprPtr cached = interned_zero_.load(std::memory_order_acquire);
+                if (cached) return cached;
+            } else if (candidate.value == BigInt(1)) {
+                ExprPtr cached = interned_one_.load(std::memory_order_acquire);
+                if (cached) return cached;
+            } else if (candidate.value == BigInt(-1)) {
+                ExprPtr cached = interned_neg_one_.load(std::memory_order_acquire);
+                if (cached) return cached;
+            }
         }
 
+        // F1.3-NEW: compute shard from structural hash of the candidate node.
         ExprPtr candidate_ptr(&candidate);
-        if (auto it = interning_table_.find(candidate_ptr); it != interning_table_.end()) {
+        const std::size_t h = expr_hash(candidate_ptr);
+        const std::size_t shard_idx = h & (N_INTERN_SHARDS - 1U);
+
+        std::lock_guard<std::mutex> shard_lock(intern_shards_[shard_idx]);
+
+        // Each shard owns its own unordered_set — no shared container across
+        // shard locks (eliminates the data-race on a single interning_table_).
+        auto& shard_table = intern_shard_tables_[shard_idx];
+        if (auto it = shard_table.find(candidate_ptr); it != shard_table.end()) {
             return *it;
         }
 
-        // Se non trovato, allochiamo realmente in arena
-        ExprPtr created = make_uncached<T>(std::move(candidate));
-
-        // Aggiorna cache calde se necessario
-        if constexpr (std::is_same_v<T, Constant>) {
-            const std::size_t index = static_cast<std::size_t>(expr_ref<Constant>(created).value);
-            if (index < interned_constants_.size()) interned_constants_[index] = created;
-        } else if constexpr (std::is_same_v<T, IntegerLit>) {
-            const auto& val = expr_ref<IntegerLit>(created).value;
-            if (val.is_zero()) interned_zero_ = created;
-            else if (val == BigInt(1)) interned_one_ = created;
-            else if (val == BigInt(-1)) interned_negative_one_ = created;
+        // Not found: allocate under the global alloc mutex (nested inside the
+        // shard lock — always in shard → alloc order, never reversed).
+        ExprPtr created;
+        {
+            std::lock_guard<std::mutex> alloc_lock(alloc_mutex_);
+            created = make_uncached<T>(std::move(candidate));
         }
 
-        interning_table_.insert(created);
+        // Update atomic hot caches (visible to fast-path without lock).
+        if constexpr (std::is_same_v<T, Constant>) {
+            const std::size_t idx = static_cast<std::size_t>(expr_ref<Constant>(created).value);
+            if (idx < interned_constants_.size()) {
+                interned_constants_[idx].store(created, std::memory_order_release);
+            }
+        } else if constexpr (std::is_same_v<T, IntegerLit>) {
+            const auto& val = expr_ref<IntegerLit>(created).value;
+            if (val.is_zero()) interned_zero_.store(created, std::memory_order_release);
+            else if (val == BigInt(1)) interned_one_.store(created, std::memory_order_release);
+            else if (val == BigInt(-1)) interned_neg_one_.store(created, std::memory_order_release);
+        }
+
+        shard_table.insert(created);
         return created;
     }
 
@@ -440,6 +471,7 @@ public:
 private:
     template <typename T, typename... Args>
     [[nodiscard]] ExprPtr make_uncached(Args&&... args) {
+        // Caller holds alloc_mutex_.
         T* node = static_cast<T*>(allocate(sizeof(T), alignof(T)));
         node = ::new (node) T(std::forward<Args>(args)...);
 
@@ -452,6 +484,7 @@ private:
 
         return ExprPtr(node);
     }
+
     struct Block {
         std::unique_ptr<std::byte[]> data;
         std::size_t capacity{0U};
@@ -463,20 +496,41 @@ private:
     [[nodiscard]] void* allocate(std::size_t size, std::size_t alignment);
     void append_block(std::size_t minimum_bytes);
 
-    mutable std::mutex mutex_;
+    // F1.3-NEW: bump allocator state protected by its own mutex.
+    mutable std::mutex alloc_mutex_;
     std::vector<Block> blocks_;
     std::vector<std::vector<ExprNode*>> node_chunks_;
     std::size_t total_nodes_{0U};
 
-    // Tabella di interning universale
-    std::unordered_set<ExprPtr, ExprHash, ExprEqual> interning_table_;
+    // F1.3-NEW / HPP-016: interning table sharded by hash % N_INTERN_SHARDS.
+    //
+    // N_INTERN_SHARDS = 16: power-of-2 so shard selection is a cheap bitwise
+    // AND.  16 shards reduce lock contention to ~1/16 of a global lock in the
+    // common case (distinct hash buckets map to distinct shards).
+    //
+    // THREAD-SAFETY INVARIANT: each intern_shard_tables_[i] is accessed
+    // exclusively while holding intern_shards_[i].  No operation may touch
+    // intern_shard_tables_[i] without first acquiring intern_shards_[i].
+    // The alloc_mutex_ is a NESTED lock (always acquired AFTER a shard lock,
+    // never before) — locking order: shard → alloc, never alloc → shard.
+    mutable std::array<std::mutex, N_INTERN_SHARDS> intern_shards_;
+    // Per-shard interning sets: intern_shard_tables_[i] is protected by
+    // intern_shards_[i].  Using per-shard containers eliminates the data
+    // race that would arise from a single shared unordered_set accessed under
+    // different shard locks.
+    std::array<std::unordered_set<ExprPtr, ExprHash, ExprEqual>, N_INTERN_SHARDS>
+        intern_shard_tables_;
 
-    // Cache per costanti matematiche calde (indicizzate per MathConstant)
-    std::array<ExprPtr, 5U> interned_constants_{};
-    // Cache per literal interi comuni
-    std::optional<ExprPtr> interned_zero_{};
-    std::optional<ExprPtr> interned_one_{};
-    std::optional<ExprPtr> interned_negative_one_{};
+    // Compile-time check: N_INTERN_SHARDS must be a power of two so that
+    // (hash & (N_INTERN_SHARDS - 1)) == (hash % N_INTERN_SHARDS).
+    static_assert((N_INTERN_SHARDS & (N_INTERN_SHARDS - 1U)) == 0U,
+                  "N_INTERN_SHARDS must be a power of two");
+
+    // F1.3-NEW: hot-constant caches as atomics for lock-free fast-path reads.
+    std::array<std::atomic<ExprPtr>, 5U> interned_constants_{};
+    std::atomic<ExprPtr> interned_zero_{ExprPtr{}};
+    std::atomic<ExprPtr> interned_one_{ExprPtr{}};
+    std::atomic<ExprPtr> interned_neg_one_{ExprPtr{}};
 };
 
 template <typename Visitor>

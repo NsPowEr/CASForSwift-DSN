@@ -1,0 +1,140 @@
+{"input": "integrate(x, x)", "area": "integrate", "ref": "power_rule_x"}
+{"input": "integrate(x^2, x)", "area": "integrate", "ref": "power_rule_x2"}
+{"input": "integrate(x^3, x)", "area": "integrate", "ref": "power_rule_x3"}
+{"input": "integrate(x^n, x)", "area": "integrate", "ref": "power_rule_n", "assume": "n != -1"}
+{"input": "integrate(1/x, x)", "area": "integrate", "ref": "log_rule"}
+{"input": "integrate(exp(x), x)", "area": "integrate", "ref": "exp_x"}
+{"input": "integrate(sin(x), x)", "area": "integrate", "ref": "sin_x"}
+{"input": "integrate(cos(x), x)", "area": "integrate", "ref": "cos_x"}
+{"input": "integrate(1/(1 + x^2), x)", "area": "integrate", "ref": "arctan"}
+{"input": "integrate(1/sqrt(1 - x^2), x)", "area": "integrate", "ref": "arcsin"}
+{"input": "integrate(x*exp(x), x)", "area": "integrate", "ref": "IBP_x_expx"}
+{"input": "integrate(x*sin(x), x)", "area": "integrate", "ref": "IBP_x_sinx"}
+{"input": "integrate(x*cos(x), x)", "area": "integrate", "ref": "IBP_x_cosx"}
+{"input": "integrate(log(x), x)", "area": "integrate", "ref": "IBP_log"}
+{"input": "integrate(x*log(x), x)", "area": "integrate", "ref": "IBP_x_logx"}
+{"input": "integrate(x^2*exp(x), x)", "area": "integrate", "ref": "IBP_x2_expx"}
+{"input": "integrate(sin(x)*exp(x), x)", "area": "integrate", "ref": "cyclic_IBP"}
+{"input": "integrate(cos(x)*exp(x), x)", "area": "integrate", "ref": "cyclic_IBP_cos"}
+{"input": "integrate(1/(x^2 + 1), x)", "area": "integrate", "ref": "pfd_arctan"}
+{"input": "integrate(1/(x^2 - 1), x)", "area": "integrate", "ref": "pfd_log"}
+{"input": "integrate(x/(x^2 + 1), x)", "area": "integrate", "ref": "log_substitution"}
+{"input": "integrate(1/(x*(x+1)), x)", "area": "integrate", "ref": "pfd_simple"}
+{"input": "integrate(x^2/(x^2+1), x)", "area": "integrate", "ref": "rational_reduce"}
+{"input": "integrate(sin(x)^2, x)", "area": "integrate", "ref": "trig_power_sin2"}
+{"input": "integrate(cos(x)^2, x)", "area": "integrate", "ref": "trig_power_cos2"}
+{"input": "integrate(tan(x), x)", "area": "integrate", "ref": "tan_log"}
+{"input": "integrate(1/sin(x), x)", "area": "integrate", "ref": "csc_log"}
+{"input": "integrate(exp(x^2), x)", "area": "integrate", "ref": "erf_unimplemented"}
+{"input": "integrate(sqrt(1 - x^2), x)", "area": "integrate", "ref": "trig_sub_arcsin"}
+{"input": "integrate(1/sqrt(x^2 + 1), x)", "area": "integrate", "ref": "arcsinh"}
+{"input": "integrate(x^4, x)", "area": "integrate", "ref": "power_rule_x4"}
+{"input": "integrate(x^5, x)", "area": "integrate", "ref": "power_rule_x5"}
+{"input": "integrate(1/x^2, x)", "area": "integrate", "ref": "neg_power_x2"}
+{"input": "integrate(1/x^3, x)", "area": "integrate", "ref": "neg_power_x3"}
+{"input": "integrate(sqrt(x), x)", "area": "integrate", "ref": "sqrt_x_power"}
+{"input": "integrate(x^(1/3), x)", "area": "integrate", "ref": "cbrt_x"}
+{"input": "integrate(2*x + 3, x)", "area": "integrate", "ref": "linear_poly"}
+{"input": "integrate(3*x^2 - 2*x + 1, x)", "area": "integrate", "ref": "quadratic_poly"}
+{"input": "integrate(x^3 + x^2 + x + 1, x)", "area": "integrate", "ref": "cubic_poly"}
+{"input": "integrate(exp(2*x), x)", "area": "integrate", "ref": "exp_2x"}
+{"input": "integrate(exp(-x), x)", "area": "integrate", "ref": "exp_neg_x"}
+{"input": "integrate(exp(3*x), x)", "area": "integrate", "ref": "exp_3x"}
+{"input": "integrate(sin(2*x), x)", "area": "integrate", "ref": "sin_2x"}
+{"input": "integrate(cos(3*x), x)", "area": "integrate", "ref": "cos_3x"}
+{"input": "integrate(sin(x/2), x)", "area": "integrate", "ref": "sin_half_x"}
+{"input": "integrate(2*sin(x)*cos(x), x)", "area": "integrate", "ref": "sin_2x_identity_int"}
+{"input": "integrate(1/(x + 1), x)", "area": "integrate", "ref": "log_shifted"}
+{"input": "integrate(1/(2*x + 1), x)", "area": "integrate", "ref": "log_2x_plus_1"}
+{"input": "integrate(1/(x^2 + 4), x)", "area": "integrate", "ref": "arctan_2"}
+{"input": "integrate(1/(x^2 + 9), x)", "area": "integrate", "ref": "arctan_3"}
+{"input": "integrate(x/(x^2 + 4), x)", "area": "integrate", "ref": "log_x2_4"}
+{"input": "integrate(x/(x^2 - 4), x)", "area": "integrate", "ref": "log_x2_minus_4"}
+{"input": "integrate(1/(x^2 - 4), x)", "area": "integrate", "ref": "pfd_x2_minus_4"}
+{"input": "integrate(1/(x^2 - 9), x)", "area": "integrate", "ref": "pfd_x2_minus_9"}
+{"input": "integrate(2*x/(x^2 + 1)^2, x)", "area": "integrate", "ref": "inv_sq_subst"}
+{"input": "integrate(x^2*sin(x), x)", "area": "integrate", "ref": "IBP_x2_sinx"}
+{"input": "integrate(x^2*cos(x), x)", "area": "integrate", "ref": "IBP_x2_cosx"}
+{"input": "integrate(x^3*exp(x), x)", "area": "integrate", "ref": "IBP_x3_expx"}
+{"input": "integrate(log(x)/x, x)", "area": "integrate", "ref": "log_over_x_subst"}
+{"input": "integrate(log(x)^3, x)", "area": "integrate", "ref": "IBP_log3"}
+{"input": "integrate(x*log(x)^2, x)", "area": "integrate", "ref": "IBP_x_log2"}
+{"input": "integrate(sin(x)^2*cos(x), x)", "area": "integrate", "ref": "trig_subst_sin2_cos"}
+{"input": "integrate(sin(x)*cos(x)^2, x)", "area": "integrate", "ref": "trig_subst_cos2_sin"}
+{"input": "integrate(tan(x)^2, x)", "area": "integrate", "ref": "tan_sq_identity"}
+{"input": "integrate(sec(x)^2, x)", "area": "integrate", "ref": "sec2_tan"}
+{"input": "integrate(1/(x*(x+2)), x)", "area": "integrate", "ref": "pfd_x_xplus2"}
+{"input": "integrate(1/(x*(x-1)), x)", "area": "integrate", "ref": "pfd_x_xminus1"}
+{"input": "integrate(1/((x+1)*(x+2)), x)", "area": "integrate", "ref": "pfd_consecutive_linear"}
+{"input": "integrate(x/(x+1)^2, x)", "area": "integrate", "ref": "pfd_x_over_sq_linear"}
+{"input": "integrate(1/(x^2*(x-1)), x)", "area": "integrate", "ref": "pfd_double_pole_shifted"}
+{"input": "integrate(x^2/(x-1), x)", "area": "integrate", "ref": "poly_div_then_integrate"}
+{"input": "integrate(x/(x^2 + 2*x + 1), x)", "area": "integrate", "ref": "pfd_perf_sq_denom"}
+{"input": "integrate(1/(x^3 + x), x)", "area": "integrate", "ref": "pfd_x_x2plus1"}
+{"input": "integrate((x+1)/(x^2 + 1), x)", "area": "integrate", "ref": "arctan_plus_log"}
+{"input": "integrate((x+2)/(x^2 + 4), x)", "area": "integrate", "ref": "arctan_log_combined"}
+{"input": "integrate(x*sqrt(x+1), x)", "area": "integrate", "ref": "subst_sqrt_linear"}
+{"input": "integrate(x/sqrt(x^2+1), x)", "area": "integrate", "ref": "subst_sqrt_x2_1"}
+{"input": "integrate(x/sqrt(1-x^2), x)", "area": "integrate", "ref": "subst_sqrt_1_x2"}
+{"input": "integrate(sqrt(x^2 - 1), x)", "area": "integrate", "ref": "trig_sub_cosh"}
+{"input": "integrate(1/(x*sqrt(x^2-1)), x)", "area": "integrate", "ref": "arcsec"}
+{"input": "integrate(exp(x) + sin(x), x)", "area": "integrate", "ref": "sum_exp_sin"}
+{"input": "integrate(x^2 + 1/x, x)", "area": "integrate", "ref": "sum_poly_log"}
+{"input": "integrate(3*exp(x) - 2*cos(x), x)", "area": "integrate", "ref": "sum_exp_cos"}
+{"input": "integrate(1/(1 + exp(x)), x)", "area": "integrate", "ref": "logistic_integral"}
+{"input": "integrate(exp(x)/(1 + exp(x)), x)", "area": "integrate", "ref": "exp_logistic_log"}
+{"input": "integrate(1/(exp(x) + exp(-x)), x)", "area": "integrate", "ref": "sech_arctan"}
+{"input": "integrate(sinh(x), x)", "area": "integrate", "ref": "sinh_integral"}
+{"input": "integrate(cosh(x), x)", "area": "integrate", "ref": "cosh_integral"}
+{"input": "integrate(tanh(x), x)", "area": "integrate", "ref": "tanh_log"}
+{"input": "integrate(1/sqrt(x), x)", "area": "integrate", "ref": "inv_sqrt_x"}
+{"input": "integrate(x*sqrt(x), x)", "area": "integrate", "ref": "x_sqrt_x"}
+{"input": "integrate(x/(x^2+1)^2, x)", "area": "integrate", "ref": "x_over_x2plus1_sq"}
+{"input": "integrate(sin(x)^5, x)", "area": "integrate", "ref": "sin_power_5"}
+{"input": "integrate(cos(x)^4, x)", "area": "integrate", "ref": "cos_power_4"}
+{"input": "integrate(sin(x)^2*cos(x)^3, x)", "area": "integrate", "ref": "trig_mixed_2_3"}
+{"input": "integrate(1/(sin(x)*cos(x)), x)", "area": "integrate", "ref": "csc_sec_product"}
+{"input": "integrate(cos(x)*exp(sin(x)), x)", "area": "integrate", "ref": "exp_sin_subst"}
+{"input": "integrate(sin(x)*exp(cos(x)), x)", "area": "integrate", "ref": "exp_cos_subst"}
+{"input": "integrate(x*cos(x^2), x)", "area": "integrate", "ref": "cos_x2_subst"}
+{"input": "integrate(x*sin(x^2), x)", "area": "integrate", "ref": "sin_x2_subst"}
+{"input": "integrate(x^3*cos(x^2), x)", "area": "integrate", "ref": "IBP_after_subst_cos_x2"}
+{"input": "integrate(log(x)/sqrt(x), x)", "area": "integrate", "ref": "IBP_log_inv_sqrt"}
+{"input": "integrate(sqrt(x)*log(x), x)", "area": "integrate", "ref": "IBP_sqrt_log"}
+{"input": "integrate(x^3*sqrt(x^2+1), x)", "area": "integrate", "ref": "trig_sub_x3_sqrt"}
+{"input": "integrate(1/(x^2+2*x+2), x)", "area": "integrate", "ref": "complete_sq_arctan"}
+{"input": "integrate(1/(x^2-2*x-3), x)", "area": "integrate", "ref": "complete_sq_pfd"}
+{"input": "integrate(x/(x^2+2*x+2), x)", "area": "integrate", "ref": "num_shift_arctan_log"}
+{"input": "integrate(sin(x)*log(cos(x)), x)", "area": "integrate", "ref": "subst_log_cos"}
+{"input": "integrate(cos(log(x)), x)", "area": "integrate", "ref": "IBP_cos_log"}
+{"input": "integrate(sin(log(x)), x)", "area": "integrate", "ref": "IBP_sin_log"}
+{"input": "integrate(x*atan(x), x)", "area": "integrate", "ref": "IBP_x_arctan"}
+{"input": "integrate(atan(x), x)", "area": "integrate", "ref": "IBP_arctan"}
+{"input": "integrate(asin(x), x)", "area": "integrate", "ref": "IBP_arcsin"}
+{"input": "integrate(acos(x), x)", "area": "integrate", "ref": "IBP_arccos"}
+{"input": "integrate(x*asin(x), x)", "area": "integrate", "ref": "IBP_x_arcsin"}
+{"input": "integrate(x^2*log(x)^2, x)", "area": "integrate", "ref": "IBP_x2_log2"}
+{"input": "integrate(1/(x^4+1), x)", "area": "integrate", "ref": "quartic_plus_1_pfd"}
+{"input": "integrate(x^2/(x^4+1), x)", "area": "integrate", "ref": "quartic_plus_1_x2_pfd"}
+{"input": "integrate((x^2+1)/(x^4+1), x)", "area": "integrate", "ref": "quartic_plus_1_numer"}
+{"input": "integrate((x^2-1)/(x^4+1), x)", "area": "integrate", "ref": "quartic_plus_1_numer_neg"}
+{"input": "integrate(1/((x+1)*(x^2+1)), x)", "area": "integrate", "ref": "pfd_linear_irred_quad"}
+{"input": "integrate(x/((x+1)*(x^2+1)), x)", "area": "integrate", "ref": "pfd_x_linear_quad"}
+{"input": "integrate((x^2+2)/(x^3+x), x)", "area": "integrate", "ref": "pfd_x_x2plus1_numer"}
+{"input": "integrate(x^2/(x^3-1), x)", "area": "integrate", "ref": "log_cube_unity_deriv"}
+{"input": "integrate(1/(x^3+1), x)", "area": "integrate", "ref": "sum_cubes_pfd"}
+{"input": "integrate(1/(x^3-1), x)", "area": "integrate", "ref": "diff_cubes_pfd"}
+{"input": "integrate(x/(x^3-1), x)", "area": "integrate", "ref": "diff_cubes_pfd_x"}
+{"input": "integrate(x^2/(x^2+1)^2, x)", "area": "integrate", "ref": "pfd_double_quad_pole"}
+{"input": "integrate(1/(x^2+1)^2, x)", "area": "integrate", "ref": "arctan_reduction_formula"}
+{"input": "integrate(x^3/(x^2-1), x)", "area": "integrate", "ref": "poly_div_x3_diff_sq"}
+{"input": "integrate(x^2/(x^2-1), x)", "area": "integrate", "ref": "poly_div_x2_diff_sq"}
+{"input": "integrate(x^4/(x^2+1), x)", "area": "integrate", "ref": "poly_div_x4_arctan"}
+{"input": "integrate(x^5/(x^2+1), x)", "area": "integrate", "ref": "poly_div_x5_arctan"}
+{"input": "integrate(1/(1 + tan(x)), x)", "area": "integrate", "ref": "weierstrass_tan"}
+{"input": "integrate(1/(a^2 + x^2), x)", "area": "integrate", "ref": "arctan_param_a"}
+{"input": "integrate(1/sqrt(a^2 - x^2), x)", "area": "integrate", "ref": "arcsin_param_a"}
+{"input": "integrate(exp(a*x), x)", "area": "integrate", "ref": "exp_ax_param"}
+{"input": "integrate(sin(a*x), x)", "area": "integrate", "ref": "sin_ax_param"}
+{"input": "integrate(cos(a*x), x)", "area": "integrate", "ref": "cos_ax_param"}
+{"input": "integrate(x^n*log(x), x)", "area": "integrate", "ref": "power_log_param", "assume": "n != -1"}

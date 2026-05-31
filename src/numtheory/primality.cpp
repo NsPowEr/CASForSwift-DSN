@@ -242,8 +242,15 @@ Result<bool> is_prime(const Integer& n) {
         } else if (n_u64 < 341550071728321ULL) {
             bases = {Integer(2), Integer(3), Integer(5), Integer(7), Integer(11), Integer(13), Integer(17)};
         } else {
-            // Per n < 2^64
-            bases = {Integer(2), Integer(3), Integer(5), Integer(7), Integer(11), Integer(13), Integer(17), Integer(19), Integer(23)};
+            // Deterministic for all n < 3.18×10^23 > 2^64.
+            // Reference: Sorenson-Webster, "Strong Pseudoprimes to Twelve Prime Bases",
+            // Mathematics of Computation 84 (2015), pp. 3049-3060, Table 2.
+            // The set {2,3,5,7,11,13,17,19,23} is deterministic only for n < 3,825,123,056,546,413,051
+            // (~3.8×10^18). The extended 12-base set covers all n < 3.18×10^23, hence all n < 2^64.
+            // Base 37 in particular rejects the known strong pseudoprime 3825123056546413051
+            // which passes all 9 smaller bases.
+            bases = {Integer(2), Integer(3), Integer(5), Integer(7), Integer(11), Integer(13),
+                     Integer(17), Integer(19), Integer(23), Integer(29), Integer(31), Integer(37)};
         }
     } else {
         // Probabilistico per numeri grandi

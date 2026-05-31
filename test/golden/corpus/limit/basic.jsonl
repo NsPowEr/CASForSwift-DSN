@@ -1,0 +1,99 @@
+{"input": "limit(x, x, 0)", "area": "limit", "ref": "identity_zero"}
+{"input": "limit(x^2, x, 2)", "area": "limit", "ref": "poly_at_2"}
+{"input": "limit(sin(x)/x, x, 0)", "area": "limit", "ref": "sinc_zero"}
+{"input": "limit((1 - cos(x))/x^2, x, 0)", "area": "limit", "ref": "half"}
+{"input": "limit(exp(x), x, 0)", "area": "limit", "ref": "exp_zero"}
+{"input": "limit(log(x), x, 1)", "area": "limit", "ref": "log_one"}
+{"input": "limit((x^2 - 1)/(x - 1), x, 1)", "area": "limit", "ref": "removable_sing"}
+{"input": "limit(1/x, x, inf)", "area": "limit", "ref": "inv_x_inf"}
+{"input": "limit(x^2, x, inf)", "area": "limit", "ref": "x2_inf"}
+{"input": "limit(exp(-x), x, inf)", "area": "limit", "ref": "exp_neg_inf"}
+{"input": "limit((1 + 1/n)^n, n, inf)", "area": "limit", "ref": "e_definition"}
+{"input": "limit(x*sin(1/x), x, inf)", "area": "limit", "ref": "x_sin_inv"}
+{"input": "limit(log(x)/x, x, inf)", "area": "limit", "ref": "log_over_x"}
+{"input": "limit(x/exp(x), x, inf)", "area": "limit", "ref": "poly_over_exp"}
+{"input": "limit((exp(x) - 1)/x, x, 0)", "area": "limit", "ref": "exp_minus_one"}
+{"input": "limit(tan(x)/x, x, 0)", "area": "limit", "ref": "tan_over_x"}
+{"input": "limit(log(1 + x)/x, x, 0)", "area": "limit", "ref": "log_one_plus_x"}
+{"input": "limit(sqrt(x + 1) - sqrt(x), x, inf)", "area": "limit", "ref": "sqrt_diff_inf"}
+{"input": "limit(1/x, x, 0, plus)", "area": "limit", "ref": "inv_x_zero_plus"}
+{"input": "limit(1/x, x, 0, minus)", "area": "limit", "ref": "inv_x_zero_minus"}
+{"input": "limit((x^3 - 8)/(x - 2), x, 2)", "area": "limit", "ref": "cubic_factor"}
+{"input": "limit(sin(3*x)/x, x, 0)", "area": "limit", "ref": "sinc_scaled"}
+{"input": "limit(x^(1/x), x, inf)", "area": "limit", "ref": "x_inv_x"}
+{"input": "limit((x^2 - 4)/(x - 2), x, 2)", "area": "limit", "ref": "quad_removable"}
+{"input": "limit(atan(x), x, inf)", "area": "limit", "ref": "arctan_inf"}
+{"input": "limit(x*exp(-x), x, inf)", "area": "limit", "ref": "x_times_exp_neg"}
+{"input": "limit(x^n/exp(x), x, inf)", "area": "limit", "ref": "poly_vs_exp_n"}
+{"input": "limit(sin(x)^2/x^2, x, 0)", "area": "limit", "ref": "sinc_squared"}
+{"input": "limit((1 + x)^(1/x), x, 0)", "area": "limit", "ref": "e_variant"}
+{"input": "limit(log(x)/sqrt(x), x, inf)", "area": "limit", "ref": "log_over_sqrt"}
+{"input": "limit(x^3, x, 2)", "area": "limit", "ref": "poly_cubic_at_2"}
+{"input": "limit(2*x + 5, x, 3)", "area": "limit", "ref": "linear_at_3"}
+{"input": "limit(x^2 - 3*x + 2, x, 1)", "area": "limit", "ref": "quad_at_1"}
+{"input": "limit(sqrt(x), x, 4)", "area": "limit", "ref": "sqrt_at_4"}
+{"input": "limit(1/(x-1), x, 2)", "area": "limit", "ref": "rational_at_2"}
+{"input": "limit(exp(2*x), x, 0)", "area": "limit", "ref": "exp_2x_zero"}
+{"input": "limit(sin(2*x)/x, x, 0)", "area": "limit", "ref": "sinc_2x"}
+{"input": "limit(sin(x)/tan(x), x, 0)", "area": "limit", "ref": "sin_over_tan"}
+{"input": "limit((x^3 - x)/(x - 1), x, 1)", "area": "limit", "ref": "cubic_factor_at_1"}
+{"input": "limit((x^4 - 1)/(x - 1), x, 1)", "area": "limit", "ref": "quartic_factor_at_1"}
+{"input": "limit((x^2 - x - 2)/(x - 2), x, 2)", "area": "limit", "ref": "quad_removable_2"}
+{"input": "limit((x^3 - 27)/(x - 3), x, 3)", "area": "limit", "ref": "cubic_diff_at_3"}
+{"input": "limit(sqrt(x+4) - 2, x, 0)", "area": "limit", "ref": "sqrt_conjugate"}
+{"input": "limit((sqrt(x+4) - 2)/x, x, 0)", "area": "limit", "ref": "sqrt_conjugate_over_x"}
+{"input": "limit((sqrt(x) - 1)/(x - 1), x, 1)", "area": "limit", "ref": "sqrt_removable_1"}
+{"input": "limit(x*log(x), x, 0, plus)", "area": "limit", "ref": "x_log_zero_plus"}
+{"input": "limit(x^2*log(x), x, 0, plus)", "area": "limit", "ref": "x2_log_zero_plus"}
+{"input": "limit(exp(x)/x^2, x, inf)", "area": "limit", "ref": "exp_over_x2"}
+{"input": "limit(exp(x)/x^10, x, inf)", "area": "limit", "ref": "exp_over_x10"}
+{"input": "limit(x^100/exp(x), x, inf)", "area": "limit", "ref": "x100_over_exp"}
+{"input": "limit(log(x)/x^2, x, inf)", "area": "limit", "ref": "log_over_x2"}
+{"input": "limit(log(log(x))/x, x, inf)", "area": "limit", "ref": "log_log_over_x"}
+{"input": "limit((exp(x) - 1 - x)/x^2, x, 0)", "area": "limit", "ref": "exp_expand_x2"}
+{"input": "limit((sin(x) - x)/x^3, x, 0)", "area": "limit", "ref": "sin_expand_x3"}
+{"input": "limit((1 - cos(x))/x, x, 0)", "area": "limit", "ref": "one_minus_cos_over_x"}
+{"input": "limit((x - sin(x))/x^3, x, 0)", "area": "limit", "ref": "x_minus_sin_cubic"}
+{"input": "limit(tan(x) - x, x, 0)", "area": "limit", "ref": "tan_minus_x"}
+{"input": "limit((tan(x) - x)/x^3, x, 0)", "area": "limit", "ref": "tan_expand_x3"}
+{"input": "limit(x^x, x, 0, plus)", "area": "limit", "ref": "x_to_x_zero"}
+{"input": "limit((1 + x/n)^n, n, inf)", "area": "limit", "ref": "e_general_form"}
+{"input": "limit(n*sin(1/n), n, inf)", "area": "limit", "ref": "n_sin_inv_n"}
+{"input": "limit(sin(x)^(1/x), x, 0, plus)", "area": "limit", "ref": "sin_power_inv_x"}
+{"input": "limit((1 + 1/x)^x, x, inf)", "area": "limit", "ref": "e_base_large_x"}
+{"input": "limit(x^(sin(x)), x, 0, plus)", "area": "limit", "ref": "x_sin_x_power"}
+{"input": "limit(atan(x), x, 0)", "area": "limit", "ref": "arctan_zero"}
+{"input": "limit(atan(1/x), x, 0, plus)", "area": "limit", "ref": "arctan_inv_zero_plus"}
+{"input": "limit(atan(1/x), x, 0, minus)", "area": "limit", "ref": "arctan_inv_zero_minus"}
+{"input": "limit(asin(x), x, 0)", "area": "limit", "ref": "arcsin_zero"}
+{"input": "limit(asin(x)/x, x, 0)", "area": "limit", "ref": "arcsin_over_x"}
+{"input": "limit((x^2 - 1)/(x^2 + 1), x, inf)", "area": "limit", "ref": "ratio_x2_inf"}
+{"input": "limit((3*x^2 + x)/(x^2 - 5), x, inf)", "area": "limit", "ref": "rational_leading_3"}
+{"input": "limit((2*x^3 - x)/(x^3 + 1), x, inf)", "area": "limit", "ref": "rational_leading_2"}
+{"input": "limit(x^2 * exp(-x), x, inf)", "area": "limit", "ref": "x2_exp_neg"}
+{"input": "limit(x^3 * exp(-x), x, inf)", "area": "limit", "ref": "x3_exp_neg"}
+{"input": "limit(log(x)/x^(1/2), x, inf)", "area": "limit", "ref": "log_over_sqrt_x"}
+{"input": "limit(exp(-x^2), x, inf)", "area": "limit", "ref": "gaussian_inf"}
+{"input": "limit((exp(h) - 1)/h, h, 0)", "area": "limit", "ref": "deriv_exp_zero"}
+{"input": "limit((sin(h))/h, h, 0)", "area": "limit", "ref": "deriv_sin_zero"}
+{"input": "limit((cos(h) - 1)/h, h, 0)", "area": "limit", "ref": "deriv_cos_zero"}
+{"input": "limit((log(1+h))/h, h, 0)", "area": "limit", "ref": "deriv_log_zero"}
+{"input": "limit(sin(x)/(x - pi), x, pi)", "area": "limit", "ref": "sin_removable_at_pi"}
+{"input": "limit(tan(x)/(x - pi/2), x, pi/2)", "area": "limit", "ref": "tan_at_pi_2"}
+{"input": "limit(x/tan(x), x, 0)", "area": "limit", "ref": "x_over_tan_x"}
+{"input": "limit((x^2 - 9)/(x - 3), x, 3)", "area": "limit", "ref": "diff_sq_9_removable"}
+{"input": "limit((x^2 - 4)/(x^2 - 2*x), x, 2)", "area": "limit", "ref": "diff_sq_4_removable"}
+{"input": "limit(x * (1 - cos(1/x)), x, inf)", "area": "limit", "ref": "x_1_minus_cos_inv"}
+{"input": "limit(sinh(x)/x, x, 0)", "area": "limit", "ref": "sinh_over_x"}
+{"input": "limit(tanh(x)/x, x, 0)", "area": "limit", "ref": "tanh_over_x"}
+{"input": "limit(cosh(x), x, 0)", "area": "limit", "ref": "cosh_zero"}
+{"input": "limit(sinh(x), x, 0)", "area": "limit", "ref": "sinh_zero"}
+{"input": "limit((1 + a/x)^x, x, inf)", "area": "limit", "ref": "e_a_power"}
+{"input": "limit(log(1 + x)/sin(x), x, 0)", "area": "limit", "ref": "log1p_over_sin"}
+{"input": "limit((1 - x)^(1/x), x, 0, plus)", "area": "limit", "ref": "one_minus_x_inv_x"}
+{"input": "limit(sin(x^2)/x^2, x, 0)", "area": "limit", "ref": "sinc_x2"}
+{"input": "limit(x*sin(1/x^2), x, 0)", "area": "limit", "ref": "x_sin_inv_x2"}
+{"input": "limit(exp(x) - x, x, inf)", "area": "limit", "ref": "exp_minus_x_inf"}
+{"input": "limit(x^2 - exp(x), x, inf)", "area": "limit", "ref": "x2_minus_exp_inf"}
+{"input": "limit(x - log(x), x, inf)", "area": "limit", "ref": "x_minus_log_inf"}
+{"input": "limit(2/x, x, inf)", "area": "limit", "ref": "inv_2x_inf"}

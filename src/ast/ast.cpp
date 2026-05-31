@@ -98,35 +98,73 @@ void destroy_node(ExprNode* node) noexcept {
 
 }  // namespace
 
-AstArena::AstArena(AstArena&& other) noexcept
-    : blocks_(std::move(other.blocks_))
-    , node_chunks_(std::move(other.node_chunks_))
-    , total_nodes_(other.total_nodes_)
-    , interning_table_(std::move(other.interning_table_))
-    , interned_constants_(std::move(other.interned_constants_))
-    , interned_zero_(std::move(other.interned_zero_))
-    , interned_one_(std::move(other.interned_one_))
-    , interned_negative_one_(std::move(other.interned_negative_one_))
-{
+// F1.3-NEW: move ctor — atomics and mutex arrays are not movable, so we
+// transfer the data members that can be moved under a full lock of the source.
+AstArena::AstArena(AstArena&& other) noexcept {
+    // Lock all shards + alloc mutex of `other` to ensure no concurrent access.
+    std::lock_guard<std::mutex> alloc_lock(other.alloc_mutex_);
+    for (auto& shard : other.intern_shards_) shard.lock();
+
+    blocks_ = std::move(other.blocks_);
+    node_chunks_ = std::move(other.node_chunks_);
+    total_nodes_ = other.total_nodes_;
     other.total_nodes_ = 0;
+    // Move all per-shard interning tables (replaces single interning_table_).
+    for (std::size_t i = 0; i < N_INTERN_SHARDS; ++i) {
+        intern_shard_tables_[i] = std::move(other.intern_shard_tables_[i]);
+    }
+
+    for (std::size_t i = 0; i < interned_constants_.size(); ++i) {
+        interned_constants_[i].store(
+            other.interned_constants_[i].load(std::memory_order_relaxed),
+            std::memory_order_relaxed);
+        other.interned_constants_[i].store(ExprPtr{}, std::memory_order_relaxed);
+    }
+    interned_zero_.store(other.interned_zero_.load(std::memory_order_relaxed), std::memory_order_relaxed);
+    interned_one_.store(other.interned_one_.load(std::memory_order_relaxed), std::memory_order_relaxed);
+    interned_neg_one_.store(other.interned_neg_one_.load(std::memory_order_relaxed), std::memory_order_relaxed);
+    other.interned_zero_.store(ExprPtr{}, std::memory_order_relaxed);
+    other.interned_one_.store(ExprPtr{}, std::memory_order_relaxed);
+    other.interned_neg_one_.store(ExprPtr{}, std::memory_order_relaxed);
+
+    for (auto& shard : other.intern_shards_) shard.unlock();
 }
 
 AstArena& AstArena::operator=(AstArena&& other) noexcept {
     if (this != &other) {
-        // Destroy current nodes before overwriting
+        // Destroy current nodes first.
         for (auto& chunk : node_chunks_)
             for (ExprNode* node : chunk)
                 if (node) destroy_node(node);
 
+        // Lock both arenas to prevent races.
+        std::lock_guard<std::mutex> alloc_lock_other(other.alloc_mutex_);
+        for (auto& shard : other.intern_shards_) shard.lock();
+        std::lock_guard<std::mutex> alloc_lock_self(alloc_mutex_);
+
         blocks_ = std::move(other.blocks_);
         node_chunks_ = std::move(other.node_chunks_);
         total_nodes_ = other.total_nodes_;
-        interning_table_ = std::move(other.interning_table_);
-        interned_constants_ = std::move(other.interned_constants_);
-        interned_zero_ = std::move(other.interned_zero_);
-        interned_one_ = std::move(other.interned_one_);
-        interned_negative_one_ = std::move(other.interned_negative_one_);
         other.total_nodes_ = 0;
+        // Move all per-shard interning tables (replaces single interning_table_).
+        for (std::size_t i = 0; i < N_INTERN_SHARDS; ++i) {
+            intern_shard_tables_[i] = std::move(other.intern_shard_tables_[i]);
+        }
+
+        for (std::size_t i = 0; i < interned_constants_.size(); ++i) {
+            interned_constants_[i].store(
+                other.interned_constants_[i].load(std::memory_order_relaxed),
+                std::memory_order_relaxed);
+            other.interned_constants_[i].store(ExprPtr{}, std::memory_order_relaxed);
+        }
+        interned_zero_.store(other.interned_zero_.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        interned_one_.store(other.interned_one_.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        interned_neg_one_.store(other.interned_neg_one_.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        other.interned_zero_.store(ExprPtr{}, std::memory_order_relaxed);
+        other.interned_one_.store(ExprPtr{}, std::memory_order_relaxed);
+        other.interned_neg_one_.store(ExprPtr{}, std::memory_order_relaxed);
+
+        for (auto& shard : other.intern_shards_) shard.unlock();
     }
     return *this;
 }
@@ -174,7 +212,8 @@ void AstArena::append_block(std::size_t minimum_bytes) {
 }
 
 std::size_t AstArena::size() const noexcept {
-    std::lock_guard<std::mutex> lock(mutex_);
+    // F1.3-NEW: use alloc_mutex_ (total_nodes_ is modified under it).
+    std::lock_guard<std::mutex> lock(alloc_mutex_);
     return total_nodes_;
 }
 

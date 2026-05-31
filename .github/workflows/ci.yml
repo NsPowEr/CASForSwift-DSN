@@ -3,16 +3,26 @@ name: ci
 on:
   push:
   pull_request:
+  schedule:
+    # Weekly mutation testing job — every Monday at 03:00 UTC
+    - cron: '0 3 * * 1'
 
 jobs:
+  # ── Original foundation job (preserved) ────────────────────────────────────
   foundation:
     runs-on: macos-latest
-
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install dependencies
+        run: brew install ninja ccache mpfr gmp lcov
+
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
         run: cmake --build build
@@ -31,9 +41,169 @@ jobs:
             build-bench-ci/current.txt
             build-bench-ci/report.json
 
+  # ── F0.6 Anti-monolith gate ─────────────────────────────────────────────────
+  anti-monolith:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check file sizes
+        run: bash scripts/check_file_size.sh --verbose
+
+  # ── F0.6 Sanitizers (ASan + UBSan) ─────────────────────────────────────────
+  sanitizers:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: brew install ninja ccache mpfr gmp
+
+      - name: Configure (ASan + UBSan)
+        run: |
+          cmake -S . -B build_san -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCAS_ENABLE_SANITIZERS=ON \
+            -DENABLE_COVERAGE=OFF \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build
+        run: cmake --build build_san
+
+      - name: Test
+        run: ctest --test-dir build_san --output-on-failure
+        env:
+          ASAN_OPTIONS: detect_leaks=0:abort_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+
+  # ── F0.4 Property tests ─────────────────────────────────────────────────────
+  property-tests:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: brew install ninja ccache mpfr gmp
+
+      - name: Configure
+        run: |
+          cmake -S . -B build_prop -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCAS_ENABLE_SANITIZERS=OFF \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build property tests
+        run: cmake --build build_prop --target cas_property_tests
+
+      - name: Run property tests
+        run: ctest --test-dir build_prop -R property --output-on-failure
+        env:
+          ASAN_OPTIONS: detect_leaks=0
+
+  # ── F0.3 Coverage + diff-cover (PR only) ────────────────────────────────────
+  coverage:
+    runs-on: macos-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          brew install ninja ccache mpfr gmp lcov
+          pip3 install diff-cover gcovr
+
+      - name: Configure with coverage
+        run: |
+          cmake -S . -B build_cov -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DENABLE_COVERAGE=ON \
+            -DCAS_ENABLE_SANITIZERS=OFF \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build
+        run: cmake --build build_cov
+
+      - name: Run tests
+        run: ctest --test-dir build_cov --output-on-failure
+        env:
+          ASAN_OPTIONS: detect_leaks=0
+
+      - name: Capture coverage
+        run: |
+          lcov --directory build_cov \
+               --capture \
+               --output-file build_cov/coverage.info \
+               --ignore-errors mismatch || true
+          lcov --remove build_cov/coverage.info \
+               '/usr/*' '*/test/*' '*/_deps/*' '*/tools/*' '*/GUI/*' \
+               --output-file build_cov/coverage_filtered.info \
+               --ignore-errors unused || true
+          genhtml build_cov/coverage_filtered.info \
+               --output-directory build_cov/coverage \
+               --title "CAS Engine Coverage" --legend --demangle-cpp || true
+
+      - name: Generate Cobertura XML
+        run: |
+          gcovr --root . \
+            --xml --output build_cov/coverage.xml \
+            --exclude 'test/' --exclude '_deps/' \
+            --exclude 'tools/' --exclude 'GUI/'
+
+      - name: Diff coverage gate
+        run: |
+          diff-cover build_cov/coverage.xml \
+            --fail-under=85 \
+            --compare-branch=origin/main \
+            --html-report build_cov/diff_coverage.html \
+          || echo "::warning::diff-cover: new-line coverage below 85%"
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            build_cov/coverage/
+            build_cov/diff_coverage.html
+
+  # ── F0.6 Benchmark regression gate ─────────────────────────────────────────
+  bench:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: brew install ninja ccache mpfr gmp
+
+      - name: Build + run benchmarks
+        run: |
+          bash scripts/benchmark.sh \
+            --build-dir build-bench-gate \
+            --output build-bench-gate/current.txt \
+            --report-json build-bench-gate/report.json
+
+      - name: Regression gate (max 10% regression)
+        run: |
+          bash scripts/check_bench_regression.sh \
+            --current build-bench-gate/current.txt \
+            --threshold 10 \
+            --verbose
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-results
+          path: |
+            build-bench-gate/current.txt
+            build-bench-gate/report.json
+
+  # ── GUI smoke (preserved) ───────────────────────────────────────────────────
   gui-smoke:
     runs-on: macos-latest
-
     steps:
       - uses: actions/checkout@v4
 
@@ -48,3 +218,26 @@ jobs:
 
       - name: Test cas_gui_vm_tests
         run: QT_QPA_PLATFORM=offscreen ctest --test-dir build_gui -R GuiUndoRedo --output-on-failure
+
+  # ── F0.6 Mutation testing — weekly, non-blocking ────────────────────────────
+  mutation-weekly:
+    runs-on: macos-latest
+    if: github.event_name == 'schedule'
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          brew install ninja ccache mpfr gmp
+          brew install mull || echo "mull not in brew — mutation skipped"
+
+      - name: Run mutation tests
+        run: bash scripts/run_mutation.sh --build-dir build-mutation
+
+      - name: Upload mutation report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mutation-report
+          path: mutation-report/

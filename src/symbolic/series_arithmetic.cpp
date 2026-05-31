@@ -1,6 +1,7 @@
 #include "cas/symbolic.hpp"
 #include "cas/ast.hpp"
 #include "simplify_impl.hpp"
+#include "cas/error_helpers.hpp"
 #include <map>
 #include <vector>
 
@@ -67,7 +68,13 @@ namespace cas::symbolic::detail {
     while (it != s.terms.end() && is_zero_expr(it->second)) ++it;
     if (it == s.terms.end()) return fail<ExprPtr>(make_error(CASErrorKind::Undefined, "Cannot invert zero series"));
     
-    return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Series inversion not yet fully implemented"));
+    // F0.8-MIGRATED
+    return make_unimplemented<ExprPtr>(
+        "symbolic", "trunc_series_inv",
+        "truncated power series inversion (non-constant leading term)",
+        error::reason_codes::SYMBOLIC_SERIES_INVERSION,
+        "Implement full series inversion via Newton iteration on truncated series ring",
+        "F1.x");
 }
 
 } // namespace cas::symbolic::detail

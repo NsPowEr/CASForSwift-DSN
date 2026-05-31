@@ -193,7 +193,7 @@ void append_factor_with_multiplicity(
         return ok(std::move(factors));
     }
 
-    IntPoly g = gcd_integer_poly_with_subresultant(primitive, derivative).gcd;
+    IntPoly g = gcd_integer_poly_dispatch(primitive, derivative, ctx).gcd;
     auto w_result = exact_divide_integer_poly(primitive, g, ctx);
     if (w_result.is_error()) {
         return fail<std::vector<IntegerSquareFreeFactor>>(w_result.error());
@@ -202,7 +202,7 @@ void append_factor_with_multiplicity(
     IntPoly w = primitive_integer_poly(std::move(w_result.value()));
     unsigned int multiplicity = 1U;
     while (!is_unit_integer_poly(w)) {
-        IntPoly y = gcd_integer_poly_with_subresultant(w, g).gcd;
+        IntPoly y = gcd_integer_poly_dispatch(w, g, ctx).gcd;
         auto z_result = exact_divide_integer_poly(w, y, ctx);
         if (z_result.is_error()) {
             return fail<std::vector<IntegerSquareFreeFactor>>(z_result.error());
@@ -326,7 +326,20 @@ void append_factor_with_multiplicity(
 
     if (remaining.size() > 7U) {
         BigInt p = select_factorization_prime(remaining);
-        auto mod_factors_res = factor_polynomial_mod_p(remaining, p);
+
+        // Berlekamp dispatcher (R4 wiring, F2 Block A):
+        // Use Berlekamp for small p where deg(f) * p ≤ max_berlekamp_matrix_size;
+        // fall back to Cantor-Zassenhaus (factor_polynomial_mod_p) for larger p.
+        // Both produce the same irreducible factorization mod p; Berlekamp is
+        // deterministic and faster for small p, CZ is probabilistic but scalable.
+        const std::size_t deg_p_product = remaining.degree() * static_cast<std::size_t>(p.to_u64());
+        auto mod_factors_res = (deg_p_product <= ctx.max_berlekamp_matrix_size())
+            ? berlekamp_factor_mod_p(remaining, p, ctx.max_berlekamp_matrix_size())
+            : factor_polynomial_mod_p(remaining, p);
+        // If Berlekamp returns Unimplemented (BERLEKAMP_MATRIX_TOO_LARGE), fall back to CZ.
+        if (mod_factors_res.is_error()) {
+            mod_factors_res = factor_polynomial_mod_p(remaining, p);
+        }
         if (mod_factors_res.is_ok() && mod_factors_res.value().size() > 1) {
             auto mod_factors = mod_factors_res.value();
             std::size_t n = remaining.degree();
@@ -343,34 +356,53 @@ void append_factor_with_multiplicity(
             auto lifted_res = hensel_lift_multi(remaining, mod_factors, p, k);
             if (lifted_res.is_ok()) {
                 auto lifted = lifted_res.value();
-                auto recombined = find_factor_by_hensel_recombination(
-                    remaining,
-                    mod_factors,
-                    p,
-                    k,
-                    remaining.degree() / 2U);
-                if (recombined.has_value()) {
-                    auto quotient = exact_divide_integer_poly(remaining, *recombined, ctx);
-                    if (quotient.is_ok()) {
-                        auto factor_expr = integer_coefficients_to_expr(*recombined, var, ctx);
-                        if (factor_expr.is_ok()) {
-                            append_factor_with_multiplicity(factorization.factors, factor_expr.value(), multiplicity);
-                            remaining = primitive_integer_poly(std::move(quotient.value()));
-                        }
+
+                // accept_factor: record a found Z-factor, divide remaining.
+                auto accept_factor = [&](const IntPoly& h) {
+                    auto q = exact_divide_integer_poly(remaining, h, ctx);
+                    if (!q.is_ok()) return;
+                    auto e = integer_coefficients_to_expr(h, var, ctx);
+                    if (!e.is_ok()) return;
+                    append_factor_with_multiplicity(factorization.factors, e.value(), multiplicity);
+                    remaining = primitive_integer_poly(std::move(q.value()));
+                };
+
+                // per_factor_lll: secondary LLL pass on each lifted factor.
+                auto per_factor_lll = [&]() {
+                    for (const auto& g_mod : lifted) {
+                        if (remaining.size() <= 1U) break;
+                        auto h = find_factor_lll(remaining, g_mod, pk,
+                                                 remaining.degree() / 2U, ctx.lll_delta());
+                        if (h.has_value()) accept_factor(*h);
                     }
-                }
-                for (const auto& g_mod : lifted) {
-                    auto h = find_factor_lll(remaining, g_mod, pk, remaining.degree() / 2, ctx.lll_delta());
-                    if (h.has_value()) {
-                        auto quotient = exact_divide_integer_poly(remaining, *h, ctx);
-                        if (quotient.is_ok()) {
-                            auto h_expr = integer_coefficients_to_expr(*h, var, ctx);
-                            if (h_expr.is_ok()) {
-                                append_factor_with_multiplicity(factorization.factors, h_expr.value(), multiplicity);
-                                remaining = primitive_integer_poly(std::move(quotient.value()));
-                            }
-                        }
+                };
+
+                // Dispatch: van Hoeij knapsack-lattice for r ≥ threshold.
+                // Threshold=8: 2^8=256 enumeration budget = crossover point.
+                // Reference: van Hoeij 2002 §4 Thm 4.2.
+                const std::size_t r = mod_factors.size();
+                if (r >= ctx.van_hoeij_threshold()) {
+                    // Primary: van Hoeij knapsack (polynomial-time for large r).
+                    // Invariant: pk > 2·Mignotte_bound(f, n/2) — ensured by loop above.
+                    auto vh = van_hoeij_knapsack_factor(remaining, lifted, pk,
+                                                         ctx.lll_delta(),
+                                                         ctx.van_hoeij_lll_threshold());
+                    if (vh.has_value()) accept_factor(*vh);
+                    // Secondary: subset enumeration (catches what knapsack misses for
+                    // moderate r where enumeration is still tractable).
+                    // Bounded by C(r, n/2) with Mignotte pruning — polynomial for n/2 ≤ 8.
+                    if (remaining.size() > 1U) {
+                        auto recombined = find_factor_by_hensel_recombination(
+                            remaining, mod_factors, p, k, remaining.degree() / 2U);
+                        if (recombined.has_value()) accept_factor(*recombined);
                     }
+                    per_factor_lll();  // tertiary: per-factor LLL
+                } else {
+                    // Fast path: O(2^r) subset enumeration with Mignotte pruning (r < 8).
+                    auto recombined = find_factor_by_hensel_recombination(
+                        remaining, mod_factors, p, k, remaining.degree() / 2U);
+                    if (recombined.has_value()) accept_factor(*recombined);
+                    per_factor_lll();
                 }
             }
         }

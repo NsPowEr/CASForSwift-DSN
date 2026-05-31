@@ -1,5 +1,6 @@
 #include "cas/normal_form.hpp"
 #include "cas/algebra.hpp"
+#include "cas/error_helpers.hpp"
 #include <algorithm>
 
 namespace cas::symbolic {
@@ -143,9 +144,13 @@ Result<ExprPtr> transcendental_normal_form(ExprPtr expr, CASContext& ctx, int de
     if (!expr) return ok(expr);
     if (depth < 0) depth = ctx.max_simplification_depth();
     if (depth == 0)
-        return fail<ExprPtr>(CASError{.kind = CASErrorKind::Unimplemented,
-            .message = "transcendental_normal_form: max recursion depth reached",
-            .hint = std::nullopt});
+        // F0.8-MIGRATED
+        return make_unimplemented<ExprPtr>(
+            "symbolic", "transcendental_normal_form",
+            "expression tree exceeding max_simplification_depth levels",
+            error::reason_codes::SYMBOLIC_NORMAL_FORM_DEPTH,
+            "Increase ctx.max_simplification_depth or simplify sub-expressions before calling",
+            "F1.x");
 
     auto recurse = [&](ExprPtr e) -> Result<ExprPtr> {
         return transcendental_normal_form(e, ctx, depth - 1);

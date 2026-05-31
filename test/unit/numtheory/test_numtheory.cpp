@@ -184,5 +184,46 @@ TEST(NumberTheoryPrimalityTest, RejectsCompositeNumbersBeyondSixtyFourBits) {
     EXPECT_FALSE(result.value());
 }
 
+// ── P0 Boundary Tests — Miller-Rabin 12-base determinism for n < 2^64 ────────
+//
+// These tests guard the gap [3.8×10^18, 2^64] where the previous 9-base set
+// had no determinism guarantee.  The canonical witness is:
+//   3825123056546413051 — strong pseudoprime to all of {2,3,5,7,11,13,17,19,23}
+//   but composite (= 149491 × 747451 × 34233211, confirmed by factorization).
+//   Base 37 is the first of the extended set that detects it as composite.
+// Reference: Sorenson-Webster, Mathematics of Computation 84 (2015), Table 2.
+//
+// Also tested: 2^64 − 59 = 18446744073709551557, a known prime near the u64 bound
+// (confirmed by independent primality provers).
+
+TEST(NumberTheoryPrimalityBoundaryTest, RejectsPseudoprimeToFirst9Bases) {
+    // 3825123056546413051 is a strong pseudoprime to all bases {2,3,5,7,11,13,17,19,23}
+    // but is composite (= 149491 * 747451 * 34233211).
+    // With the corrected 12-base set it must be rejected.
+    auto result = is_prime(parse_integer_or_fail("3825123056546413051"));
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+    EXPECT_FALSE(result.value())
+        << "3825123056546413051 is composite but passed 9-base Miller-Rabin; "
+           "the 12-base fix (adding 29,31,37) must detect it via base 37";
+}
+
+TEST(NumberTheoryPrimalityBoundaryTest, AcceptsLargePrimeNearU64Max) {
+    // 2^64 - 59 = 18446744073709551557 is prime.
+    // This exercises the final tier of the deterministic branch for n near 2^64.
+    auto result = is_prime(parse_integer_or_fail("18446744073709551557"));
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+    EXPECT_TRUE(result.value())
+        << "18446744073709551557 (= 2^64 - 59) is a known prime";
+}
+
+TEST(NumberTheoryPrimalityBoundaryTest, RejectsCompositeNearU64MaxGap) {
+    // 18446744073709551615 = 2^64 - 1 = 3 * 5 * 17 * 257 * 65537 * 6700417
+    // Must be rejected by is_prime.
+    auto result = is_prime(parse_integer_or_fail("18446744073709551615"));
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+    EXPECT_FALSE(result.value())
+        << "18446744073709551615 (= 2^64 - 1) is composite";
+}
+
 }  // namespace
 }  // namespace cas::numtheory

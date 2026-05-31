@@ -5,6 +5,71 @@
 
 namespace cas::calculus::integrate_detail {
 
+namespace {
+
+// Returns true if `expr` is exp(arg) where `arg` has negative or symbolic
+// powers of `var` (i.e. `arg` is not a polynomial in `var`).  Such products
+// cannot be closed by integration-by-parts in finite steps; the Risch
+// algorithm must handle them.  This guard prevents the growing-denominator
+// IBP loop that caused BUG-HANG-001.
+bool has_exp_rational_non_poly_factor(const std::vector<ExprPtr>& factors, const Symbol& var) {
+    for (ExprPtr f : factors) {
+        const auto* call = expr_cast<FuncCall>(f);
+        if (!call || call->func_id != BuiltinOp::Exp || call->args.size() != 1U) continue;
+        ExprPtr arg = call->args[0];
+        // Check: does the arg depend on var and contain any negative or
+        // fractional power of var (e.g. 1/x, 1/x², √x)?
+        // Walk the arg; if we find x^n with n < 0 or non-integer, or Div by var,
+        // declare it non-polynomial.
+        struct NonPolyWalker {
+            const Symbol& v;
+            bool found{false};
+            void walk(ExprPtr e) {
+                if (!e || found) return;
+                if (const auto* bin = expr_cast<Binary>(e)) {
+                    if (bin->op == BinaryOp::Div) {
+                        // Check if denominator depends on v.
+                        if (depends_on(bin->right, v)) { found = true; return; }
+                    }
+                    if (bin->op == BinaryOp::Pow && depends_on(bin->left, v)) {
+                        // Negative or non-integer exponent → not polynomial.
+                        if (const auto* el = expr_cast<IntegerLit>(bin->right)) {
+                            if (el->value < BigInt(0)) { found = true; return; }
+                        } else if (const auto* rl = expr_cast<RationalLit>(bin->right)) {
+                            // fractional → not polynomial
+                            (void)rl;
+                            found = true; return;
+                        } else {
+                            // symbolic exponent depending on v
+                            if (depends_on(bin->right, v)) { found = true; return; }
+                        }
+                    }
+                    walk(bin->left); walk(bin->right); return;
+                }
+                if (const auto* un = expr_cast<Unary>(e)) { walk(un->operand); return; }
+                if (const auto* s = expr_cast<Sum>(e)) {
+                    for (ExprPtr t : s->terms) walk(t);
+                    return;
+                }
+                if (const auto* p = expr_cast<Product>(e)) {
+                    for (ExprPtr t : p->factors) walk(t);
+                    return;
+                }
+                if (const auto* fc = expr_cast<FuncCall>(e)) {
+                    for (ExprPtr a : fc->args) walk(a);
+                    return;
+                }
+            }
+        };
+        NonPolyWalker w{var};
+        w.walk(arg);
+        if (w.found) return true;
+    }
+    return false;
+}
+
+}  // namespace
+
 Result<ExprPtr> Integrator::integrate_product(const Product& product, const Symbol& var) {
     auto substitution = try_u_substitution_for_product(product, var);
     if (substitution.is_ok()) {
@@ -65,6 +130,16 @@ Result<ExprPtr> Integrator::integrate_product(const Product& product, const Symb
             std::vector<ExprPtr> result_factors = constant_factors;
             result_factors.push_back(rational_integral.value());
             return ok(make_product(arena_, std::move(result_factors)));
+        }
+
+        // BUG-HANG-001: skip IBP when a factor is exp(g) with g non-polynomial
+        // in var (e.g. exp(1/x)).  IBP generates integrands with growing
+        // denominator degree and never terminates.  Risch DE solver handles
+        // these cases in step 3 of Integrator::integrate.
+        if (has_exp_rational_non_poly_factor(variable_factors, var)) {
+            return fail<ExprPtr>(make_error(
+                CASErrorKind::Unimplemented,
+                "integrate_product: IBP skipped for exp(non-poly) factor; defer to Risch DE"));
         }
 
         auto ibp_res = integrate_by_parts(arena_.make<Product>(variable_factors), var, context_);

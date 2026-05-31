@@ -3,6 +3,7 @@
 #include "cas/symbolic.hpp"
 #include "cas/ast.hpp"
 #include "cas/result.hpp"
+#include "cas/error_helpers.hpp"
 #include <cmath>
 #include <string>
 
@@ -65,8 +66,13 @@ public:
                         return fail<BigFloat>(make_error(CASErrorKind::Undefined,
                             "Infinity has no finite BigFloat representation"));
                     default:
-                        return fail<BigFloat>(make_error(CASErrorKind::Unimplemented,
-                            "Constant not supported in BigFloat evaluator"));
+                        // F0.8-MIGRATED
+                        return make_unimplemented<BigFloat>(
+                            "numeric", "BigFloatEvaluator::evaluate",
+                            "math constant not yet mapped to BigFloat (MPFR) function",
+                            error::reason_codes::NUMERIC_UNSUPPORTED_CONSTANT,
+                            "Add MPFR constant via BigFloat::from_mpfr_const() for the missing MathConstant",
+                            "F1.x");
                     }
                 }
                 else if constexpr (std::is_same_v<NodeT, Unary>) {
@@ -75,8 +81,13 @@ public:
                     switch (node.op) {
                     case UnaryOp::Neg: return ok(-op.value());
                     default:
-                        return fail<BigFloat>(make_error(CASErrorKind::Unimplemented,
-                            "Unary op not supported in BigFloat evaluator"));
+                        // F0.8-MIGRATED
+                        return make_unimplemented<BigFloat>(
+                            "numeric", "BigFloatEvaluator::evaluate",
+                            "unary operator not dispatched in BigFloat evaluator",
+                            error::reason_codes::NUMERIC_UNSUPPORTED_UNARY_OP,
+                            "Add BigFloat dispatch for the missing UnaryOp in bigfloat_eval.cpp",
+                            "F1.x");
                     }
                 }
                 else if constexpr (std::is_same_v<NodeT, Binary>) {
@@ -96,8 +107,13 @@ public:
                     case BinaryOp::Pow:
                         return ok(BigFloat::pow(lv.value(), rv.value()));
                     default:
-                        return fail<BigFloat>(make_error(CASErrorKind::Unimplemented,
-                            "Binary op not supported in BigFloat evaluator"));
+                        // F0.8-MIGRATED
+                        return make_unimplemented<BigFloat>(
+                            "numeric", "BigFloatEvaluator::evaluate",
+                            "binary operator not dispatched in BigFloat evaluator",
+                            error::reason_codes::NUMERIC_UNSUPPORTED_BINARY_OP,
+                            "Add BigFloat dispatch for the missing BinaryOp in bigfloat_eval.cpp",
+                            "F1.x");
                     }
                 }
                 else if constexpr (std::is_same_v<NodeT, Sum>) {
@@ -164,12 +180,22 @@ public:
                     if (op == BuiltinOp::Cosh)    return ok(BigFloat::cosh(args[0]));
                     if (op == BuiltinOp::Tanh)    return ok(BigFloat::tanh(args[0]));
 
-                    return fail<BigFloat>(make_error(CASErrorKind::Unimplemented,
-                        "Function '" + node.name + "' not supported in BigFloat evaluator"));
+                    // F0.8-MIGRATED
+                    return make_unimplemented<BigFloat>(
+                        "numeric", "BigFloatEvaluator::evaluate",
+                        "function '" + node.name + "' not dispatched in BigFloat evaluator",
+                        error::reason_codes::NUMERIC_UNSUPPORTED_FUNCTION,
+                        "Add BigFloat::fn() wrapper for '" + node.name + "' via mpfr_fn() in bigfloat.cpp",
+                        "F1.x");
                 }
                 else {
-                    return fail<BigFloat>(make_error(CASErrorKind::Unimplemented,
-                        "AST node type not supported in BigFloat evaluator"));
+                    // F0.8-MIGRATED
+                    return make_unimplemented<BigFloat>(
+                        "numeric", "BigFloatEvaluator::evaluate",
+                        "AST node type not handled in BigFloat evaluator dispatch",
+                        error::reason_codes::NUMERIC_UNSUPPORTED_NODE_TYPE,
+                        "Add a constexpr branch for the missing node type in bigfloat_eval.cpp",
+                        "F1.x");
                 }
             });
     }

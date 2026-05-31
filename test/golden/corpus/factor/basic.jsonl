@@ -1,0 +1,99 @@
+{"input": "x^2 - 1", "area": "factor", "ref": "diff_squares"}
+{"input": "x^2 - 4", "area": "factor", "ref": "diff_squares_2"}
+{"input": "x^4 - 1", "area": "factor", "ref": "diff_squares_chain"}
+{"input": "x^2 + 2*x + 1", "area": "factor", "ref": "perfect_square"}
+{"input": "x^2 - 2*x + 1", "area": "factor", "ref": "perfect_square_neg"}
+{"input": "x^3 - 1", "area": "factor", "ref": "sum_cubes"}
+{"input": "x^3 + 1", "area": "factor", "ref": "diff_cubes"}
+{"input": "x^3 + x^2 + x + 1", "area": "factor", "ref": "cubic_grouping"}
+{"input": "2*x^2 + 5*x + 3", "area": "factor", "ref": "trinomial_1"}
+{"input": "6*x^2 + 11*x + 4", "area": "factor", "ref": "trinomial_2"}
+{"input": "x^2 + x", "area": "factor", "ref": "common_factor_x"}
+{"input": "3*x^2 + 6*x", "area": "factor", "ref": "common_factor_3x"}
+{"input": "x^4 - 16", "area": "factor", "ref": "diff_fourth_powers"}
+{"input": "x^6 - 1", "area": "factor", "ref": "sixth_power"}
+{"input": "x^2 - 5*x + 6", "area": "factor", "ref": "roots_2_3"}
+{"input": "x^2 + 5*x + 6", "area": "factor", "ref": "roots_neg2_neg3"}
+{"input": "x^3 - 3*x^2 + 3*x - 1", "area": "factor", "ref": "cube_binomial"}
+{"input": "4*x^2 - 9", "area": "factor", "ref": "diff_squares_coeff"}
+{"input": "9*x^2 - 6*x + 1", "area": "factor", "ref": "perfect_square_3x"}
+{"input": "x^4 + 4", "area": "factor", "ref": "sophie_germain"}
+{"input": "x^2*y - x*y^2", "area": "factor", "ref": "two_var_common"}
+{"input": "x^3 - y^3", "area": "factor", "ref": "diff_cubes_gen"}
+{"input": "x^5 - 1", "area": "factor", "ref": "fifth_root_unity"}
+{"input": "2*x^3 - 2*x", "area": "factor", "ref": "cubic_common_2x"}
+{"input": "x^4 - y^4", "area": "factor", "ref": "diff_fourth_gen"}
+{"input": "x^2 + 4*x + 4", "area": "factor", "ref": "perfect_square_4"}
+{"input": "x^3 + 3*x^2 + 3*x + 1", "area": "factor", "ref": "cube_binomial_plus"}
+{"input": "12*x^2 - 3", "area": "factor", "ref": "common_3_diff_sq"}
+{"input": "x^2 - 7*x + 12", "area": "factor", "ref": "roots_3_4"}
+{"input": "x^4 + x^3 - x - 1", "area": "factor", "ref": "factor_grouping_4"}
+{"input": "x^2 + x - 2", "area": "factor", "ref": "roots_neg2_1"}
+{"input": "x^2 + x - 6", "area": "factor", "ref": "roots_neg3_2"}
+{"input": "x^2 - x - 12", "area": "factor", "ref": "roots_neg3_4"}
+{"input": "x^2 + 6*x + 9", "area": "factor", "ref": "perfect_sq_6"}
+{"input": "x^2 - 6*x + 9", "area": "factor", "ref": "perfect_sq_neg6"}
+{"input": "x^2 + 4*x - 12", "area": "factor", "ref": "roots_neg6_2"}
+{"input": "x^2 - 9", "area": "factor", "ref": "diff_sq_9"}
+{"input": "x^2 - 25", "area": "factor", "ref": "diff_sq_25"}
+{"input": "x^2 - 36", "area": "factor", "ref": "diff_sq_36"}
+{"input": "4*x^2 - 25", "area": "factor", "ref": "diff_sq_4x_25"}
+{"input": "9*x^2 - 16", "area": "factor", "ref": "diff_sq_9x_16"}
+{"input": "x^3 + 8", "area": "factor", "ref": "sum_cubes_8"}
+{"input": "x^3 - 8", "area": "factor", "ref": "diff_cubes_8"}
+{"input": "x^3 + 27", "area": "factor", "ref": "sum_cubes_27"}
+{"input": "x^3 - 27", "area": "factor", "ref": "diff_cubes_27"}
+{"input": "8*x^3 - 1", "area": "factor", "ref": "diff_cubes_coeff_8"}
+{"input": "27*x^3 + 1", "area": "factor", "ref": "sum_cubes_27x"}
+{"input": "x^4 + x^2 + 1", "area": "factor", "ref": "cyclotomic_12"}
+{"input": "x^4 - x^2 - 2", "area": "factor", "ref": "biquad_sub"}
+{"input": "x^4 - 5*x^2 + 4", "area": "factor", "ref": "biquad_5_4"}
+{"input": "x^4 - 13*x^2 + 36", "area": "factor", "ref": "biquad_13_36"}
+{"input": "x^3 - 2*x^2 - x + 2", "area": "factor", "ref": "cubic_grouping_2"}
+{"input": "x^3 + 2*x^2 - x - 2", "area": "factor", "ref": "cubic_grouping_3"}
+{"input": "x^3 - 4*x^2 + 4*x", "area": "factor", "ref": "cubic_double_root"}
+{"input": "2*x^3 + 3*x^2 - 2*x - 3", "area": "factor", "ref": "cubic_grouping_coeff"}
+{"input": "x^4 - 8*x^2 + 16", "area": "factor", "ref": "biquad_perfect_sq"}
+{"input": "x^2*y^2 - 1", "area": "factor", "ref": "multivar_diff_one"}
+{"input": "x^2*y^2 - x^2", "area": "factor", "ref": "multivar_common_x2"}
+{"input": "x^2 - y^2 + x - y", "area": "factor", "ref": "multivar_grouped"}
+{"input": "x^4 - y^2", "area": "factor", "ref": "multivar_x4_y2"}
+{"input": "x^3 + x^2*y - x*y^2 - y^3", "area": "factor", "ref": "multivar_cubic_2var"}
+{"input": "a^2*x^2 - b^2", "area": "factor", "ref": "param_diff_sq"}
+{"input": "x^6 + x^3 - 2", "area": "factor", "ref": "sub_cubic_in_x3"}
+{"input": "x^5 + x^4 - x - 1", "area": "factor", "ref": "fifth_grouping"}
+{"input": "x^7 - 1", "area": "factor", "ref": "seventh_unity"}
+{"input": "x^8 - 1", "area": "factor", "ref": "eighth_unity"}
+{"input": "3*x^3 - 3*x^2 + x - 1", "area": "factor", "ref": "cubic_grouping_3x"}
+{"input": "5*x^2 - 5", "area": "factor", "ref": "common_5_diff_sq"}
+{"input": "x^2 + 14*x + 49", "area": "factor", "ref": "perfect_sq_49"}
+{"input": "x^2 - 8*x + 16", "area": "factor", "ref": "perfect_sq_16"}
+{"input": "x^2 + 10*x + 25", "area": "factor", "ref": "perfect_sq_25"}
+{"input": "x^3 - x^2", "area": "factor", "ref": "x2_common"}
+{"input": "x^4 - x^3", "area": "factor", "ref": "x3_common"}
+{"input": "6*x^2 - 7*x - 3", "area": "factor", "ref": "trinomial_3"}
+{"input": "3*x^2 - 7*x + 2", "area": "factor", "ref": "trinomial_4"}
+{"input": "4*x^2 - 4*x + 1", "area": "factor", "ref": "perfect_sq_2x_minus1"}
+{"input": "9*x^2 + 12*x + 4", "area": "factor", "ref": "perfect_sq_3x_plus2"}
+{"input": "x^4 - 2*x^2 + 1", "area": "factor", "ref": "biquad_perfect_x2_minus1"}
+{"input": "2*x^4 - 18*x^2", "area": "factor", "ref": "quartic_common_2x2"}
+{"input": "x^5 - x^3", "area": "factor", "ref": "quintic_common_x3"}
+{"input": "x^6 - x^4", "area": "factor", "ref": "sixth_common_x4"}
+{"input": "x^2 - 11*x + 30", "area": "factor", "ref": "roots_5_6"}
+{"input": "x^2 + 11*x + 30", "area": "factor", "ref": "roots_neg5_neg6"}
+{"input": "x^2 - 13*x + 40", "area": "factor", "ref": "roots_5_8"}
+{"input": "x^2 - 10*x + 21", "area": "factor", "ref": "roots_3_7"}
+{"input": "x^2 - 11*x + 18", "area": "factor", "ref": "roots_2_9"}
+{"input": "x^3 - 7*x + 6", "area": "factor", "ref": "cubic_rational_roots_1_2_neg3"}
+{"input": "x^3 - 6*x - 4", "area": "factor", "ref": "cubic_rational_roots_neg2_neg2_4"}
+{"input": "x^3 + 6*x^2 + 11*x + 6", "area": "factor", "ref": "cubic_roots_neg1_neg2_neg3"}
+{"input": "x^4 + 2*x^3 - x^2 - 2*x", "area": "factor", "ref": "quartic_factor_zero"}
+{"input": "x^4 - 10*x^2 + 9", "area": "factor", "ref": "biquad_1_3_sub"}
+{"input": "x^2 + x - 20", "area": "factor", "ref": "roots_neg5_4"}
+{"input": "x^2 - 3*x - 10", "area": "factor", "ref": "roots_neg2_5"}
+{"input": "x^2 + 3*x - 10", "area": "factor", "ref": "roots_2_neg5"}
+{"input": "x^2 - 8*x + 12", "area": "factor", "ref": "roots_2_6"}
+{"input": "x^2 + 8*x + 12", "area": "factor", "ref": "roots_neg2_neg6"}
+{"input": "x^2 - 6*x + 8", "area": "factor", "ref": "roots_2_4"}
+{"input": "x^2 + 6*x + 8", "area": "factor", "ref": "roots_neg2_neg4"}
+{"input": "x^3 - 3*x + 2", "area": "factor", "ref": "cubic_roots_1_1_neg2"}

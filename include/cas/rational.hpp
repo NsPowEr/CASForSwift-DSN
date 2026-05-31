@@ -4,6 +4,8 @@
 #include "cas/result.hpp"
 
 #include <cstdint>
+#include <limits>
+#include <vector>
 
 namespace cas {
 
@@ -24,6 +26,17 @@ public:
     [[nodiscard]] BigInt round() const;
     [[nodiscard]] Result<double> to_double_checked() const;
     [[nodiscard]] double to_double() const;
+
+    // F1.2-NEW: continued-fraction expansion via the Euclidean algorithm.
+    // Returns the partial quotients [a0; a1, a2, ..., ak] with at most
+    // n_max terms (default unbounded = terminates when remainder is zero).
+    // For a negative rational the sign is absorbed into a0 (a0 may be
+    // negative; all subsequent quotients are positive — standard convention).
+    // Property: the (n_max)-convergent reconstructed from the returned
+    // list satisfies |rational - convergent| <= 1/(q_k * q_{k+1}) where
+    // q_k is the k-th convergent denominator.
+    [[nodiscard]] std::vector<BigInt> to_continued_fraction(
+        std::size_t n_max = std::numeric_limits<std::size_t>::max()) const;
 
     [[nodiscard]] Rational operator-() const;
 

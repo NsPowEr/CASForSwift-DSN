@@ -1,0 +1,100 @@
+# F0.6 Anti-monolith whitelist — files that currently exceed the 500-line limit.
+# Each entry must have a MANDATORY refactor ticket in CAS_TASKS.md / HARDCODE_LEDGER.md.
+# Format: one path relative to repo root per line, comments with #.
+# No new entries without a corresponding split task filed.
+
+# src/calculus/limit_mrv.cpp              (~1019 lines) — Gruntz MRV algorithm; split target: F5.2
+src/calculus/limit_mrv.cpp
+
+# src/algebra/polynomial_gcd_multivariate.cpp  (~1010 lines) — Brown+Zippel; split target: F3.1
+src/algebra/polynomial_gcd_multivariate.cpp
+
+# src/algebra/factorization_polynomials.cpp    (~1005 lines) — Cantor-Zassenhaus+recomb; split target: F2.3
+src/algebra/factorization_polynomials.cpp
+
+# src/calculus/integrate_risch.cpp        (~913 lines)  — Risch-Hermite pipeline; split target: F5.1
+src/calculus/integrate_risch.cpp
+
+# src/symbolic/simplify_arithmetic.cpp    (~724 lines)  — like-term collection; split target: F1.4
+src/symbolic/simplify_arithmetic.cpp
+
+# src/symbolic/assumptions.cpp            (~682 lines)  — assumption inference; split target: F1.4
+src/symbolic/assumptions.cpp
+
+# src/symbolic/context_core.cpp           (~627 lines)  — CASContext; split target: F1.3
+src/symbolic/context_core.cpp
+
+# src/algebra/algebraic_tower_bridge.cpp  (~620 lines)  — Trager primitive element; split target: F3.4
+src/algebra/algebraic_tower_bridge.cpp
+
+# src/foundation/bigint.cpp               (~615 lines)  — BigInt core; split target: F1.1
+# (Note: bigint split already done into bigint_arithmetic/conversions/logic — verify count)
+src/foundation/bigint.cpp
+
+# src/calculus/differentiate.cpp          (~611 lines)  — diff rules; split target: F5
+src/calculus/differentiate.cpp
+
+# src/rewrite/builtin_rewrite.cpp         (~610 lines)  — rewrite rules; split target: F1.5
+src/rewrite/builtin_rewrite.cpp
+
+# src/ast/ast.cpp                         (~605 lines)  — AST nodes; split target: F1.3
+src/ast/ast.cpp
+
+# src/symbolic/term_order.cpp             (~589 lines)  — LPO/GrevLex ordering; split target: F3.3
+src/symbolic/term_order.cpp
+
+# src/algebra/algebraic_number_bridge.cpp (~584 lines)  — Q(alpha) arithmetic; split target: F3.4
+src/algebra/algebraic_number_bridge.cpp
+
+# src/algebra/solve_polynomial.cpp        (~573 lines)  — polynomial solver; split target: F2
+src/algebra/solve_polynomial.cpp
+
+# src/symbolic/simplify_exp_log.cpp       (~550 lines)  — exp/log simplification; split target: F1.4
+src/symbolic/simplify_exp_log.cpp
+
+# src/symbolic/simplify_arithmetic_chain.cpp (~545 lines) — chain simplification; split target: F1.4
+src/symbolic/simplify_arithmetic_chain.cpp
+
+# include/cas/ast.hpp                     (~542 lines)  — public AST header; split target: F1.3
+include/cas/ast.hpp
+
+# src/calculus/limit.cpp                  (~540 lines)  — limit dispatcher; split target: F5.2
+src/calculus/limit.cpp
+
+# src/calculus/laplace_transform.cpp      (~515 lines)  — Laplace table + algorithm; split target: F5.8
+src/calculus/laplace_transform.cpp
+
+# src/calculus/orthogonal_polynomials.cpp (~521 lines)  — Legendre/Chebyshev/Hermite/Laguerre; split target: F5.9
+src/calculus/orthogonal_polynomials.cpp
+
+# src/calculus/residue_theorem.cpp        (~501 lines)  — residue + contour integration; split target: F5.6
+src/calculus/residue_theorem.cpp
+
+# src/symbolic/simplify_trig.cpp — SPLIT DONE (F1-DEBT1): arc-trig extracted to
+#   simplify_trig_inverse.cpp; simplify_trig.cpp now 455 lines (≤500). No whitelist needed.
+
+# include/cas/symbolic.hpp — DEBT CLOSED (SPLIT-SYMBOLIC-HPP-F2.5).
+# Algorithm parameters extracted to cas_context_params.hpp; now 328 lines (≤500).
+# No whitelist entry needed.
+
+# Pre-existing violations (split tasks filed in CAS_TASKS.md under SPLIT-F3.x):
+
+# src/algebra/algebraic_tower_primitive_internal.hpp (~581 lines) — F3.4 internal helpers;
+#   split target: extract compute_shift_resultant to algebraic_tower_primitive_shift.cpp
+src/algebra/algebraic_tower_primitive_internal.hpp
+
+# src/algebra/polynomial_gcd_fp_recursive.cpp (~546 lines) — Brown sparse GCD recursive;
+#   split target: F3.1 content helpers to polynomial_gcd_fp_content.cpp
+src/algebra/polynomial_gcd_fp_recursive.cpp
+
+# src/algebra/polynomial_gcd_brown_modular.cpp (~596 lines) — Brown modular GCD;
+#   split target: F3.1 CRT phase to polynomial_gcd_brown_crt.cpp
+src/algebra/polynomial_gcd_brown_modular.cpp
+
+# src/algebra/polynomial_groebner_f5.cpp (~524 lines) — F5 Groebner;
+#   split target: F3.3 signature reduction to polynomial_groebner_f5_reduce.cpp
+src/algebra/polynomial_groebner_f5.cpp
+
+# src/algebra/polynomial_groebner_fglm.cpp (~572 lines) — FGLM;
+#   split target: F3.3 linear algebra phase to polynomial_groebner_fglm_linalg.cpp
+src/algebra/polynomial_groebner_fglm.cpp

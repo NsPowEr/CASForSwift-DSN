@@ -31,6 +31,8 @@ GoogleTest is the intended framework; the `test/` subtree is reserved for it. Te
 
 ## Commit & Pull Request Guidelines
 Git history is not available in this checkout, so use short imperative commit messages such as `Add parser error propagation`. Keep each commit focused on one module or behavior. PRs should include: purpose, affected module, references consulted in `.APROJECT_REFERENCES`, test evidence (`ctest`, sanitizer runs, manual `cas_ui` checks), and screenshots only if `tools/cas_ui` UI behavior changes.
+
+**Git Safety Rule**: Mai dare agente accesso a `git reset --hard` o `git restore` without explicit safe pattern. NO `git reset --hard`, NO `git restore --source`, solo backup via `git stash push`.
 ## Mandato di Guardia Architetturale
 Gli agenti sono i custodi dell'integrità del motore. È obbligatorio:
 1. **Rilevamento Preventivo Monoliti**: Se un file supera le 400 righe, l'agente deve proporre uno split preventivo in moduli verticali (es. `simplify_arithmetic.cpp`).
@@ -41,3 +43,16 @@ Gli agenti sono i custodi dell'integrità del motore. È obbligatorio:
 ## Agent-Specific Instructions
 ...
 If a required spec file is missing or marked as future work, stop and ask for the specification instead of inventing architecture. This repository is documentation-driven; implementation follows approved references, not ad hoc design.
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+When the user types `/graphify`, invoke the `skill` tool with `skill: "graphify"` before doing anything else.
+
+Rules:
+- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- Dirty graphify-out/ files are expected after hooks or incremental updates; dirty graph files are not a reason to skip graphify. Only skip graphify if the task is about stale or incorrect graph output, or the user explicitly says not to use it.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).

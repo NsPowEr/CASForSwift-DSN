@@ -1,3 +1,8 @@
+// factorization_trager.cpp — Trager algorithm for factorization over algebraic extensions.
+// Extracted from factorization_polynomials.cpp (A1 anti-monolith split, F2 Block A).
+// Ref: Trager 1976 "Algebraic Factoring and Rational Function Integration";
+//      GCL §8.3 (Algorithms for Computer Algebra, Geddes-Czapor-Labahn).
+
 #include "cas/algebra.hpp"
 #include "cas/ast_debug.hpp"
 #include "cas/symbolic.hpp"
@@ -8,512 +13,6 @@
 #include <vector>
 
 namespace cas::algebra {
-
-[[nodiscard]] static Result<RationalParts> normalize_rational_parts(RationalParts parts, symbolic::CASContext& ctx) {
-    auto numerator = simplify_expr(parts.numerator, ctx);
-    if (numerator.is_error()) {
-        return fail<RationalParts>(numerator.error());
-    }
-
-    auto denominator = simplify_expr(parts.denominator, ctx);
-    if (denominator.is_error()) {
-        return fail<RationalParts>(denominator.error());
-    }
-    if (is_zero_expr(denominator.value())) {
-        return fail<RationalParts>(make_error(CASErrorKind::Undefined, "Denominatore nullo in apart_num_den"));
-    }
-
-    if (is_zero_expr(numerator.value())) {
-        return ok(RationalParts{
-            .numerator = make_integer(ctx.arena(), 0),
-            .denominator = make_integer(ctx.arena(), 1),
-        });
-    }
-
-    return ok(RationalParts{
-        .numerator = numerator.value(),
-        .denominator = denominator.value(),
-    });
-}
-
-[[nodiscard]] static Result<RationalParts> make_atomic_parts(ExprPtr expr, symbolic::CASContext& ctx) {
-    auto cloned = clone_into_context(expr, ctx);
-    if (cloned.is_error()) {
-        return fail<RationalParts>(cloned.error());
-    }
-    return normalize_rational_parts(
-        RationalParts{
-            .numerator = cloned.value(),
-            .denominator = make_integer(ctx.arena(), 1),
-        },
-        ctx);
-}
-
-[[nodiscard]] static Result<RationalParts> multiply_parts(const RationalParts& lhs, const RationalParts& rhs, symbolic::CASContext& ctx) {
-    auto numerator = multiply_exprs(lhs.numerator, rhs.numerator, ctx);
-    if (numerator.is_error()) {
-        return fail<RationalParts>(numerator.error());
-    }
-    auto denominator = multiply_exprs(lhs.denominator, rhs.denominator, ctx);
-    if (denominator.is_error()) {
-        return fail<RationalParts>(denominator.error());
-    }
-    return normalize_rational_parts(
-        RationalParts{
-            .numerator = numerator.value(),
-            .denominator = denominator.value(),
-        },
-        ctx);
-}
-
-[[nodiscard]] static Result<RationalParts> divide_parts(const RationalParts& lhs, const RationalParts& rhs, symbolic::CASContext& ctx) {
-    if (is_zero_expr(rhs.numerator)) {
-        return fail<RationalParts>(make_error(CASErrorKind::Undefined, "Divisione per zero in apart_num_den"));
-    }
-
-    auto numerator = multiply_exprs(lhs.numerator, rhs.denominator, ctx);
-    if (numerator.is_error()) {
-        return fail<RationalParts>(numerator.error());
-    }
-    auto denominator = multiply_exprs(lhs.denominator, rhs.numerator, ctx);
-    if (denominator.is_error()) {
-        return fail<RationalParts>(denominator.error());
-    }
-    return normalize_rational_parts(
-        RationalParts{
-            .numerator = numerator.value(),
-            .denominator = denominator.value(),
-        },
-        ctx);
-}
-
-[[nodiscard]] static Result<RationalParts> add_parts(const RationalParts& lhs, const RationalParts& rhs, symbolic::CASContext& ctx) {
-    auto lhs_scaled = multiply_exprs(lhs.numerator, rhs.denominator, ctx);
-    if (lhs_scaled.is_error()) {
-        return fail<RationalParts>(lhs_scaled.error());
-    }
-    auto rhs_scaled = multiply_exprs(rhs.numerator, lhs.denominator, ctx);
-    if (rhs_scaled.is_error()) {
-        return fail<RationalParts>(rhs_scaled.error());
-    }
-    auto numerator = add_exprs(lhs_scaled.value(), rhs_scaled.value(), ctx);
-    if (numerator.is_error()) {
-        return fail<RationalParts>(numerator.error());
-    }
-    auto denominator = multiply_exprs(lhs.denominator, rhs.denominator, ctx);
-    if (denominator.is_error()) {
-        return fail<RationalParts>(denominator.error());
-    }
-    return normalize_rational_parts(
-        RationalParts{
-            .numerator = numerator.value(),
-            .denominator = denominator.value(),
-        },
-        ctx);
-}
-
-[[nodiscard]] static Result<RationalParts> subtract_parts(const RationalParts& lhs, const RationalParts& rhs, symbolic::CASContext& ctx) {
-    auto lhs_scaled = multiply_exprs(lhs.numerator, rhs.denominator, ctx);
-    if (lhs_scaled.is_error()) {
-        return fail<RationalParts>(lhs_scaled.error());
-    }
-    auto rhs_scaled = multiply_exprs(rhs.numerator, lhs.denominator, ctx);
-    if (rhs_scaled.is_error()) {
-        return fail<RationalParts>(rhs_scaled.error());
-    }
-    auto numerator = subtract_exprs(lhs_scaled.value(), rhs_scaled.value(), ctx);
-    if (numerator.is_error()) {
-        return fail<RationalParts>(numerator.error());
-    }
-    auto denominator = multiply_exprs(lhs.denominator, rhs.denominator, ctx);
-    if (denominator.is_error()) {
-        return fail<RationalParts>(denominator.error());
-    }
-    return normalize_rational_parts(
-        RationalParts{
-            .numerator = numerator.value(),
-            .denominator = denominator.value(),
-        },
-        ctx);
-}
-
-[[nodiscard]] static Result<RationalParts> pow_parts(const RationalParts& parts, const IntegerExponent& exponent, symbolic::CASContext& ctx) {
-    if (exponent.negative && is_zero_expr(parts.numerator)) {
-        return fail<RationalParts>(make_error(
-            CASErrorKind::Undefined,
-            "Una potenza negativa richiede una base razionale non nulla"));
-    }
-
-    auto numerator = pow_expr(parts.numerator, exponent.magnitude, ctx);
-    if (numerator.is_error()) {
-        return fail<RationalParts>(numerator.error());
-    }
-    auto denominator = pow_expr(parts.denominator, exponent.magnitude, ctx);
-    if (denominator.is_error()) {
-        return fail<RationalParts>(denominator.error());
-    }
-
-    if (!exponent.negative) {
-        return normalize_rational_parts(
-            RationalParts{
-                .numerator = numerator.value(),
-                .denominator = denominator.value(),
-            },
-            ctx);
-    }
-
-    return normalize_rational_parts(
-        RationalParts{
-            .numerator = denominator.value(),
-            .denominator = numerator.value(),
-        },
-        ctx);
-}
-
-Result<RationalParts> split_num_den(ExprPtr expr, symbolic::CASContext& ctx) {
-    if (!expr) {
-        return fail<RationalParts>(make_error(CASErrorKind::InvalidArgument, "Espressione nulla in apart_num_den"));
-    }
-    if (contains_decimal_literal(expr)) {
-        return fail<RationalParts>(make_error(
-            CASErrorKind::Unimplemented,
-            "I literal decimali non sono supportati in apart_num_den"));
-    }
-
-    if (const auto* unary = expr_cast<Unary>(expr)) {
-        if (unary->op == UnaryOp::Neg) {
-            auto operand = split_num_den(unary->operand, ctx);
-            if (operand.is_error()) {
-                return fail<RationalParts>(operand.error());
-            }
-            auto negated = negate_expr(operand.value().numerator, ctx);
-            if (negated.is_error()) {
-                return fail<RationalParts>(negated.error());
-            }
-            return normalize_rational_parts(
-                RationalParts{
-                    .numerator = negated.value(),
-                    .denominator = operand.value().denominator,
-                },
-                ctx);
-        }
-        return make_atomic_parts(expr, ctx);
-    }
-
-    if (const auto* binary = expr_cast<Binary>(expr)) {
-        auto lhs = split_num_den(binary->left, ctx);
-        if (lhs.is_error()) {
-            return fail<RationalParts>(lhs.error());
-        }
-
-        switch (binary->op) {
-        case BinaryOp::Add: {
-            auto rhs = split_num_den(binary->right, ctx);
-            if (rhs.is_error()) {
-                return fail<RationalParts>(rhs.error());
-            }
-            return add_parts(lhs.value(), rhs.value(), ctx);
-        }
-        case BinaryOp::Sub: {
-            auto rhs = split_num_den(binary->right, ctx);
-            if (rhs.is_error()) {
-                return fail<RationalParts>(rhs.error());
-            }
-            return subtract_parts(lhs.value(), rhs.value(), ctx);
-        }
-        case BinaryOp::Mul: {
-            auto rhs = split_num_den(binary->right, ctx);
-            if (rhs.is_error()) {
-                return fail<RationalParts>(rhs.error());
-            }
-            return multiply_parts(lhs.value(), rhs.value(), ctx);
-        }
-        case BinaryOp::Div: {
-            auto rhs = split_num_den(binary->right, ctx);
-            if (rhs.is_error()) {
-                return fail<RationalParts>(rhs.error());
-            }
-            return divide_parts(lhs.value(), rhs.value(), ctx);
-        }
-        case BinaryOp::Pow: {
-            auto exponent = parse_integer_exponent(binary->right);
-            if (exponent.is_error()) {
-                return fail<RationalParts>(exponent.error());
-            }
-            return pow_parts(lhs.value(), exponent.value(), ctx);
-        }
-        case BinaryOp::Mod:
-            return fail<RationalParts>(make_error(
-                CASErrorKind::Unimplemented,
-                "Il modulo non e' supportato in apart_num_den"));
-        case BinaryOp::Equal:
-        case BinaryOp::Less:
-        case BinaryOp::Greater:
-        case BinaryOp::LessEqual:
-        case BinaryOp::GreaterEqual:
-            return fail<RationalParts>(make_error(
-                CASErrorKind::InvalidArgument,
-                "Comparison operators not supported in apart_num_den"));
-        }
-    }
-
-    if (const auto* sum = expr_cast<Sum>(expr)) {
-        auto result = normalize_rational_parts(
-            RationalParts{
-                .numerator = make_integer(ctx.arena(), 0),
-                .denominator = make_integer(ctx.arena(), 1),
-            },
-            ctx);
-        if (result.is_error()) {
-            return fail<RationalParts>(result.error());
-        }
-        for (ExprPtr term : sum->terms) {
-            auto current = split_num_den(term, ctx);
-            if (current.is_error()) {
-                return fail<RationalParts>(current.error());
-            }
-            result = add_parts(result.value(), current.value(), ctx);
-            if (result.is_error()) {
-                return fail<RationalParts>(result.error());
-            }
-        }
-        return result;
-    }
-
-    if (const auto* product = expr_cast<Product>(expr)) {
-        auto result = normalize_rational_parts(
-            RationalParts{
-                .numerator = make_integer(ctx.arena(), 1),
-                .denominator = make_integer(ctx.arena(), 1),
-            },
-            ctx);
-        if (result.is_error()) {
-            return fail<RationalParts>(result.error());
-        }
-        for (ExprPtr factor : product->factors) {
-            auto current = split_num_den(factor, ctx);
-            if (current.is_error()) {
-                return fail<RationalParts>(current.error());
-            }
-            result = multiply_parts(result.value(), current.value(), ctx);
-            if (result.is_error()) {
-                return fail<RationalParts>(result.error());
-            }
-        }
-        return result;
-    }
-
-    return make_atomic_parts(expr, ctx);
-}
-
-Result<ExprPtr> together(ExprPtr expr, symbolic::CASContext& ctx) {
-    if (!expr) {
-        return fail<ExprPtr>(make_error(CASErrorKind::InvalidArgument, "together richiede un'espressione non nulla"));
-    }
-
-    auto parts = apart_num_den(expr, ctx);
-    if (parts.is_error()) {
-        return fail<ExprPtr>(parts.error());
-    }
-    if (is_one_expr(parts.value().denominator)) {
-        return ok(parts.value().numerator);
-    }
-    return divide_exprs(parts.value().numerator, parts.value().denominator, ctx);
-}
-
-Result<RationalParts> apart_num_den(ExprPtr expr, symbolic::CASContext& ctx) {
-    if (!expr) {
-        return fail<RationalParts>(make_error(
-            CASErrorKind::InvalidArgument,
-            "apart_num_den richiede un'espressione non nulla"));
-    }
-    return split_num_den(expr, ctx);
-}
-
-Result<ExprPtr> polynomial_gcd(ExprPtr p, ExprPtr q, const Symbol& var, symbolic::CASContext& ctx) {
-    const bool owns_operation = !ctx.operation_active_;
-    if (owns_operation) {
-        ctx.operation_active_ = true;
-        ctx.trace_capture_active_ = ctx.trace_enabled_;
-        ctx.trace_.clear();
-        ctx.ops_count_ = 0;
-        ctx.operation_started_at_ = std::chrono::steady_clock::now();
-    }
-
-    auto record_trace = [&](symbolic::RuleId rule_id, ExprPtr result) {
-        if (!ctx.trace_enabled_) {
-            return;
-        }
-        ctx.trace_.push_back(symbolic::TraceStep{
-            .rule_id = rule_id,
-            .depth = 0U,
-            .target_before = p,
-            .target_after = q,
-            .root_after = result,
-        });
-    };
-
-    auto finalize = [&]() {
-        if (owns_operation) {
-            ctx.operation_active_ = false;
-            ctx.trace_capture_active_ = false;
-            ctx.ops_count_ = 0;
-        }
-    };
-
-    auto result = [&]() -> Result<ExprPtr> {
-    if (!p || !q) {
-        return fail<ExprPtr>(make_error(
-            CASErrorKind::InvalidArgument,
-            "polynomial_gcd richiede due espressioni polinomiali non nulle"));
-    }
-
-    // Try multivariate GCD first if there are multiple variables
-    auto p_multi = parse_multivariate_polynomial(p, ctx);
-    auto q_multi = parse_multivariate_polynomial(q, ctx);
-    
-    if (p_multi.is_ok() && q_multi.is_ok()) {
-        auto vars = p_multi.value().variables();
-        auto vars_q = q_multi.value().variables();
-        vars.insert(vars.end(), vars_q.begin(), vars_q.end());
-        std::sort(vars.begin(), vars.end(), [](const auto& a, const auto& b){ return a.name < b.name; });
-        vars.erase(std::unique(vars.begin(), vars.end(), [](const auto& a, const auto& b){ return a.name == b.name; }), vars.end());
-
-        auto contains_non_main_var = [&](const MultivariatePolynomial& poly) {
-            for (const Symbol& candidate : poly.variables()) {
-                if (candidate.name != var.name) {
-                    return true;
-                }
-            }
-            return false;
-        };
-
-        if (contains_non_main_var(p_multi.value()) && contains_non_main_var(q_multi.value())) {
-            auto gcd_res = gcd_multivariate_eval_interp(p_multi.value(), q_multi.value(), ctx);
-            if (gcd_res.is_ok()) {
-                auto gcd_expr = multivariate_to_expr(gcd_res.value(), ctx);
-                if (gcd_expr.is_error()) {
-                    return fail<ExprPtr>(gcd_expr.error());
-                }
-                return ctx.simplify(gcd_expr.value());
-            }
-        }
-    }
-
-    auto left = parse_polynomial(p, var, ctx);
-    if (left.is_error()) {
-        return fail<ExprPtr>(left.error());
-    }
-    auto right = parse_polynomial(q, var, ctx);
-    if (right.is_error()) {
-        return fail<ExprPtr>(right.error());
-    }
-
-    auto left_integer = poly_to_integer_poly(left.value());
-    auto right_integer = poly_to_integer_poly(right.value());
-    if (left_integer.is_ok() && right_integer.is_ok()) {
-        const BigInt left_content = integer_content(left_integer.value());
-        const BigInt right_content = integer_content(right_integer.value());
-        IntegerGcdResult gcd_result =
-            gcd_integer_poly_with_subresultant(left_integer.value(), right_integer.value());
-        IntPoly gcd_poly = std::move(gcd_result.gcd);
-        symbolic::RuleId path_rule = symbolic::RuleId::PolynomialGcdPrimitiveFallback;
-        switch (gcd_result.path) {
-        case IntegerGcdPath::Subresultant:
-            path_rule = symbolic::RuleId::PolynomialGcdSubresultant;
-            break;
-        case IntegerGcdPath::PrimitiveFallbackPsi:
-            path_rule = symbolic::RuleId::PolynomialGcdPrimitiveFallbackPsi;
-            break;
-        case IntegerGcdPath::PrimitiveFallbackBeta:
-            path_rule = symbolic::RuleId::PolynomialGcdPrimitiveFallbackBeta;
-            break;
-        case IntegerGcdPath::PrimitiveFallback:
-            path_rule = symbolic::RuleId::PolynomialGcdPrimitiveFallback;
-            break;
-        }
-
-        if (is_zero_integer_poly(gcd_poly)) {
-            ExprPtr zero = make_integer(ctx.arena(), 0);
-            record_trace(path_rule, zero);
-            return ok(zero);
-        }
-
-        auto gcd_expr = integer_coefficients_to_expr(gcd_poly, var, ctx);
-        if (gcd_expr.is_error()) {
-            return fail<ExprPtr>(gcd_expr.error());
-        }
-
-        Result<ExprPtr> traced_result = ctx.simplify(gcd_expr.value());
-        if (left_content == right_content && traced_result.is_ok()) {
-            auto parsed_gcd = parse_polynomial(traced_result.value(), var, ctx);
-            if (parsed_gcd.is_ok()) {
-                auto monic = normalize_poly_monic(parsed_gcd.value(), ctx);
-                if (monic.is_ok()) {
-                    traced_result = polynomial_to_expr(monic.value(), var, ctx);
-                }
-            }
-        }
-        if (traced_result.is_ok()) {
-            record_trace(path_rule, traced_result.value());
-        }
-        return traced_result;
-    }
-
-    if (is_zero_poly(left.value()) && is_zero_poly(right.value())) {
-        ExprPtr zero = make_integer(ctx.arena(), 0);
-        record_trace(symbolic::RuleId::PolynomialGcdSymbolicEuclidean, zero);
-        return ok(zero);
-    }
-    if (is_zero_poly(left.value())) {
-        auto normalized = normalize_poly_monic(right.value(), ctx);
-        if (normalized.is_error()) {
-            return fail<ExprPtr>(normalized.error());
-        }
-        auto traced_result = polynomial_to_expr(normalized.value(), var, ctx);
-        if (traced_result.is_ok()) {
-            record_trace(symbolic::RuleId::PolynomialGcdSymbolicEuclidean, traced_result.value());
-        }
-        return traced_result;
-    }
-    if (is_zero_poly(right.value())) {
-        auto normalized = normalize_poly_monic(left.value(), ctx);
-        if (normalized.is_error()) {
-            return fail<ExprPtr>(normalized.error());
-        }
-        auto traced_result = polynomial_to_expr(normalized.value(), var, ctx);
-        if (traced_result.is_ok()) {
-            record_trace(symbolic::RuleId::PolynomialGcdSymbolicEuclidean, traced_result.value());
-        }
-        return traced_result;
-    }
-
-    PolyExpr a = std::move(left.value());
-    PolyExpr b = std::move(right.value());
-
-    while (!is_zero_poly(b)) {
-        auto division = divide_poly_with_remainder(a, b, ctx);
-        if (division.is_error()) {
-            return fail<ExprPtr>(division.error());
-        }
-        a = std::move(b);
-        b = std::move(division.value().remainder);
-    }
-
-    auto normalized = normalize_poly_monic(a, ctx);
-    if (normalized.is_error()) {
-        return fail<ExprPtr>(normalized.error());
-    }
-    auto traced_result = polynomial_to_expr(normalized.value(), var, ctx);
-    if (traced_result.is_ok()) {
-        record_trace(symbolic::RuleId::PolynomialGcdSymbolicEuclidean, traced_result.value());
-    }
-    return traced_result;
-    }();
-
-    finalize();
-    return result;
-}
 
 namespace {
 
@@ -819,12 +318,6 @@ struct ExtensionInfo {
             auto rat_y = poly_to_rational_poly(poly_y.value());
             if (rat_y.is_ok()) {
                 auto [q, rem] = div_rem_rational_poly(rat_y.value(), m_y);
-                std::vector<ExprPtr> rem_expr_coeffs;
-                for (const auto& c : rem.coefficients()) {
-                    rem_expr_coeffs.push_back(ctx.arena().make<RationalLit>(c.numerator(), c.denominator()));
-                }
-                auto int_poly_res = poly_to_integer_poly(PolyExpr(rem_expr_coeffs));
-                auto rem_expr = polynomial_to_expr(PolyExpr(integer_coefficients_to_poly(int_poly_res.is_ok() ? int_poly_res.value() : IntPoly{}, ctx.arena())), y, ctx); // Simplification bypass
                 // Actually easier:
                 std::vector<ExprPtr> rem_coeffs;
                 for (const auto& c : rem.coefficients()) {
@@ -846,7 +339,7 @@ struct ExtensionInfo {
     const Symbol& y,
     const RatPoly& m_y,
     symbolic::CASContext& ctx) {
-    
+
     auto reduce = [&](PolyExpr p) { return reduce_poly_mod_m(std::move(p), y, m_y, ctx); };
 
     A = reduce(std::move(A)).value();
@@ -863,7 +356,7 @@ struct ExtensionInfo {
         if (g.degree() > 0 || g.is_zero()) {
             return fail<PolyExpr>(make_error(CASErrorKind::InvalidArgument, "Coefficiente non invertibile nell'estensione (m(y) non irriducibile?)"));
         }
-        
+
         Rational inv_g = Rational(BigInt(1)) / g.constant_term();
         std::vector<ExprPtr> inv_coeffs;
         for (const auto& c : s.coefficients()) {
@@ -878,7 +371,7 @@ struct ExtensionInfo {
 
         auto div_res = divide_poly_with_remainder(A, B_monic, ctx);
         if (div_res.is_error()) return fail<PolyExpr>(div_res.error());
-        
+
         A = std::move(B);
         B = reduce(std::move(div_res.value().remainder)).value();
     }
@@ -907,7 +400,7 @@ Result<Factorization> factor_polynomial(
     const Symbol& var,
     symbolic::CASContext& ctx,
     std::optional<ExprPtr> extension) {
-    
+
     if (!extension.has_value()) {
         return factor_over_integers(poly, var, ctx);
     }
@@ -925,7 +418,7 @@ Result<Factorization> factor_polynomial(
     auto f_x_y_raw = replace_subexpression(poly, ext_info.original_expr, alpha, ctx.arena());
     auto f_x_y_expr = ctx.simplify(f_x_y_raw);
     if (f_x_y_expr.is_error()) return fail<Factorization>(f_x_y_expr.error());
-    
+
     auto f_poly_res = parse_polynomial(f_x_y_expr.value(), var, ctx);
     if (f_poly_res.is_error()) return fail<Factorization>(f_poly_res.error());
     PolyExpr f_poly = f_poly_res.value();
@@ -936,7 +429,7 @@ Result<Factorization> factor_polynomial(
         m_coeffs.push_back(ctx.arena().make<RationalLit>(c.numerator(), c.denominator()));
     }
     auto m_y_expr = polynomial_to_expr(PolyExpr(m_coeffs), ext_info.var, ctx).value();
-    
+
     const std::size_t max_shift_attempts = trager_shift_attempt_bound(f_poly, ext_info.min_poly, ctx);
     for (std::size_t s = 0U; s < max_shift_attempts; ++s) {
         // g(x) = Norm(f(x - sy, y))
@@ -961,7 +454,7 @@ Result<Factorization> factor_polynomial(
         if (g_factors_res.is_error()) return fail<Factorization>(g_factors_res.error());
         auto g_factors = g_factors_res.value();
 
-        // Verifica se Norm è square-free (per semplicità, controlliamo se ci sono fattori con molteplicità > 1)
+        // Verifica se Norm è square-free (controlliamo se ci sono fattori con molteplicità > 1)
         bool square_free = true;
         for (const auto& fact : g_factors.factors) {
             if (fact.multiplicity > 1) {
@@ -974,7 +467,7 @@ Result<Factorization> factor_polynomial(
             // 4. GCD: f_i(x, y) = gcd(f(x, y), g_i(x + sy, y))
             Factorization result;
             result.content = make_integer(ctx.arena(), 1); // Trager usually returns monic factors
-            
+
             for (const auto& gi_fact : g_factors.factors) {
                 ExprPtr gi_shifted_expr = gi_fact.factor;
                 if (s != 0) {
@@ -1000,6 +493,5 @@ Result<Factorization> factor_polynomial(
 
     return fail<Factorization>(make_error(CASErrorKind::Unimplemented, "Impossibile trovare uno shift square-free per la fattorizzazione di Trager entro il budget configurato"));
 }
-
 
 } // namespace cas::algebra

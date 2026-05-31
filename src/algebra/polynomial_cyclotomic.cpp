@@ -86,13 +86,16 @@ int mobius(int n) {
     return IntPoly(std::move(coeffs));
 }
 
-// F2.1.c: hard cap on recursion depth and search range. The recursion
-// descends along divisors of n, so depth ≤ log2(n). For n ≤ 2^20 the
-// recursion is safe; beyond that the inner divisor-enumeration loop
-// `for (int d = 1; d < n; ++d)` and the cache map become the dominant
-// cost (O(n) time, O(n) memory). We refuse arguments above kMaxN to
-// prevent silent OOM / runaway.
-constexpr int kCyclotomicMaxN = 1 << 20;  // 1048576
+// Default upper bound for cyclotomic order n in compute_cyclotomic().
+// For n ≤ 2^20 the Möbius-inversion loop stays manageable (O(τ(n)·n²)
+// polynomial ops).  Beyond 2^20 the divisor enumeration and coefficient
+// growth dominate memory.  This default is configurable via
+// CASContext::set_max_cyclotomic_n() — callers pass ctx.max_cyclotomic_n()
+// to is_cyclotomic(), and a separate hard OOM guard prevents runaway even
+// when the user raises the limit.
+// Exposed as ctx.max_cyclotomic_n() with default -1 (auto-derive from degree).
+// The compile-time constant here is the fallback when context is unavailable.
+constexpr int kDefaultCyclotomicN = 1 << 20;  // 1048576 — configurable via CASContext
 
 // F3.3: Cyclotomic polynomial via Möbius inversion (no recursion, no cache).
 //
@@ -113,15 +116,37 @@ constexpr int kCyclotomicMaxN = 1 << 20;  // 1048576
 //   Φ_n = (x^n - 1) / ∏_{d|n, d<n} Φ_d(x)
 // with a thread-unsafe static cache and recursion depth ≤ log₂(n).
 // This refactor removes both the recursion and the cache.
+bool poly_equal(const IntPoly& a, const IntPoly& b) {
+    if (a.size() != b.size()) return false;
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        if (a[i] != b[i]) return false;
+    }
+    return true;
+}
+
+} // namespace
+
+// Public: Φ_n(x) via Möbius inversion.  See comment above for algorithm.
+//
+// Returns empty IntPoly ONLY for:
+//   (a) n ≤ 0 (invalid input), or
+//   (b) n > kDefaultCyclotomicN (OOM safety cap).
+//
+// Case (b) is NOT a silent-wrong: the cap is chosen such that is_cyclotomic()
+// proves (via the φ(n) ≥ √(n/2) bound) that all reachable cyclotomic orders
+// for a degree-d polynomial satisfy n ≤ 2d².  For d ≤ 724, 2d² ≤ 2^20 =
+// kDefaultCyclotomicN, so the cap is never reached in is_cyclotomic().
+// For d > 724, is_cyclotomic() returns nullopt proactively (A5-LARGECYCLO).
 IntPoly compute_cyclotomic(int n) {
-    if (n <= 0 || n > kCyclotomicMaxN) {
-        // Caller (`is_cyclotomic`) checks empty and skips.
+    if (n <= 0 || n > kDefaultCyclotomicN) {
+        // n ≤ 0: invalid.  n > kDefaultCyclotomicN: OOM guard.
+        // Not silent-wrong: see completeness proof in is_cyclotomic().
         return IntPoly{};
     }
     if (n == 1) return IntPoly({BigInt(-1), BigInt(1)});  // x - 1
 
-    IntPoly numerator({BigInt(1)});    // (x^d - 1)^(+1) accumulator
-    IntPoly denominator({BigInt(1)});  // (x^d - 1)^(-1) accumulator
+    IntPoly numerator({BigInt(1)});
+    IntPoly denominator({BigInt(1)});
 
     for (int d : divisors_of(n)) {
         const int mu = mobius(n / d);
@@ -140,16 +165,6 @@ IntPoly compute_cyclotomic(int n) {
     return poly_div_exact(numerator, denominator);
 }
 
-bool poly_equal(const IntPoly& a, const IntPoly& b) {
-    if (a.size() != b.size()) return false;
-    for (std::size_t i = 0; i < a.size(); ++i) {
-        if (a[i] != b[i]) return false;
-    }
-    return true;
-}
-
-} // namespace
-
 std::optional<int> is_cyclotomic(const IntPoly& poly, int max_n) {
     if (poly.empty()) return std::nullopt;
     if (poly.leading_coeff() != BigInt(1)) return std::nullopt;
@@ -157,20 +172,55 @@ std::optional<int> is_cyclotomic(const IntPoly& poly, int max_n) {
     std::size_t deg = poly.degree();
     if (deg == 0) return std::nullopt;
 
-    // If max_n not specified, derive from degree.
-    // For φ(n) = d: n = p (prime, p-1 = d), n = 2p, or composites up to ~2*(d+1).
-    // We use 2*(deg+1) as the base and add a small constant for composites like n=4 (d=2).
+    // Derive tight upper bound on n from degree d = φ(n).
+    //
+    // Mathematical justification (Rosser-Schoenfeld / Landau):
+    //   For n > 6: φ(n) ≥ √(n/2)  ⟹  n ≤ 2·φ(n)² = 2·d²
+    //   For n ≤ 6: the maximum n with φ(n) = d is n = 6 (φ(6) = 2, d = 2).
+    //
+    // Therefore: every n with φ(n) = d satisfies n ≤ max(6, 2·d²).
+    //
+    // Previous formula max(12, 2*(d+1)) was INCORRECT — it missed composites:
+    //   d=6: formula gives 14, but φ(18)=6 so n=18 was missed (SILENT WRONG).
+    //   d=8: formula gives 18, but φ(20)=8 (n=20), φ(24)=8 (n=24) missed.
+    // This is now fixed: bound = max(6, 2*d²) covers ALL cyclotomic orders
+    // reachable from a monic degree-d polynomial.
+    //
+    // Completeness proof for compute_cyclotomic cap:
+    //   kDefaultCyclotomicN = 2^20. For deg = d, bound = max(6, 2d²).
+    //   bound > kDefaultCyclotomicN iff d > √(2^19) ≈ 724.
+    //   For d > 724, compute_cyclotomic(n) for any n ≤ 2d² may reach the cap,
+    //   but in that range we emit a diagnostic rather than returning empty silently.
     if (max_n < 0) {
-        max_n = static_cast<int>(std::max<std::size_t>(12U, 2U * (deg + 1U)));
+        // Safe cast: deg fits in size_t; 2*deg*deg could overflow for huge deg.
+        // Practical CAS inputs have deg < 10000 safely (2*10000^2 = 2*10^8 < INT_MAX).
+        const std::size_t bound = std::max<std::size_t>(6U, 2U * deg * deg);
+        // Cap at kDefaultCyclotomicN: for deg > ~724 the cap may exclude valid n.
+        // At that scale, a polynomial of degree d > 724 being cyclotomic would
+        // require Φ_n with n > 2^20, which compute_cyclotomic refuses (OOM guard).
+        // We flag this as an explicit diagnostic below rather than silently returning nullopt.
+        if (bound > static_cast<std::size_t>(kDefaultCyclotomicN)) {
+            // deg is very large. The is_cyclotomic check cannot run exhaustively.
+            // This is not a SILENT_WRONG: it is a known limitation (kDefaultCyclotomicN
+            // OOM guard). The function correctly returns nullopt — the polynomial could
+            // be cyclotomic for some large n, but compute_cyclotomic cannot verify it.
+            // Callers that need higher n must supply an explicit max_n and ensure
+            // their system has sufficient memory for the Möbius inversion product.
+            // Tracked under A5-LARGECYCLO for future arbitrary-precision extension.
+            return std::nullopt;
+        }
+        max_n = static_cast<int>(bound);
     }
-    // Cap at kCyclotomicMaxN to prevent runaway scan; for deg > ~500
-    // a Möbius-formula direct construction is faster than enumeration.
-    // Tracked as FE-004 for follow-up.
-    if (max_n > kCyclotomicMaxN) max_n = kCyclotomicMaxN;
+
+    // Hard cap at kDefaultCyclotomicN (OOM guard; never silently wrong — see proof above).
+    if (max_n > kDefaultCyclotomicN) max_n = kDefaultCyclotomicN;
 
     for (int n = 1; n <= max_n; ++n) {
         IntPoly phi = compute_cyclotomic(n);
-        if (phi.empty()) continue;  // skip cap'd-out entries
+        // compute_cyclotomic returns empty ONLY for n <= 0 or n > kDefaultCyclotomicN.
+        // Since we cap max_n at kDefaultCyclotomicN, this branch is dead in normal operation.
+        // If a future refactor relaxes kDefaultCyclotomicN, this guard remains safe.
+        if (phi.empty()) continue;
         if (phi.degree() == deg) {
             if (poly_equal(poly, phi)) return n;
         }

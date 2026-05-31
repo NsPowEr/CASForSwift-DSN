@@ -3,6 +3,7 @@
 #include "cas/differential_algebra.hpp"
 #include "cas/algebra.hpp"
 #include "cas/error.hpp"
+#include "cas/error_helpers.hpp"
 #include "../algebra/polynomial_internal.hpp"
 
 #include <array>
@@ -103,8 +104,14 @@ risch_extract_rational_coeffs(const algebra::PolyExpr& poly) {
 [[nodiscard]] Result<ExprPtr> solve_risch_de_poly_q(
     ExprPtr f_expr, ExprPtr g_expr, const Symbol& var, symbolic::CASContext& ctx) {
     AstArena& arena = ctx.arena();
+    // F0.8-MIGRATED
     auto fail_unimpl = [&](const char* msg) {
-        return fail<ExprPtr>(CASError{CASErrorKind::Unimplemented, msg, std::nullopt});
+        return make_unimplemented<ExprPtr>(
+            "calculus", "solve_risch_de_poly_q",
+            msg,
+            cas::error::reason_codes::RISCH_NO_POLYNOMIAL_SOLUTION,
+            "Risch DE poly: extend coefficient solver or fall back to exponential branch",
+            "F0.8");
     };
 
     auto f_poly_res = algebra::parse_polynomial(f_expr, var, ctx);
@@ -243,8 +250,14 @@ risch_extract_rational_coeffs(const algebra::PolyExpr& poly) {
 [[nodiscard]] Result<ExprPtr> solve_risch_de_rational_q(
     ExprPtr f_expr, ExprPtr g_expr, const Symbol& var, symbolic::CASContext& ctx) {
     AstArena& arena = ctx.arena();
+    // F0.8-MIGRATED
     auto fail_unimpl = [&](const char* msg) {
-        return fail<ExprPtr>(CASError{CASErrorKind::Unimplemented, msg, std::nullopt});
+        return make_unimplemented<ExprPtr>(
+            "calculus", "solve_risch_de_rational_q",
+            msg,
+            cas::error::reason_codes::RISCH_SINGULAR_SYSTEM,
+            "Risch DE rational: check for singular Hermite system or missing partial fraction coefficients",
+            "F0.8");
     };
 
     // ----- Stage 1: decompose f and g into num/den and build LCM-scaled
@@ -375,8 +388,9 @@ risch_extract_rational_coeffs(const algebra::PolyExpr& poly) {
     if (M_bound < deg_D) M_bound = deg_D;
     // Always allow degenerate constant solutions.
     if (M_bound < 0) M_bound = 0;
-    // Safety cap (config knob; conservative for now).
-    if (M_bound > 256) return fail_unimpl("Risch DE rational: degree bound for P too large");
+    // Safety cap — configurable via CASContext (CLAUDE.md Cat. 1: no magic constants).
+    const int ansatz_cap = static_cast<int>(ctx.max_risch_rational_ansatz_degree());
+    if (M_bound > ansatz_cap) return fail_unimpl("Risch DE rational: degree bound for P exceeds ctx.max_risch_rational_ansatz_degree (BUG-HANG-001)");
 
     const std::size_t n_unk = static_cast<std::size_t>(M_bound) + 1U;
     int max_eq_deg = std::max({deg_Gd,
@@ -525,10 +539,13 @@ risch_extract_rational_coeffs(const algebra::PolyExpr& poly) {
 
         auto b_k_res = integrate(rhs, var, context);
         if (b_k_res.is_error()) {
-            return fail<ExprPtr>(CASError{
-                .kind = CASErrorKind::Unimplemented,
-                .message = "Risch log: lower-field integration failed at degree k=" + std::to_string(kz),
-                .hint = std::nullopt});
+            // F0.8-MIGRATED
+            return make_unimplemented<ExprPtr>(
+                "calculus", "integrate_risch_log_extension",
+                "lower-field integration failed at degree k=" + std::to_string(kz),
+                cas::error::reason_codes::RISCH_LOG_EXTENSION_GENERAL,
+                "Extend the logarithmic extension solver or add reduction-of-order step",
+                "F0.8");
         }
         b[kz] = b_k_res.value();
     }
@@ -618,7 +635,13 @@ Result<ExprPtr> integrate_risch(ExprPtr expr, const Symbol& var, symbolic::CASCo
             && expr_ref<IntegerLit>(delta_simp.value()).value.is_zero()) {
             return context.simplify(cF);
         }
-        return fail<ExprPtr>(CASError{CASErrorKind::Unimplemented, "no match", std::nullopt});
+        // F0.8-MIGRATED
+        return make_unimplemented<ExprPtr>(
+            "calculus", "try_risch_exponential_rational",
+            "trial constant did not cancel residue",
+            cas::error::reason_codes::RISCH_NO_MATCH,
+            "Extend trial constant set or implement full exponential Risch solver",
+            "F0.8");
     };
     const std::array<std::pair<long long, long long>, 6> trial_consts = {{
         {1, 1}, {-1, 1}, {1, 2}, {2, 1}, {-1, 2}, {-2, 1},
@@ -693,19 +716,52 @@ Result<ExprPtr> integrate_risch(ExprPtr expr, const Symbol& var, symbolic::CASCo
                     ExprPtr exp_g = arena.make<FuncCall>(BuiltinOp::Exp,
                         std::vector<ExprPtr>{exp_arg});
                     ExprPtr antider = arena.make<Binary>(BinaryOp::Mul, y_res.value(), exp_g);
-                    // Verify D(antider) = expr structurally before commit.
-                    auto D_check = diff(antider, var, 1U, context);
-                    if (D_check.is_ok()) {
-                        ExprPtr delta = arena.make<Binary>(BinaryOp::Sub, D_check.value(), expr);
-                        auto delta_tog = algebra::together(delta, context);
-                        if (delta_tog.is_ok()) {
-                            auto delta_simp = context.simplify(delta_tog.value());
-                            if (delta_simp.is_ok()
-                                && expr_is<IntegerLit>(delta_simp.value())
-                                && expr_ref<IntegerLit>(delta_simp.value()).value.is_zero()) {
-                                return context.simplify(antider);
+                    // Verify the Risch DE is satisfied: dy + g'·y == f (in the
+                    // rational field, no exp factor).  This avoids the
+                    // "together+simplify cannot cancel exp(rational) factors"
+                    // failure that caused BUG-HANG-001 (infinite IBP loop).
+                    // Correctness: D(y·exp(g)) = (y' + g'·y)·exp(g) = f·exp(g)
+                    // iff y' + g'·y = f, which we verify here as a pure rational
+                    // identity without the transcendental exp(g) term.
+                    bool de_verified = false;
+                    auto dy_res = diff(y_res.value(), var, 1U, context);
+                    if (dy_res.is_ok()) {
+                        // Compute dy + g' * y - f and check == 0 as a rational fn.
+                        ExprPtr gp_y = arena.make<Binary>(BinaryOp::Mul,
+                            g_prime.value(), y_res.value());
+                        ExprPtr lhs = arena.make<Sum>(std::vector<ExprPtr>{
+                            dy_res.value(), gp_y});
+                        ExprPtr rhs = f_poly;
+                        ExprPtr residue = arena.make<Binary>(BinaryOp::Sub, lhs, rhs);
+                        auto resid_tog = algebra::together(residue, context);
+                        ExprPtr resid_for_simp = resid_tog.is_ok() ? resid_tog.value() : residue;
+                        auto resid_simp = context.simplify(resid_for_simp);
+                        if (resid_simp.is_ok()
+                            && expr_is<IntegerLit>(resid_simp.value())
+                            && expr_ref<IntegerLit>(resid_simp.value()).value.is_zero()) {
+                            de_verified = true;
+                        }
+                    }
+                    // Fallback: if DE verification inconclusive, try full D(antider)==expr
+                    // check (slower, but handles edge cases where diff simplification
+                    // leaves rationals in non-canonical form).
+                    if (!de_verified) {
+                        auto D_check = diff(antider, var, 1U, context);
+                        if (D_check.is_ok()) {
+                            ExprPtr delta = arena.make<Binary>(BinaryOp::Sub, D_check.value(), expr);
+                            auto delta_tog = algebra::together(delta, context);
+                            if (delta_tog.is_ok()) {
+                                auto delta_simp = context.simplify(delta_tog.value());
+                                if (delta_simp.is_ok()
+                                    && expr_is<IntegerLit>(delta_simp.value())
+                                    && expr_ref<IntegerLit>(delta_simp.value()).value.is_zero()) {
+                                    de_verified = true;
+                                }
                             }
                         }
+                    }
+                    if (de_verified) {
+                        return context.simplify(antider);
                     }
                 }
             }
@@ -802,7 +858,13 @@ Result<ExprPtr> integrate_risch(ExprPtr expr, const Symbol& var, symbolic::CASCo
                                     ExprPtr t_pow = (k == 1) ? arena.make<Symbol>(t_top) : arena.make<Binary>(BinaryOp::Pow, arena.make<Symbol>(t_top), arena.make<IntegerLit>(BigInt(k)));
                                     int_terms.push_back(arena.make<Binary>(BinaryOp::Mul, y_res.value(), t_pow));
                                 } else {
-                                    return fail<ExprPtr>(CASError{CASErrorKind::Unimplemented, "Risch: could not solve DE for exponential term", std::nullopt});
+                                    // F0.8-MIGRATED
+                                    return make_unimplemented<ExprPtr>(
+                                        "calculus", "integrate_risch_exponential_extension",
+                                        "Risch DE for exponential term has no polynomial solution",
+                                        cas::error::reason_codes::RISCH_EXPONENTIAL_DE,
+                                        "Implement full Risch DE solver for exponential extensions (Bronstein §5.8)",
+                                        "F0.8");
                                 }
                             }
                         } else if (ext.type == ExtensionType::Logarithmic) {
@@ -812,7 +874,13 @@ Result<ExprPtr> integrate_risch(ExprPtr expr, const Symbol& var, symbolic::CASCo
                                     arena.make<Unary>(UnaryOp::Neg, arena.make<Symbol>(var))
                                 }));
                             } else {
-                                return fail<ExprPtr>(CASError{CASErrorKind::Unimplemented, "Risch: log extension integration not fully implemented", std::nullopt});
+                                // F0.8-MIGRATED
+                                return make_unimplemented<ExprPtr>(
+                                    "calculus", "integrate_risch_logarithmic_extension",
+                                    "log extension term with non-trivial coefficient or high degree",
+                                    cas::error::reason_codes::RISCH_LOG_EXTENSION_GENERAL,
+                                    "Implement full Risch logarithmic extension (Bronstein §5.10)",
+                                    "F0.8");
                             }
                         }
                     }
@@ -903,11 +971,13 @@ Result<ExprPtr> integrate_risch(ExprPtr expr, const Symbol& var, symbolic::CASCo
     }
 
     // Fallback to simpler cases if full Risch fails
-    return fail<ExprPtr>(CASError{
-        .kind = CASErrorKind::Unimplemented,
-        .message = "Risch algorithm: integrability could not be decided for this transcendental extension",
-        .hint = std::nullopt
-    });
+    // F0.8-MIGRATED
+    return make_unimplemented<ExprPtr>(
+        "calculus", "integrate_risch",
+        "transcendental extension: integrability undecidable with current pipeline",
+        cas::error::reason_codes::RISCH_LOG_EXTENSION_GENERAL,
+        "Implement full Risch structure theorem for this extension type (Bronstein §5)",
+        "F0.8");
 }
 
 } // namespace cas::calculus

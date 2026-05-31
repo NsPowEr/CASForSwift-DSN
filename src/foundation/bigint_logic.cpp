@@ -148,4 +148,23 @@ std::size_t BigInt::hash() const noexcept {
     return seed;
 }
 
+// F1.1: public factory from little-endian uint32 limbs (non-negative).
+BigInt BigInt::from_limbs_le(std::vector<std::uint32_t> limbs) noexcept {
+    return from_parts(std::move(limbs), false);
+}
+
+// F1.1: limb access helpers for Toom-3 and GCD algorithms.
+std::size_t BigInt::limb_count() const noexcept {
+    return limbs_.size();
+}
+
+std::uint32_t BigInt::limb_at(std::size_t index) const noexcept {
+    return limbs_[index];
+}
+
+// F1.1: public compare_magnitude wrapper for binary_gcd / lehmer_gcd.
+int BigInt::compare_magnitude_pub(const BigInt& a, const BigInt& b) noexcept {
+    return compare_magnitude(a, b);
+}
+
 } // namespace cas

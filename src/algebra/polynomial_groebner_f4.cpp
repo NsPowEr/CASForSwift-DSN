@@ -1,5 +1,6 @@
 #include "polynomial_groebner_f4.hpp"
 #include "polynomial_groebner_f4_internal.hpp"
+#include "polynomial_groebner_f5.hpp"
 #include "cas/algebra.hpp"
 #include "cas/symbolic.hpp"
 #include "cas/rational.hpp"
@@ -212,6 +213,14 @@ static bool divides(const Monomial& a, const Monomial& b) {
 }
 
 Result<std::vector<PolyF4>> f4_groebner(std::vector<PolyF4> G, MonomialOrder order, symbolic::CASContext* ctx) {
+    // F3.3-F5-WIRE: when enabled, route to F5C (Buchberger with F5 signature
+    // criterion + Rewritten criterion) which prunes S-pairs by signature
+    // divisibility against accumulated syzygy signatures (Faugère 2002 §3).
+    // Default flag false → original F4/Buchberger path retained.
+    if (ctx && ctx->enable_f5_signature_pruning() && !G.empty()) {
+        F5Result fr = f5c_groebner(std::move(G), order);
+        return ok(std::move(fr.basis));
+    }
     // Termination follows from the Hilbert basis theorem (every ideal in
     // K[x_1, ..., x_n] is finitely generated) and Buchberger termination
     // theorem: under sugar-ordered Gebauer-Moeller pair pruning the pair

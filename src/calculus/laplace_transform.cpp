@@ -15,6 +15,7 @@
 #include "calculus_internal.hpp"
 
 #include "cas/algebra.hpp"
+#include "cas/error_helpers.hpp"
 #include "cas/symbolic.hpp"
 
 #include <vector>
@@ -244,10 +245,13 @@ namespace {
         }
     }
 
-    return fail<ExprPtr>(CASError{
-        CASErrorKind::Unimplemented,
-        "Laplace transform: pattern not in elementary table",
-        std::nullopt});
+    // F0.8-MIGRATED
+    return make_unimplemented<ExprPtr>(
+        "calculus", "laplace_transform",
+        "expression not in elementary Laplace table",
+        cas::error::reason_codes::LAPLACE_UNKNOWN_FORM,
+        "Extend the Laplace table or implement algorithmic transform (e.g. Meijer G-functions)",
+        "F0.8");
 }
 
 namespace {
@@ -506,10 +510,13 @@ namespace {
         }
     }
 
-    return fail<ExprPtr>(CASError{
-        CASErrorKind::Unimplemented,
-        "Inverse Laplace: pattern not in elementary table",
-        std::nullopt});
+    // F0.8-MIGRATED
+    return make_unimplemented<ExprPtr>(
+        "calculus", "inverse_laplace_transform",
+        "expression not in elementary inverse Laplace table",
+        cas::error::reason_codes::LAPLACE_UNKNOWN_FORM,
+        "Extend the inverse Laplace table or implement Bromwich integral / PFD bridge",
+        "F0.8");
 }
 
 }  // namespace cas::calculus

@@ -1,4 +1,5 @@
 #include "cas/linalg/Matrix.hpp"
+#include "cas/error_helpers.hpp"
 
 #include <optional>
 #include <string>
@@ -66,7 +67,13 @@ void swap_rows(MatrixExpr& matrix, std::size_t lhs, std::size_t rhs) {
 
 [[nodiscard]] Result<void> scale_row(MatrixExpr& matrix, std::size_t row, ExprPtr divisor, symbolic::CASContext& ctx) {
     if (!is_known_nonzero_expr(divisor, &ctx)) {
-        return fail<void>(make_error(CASErrorKind::Unimplemented, "RREF pivot is not decidably nonzero"));
+        // F0.8-MIGRATED
+        return make_unimplemented<void>(
+            "linalg", "scale_row",
+            "RREF pivot expression cannot be decided nonzero under current assumptions",
+            error::reason_codes::LINALG_RREF_UNDECIDABLE_PIVOT,
+            "Add assumptions about pivot variables or use Bareiss integer-preserving elimination",
+            "L3-13");
     }
     for (std::size_t col = 0; col < matrix.cols(); ++col) {
         auto value = div_expr(ctx, matrix(row, col), divisor);

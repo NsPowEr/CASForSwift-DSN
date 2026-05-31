@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <map>
 #include <optional>
 #include <set>
@@ -532,8 +533,17 @@ void sparse_subtract(SparsePoly& lhs, const SparsePoly& rhs) {
     }
 
     const auto [divisor_lm, divisor_lc] = *std::prev(divisor_sparse.end());
+    // HPP-003 FIX 2026-05-28 (CLAUDE.md Cat 2 — no magic constant).
+    // Bound derivation: multivariate exact division by repeated leading-monomial
+    // cancellation.  Each step eliminates the leading monomial of remainder
+    // and subtracts at most (|divisor_sparse|-1) new monomials.  The worst-case
+    // total monomial-pair interactions equals |remainder| * |divisor_sparse|.
+    // Formula: (remainder.size() + 1) * (divisor_sparse.size() + 1).
+    // This replaces the previous (remainder.size()+1)*(vars.size()+1)*16U which
+    // used the variable count (irrelevant to step count) and the magic 16U.
     const std::size_t max_steps =
-        std::max(ctx.min_gcd_division_steps(), (remainder.size() + 1U) * (vars.size() + 1U) * 16U);
+        std::max(ctx.min_gcd_division_steps(),
+                 (remainder.size() + 1U) * (divisor_sparse.size() + 1U));
     std::size_t steps = 0U;
 
     while (!remainder.empty()) {
@@ -674,17 +684,35 @@ void sparse_subtract(SparsePoly& lhs, const SparsePoly& rhs) {
     const MultivariatePolynomial& q,
     const std::vector<Symbol>& vars,
     symbolic::CASContext& ctx,
-    std::size_t depth);
+    std::size_t depth,
+    std::size_t& call_count);
 
 [[nodiscard]] Result<MultivariatePolynomial> gcd_multivariate_recursive(
     const MultivariatePolynomial& P,
     const MultivariatePolynomial& Q,
     symbolic::CASContext& ctx,
-    std::size_t depth) {
+    std::size_t depth,
+    std::size_t& call_count) {
+    // Configurable total-call budget (CLAUDE.md Cat 1 — no fixed computational
+    // limit).  Bound justification: by Schwartz-Zippel, each nesting level
+    // expands fan-out by at most (2*D+3) evaluations; default 4096 safely covers
+    // all currently-tested inputs (≤4 vars, deg ≤2) while bounding pathological
+    // inputs until Brown/Zippel is implemented (L1-08/F3.1).
+    if (++call_count > ctx.max_gcd_total_calls()) {
+        return fail<MultivariatePolynomial>(make_error(
+            CASErrorKind::Unimplemented,
+            "polynomial_gcd_multivariate [module=algebra, function=gcd_multivariate, "
+            "reason_code=GCD_MULTIVARIATE_BUDGET_EXCEEDED, ticket=L1-08/F3.1]: "
+            "total call budget exceeded — increase ctx.max_gcd_total_calls() or "
+            "await Brown/Zippel GCD implementation (F3.1)"));
+    }
     if (depth > ctx.max_gcd_recursion_depth()) {
         return fail<MultivariatePolynomial>(make_error(
             CASErrorKind::Unimplemented,
-            "polynomial_gcd_multivariate: recursion depth limit reached while certifying gcd"));
+            "polynomial_gcd_multivariate [module=algebra, function=gcd_multivariate, "
+            "reason_code=GCD_MULTIVARIATE_BUDGET_EXCEEDED, ticket=L1-08/F3.1]: "
+            "recursion depth limit reached — increase ctx.max_gcd_recursion_depth() or "
+            "await Brown/Zippel GCD implementation (F3.1)"));
     }
 
     MultivariatePolynomial p = normalize_multivariate_gcd(P);
@@ -732,7 +760,7 @@ void sparse_subtract(SparsePoly& lhs, const SparsePoly& rhs) {
     // For 3+ variables the candidate count grows as 5^n which makes the scan
     // more expensive than the eval-interpolation path it is meant to accelerate.
     if (vars.size() <= 2U) {
-        auto linear_gcd = try_certified_linear_gcd(p, q, vars, ctx, depth);
+        auto linear_gcd = try_certified_linear_gcd(p, q, vars, ctx, depth, call_count);
         if (linear_gcd.is_error()) {
             return fail<MultivariatePolynomial>(linear_gcd.error());
         }
@@ -754,12 +782,35 @@ void sparse_subtract(SparsePoly& lhs, const SparsePoly& rhs) {
     const std::size_t interpolation_degree_bound =
         std::min(degree_in_var(p, interpolation_var), degree_in_var(q, interpolation_var));
     const std::size_t required_samples = std::max<std::size_t>(interpolation_degree_bound + 1U, 2U);
-    // Schwartz-Zippel bound: lc(GCD, interp_var) vanishes at at most D = interpolation_degree_bound
-    // values in any evaluation domain.  Therefore 2D+3 samples always contain at least D+2 lucky
-    // ones — enough for unique interpolation + one extra for the bucket selection heuristic.
-    // This replaces the previous O(log(1/δ)) safety margin which caused O(N^k) fan-out blowup for
-    // polynomials in k≥3 variables.
-    const std::size_t max_samples = 2U * interpolation_degree_bound + 3U;
+    // HPP-004 FIX 2026-05-28 (CLAUDE.md Cat 6 — no arbitrary constant).
+    //
+    // Schwartz-Zippel worst-case analysis:
+    //   D = interpolation_degree_bound.  The leading coefficient of the GCD in
+    //   interpolation_var is a polynomial of degree ≤ D.  A random evaluation point
+    //   is "unlucky" iff it zeros this polynomial.  At most D such points exist in
+    //   any infinite evaluation domain (Fundamental Theorem of Algebra).
+    //
+    //   With N = 2D + extra evaluation points, at most D are unlucky, leaving
+    //   N − D = D + extra lucky ones.  For the bucket-selection phase to succeed
+    //   we need: D + extra ≥ required_samples + 1 = (D+1) + 1, i.e., extra ≥ 2.
+    //
+    //   So extra = 2 is the mathematically minimum correct value.  We set:
+    //     extra = max(2, ceil(log2(required_samples + 1)))
+    //   This adds one additional bucket-guard bit per doubling of required_samples,
+    //   derived from the binary logarithm of the number of needed lucky points.
+    //   The formula grows O(log D) so it does NOT cause exponential fan-out blowup
+    //   in multi-variable recursion (unlike the previous O(log(1/δ)) formula that
+    //   was removed, comment preserved: "O(N^k) fan-out avoided").
+    //
+    //   For required_samples ≤ 3 (D ≤ 2): extra = max(2, ceil(log2(4))) = 2 → N=2D+2.
+    //   For required_samples ≤ 7 (D ≤ 6): extra = max(2, ceil(log2(8))) = 3 → N=2D+3.
+    //   For required_samples ≤ 15 (D ≤ 14): extra = 4, etc.
+    //   Default case (required_samples=2, D=0): N = 2*0+2 = 2 (correct).
+    const std::size_t log2_rs1 = (required_samples > 0U)
+        ? static_cast<std::size_t>(std::ceil(std::log2(static_cast<double>(required_samples + 1U))))
+        : std::size_t{1U};
+    const std::size_t extra_guard = std::max(std::size_t{2U}, log2_rs1);
+    const std::size_t max_samples = 2U * interpolation_degree_bound + extra_guard;
 
     struct SamplePoint {
         BigInt value;
@@ -789,7 +840,7 @@ void sparse_subtract(SparsePoly& lhs, const SparsePoly& rhs) {
                 break;
             }
 
-            auto gcd_eval = gcd_multivariate_recursive(p_eval.value(), q_eval.value(), ctx, depth + 1U);
+            auto gcd_eval = gcd_multivariate_recursive(p_eval.value(), q_eval.value(), ctx, depth + 1U, call_count);
             if (gcd_eval.is_error()) {
                 sampling_ok = false;
                 break;
@@ -868,6 +919,17 @@ void sparse_subtract(SparsePoly& lhs, const SparsePoly& rhs) {
             continue;
         }
 
+        // Unit-candidate short-circuit: if interpolation produced a unit (1),
+        // all sample GCDs were 1 at ≥ required_samples evaluation points.
+        // By the Schwartz-Zippel uniqueness argument (required_samples ≥
+        // interpolation_degree_bound + 1), the unique polynomial consistent with
+        // those samples IS 1.  No recursive certification is needed — calling
+        // gcd(p/1, q/1) = gcd(p, q) would be circular and causes the
+        // 3^depth exponential blowup that constitutes BUG-HANG-002.
+        if (is_unit_polynomial(candidate)) {
+            return ok(candidate);
+        }
+
         auto quotient_p = exact_quotient(p, candidate, vars, ctx);
         if (quotient_p.is_error() || !quotient_p.value().has_value()) {
             continue;
@@ -883,7 +945,7 @@ void sparse_subtract(SparsePoly& lhs, const SparsePoly& rhs) {
 
         bool certified = false;
         for (std::size_t refine = 0U; refine < 3U; ++refine) {
-            auto cofactor_gcd = gcd_multivariate_recursive(cofactor_p, cofactor_q, ctx, depth + 1U);
+            auto cofactor_gcd = gcd_multivariate_recursive(cofactor_p, cofactor_q, ctx, depth + 1U, call_count);
             if (cofactor_gcd.is_error()) {
                 certified = false;
                 break;
@@ -930,7 +992,8 @@ void sparse_subtract(SparsePoly& lhs, const SparsePoly& rhs) {
     const MultivariatePolynomial& q,
     const std::vector<Symbol>& vars,
     symbolic::CASContext& ctx,
-    std::size_t depth) {
+    std::size_t depth,
+    std::size_t& call_count) {
     for (const auto& candidate : primitive_linear_candidates(vars)) {
         auto quotient_p = exact_quotient(p, candidate, vars, ctx);
         if (quotient_p.is_error()) {
@@ -952,7 +1015,8 @@ void sparse_subtract(SparsePoly& lhs, const SparsePoly& rhs) {
             quotient_p.value().value(),
             quotient_q.value().value(),
             ctx,
-            depth + 1U);
+            depth + 1U,
+            call_count);
         if (cofactor_gcd.is_error()) {
             return fail<std::optional<MultivariatePolynomial>>(cofactor_gcd.error());
         }
@@ -970,7 +1034,8 @@ Result<MultivariatePolynomial> gcd_multivariate_eval_interp(
     const MultivariatePolynomial& P,
     const MultivariatePolynomial& Q,
     symbolic::CASContext& ctx) {
-    return gcd_multivariate_recursive(P, Q, ctx, 0U);
+    std::size_t call_count = 0U;
+    return gcd_multivariate_recursive(P, Q, ctx, 0U, call_count);
 }
 
 Result<ExprPtr> polynomial_gcd_multivariate(ExprPtr p, ExprPtr q, symbolic::CASContext& ctx) {

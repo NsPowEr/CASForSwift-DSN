@@ -13,29 +13,25 @@
 
 #include "cas/algebra.hpp"
 #include "cas/error.hpp"
+#include "galois_internal.hpp"
 #include "polynomial_internal.hpp"
 
 namespace cas::algebra {
 
-namespace {
-
-// Try to interpret expr as Rational. Returns nullopt otherwise.
-[[nodiscard]] std::optional<Rational> as_rational(ExprPtr e) {
+std::optional<Rational> as_rational_q(ExprPtr e) {
     if (!e) return std::nullopt;
     if (const auto* il = expr_cast<IntegerLit>(e))
         return Rational(il->value, BigInt(1));
     if (const auto* rl = expr_cast<RationalLit>(e))
         return Rational(rl->numerator, rl->denominator);
     if (const auto* un = expr_cast<Unary>(e); un && un->op == UnaryOp::Neg) {
-        auto inner = as_rational(un->operand);
+        auto inner = as_rational_q(un->operand);
         if (inner) return -(*inner);
     }
     return std::nullopt;
 }
 
-// Returns true if rational is a perfect square in Q (i.e. p/q with
-// p, q both perfect squares as BigInt and same sign).
-[[nodiscard]] bool is_rational_square(const Rational& r) {
+bool is_rational_square_q(const Rational& r) {
     if (r.numerator().is_negative()) return false;
     if (r.numerator().is_zero()) return true;
     auto isqrt = [](const BigInt& n) -> std::optional<BigInt> {
@@ -52,6 +48,16 @@ namespace {
     auto num_sqrt = isqrt(r.numerator());
     auto den_sqrt = isqrt(r.denominator());
     return num_sqrt.has_value() && den_sqrt.has_value();
+}
+
+namespace {
+
+// Legacy in-file aliases preserve the deg-2..4 code below verbatim.
+[[nodiscard]] inline std::optional<Rational> as_rational(ExprPtr e) {
+    return as_rational_q(e);
+}
+[[nodiscard]] inline bool is_rational_square(const Rational& r) {
+    return is_rational_square_q(r);
 }
 
 }  // namespace
@@ -192,6 +198,58 @@ Result<std::string> galois_group(ExprPtr poly, const Symbol& var,
         if (resolvent_reducibile && !d_is_square) return ok(std::string("D4"));
         if (!resolvent_reducibile && d_is_square) return ok(std::string("A4"));
         return ok(std::string("S4"));
+    }
+    if (total_deg == 5U) {
+        // Detect irreducible quintic: exactly one non-constant factor and
+        // that factor has degree 5 (multiplicity 1, else discriminant=0).
+        bool irreducible_quintic = false;
+        std::size_t non_constant_factors = 0U;
+        std::size_t max_factor_deg = 0U;
+        for (const auto& f : factors) {
+            auto pp = parse_polynomial(f.factor, var, ctx);
+            if (pp.is_error()) continue;
+            std::size_t d = poly_degree(pp.value());
+            if (d >= 1U) {
+                non_constant_factors += 1U;
+                if (d > max_factor_deg) max_factor_deg = d;
+            }
+        }
+        if (non_constant_factors == 1U && max_factor_deg == 5U) {
+            irreducible_quintic = true;
+        }
+        if (irreducible_quintic) {
+            return galois_group_quintic_irreducible(poly, var, ctx);
+        }
+        // Reducible quintic: Galois group = direct product of Galois groups
+        // of irreducible factors (over the algebraic closure of Q each factor
+        // splits independently).  Recurse into each non-linear factor.
+        // HC-F36-REDUCIBLE-COARSE closure: fine-grained labels via recursion.
+        if (linear_count >= 5U) return ok(std::string("trivial"));
+        std::vector<std::string> sub_labels;
+        for (const auto& f : factors) {
+            auto pp = parse_polynomial(f.factor, var, ctx);
+            if (pp.is_error()) continue;
+            std::size_t d = poly_degree(pp.value());
+            if (d == 0U) continue;
+            for (unsigned int mi = 0U; mi < f.multiplicity; ++mi) {
+                if (d == 1U) continue;  // linear factor → trivial Galois.
+                auto sub = galois_group(f.factor, var, ctx);
+                if (sub.is_error()) {
+                    return ok(std::string("reducible"));
+                }
+                if (sub.value() != std::string("trivial")) {
+                    sub_labels.push_back(sub.value());
+                }
+            }
+        }
+        if (sub_labels.empty()) return ok(std::string("trivial"));
+        if (sub_labels.size() == 1U) return ok(sub_labels[0]);
+        std::string joined;
+        for (std::size_t i = 0U; i < sub_labels.size(); ++i) {
+            if (i > 0U) joined += " x ";
+            joined += sub_labels[i];
+        }
+        return ok(joined);
     }
     return ok(std::string("unknown"));
 }

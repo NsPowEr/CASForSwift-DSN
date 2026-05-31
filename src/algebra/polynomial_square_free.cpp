@@ -61,7 +61,7 @@ namespace {
         }
         normalize_integer_poly(A_prime);
 
-        IntPoly G = gcd_integer_poly_with_subresultant(A, A_prime).gcd;
+        IntPoly G = gcd_integer_poly_dispatch(A, A_prime, ctx).gcd;
         
         // C1 = A / G, D1 = A' / G - C1'
         // In Z[x], we use exact division for A/G and A'/G
@@ -112,7 +112,7 @@ namespace {
 
         unsigned int i = 1;
         while (!C.is_zero() && C.degree() > 0) {
-            IntPoly factor_poly = gcd_integer_poly_with_subresultant(C, D).gcd;
+            IntPoly factor_poly = gcd_integer_poly_dispatch(C, D, ctx).gcd;
             if (factor_poly.degree() > 0) {
                 auto factor_expr = integer_coefficients_to_expr(factor_poly, var, ctx);
                 if (factor_expr.is_ok()) {

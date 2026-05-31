@@ -399,7 +399,9 @@ public:
                         auto i2_res = algebra::poly_to_integer_poly(p2_res.value());
                         
                         if (i1_res.is_ok() && i2_res.is_ok()) {
-                            auto gcd_poly = algebra::gcd_integer_poly_with_subresultant(i1_res.value(), i2_res.value()).gcd;
+                            auto gcd_poly = (context != nullptr)
+                                ? algebra::gcd_integer_poly_dispatch(i1_res.value(), i2_res.value(), *context).gcd
+                                : algebra::gcd_integer_poly_with_subresultant(i1_res.value(), i2_res.value()).gcd;
                             
                             if (gcd_poly.degree() > 0 || (gcd_poly.size() == 1 && gcd_poly[0] != BigInt(1))) {
                                 // Divisione intera esatta

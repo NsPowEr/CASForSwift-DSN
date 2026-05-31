@@ -69,6 +69,54 @@ void append_factor_with_multiplicity(std::vector<PolynomialFactor>& factors, Exp
     const MultivariatePolynomial& Q,
     symbolic::CASContext& ctx);
 
+// F3.1 — Brown's modular GCD (GCL §7.4) + Zippel sparse + EZ-GCD with cofactors.
+struct GcdWithCofactors {
+    MultivariatePolynomial gcd;
+    MultivariatePolynomial cofactor_p;  // P / gcd, certified: gcd * cofactor_p == P
+    MultivariatePolynomial cofactor_q;  // Q / gcd, certified: gcd * cofactor_q == Q
+};
+[[nodiscard]] Result<MultivariatePolynomial> gcd_brown(
+    const MultivariatePolynomial& P,
+    const MultivariatePolynomial& Q,
+    symbolic::CASContext& ctx);
+[[nodiscard]] Result<MultivariatePolynomial> gcd_zippel_sparse(
+    const MultivariatePolynomial& P,
+    const MultivariatePolynomial& Q,
+    symbolic::CASContext& ctx);
+// Honest name for the legacy Lagrange-over-Z evaluation/interpolation path.
+// NOT Brown's modular GCD — it interpolates in Z directly (coefficient growth).
+[[nodiscard]] Result<MultivariatePolynomial> gcd_eval_interp_z(
+    const MultivariatePolynomial& P,
+    const MultivariatePolynomial& Q,
+    symbolic::CASContext& ctx);
+// REAL Brown's modular multivariate GCD (GCL §7.4–7.5).
+// Uses modular reduction + Fp-recursive eval/interp + multi-prime CRT lift.
+// out_primes_used (optional) receives the prime list actually used (probe).
+[[nodiscard]] Result<MultivariatePolynomial> gcd_brown_modular(
+    const MultivariatePolynomial& P,
+    const MultivariatePolynomial& Q,
+    symbolic::CASContext& ctx,
+    std::vector<BigInt>* out_primes_used);
+[[nodiscard]] Result<MultivariatePolynomial> gcd_brown_modular(
+    const MultivariatePolynomial& P,
+    const MultivariatePolynomial& Q,
+    symbolic::CASContext& ctx);
+// REAL Zippel sparse interpolation GCD (Zippel 1979) — Prony skeleton + Vandermonde.
+// out_samples_used (optional) receives the number of evaluation calls (probe).
+[[nodiscard]] Result<MultivariatePolynomial> gcd_zippel_prony(
+    const MultivariatePolynomial& P,
+    const MultivariatePolynomial& Q,
+    symbolic::CASContext& ctx,
+    std::size_t* out_samples_used);
+[[nodiscard]] Result<MultivariatePolynomial> gcd_zippel_prony(
+    const MultivariatePolynomial& P,
+    const MultivariatePolynomial& Q,
+    symbolic::CASContext& ctx);
+[[nodiscard]] Result<GcdWithCofactors> gcd_ez(
+    const MultivariatePolynomial& P,
+    const MultivariatePolynomial& Q,
+    symbolic::CASContext& ctx);
+
 // Factorization structures
 struct IntegerSquareFreeFactor {
     IntPoly factor;

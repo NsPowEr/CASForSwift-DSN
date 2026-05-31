@@ -230,8 +230,12 @@ template <typename Coeff>
 [[nodiscard]] Result<Coeff> resultant_generic(
     std::vector<Coeff> a,
     std::vector<Coeff> b,
-    symbolic::CASContext* ctx) {
+    symbolic::CASContext* ctx,
+    const ResultantDeadline& deadline) {
     using namespace resultant_detail;
+    auto deadline_check = [&]() -> bool {
+        return deadline.has_value() && std::chrono::steady_clock::now() >= *deadline;
+    };
     if constexpr (std::is_same_v<Coeff, ExprPtr>) {
         if (!ctx) {
             return fail<Coeff>(make_resultant_error(
@@ -299,6 +303,11 @@ template <typename Coeff>
     Coeff c = s_last;
 
     while (!is_zero_poly(h, ctx)) {
+        if (deadline_check()) {
+            return fail<Coeff>(make_resultant_error(
+                CASErrorKind::Unimplemented,
+                "resultant_generic: ctx.timeout() exceeded during subresultant chain"));
+        }
         const std::size_t k = degree(h);
         a = std::move(b);
         b = std::move(h);

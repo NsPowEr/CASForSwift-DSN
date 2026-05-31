@@ -1,0 +1,81 @@
+{"input": "series(exp(x), x, 0, 5)", "area": "series", "ref": "exp_taylor_5"}
+{"input": "series(sin(x), x, 0, 6)", "area": "series", "ref": "sin_taylor_6"}
+{"input": "series(cos(x), x, 0, 6)", "area": "series", "ref": "cos_taylor_6"}
+{"input": "series(log(1 + x), x, 0, 5)", "area": "series", "ref": "log1p_taylor_5"}
+{"input": "series(1/(1 - x), x, 0, 5)", "area": "series", "ref": "geometric_5"}
+{"input": "series(sqrt(1 + x), x, 0, 4)", "area": "series", "ref": "sqrt_binomial_4"}
+{"input": "series(atan(x), x, 0, 5)", "area": "series", "ref": "arctan_5"}
+{"input": "series(sinh(x), x, 0, 5)", "area": "series", "ref": "sinh_5"}
+{"input": "series(cosh(x), x, 0, 5)", "area": "series", "ref": "cosh_5"}
+{"input": "series(exp(x), x, 0, 3)", "area": "series", "ref": "exp_taylor_3"}
+{"input": "series(sin(x)/x, x, 0, 4)", "area": "series", "ref": "sinc_series_4"}
+{"input": "series(1/(1 + x^2), x, 0, 6)", "area": "series", "ref": "lorentz_6"}
+{"input": "series(log(1 - x), x, 0, 5)", "area": "series", "ref": "log1m_5"}
+{"input": "series((exp(x) - 1)/x, x, 0, 4)", "area": "series", "ref": "exp_diff_4"}
+{"input": "series(tan(x), x, 0, 5)", "area": "series", "ref": "tan_5"}
+{"input": "series(1/sqrt(1 - x), x, 0, 4)", "area": "series", "ref": "inv_sqrt_4"}
+{"input": "series(exp(-x^2), x, 0, 5)", "area": "series", "ref": "gaussian_5"}
+{"input": "series(log(x), x, 1, 4)", "area": "series", "ref": "log_at_1_4"}
+{"input": "series(sin(x^2), x, 0, 6)", "area": "series", "ref": "sin_x2_6"}
+{"input": "series(cos(x)^2, x, 0, 5)", "area": "series", "ref": "cos_sq_5"}
+{"input": "series(exp(x), x, 0, 7)", "area": "series", "ref": "exp_taylor_7"}
+{"input": "series(sin(x), x, 0, 9)", "area": "series", "ref": "sin_taylor_9"}
+{"input": "series(cos(x), x, 0, 8)", "area": "series", "ref": "cos_taylor_8"}
+{"input": "series(log(1 + x), x, 0, 6)", "area": "series", "ref": "log1p_taylor_6"}
+{"input": "series(log(1 - x), x, 0, 6)", "area": "series", "ref": "log1m_6"}
+{"input": "series(1/(1 + x), x, 0, 5)", "area": "series", "ref": "geom_neg_5"}
+{"input": "series(1/(1 - x^2), x, 0, 6)", "area": "series", "ref": "geom_x2_6"}
+{"input": "series(exp(-x), x, 0, 5)", "area": "series", "ref": "exp_neg_5"}
+{"input": "series(exp(x^2), x, 0, 5)", "area": "series", "ref": "exp_x2_5"}
+{"input": "series(sin(x^2), x, 0, 9)", "area": "series", "ref": "sin_x2_9"}
+{"input": "series(cos(x^2), x, 0, 8)", "area": "series", "ref": "cos_x2_8"}
+{"input": "series(exp(2*x), x, 0, 4)", "area": "series", "ref": "exp_2x_4"}
+{"input": "series(sin(2*x), x, 0, 7)", "area": "series", "ref": "sin_2x_7"}
+{"input": "series(cos(3*x), x, 0, 6)", "area": "series", "ref": "cos_3x_6"}
+{"input": "series(sqrt(x), x, 1, 4)", "area": "series", "ref": "sqrt_at_1_4"}
+{"input": "series(1/x, x, 1, 4)", "area": "series", "ref": "inv_x_at_1_4"}
+{"input": "series(exp(x), x, 1, 4)", "area": "series", "ref": "exp_at_1_4"}
+{"input": "series(sin(x), x, 1, 4)", "area": "series", "ref": "sin_at_1_4"}
+{"input": "series(log(x), x, 1, 5)", "area": "series", "ref": "log_at_1_5"}
+{"input": "series(x^2 + x + 1, x, 0, 4)", "area": "series", "ref": "poly_exact_series"}
+{"input": "series(x/(1+x), x, 0, 6)", "area": "series", "ref": "x_over_1px_6"}
+{"input": "series(x^2/(1-x), x, 0, 6)", "area": "series", "ref": "x2_over_1mx_6"}
+{"input": "series(1/(1+x+x^2), x, 0, 6)", "area": "series", "ref": "inv_quad_6"}
+{"input": "series(atan(x)/x, x, 0, 6)", "area": "series", "ref": "arctan_over_x_6"}
+{"input": "series(sin(x)/x^2, x, 0, 6)", "area": "series", "ref": "sinc_over_x_6"}
+{"input": "series(tan(x), x, 0, 7)", "area": "series", "ref": "tan_7"}
+{"input": "series(tanh(x), x, 0, 7)", "area": "series", "ref": "tanh_7"}
+{"input": "series(asin(x), x, 0, 6)", "area": "series", "ref": "arcsin_6"}
+{"input": "series(1/(1+x)^2, x, 0, 5)", "area": "series", "ref": "inv_sq_5"}
+{"input": "series(1/(1+x)^3, x, 0, 5)", "area": "series", "ref": "inv_cube_5"}
+{"input": "series(sqrt(1-x), x, 0, 5)", "area": "series", "ref": "sqrt_1mx_5"}
+{"input": "series(1/sqrt(1+x), x, 0, 5)", "area": "series", "ref": "inv_sqrt_1px_5"}
+{"input": "series((1+x)^(1/3), x, 0, 4)", "area": "series", "ref": "cbrt_1px_4"}
+{"input": "series(exp(x)*sin(x), x, 0, 5)", "area": "series", "ref": "exp_sin_product_5"}
+{"input": "series(exp(x)*cos(x), x, 0, 5)", "area": "series", "ref": "exp_cos_product_5"}
+{"input": "series(sin(x)*cos(x), x, 0, 6)", "area": "series", "ref": "sin_cos_product_6"}
+{"input": "series(exp(sin(x)), x, 0, 5)", "area": "series", "ref": "exp_sin_compose_5"}
+{"input": "series(sin(exp(x) - 1), x, 0, 4)", "area": "series", "ref": "sin_exp_minus1_4"}
+{"input": "series(log(1+sin(x)), x, 0, 5)", "area": "series", "ref": "log_1p_sin_5"}
+{"input": "series(log(cos(x)), x, 0, 6)", "area": "series", "ref": "log_cos_6"}
+{"input": "series(exp(x) - 1, x, 0, 5)", "area": "series", "ref": "exp_minus1_5"}
+{"input": "series((exp(x)-1)/x, x, 0, 5)", "area": "series", "ref": "expsinc_5"}
+{"input": "series(cos(x)/sin(x), x, pi/2, 4)", "area": "series", "ref": "cot_at_pi2_4"}
+{"input": "series(1/(sin(x)), x, pi/6, 4)", "area": "series", "ref": "csc_at_pi6_4"}
+{"input": "series(sinh(x)/x, x, 0, 5)", "area": "series", "ref": "sinhc_5"}
+{"input": "series(cosh(x) - 1, x, 0, 5)", "area": "series", "ref": "cosh_minus1_5"}
+{"input": "series(log(1+x^2), x, 0, 6)", "area": "series", "ref": "log_1p_x2_6"}
+{"input": "series(1/(x^2+1), x, 0, 8)", "area": "series", "ref": "arctan_deriv_series_8"}
+{"input": "series(exp(x^3), x, 0, 6)", "area": "series", "ref": "exp_x3_6"}
+{"input": "series(sin(x^3), x, 0, 9)", "area": "series", "ref": "sin_x3_9"}
+{"input": "series(1/(exp(x)-1), x, 0, 5)", "area": "series", "ref": "bernoulli_generating_5"}
+{"input": "series(x/(exp(x)-1), x, 0, 5)", "area": "series", "ref": "bernoulli_x_over_expm1_5"}
+{"input": "series(exp(-x^2/2), x, 0, 6)", "area": "series", "ref": "gaussian_half_6"}
+{"input": "series(1/(x-1), x, 2, 4)", "area": "series", "ref": "inv_x_minus_1_at_2"}
+{"input": "series(1/(x+2), x, 0, 5)", "area": "series", "ref": "inv_xp2_5"}
+{"input": "series(1/(x^2-1), x, 0, 5)", "area": "series", "ref": "inv_x2m1_5"}
+{"input": "series(x^2*exp(x), x, 0, 5)", "area": "series", "ref": "x2_exp_5"}
+{"input": "series(x*log(1+x), x, 0, 6)", "area": "series", "ref": "x_log1px_6"}
+{"input": "series(sqrt(cos(x)), x, 0, 4)", "area": "series", "ref": "sqrt_cos_4"}
+{"input": "series(log(1+x)/x, x, 0, 5)", "area": "series", "ref": "log1p_over_x_5"}
+{"input": "series(atan(x)^2, x, 0, 6)", "area": "series", "ref": "arctan_sq_6"}

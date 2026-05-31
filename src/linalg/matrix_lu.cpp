@@ -16,6 +16,7 @@
 #include "cas/algebra.hpp"
 #include "cas/ast.hpp"
 #include "cas/error.hpp"
+#include "cas/error_helpers.hpp"
 #include "cas/symbolic.hpp"
 
 #include <vector>
@@ -79,11 +80,13 @@ Result<LUDecomposition> lu_decompose(const MatrixExpr& matrix,
 
         // Check pivot U[k][k] ≠ 0.
         if (is_zero_expr(U(k, k))) {
-            return fail<LUDecomposition>(CASError{
-                CASErrorKind::Unimplemented,
-                "lu_decompose: zero pivot at row " + std::to_string(k)
-                    + " — use permuted LU (follow-up)",
-                std::nullopt});
+            // F0.8-MIGRATED
+            return make_unimplemented<LUDecomposition>(
+                "linalg", "lu_decompose",
+                "zero pivot at row " + std::to_string(k) + " in Doolittle LU",
+                error::reason_codes::LINALG_ZERO_PIVOT,
+                "Use lu_decompose_pivoted for partial pivoting or Bareiss for symbolic det/rank",
+                "L3-17");
         }
 
         // Compute L[i][k] for i > k.
@@ -154,10 +157,13 @@ Result<PLUDecomposition> lu_decompose_pivoted(const MatrixExpr& matrix,
             }
         }
         if (pivot_row == n) {
-            return fail<PLUDecomposition>(CASError{
-                CASErrorKind::Unimplemented,
-                "lu_decompose_pivoted: matrix is singular (all-zero column "
-                + std::to_string(k) + ")", std::nullopt});
+            // F0.8-MIGRATED
+            return make_unimplemented<PLUDecomposition>(
+                "linalg", "lu_decompose_pivoted",
+                "singular matrix: all-zero pivot column " + std::to_string(k),
+                error::reason_codes::LINALG_SINGULAR_MATRIX,
+                "Check matrix rank via Bareiss or use pseudo-inverse for rank-deficient systems",
+                "L3-17");
         }
         // Swap rows k and pivot_row in A_perm and in L (already-built columns).
         if (pivot_row != k) {

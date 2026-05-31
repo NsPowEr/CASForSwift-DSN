@@ -1,0 +1,79 @@
+{"input": "det([[1,2],[3,4]])", "area": "matrix", "ref": "det_2x2"}
+{"input": "det([[a,b],[c,d]])", "area": "matrix", "ref": "det_2x2_sym"}
+{"input": "det([[1,0,0],[0,1,0],[0,0,1]])", "area": "matrix", "ref": "det_identity_3"}
+{"input": "det([[1,2,3],[4,5,6],[7,8,9]])", "area": "matrix", "ref": "det_singular"}
+{"input": "det([[2,1,0],[1,3,1],[0,1,2]])", "area": "matrix", "ref": "det_tridiag"}
+{"input": "trace([[1,2],[3,4]])", "area": "matrix", "ref": "trace_2x2"}
+{"input": "trace([[a,b,c],[d,e,f],[g,h,i]])", "area": "matrix", "ref": "trace_3x3_sym"}
+{"input": "transpose([[1,2,3],[4,5,6]])", "area": "matrix", "ref": "transpose_2x3"}
+{"input": "[[1,0],[0,1]] * [[a,b],[c,d]]", "area": "matrix", "ref": "identity_mul"}
+{"input": "[[1,2],[3,4]] + [[5,6],[7,8]]", "area": "matrix", "ref": "matrix_add"}
+{"input": "2 * [[1,2],[3,4]]", "area": "matrix", "ref": "scalar_mul"}
+{"input": "rank([[1,2],[2,4]])", "area": "matrix", "ref": "rank_singular"}
+{"input": "rank([[1,0],[0,1]])", "area": "matrix", "ref": "rank_identity"}
+{"input": "eigenvalues([[1,0],[0,2]])", "area": "matrix", "ref": "eigenval_diag"}
+{"input": "eigenvalues([[2,1],[1,2]])", "area": "matrix", "ref": "eigenval_symmetric"}
+{"input": "inverse([[1,2],[3,7]])", "area": "matrix", "ref": "inverse_2x2"}
+{"input": "inverse([[1,0],[0,1]])", "area": "matrix", "ref": "inverse_identity"}
+{"input": "det([[x,1],[1,x]])", "area": "matrix", "ref": "det_2x2_sym_x"}
+{"input": "[[1,2],[3,4]] * [[1,0],[0,1]]", "area": "matrix", "ref": "right_identity_mul"}
+{"input": "det([[1,2,0],[3,4,0],[0,0,5]])", "area": "matrix", "ref": "det_block_diagonal"}
+{"input": "det([[1,1],[1,1]])", "area": "matrix", "ref": "det_rank1"}
+{"input": "det([[0,1],[1,0]])", "area": "matrix", "ref": "det_permutation"}
+{"input": "det([[2,0],[0,3]])", "area": "matrix", "ref": "det_diagonal"}
+{"input": "det([[a,0],[0,b]])", "area": "matrix", "ref": "det_sym_diagonal"}
+{"input": "det([[1,2,3],[0,4,5],[0,0,6]])", "area": "matrix", "ref": "det_upper_tri"}
+{"input": "det([[1,0,0],[2,3,0],[4,5,6]])", "area": "matrix", "ref": "det_lower_tri"}
+{"input": "det([[0,0,1],[0,1,0],[1,0,0]])", "area": "matrix", "ref": "det_anti_diag"}
+{"input": "det([[2,3,1],[4,1,2],[1,2,3]])", "area": "matrix", "ref": "det_3x3_general"}
+{"input": "det([[x,0],[0,y]])", "area": "matrix", "ref": "det_sym_xy_diag"}
+{"input": "det([[a,b,c],[0,d,e],[0,0,f]])", "area": "matrix", "ref": "det_sym_upper_tri"}
+{"input": "trace([[1,2,3],[4,5,6],[7,8,9]])", "area": "matrix", "ref": "trace_3x3_15"}
+{"input": "trace([[x,0,0],[0,y,0],[0,0,z]])", "area": "matrix", "ref": "trace_diag_sym"}
+{"input": "trace([[a,b],[c,d]])", "area": "matrix", "ref": "trace_2x2_sym"}
+{"input": "transpose([[1,2],[3,4]])", "area": "matrix", "ref": "transpose_2x2"}
+{"input": "transpose([[a,b],[c,d]])", "area": "matrix", "ref": "transpose_2x2_sym"}
+{"input": "transpose([[1,0,0],[0,1,0],[0,0,1]])", "area": "matrix", "ref": "transpose_identity_3"}
+{"input": "[[1,2],[3,4]] * [[1,2],[3,4]]", "area": "matrix", "ref": "matrix_sq"}
+{"input": "[[2,1],[1,3]] * [[1,0],[0,1]]", "area": "matrix", "ref": "mul_identity_right"}
+{"input": "[[1,0],[0,1]] * [[2,1],[1,3]]", "area": "matrix", "ref": "mul_identity_left"}
+{"input": "[[1,2],[3,4]] + [[0,0],[0,0]]", "area": "matrix", "ref": "add_zero_matrix"}
+{"input": "[[1,2],[3,4]] - [[1,2],[3,4]]", "area": "matrix", "ref": "sub_self_zero"}
+{"input": "3 * [[1,0],[0,1]]", "area": "matrix", "ref": "scalar_mul_identity"}
+{"input": "0 * [[1,2],[3,4]]", "area": "matrix", "ref": "scalar_zero_mul"}
+{"input": "rank([[1,2,3],[4,5,6],[7,8,9]])", "area": "matrix", "ref": "rank_deficient_3x3"}
+{"input": "rank([[1,0,0],[0,1,0],[0,0,0]])", "area": "matrix", "ref": "rank_2_3x3"}
+{"input": "rank([[1,2],[3,4]])", "area": "matrix", "ref": "rank_full_2x2"}
+{"input": "inverse([[2,0],[0,2]])", "area": "matrix", "ref": "inverse_scaled_identity"}
+{"input": "inverse([[1,2],[3,4]])", "area": "matrix", "ref": "inverse_2x2_b"}
+{"input": "inverse([[2,1],[5,3]])", "area": "matrix", "ref": "inverse_2x2_c"}
+{"input": "inverse([[a,b],[c,d]])", "area": "matrix", "ref": "inverse_2x2_sym", "assume": "a*d - b*c != 0"}
+{"input": "det([[1,x,x^2],[1,y,y^2],[1,z,z^2]])", "area": "matrix", "ref": "vandermonde_3"}
+{"input": "det([[x,1,0],[0,x,1],[1,0,x]])", "area": "matrix", "ref": "circulant_3"}
+{"input": "eigenvalues([[0,1],[1,0]])", "area": "matrix", "ref": "eigenval_swap"}
+{"input": "eigenvalues([[3,1],[1,3]])", "area": "matrix", "ref": "eigenval_sym_plus_minus_1"}
+{"input": "eigenvalues([[1,0],[0,1]])", "area": "matrix", "ref": "eigenval_identity_both_1"}
+{"input": "[[1,2,3],[4,5,6]] * [[1,0],[0,1],[1,0]]", "area": "matrix", "ref": "nonsquare_mul"}
+{"input": "det([[1,2,3,4],[0,5,6,7],[0,0,8,9],[0,0,0,10]])", "area": "matrix", "ref": "det_upper_tri_4x4"}
+{"input": "trace([[1,0,0,0],[0,2,0,0],[0,0,3,0],[0,0,0,4]])", "area": "matrix", "ref": "trace_diag_4x4"}
+{"input": "det([[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]])", "area": "matrix", "ref": "det_identity_4"}
+{"input": "[[1,2],[3,4]] * [[5,6],[7,8]]", "area": "matrix", "ref": "matrix_mul_explicit"}
+{"input": "[[a,b],[c,d]] + [[e,f],[g,h]]", "area": "matrix", "ref": "sym_matrix_add"}
+{"input": "2 * [[a,b],[c,d]]", "area": "matrix", "ref": "sym_scalar_mul_2"}
+{"input": "inverse([[1,1],[0,1]])", "area": "matrix", "ref": "inverse_upper_unit_tri"}
+{"input": "inverse([[1,0],[1,1]])", "area": "matrix", "ref": "inverse_lower_unit_tri"}
+{"input": "rank([[2,4],[1,2]])", "area": "matrix", "ref": "rank_1_linearly_dep"}
+{"input": "det([[2,1,1],[1,2,1],[1,1,2]])", "area": "matrix", "ref": "det_all_near_ones"}
+{"input": "det([[1,2],[2,1]])", "area": "matrix", "ref": "det_2x2_off_diag"}
+{"input": "trace([[0,1,0],[0,0,1],[1,0,0]])", "area": "matrix", "ref": "trace_cyclic_perm_0"}
+{"input": "transpose([[1],[2],[3]])", "area": "matrix", "ref": "transpose_col_to_row"}
+{"input": "det([[a,a],[a,a]])", "area": "matrix", "ref": "det_all_same_zero"}
+{"input": "det([[1,-1],[-1,1]])", "area": "matrix", "ref": "det_gram"}
+{"input": "det([[2,3],[-1,4]])", "area": "matrix", "ref": "det_2x2_mixed_sign"}
+{"input": "det([[cos(t),sin(t)],[-sin(t),cos(t)]])", "area": "matrix", "ref": "det_rotation_matrix"}
+{"input": "rank([[1,0,1],[2,0,2],[3,0,3]])", "area": "matrix", "ref": "rank_1_3x3_prop"}
+{"input": "det([[1,2,3],[4,5,6],[7,8,10]])", "area": "matrix", "ref": "det_near_singular_neg3"}
+{"input": "eigenvalues([[5,0],[0,3]])", "area": "matrix", "ref": "eigenval_diag_5_3"}
+{"input": "inverse([[3,0],[0,5]])", "area": "matrix", "ref": "inverse_diag"}
+{"input": "[[1,2],[3,4]] * [[2,-1],[-1,1]]", "area": "matrix", "ref": "mat_times_inverse"}
+{"input": "det([[0,1,0,0],[1,0,0,0],[0,0,0,1],[0,0,1,0]])", "area": "matrix", "ref": "det_perm_matrix_4x4"}

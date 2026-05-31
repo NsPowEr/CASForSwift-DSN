@@ -3,6 +3,7 @@
 #include "cas/algebra.hpp"
 #include "cas/ast_debug.hpp"
 #include "cas/calculus.hpp"
+#include "cas/error_helpers.hpp"
 #include <iostream>
 
 namespace cas::calculus {
@@ -241,7 +242,13 @@ namespace cas::calculus {
         return solve_linear_nth_order_constant_coeffs(classification, ctx);
     }
     
-    return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Risolutore avanzato non ancora implementato per questo tipo di ODE."));
+    // F0.8-MIGRATED
+    return make_unimplemented<ExprPtr>(
+        "calculus", "solve_ode_advanced",
+        "ODE type not handled by advanced solver",
+        cas::error::reason_codes::ODE_UNSUPPORTED_TYPE,
+        "Implement the solver for this ODE class or add a fallback to numeric ODE integration",
+        "F0.8");
 }
 
 } // namespace cas::calculus

@@ -1,5 +1,6 @@
 #include "simplify_impl.hpp"
 #include "cas/algebra.hpp"
+#include "cas/error_helpers.hpp"
 
 namespace cas::symbolic::detail {
 
@@ -45,8 +46,13 @@ Result<ExprPtr> Simplifier::simplify_funcall_bessel_orthogonal(
         if (const auto* il = expr_cast<IntegerLit>(order);
             il != nullptr && il->value.is_negative()) {
             if (il->value.bit_length() > 16)
-                return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
-                    "Bessel: negative integer order too large"));
+                // F0.8-MIGRATED
+                return make_unimplemented<ExprPtr>(
+                    "symbolic", "simplify_funcall_bessel_orthogonal",
+                    "Bessel J/Y/I/K with negative integer order > 2^16",
+                    error::reason_codes::SYMBOLIC_DEGREE_TOO_LARGE,
+                    "Reduce order magnitude or use asymptotic expansion for large orders",
+                    "F1.x");
             BigInt mag = -il->value;
             ExprPtr pos_order = make_integer(arena_, mag);
             ExprPtr pos_call = arena_.make<FuncCall>(op,
@@ -105,8 +111,13 @@ Result<ExprPtr> Simplifier::simplify_funcall_bessel_orthogonal(
             if (const auto* il = expr_cast<IntegerLit>(order);
                 il != nullptr && !il->value.is_negative() && il->value > BigInt(1)) {
                 if (il->value.bit_length() > 16)
-                    return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
-                        "Bessel recurrence: integer order too large"));
+                    // F0.8-MIGRATED
+                    return make_unimplemented<ExprPtr>(
+                        "symbolic", "simplify_funcall_bessel_orthogonal",
+                        "Bessel J/Y three-term recurrence with integer order > 2^16",
+                        error::reason_codes::SYMBOLIC_DEGREE_TOO_LARGE,
+                        "Limit recurrence depth via ctx.max_bessel_recurrence or use asymptotic form",
+                        "F1.x");
                 BigInt n_minus_1 = il->value - BigInt(1);
                 BigInt n_minus_2 = il->value - BigInt(2);
                 ExprPtr coeff = arena_.make<Binary>(BinaryOp::Div,
@@ -131,8 +142,13 @@ Result<ExprPtr> Simplifier::simplify_funcall_bessel_orthogonal(
         if (const auto* il = expr_cast<IntegerLit>(args[0]);
             il != nullptr && !il->value.is_negative()) {
             if (il->value.bit_length() > 16)
-                return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
-                    "ChebyshevT: degree too large"));
+                // F0.8-MIGRATED
+                return make_unimplemented<ExprPtr>(
+                    "symbolic", "simplify_funcall_bessel_orthogonal",
+                    "ChebyshevT with degree > 2^16",
+                    error::reason_codes::SYMBOLIC_DEGREE_TOO_LARGE,
+                    "Cap degree via ctx.max_polynomial_degree or request numeric evaluation",
+                    "F1.x");
             const std::uint64_t n = il->value.to_u64();
             ExprPtr x = args[1];
             if (n == 0U) return ok(make_integer(arena_, BigInt(1)));
@@ -158,8 +174,13 @@ Result<ExprPtr> Simplifier::simplify_funcall_bessel_orthogonal(
         if (const auto* il = expr_cast<IntegerLit>(args[0]);
             il != nullptr && !il->value.is_negative()) {
             if (il->value.bit_length() > 16)
-                return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
-                    "ChebyshevU: degree too large"));
+                // F0.8-MIGRATED
+                return make_unimplemented<ExprPtr>(
+                    "symbolic", "simplify_funcall_bessel_orthogonal",
+                    "ChebyshevU with degree > 2^16",
+                    error::reason_codes::SYMBOLIC_DEGREE_TOO_LARGE,
+                    "Cap degree via ctx.max_polynomial_degree or request numeric evaluation",
+                    "F1.x");
             const std::uint64_t n = il->value.to_u64();
             ExprPtr x = args[1];
             if (n == 0U) return ok(make_integer(arena_, BigInt(1)));
@@ -187,8 +208,13 @@ Result<ExprPtr> Simplifier::simplify_funcall_bessel_orthogonal(
         if (const auto* il = expr_cast<IntegerLit>(args[0]);
             il != nullptr && !il->value.is_negative()) {
             if (il->value.bit_length() > 16)
-                return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
-                    "HermiteH: degree too large"));
+                // F0.8-MIGRATED
+                return make_unimplemented<ExprPtr>(
+                    "symbolic", "simplify_funcall_bessel_orthogonal",
+                    "HermiteH (physicist) with degree > 2^16",
+                    error::reason_codes::SYMBOLIC_DEGREE_TOO_LARGE,
+                    "Cap degree via ctx.max_polynomial_degree or request numeric evaluation",
+                    "F1.x");
             const std::uint64_t n = il->value.to_u64();
             ExprPtr x = args[1];
             if (n == 0U) return ok(make_integer(arena_, BigInt(1)));
@@ -218,8 +244,13 @@ Result<ExprPtr> Simplifier::simplify_funcall_bessel_orthogonal(
         if (const auto* il = expr_cast<IntegerLit>(args[0]);
             il != nullptr && !il->value.is_negative()) {
             if (il->value.bit_length() > 16)
-                return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
-                    "HermiteHe: degree too large"));
+                // F0.8-MIGRATED
+                return make_unimplemented<ExprPtr>(
+                    "symbolic", "simplify_funcall_bessel_orthogonal",
+                    "HermiteHe (probabilist) with degree > 2^16",
+                    error::reason_codes::SYMBOLIC_DEGREE_TOO_LARGE,
+                    "Cap degree via ctx.max_polynomial_degree or request numeric evaluation",
+                    "F1.x");
             const std::uint64_t n = il->value.to_u64();
             ExprPtr x = args[1];
             if (n == 0U) return ok(make_integer(arena_, BigInt(1)));
@@ -246,8 +277,13 @@ Result<ExprPtr> Simplifier::simplify_funcall_bessel_orthogonal(
         if (const auto* il = expr_cast<IntegerLit>(args[0]);
             il != nullptr && il->value >= BigInt(0)) {
             if (il->value.bit_length() > 16)
-                return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
-                    "LegendreP: degree too large for symbolic expansion"));
+                // F0.8-MIGRATED
+                return make_unimplemented<ExprPtr>(
+                    "symbolic", "simplify_funcall_bessel_orthogonal",
+                    "LegendreP with degree > 2^16",
+                    error::reason_codes::SYMBOLIC_DEGREE_TOO_LARGE,
+                    "Cap degree via ctx.max_polynomial_degree or use asymptotic Legendre formula",
+                    "F1.x");
             const std::uint64_t n = il->value.to_u64();
             ExprPtr x = args[1];
             if (n == 0U) return ok(make_integer(arena_, BigInt(1)));
@@ -307,8 +343,13 @@ Result<ExprPtr> Simplifier::simplify_funcall_bessel_orthogonal(
         if (const auto* il = expr_cast<IntegerLit>(args[0]);
             il != nullptr && il->value >= BigInt(0)) {
             if (il->value.bit_length() > 16)
-                return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
-                    "LaguerreL: degree too large"));
+                // F0.8-MIGRATED
+                return make_unimplemented<ExprPtr>(
+                    "symbolic", "simplify_funcall_bessel_orthogonal",
+                    "LaguerreL with degree > 2^16",
+                    error::reason_codes::SYMBOLIC_DEGREE_TOO_LARGE,
+                    "Cap degree via ctx.max_polynomial_degree or request numeric evaluation",
+                    "F1.x");
             const std::uint64_t n = il->value.to_u64();
             ExprPtr x = args[1];
             if (n == 0U) return ok(make_integer(arena_, BigInt(1)));
@@ -351,8 +392,13 @@ Result<ExprPtr> Simplifier::simplify_funcall_bessel_orthogonal(
         if (const auto* il = expr_cast<IntegerLit>(args[0]);
             il != nullptr && il->value >= BigInt(0)) {
             if (il->value.bit_length() > 16)
-                return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
-                    "JacobiP: degree too large for symbolic expansion"));
+                // F0.8-MIGRATED
+                return make_unimplemented<ExprPtr>(
+                    "symbolic", "simplify_funcall_bessel_orthogonal",
+                    "JacobiP P_n^(α,β) with degree > 2^16",
+                    error::reason_codes::SYMBOLIC_DEGREE_TOO_LARGE,
+                    "Cap degree via ctx.max_polynomial_degree or request numeric evaluation",
+                    "F1.x");
             const std::uint64_t n = il->value.to_u64();
             ExprPtr alpha = args[1];
             ExprPtr beta = args[2];

@@ -1,0 +1,10 @@
+!_VECCHI DOCUMENTI/
+build/
+build-*/
+.DS_Store
+*.txt
+*.yaml
+Swift/.build/
+.agents/
+.codex/
+.claude/

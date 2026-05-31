@@ -200,6 +200,13 @@ Questi hardcode **sono permessi** perché matematicamente fondati o architettura
 
 ---
 
+### Sicurezza Git (Git Safety Rule)
+
+Mai dare agente accesso a `git reset --hard` o `git restore` without explicit safe pattern.
+**NO `git reset --hard`, NO `git restore --source`**, solo backup via `git stash push`.
+
+---
+
 ### Regola di Self-Check Prima di Ogni Commit
 
 Prima di introdurre qualsiasi costante numerica `N` nel codice, rispondere a:
@@ -234,6 +241,29 @@ Prima di introdurre qualsiasi costante numerica `N` nel codice, rispondere a:
 - I letterali decimali (`DecimalLit`) sono ammessi solo per preservare l'input utente.
 - Il Core Simbolico deve restituire `CASErrorKind::Unimplemented` se un'operazione algebrica (es. espansione) richiede di operare su un `DecimalLit`. Il calcolo numerico è un fallback esplicito.
 
+### 6. Maxima Reference Oracle — Sorgente NON Modificabile (Licenza GPL-2.0-only)
+
+Maxima 5.49.0 (Homebrew bottle, `/opt/homebrew/Cellar/maxima/5.49.0/`) è il **reference oracle** primario della golden test suite (F0.5).
+
+**Divieto assoluto**:
+- È **vietato** modificare per qualsiasi ragione i sorgenti, i binari, i file `.lisp`, `.mac`, `.fas`, `.dem` o qualunque altro artefatto contenuto in `/opt/homebrew/Cellar/maxima/`, `/opt/homebrew/share/maxima/`, o qualunque altra installazione di Maxima sul sistema.
+- È **vietato** patchare, ricompilare con flag personalizzati, o re-distribuire Maxima alterato.
+- È **vietato** ridistribuire output di Maxima embedded nei nostri binari senza rispetto della GPL-2.0-only.
+
+**Motivazione**: Maxima è rilasciato sotto **GPL-2.0-only**. Qualsiasi modifica al sorgente trasformerebbe il codice CAS Engine in un *derivative work* soggetto a copyleft, invalidando la nostra licenza proprietaria e invalidando l'uso di Maxima come oracolo indipendente nei test (oracolo modificato = non più indipendente, perde validità scientifica).
+
+**Uso ammesso**:
+- Invocazione via `maxima --very-quiet --batch-string="..."` come processo separato (fork/exec).
+- Parsing dell'output testuale di Maxima per confronto AST.
+- Pin esatto della versione (`5.49.0`) documentato in `PLAN_HP_PRIME_PARITY.md` e CI.
+- Citazione di Maxima come reference nei doc, con link alla licenza GPL-2.0-only.
+
+**Verifica integrità**:
+- Lo script `scripts/verify_maxima_integrity.sh` deve calcolare lo SHA-256 dell'eseguibile Maxima e dei file `*.lisp` core, e fallire la build se non corrisponde al manifesto pinned `scripts/maxima_5.49.0_manifest.sha256`.
+- Ogni golden run logga `maxima --version` + hash binario; mismatch → build fail.
+
+**Conseguenze violazione**: rigetto immediato della PR + audit completo per identificare contaminazione GPL nel sorgente CAS Engine.
+
 ---
 
 ## WORKFLOW: PRIMA DI DICHIARARE UN TASK COMPLETATO
@@ -245,6 +275,18 @@ Prima di introdurre qualsiasi costante numerica `N` nel codice, rispondere a:
 3. **Sanitizers**: Zero errori in ASan e UBSan.
 4. **Zero Warning**: Compilazione pulita con `-Wall -Wextra -Wpedantic -Werror`.
 5. **Trace Validation**: Se il task tocca il `Simplifier`, verifica che il `ComputationTrace` sia accurato e non ridondante.
+
+---
+
+## PROTOCOLLO ANTI-LOOP E GESTIONE DEGLI ERRORI (Agent Panic Stop)
+
+**VIETATO**: Entrare in loop infiniti di correzione errori (es: fix test A → rompe test B → fix test B → rompe test A) alterando ciecamente il codice o stravolgendo l'architettura nel panico da debug.
+
+**Regola Operativa Assoluta**: Se l'agente tenta di risolvere un errore di compilazione, un test fallito o un bug e **fallisce per 3 tentativi consecutivi**, DEVE:
+1. **Fermarsi immediatamente**. È severamente vietato tentare "rewrite" totali del file, aggiungere patch casuali o disabilitare test/warning per aggirare il blocco.
+2. **Ripristinare lo stato di sicurezza**. Effettuare un `git stash` o scartare le modifiche non funzionanti per riportare la working tree all'ultimo stato noto stabile.
+3. **Produrre un Report di Stallo**. Segnalare esplicitamente all'operatore umano: *"Ho raggiunto il limite di 3 tentativi. Ecco la natura dell'errore, le 3 strategie fallite e la potenziale causa sistemica."*
+4. Attendere un intervento umano o un chiarimento architetturale. Nessun ulteriore tentativo di esecuzione codice è permesso senza autorizzazione.
 
 ---
 
@@ -291,3 +333,13 @@ Se uno script di automazione (es. `benchmark.sh`) viene modificato o ne viene ag
 ### Vincoli di Modifica
 - **MAI** rimuovere o indebolire le Regole 1, 2 e 3 (BigInt, Structural Sharing, Arena). Sono le fondamenta immutabili.
 - Ogni modifica al `CLAUDE.md` deve essere comunicata allo sviluppatore con la dicitura: *"Aggiornamento Costituzione Tecnica: [MOTIVAZIONE]"*.
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).

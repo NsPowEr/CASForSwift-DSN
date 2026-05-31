@@ -33,6 +33,7 @@
 #include "factorization_tower_internal.hpp"
 #include "polynomial_internal.hpp"
 
+#include <chrono>
 #include <cstddef>
 #include <string>
 #include <utility>
@@ -61,6 +62,31 @@ Result<Factorization> factor_polynomial_tower(
         return fail<Factorization>(fti::tower_error(
             CASErrorKind::InvalidArgument,
             "factor_polynomial_tower: tower minimal polynomials must have non-zero leading coefficient"));
+    }
+
+    // F3.5 fast path: when min_poly_2 has only rational (constant-in-α₁)
+    // coefficients (the common biquadratic case Q(√a,√b)), delegate to the
+    // single-extension Trager via primitive element.  This is dramatically
+    // faster than the iterated nested resultant and resolves BUG-HANG-003.
+    {
+        bool m2_is_rational = true;
+        std::vector<Rational> m2_rat;
+        m2_rat.reserve(gens.min_poly_2.size());
+        for (const AlgebraicNumber& c : gens.min_poly_2) {
+            const auto& v = c.value();
+            if (v.size() > 1U) { m2_is_rational = false; break; }
+            m2_rat.push_back(v.empty() ? Rational(BigInt(0)) : v[0]);
+        }
+        if (m2_is_rational) {
+            TowerGeneratorsN ng;
+            ng.alphas = {gens.alpha_1, gens.alpha_2};
+            ng.min_polys = {gens.min_poly_1, std::move(m2_rat)};
+            auto r = factor_polynomial_tower_n(poly, var, ng, ctx);
+            if (r.is_ok()) return r;
+            // On Unimplemented (e.g. budget exhausted), fall through to the
+            // legacy iterated path so the existing tests' invariants hold.
+            if (r.error().kind != CASErrorKind::Unimplemented) return r;
+        }
     }
 
     auto parsed = parse_polynomial(poly, var, ctx);
@@ -108,9 +134,39 @@ Result<Factorization> factor_polynomial_tower(
     const std::size_t default_bound = fti::compute_default_shift_bound(deg_f, deg_m1, deg_m2);
     const std::size_t max_attempts = (user_bound > 0U) ? user_bound : default_bound;
 
+    // Wall-clock budget: the shift-search loop must not run longer than the CAS context
+    // per-operation timeout.  Each inner sub-call independently resets the timer, so
+    // without this check the outer loop would run max_attempts iterations regardless of
+    // total elapsed time (BUG-HANG-003, L3-06).  The budget is the existing ctx.timeout()
+    // field — no new hardcoded constant (CLAUDE.md Cat 1).
+    const auto tower_deadline =
+        std::chrono::steady_clock::now() + ctx.timeout();
+
     std::size_t attempts = 0U;
     for (std::size_t weight = 0U; attempts < max_attempts; ++weight) {
+        if (std::chrono::steady_clock::now() >= tower_deadline) {
+            return fail<Factorization>(fti::tower_error(
+                CASErrorKind::Unimplemented,
+                "factor_polynomial_tower [module=algebra, function=factor_polynomial_tower, "
+                "reason_code=FACTOR_TOWER_WALL_BUDGET_EXCEEDED, ticket=L3-06/F3.5]: "
+                "wall-clock budget (ctx.timeout()) exceeded during composite Trager shift "
+                "search — increase ctx.set_timeout() or await sparse-resultant optimisation "
+                "(F3.5). Note: for irreducible f over a 2-level tower the Trager norm is a "
+                "perfect power of an irreducible Q-polynomial; square-free search always "
+                "exhausts the budget (see L3-06 in CAS_TASKS.md)."));
+        }
         for (std::size_t s1 = 0U; s1 <= weight && attempts < max_attempts; ++s1) {
+            if (std::chrono::steady_clock::now() >= tower_deadline) {
+                return fail<Factorization>(fti::tower_error(
+                    CASErrorKind::Unimplemented,
+                    "factor_polynomial_tower [module=algebra, function=factor_polynomial_tower, "
+                    "reason_code=FACTOR_TOWER_WALL_BUDGET_EXCEEDED, ticket=L3-06/F3.5]: "
+                    "wall-clock budget (ctx.timeout()) exceeded during composite Trager shift "
+                    "search — increase ctx.set_timeout() or await sparse-resultant optimisation "
+                    "(F3.5). Note: for irreducible f over a 2-level tower the Trager norm is a "
+                    "perfect power of an irreducible Q-polynomial; square-free search always "
+                    "exhausts the budget (see L3-06 in CAS_TASKS.md)."));
+            }
             const std::size_t s2 = weight - s1;
             ++attempts;
 

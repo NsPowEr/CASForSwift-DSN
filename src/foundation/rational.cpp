@@ -218,6 +218,48 @@ Rational operator/(const Rational& lhs, const Rational& rhs) {
         lhs.denominator() * rhs.numerator());
 }
 
+// F1.2-NEW: Euclidean continued-fraction expansion.
+// Algorithm (Knuth TAOCP Vol.2 §4.5.3):
+//   a0 = floor(p/q), then iterate (p,q) ← (q, p mod q) until q=0 or limit.
+// Negative case: standard convention keeps all a_k (k>=1) positive; only
+// a0 may be negative (i.e. a0 = floor(rational), which for negative non-
+// integers differs from truncation). We implement this via the invariant that
+// the remainder at each step is always non-negative.
+std::vector<BigInt> Rational::to_continued_fraction(std::size_t n_max) const {
+    std::vector<BigInt> quotients;
+    quotients.reserve(32U);
+
+    // Work with |numerator_| and |denominator_|, track sign separately.
+    // For floor division with negative rationals: floor(-7/3) = -3 (not -2),
+    // so we compute floor(p/q) = (p - (q-1)) / q when p is negative and q>0.
+    // Simpler: always use the Euclidean floor via BigInt arithmetic.
+    BigInt p = numerator_;
+    BigInt q = denominator_;   // Always positive after reduce().
+
+    std::size_t count = 0U;
+    while (!q.is_zero() && count < n_max) {
+        // floor_div: for p>=0 it is p/q; for p<0 it is -(|p|+q-1)/q.
+        BigInt a0;
+        BigInt r;
+        if (!p.is_negative()) {
+            a0 = p / q;
+            r  = p % q;
+        } else {
+            // p negative: floor(p/q) = -(|p| + q - 1) / q  (integer ceiling of |p|/q, negated)
+            BigInt abs_p = p.abs();
+            a0 = -((abs_p + q - BigInt(1)) / q);
+            // r = p - a0 * q  (must be in [0, q-1])
+            r  = p - a0 * q;
+        }
+        quotients.push_back(std::move(a0));
+        p = q;
+        q = std::move(r);
+        ++count;
+    }
+
+    return quotients;
+}
+
 Result<Rational> checked_divide(const Rational& lhs, const Rational& rhs) {
     if (rhs.numerator().is_zero()) {
         return fail<Rational>(make_error(CASErrorKind::Undefined, "Rational division by zero"));

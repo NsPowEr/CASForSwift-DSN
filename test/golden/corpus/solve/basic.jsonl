@@ -1,0 +1,81 @@
+{"input": "solve(x - 3, x)", "area": "solve", "ref": "linear_1"}
+{"input": "solve(2*x + 4, x)", "area": "solve", "ref": "linear_2"}
+{"input": "solve(x^2 - 4, x)", "area": "solve", "ref": "quadratic_diff_sq"}
+{"input": "solve(x^2 - 5*x + 6, x)", "area": "solve", "ref": "quadratic_two_roots"}
+{"input": "solve(x^2 + 1, x)", "area": "solve", "ref": "quadratic_complex"}
+{"input": "solve(x^3 - x, x)", "area": "solve", "ref": "cubic_three_roots"}
+{"input": "solve(x^3 - 1, x)", "area": "solve", "ref": "roots_of_unity_3"}
+{"input": "solve(x^2 + x + 1, x)", "area": "solve", "ref": "quadratic_complex_2"}
+{"input": "solve(x^4 - 1, x)", "area": "solve", "ref": "roots_of_unity_4"}
+{"input": "solve(x^2 - 2, x)", "area": "solve", "ref": "sqrt2_roots"}
+{"input": "solve(x^2 - x - 6, x)", "area": "solve", "ref": "quadratic_neg_disc"}
+{"input": "solve(2*x^2 - 8, x)", "area": "solve", "ref": "quadratic_coeff"}
+{"input": "solve(x^3 + x^2 - x - 1, x)", "area": "solve", "ref": "cubic_factor"}
+{"input": "solve(x^2 + 2*x + 1, x)", "area": "solve", "ref": "double_root"}
+{"input": "solve(x^4 - 5*x^2 + 4, x)", "area": "solve", "ref": "biquadratic"}
+{"input": "solve(x^3 - 6*x^2 + 11*x - 6, x)", "area": "solve", "ref": "cubic_123"}
+{"input": "solve(x^4 - x^2, x)", "area": "solve", "ref": "quartic_factor"}
+{"input": "solve(x^2 - 3, x)", "area": "solve", "ref": "sqrt3_roots"}
+{"input": "solve(4*x^2 - 1, x)", "area": "solve", "ref": "quadratic_half_roots"}
+{"input": "solve(x^3 + 3*x^2 + 3*x + 1, x)", "area": "solve", "ref": "triple_root"}
+{"input": "solve(3*x - 9, x)", "area": "solve", "ref": "linear_3"}
+{"input": "solve(5*x + 10, x)", "area": "solve", "ref": "linear_5"}
+{"input": "solve(x/2 - 3, x)", "area": "solve", "ref": "linear_half"}
+{"input": "solve(2*x + 1, x)", "area": "solve", "ref": "linear_half_root"}
+{"input": "solve(a*x + b, x)", "area": "solve", "ref": "linear_parametric"}
+{"input": "solve(x^2 - 9, x)", "area": "solve", "ref": "diff_sq_9_roots"}
+{"input": "solve(x^2 - 16, x)", "area": "solve", "ref": "diff_sq_16_roots"}
+{"input": "solve(x^2 - 3*x, x)", "area": "solve", "ref": "quad_factor_x"}
+{"input": "solve(x^2 + 4*x, x)", "area": "solve", "ref": "quad_factor_x_4"}
+{"input": "solve(x^2 + 4*x + 4, x)", "area": "solve", "ref": "perf_sq_double_root"}
+{"input": "solve(x^2 - 6*x + 9, x)", "area": "solve", "ref": "perf_sq_double_root_3"}
+{"input": "solve(x^2 + 2*x - 3, x)", "area": "solve", "ref": "quad_roots_1_neg3"}
+{"input": "solve(x^2 - 3*x + 2, x)", "area": "solve", "ref": "quad_roots_1_2"}
+{"input": "solve(x^2 - 7*x + 12, x)", "area": "solve", "ref": "quad_roots_3_4"}
+{"input": "solve(2*x^2 + 5*x + 3, x)", "area": "solve", "ref": "quad_with_coeff"}
+{"input": "solve(3*x^2 - 12, x)", "area": "solve", "ref": "quad_scaled_sqrt2"}
+{"input": "solve(x^2 + x, x)", "area": "solve", "ref": "quad_zero_and_neg1"}
+{"input": "solve(x^3 - 8, x)", "area": "solve", "ref": "cubic_cube_root_8"}
+{"input": "solve(x^3 + 8, x)", "area": "solve", "ref": "cubic_sum_cube_8"}
+{"input": "solve(x^4 - 16, x)", "area": "solve", "ref": "quartic_fourth_roots_2"}
+{"input": "solve(x^4 + x^2 - 2, x)", "area": "solve", "ref": "quartic_biquad_sub"}
+{"input": "solve(x^4 - 13*x^2 + 36, x)", "area": "solve", "ref": "biquad_2_3_roots"}
+{"input": "solve(x^3 - 3*x - 2, x)", "area": "solve", "ref": "cubic_triple_factor"}
+{"input": "solve(x^3 - 7*x + 6, x)", "area": "solve", "ref": "cubic_1_2_neg3"}
+{"input": "solve(x^3 + 6*x^2 + 11*x + 6, x)", "area": "solve", "ref": "cubic_neg1_neg2_neg3"}
+{"input": "solve(x^5 - x, x)", "area": "solve", "ref": "quintic_five_roots"}
+{"input": "solve(x^6 - 1, x)", "area": "solve", "ref": "roots_of_unity_6"}
+{"input": "solve(x^2 + 5, x)", "area": "solve", "ref": "quad_complex_sqrt5"}
+{"input": "solve(x^2 + 4, x)", "area": "solve", "ref": "quad_complex_2i"}
+{"input": "solve(x^2 - x - 12, x)", "area": "solve", "ref": "quad_neg3_4"}
+{"input": "solve(x^2 + 3*x - 18, x)", "area": "solve", "ref": "quad_3_neg6"}
+{"input": "solve(x^2 - 8*x + 15, x)", "area": "solve", "ref": "quad_3_5"}
+{"input": "solve(x^2 - 4*x - 5, x)", "area": "solve", "ref": "quad_5_neg1"}
+{"input": "solve(x^3 - 2*x^2 - x + 2, x)", "area": "solve", "ref": "cubic_grouping_roots_1_2_neg1"}
+{"input": "solve(x^3 + x^2 - 4*x - 4, x)", "area": "solve", "ref": "cubic_grouping_roots_2_neg2_neg1"}
+{"input": "solve(x^4 - x^3 - x + 1, x)", "area": "solve", "ref": "quartic_factor_1_neg1"}
+{"input": "solve(x^3 - x^2, x)", "area": "solve", "ref": "cubic_zero_double"}
+{"input": "solve(x^4 - 4*x^2, x)", "area": "solve", "ref": "quartic_zero_pm2"}
+{"input": "solve(x^2 - 2*x + 2, x)", "area": "solve", "ref": "quad_complex_1pm_i"}
+{"input": "solve(x^2 - 2*x - 1, x)", "area": "solve", "ref": "quad_irrational"}
+{"input": "solve(x^2 + 2*x - 8, x)", "area": "solve", "ref": "quad_2_neg4"}
+{"input": "solve(x^2 - 5*x, x)", "area": "solve", "ref": "quad_0_5"}
+{"input": "solve(x^3 - 4*x^2 + 5*x - 2, x)", "area": "solve", "ref": "cubic_1_1_2"}
+{"input": "solve(x^4 - 2*x^2 + 1, x)", "area": "solve", "ref": "quartic_double_pm1"}
+{"input": "solve(2*x^2 - 5*x + 3, x)", "area": "solve", "ref": "quad_1_3half"}
+{"input": "solve(3*x^2 + 5*x - 2, x)", "area": "solve", "ref": "quad_third_neg2"}
+{"input": "solve(4*x^2 - 8*x + 3, x)", "area": "solve", "ref": "quad_3half_half"}
+{"input": "solve(6*x^2 + x - 2, x)", "area": "solve", "ref": "quad_half_neg2third"}
+{"input": "solve(x^3 + 3*x^2 - 4, x)", "area": "solve", "ref": "cubic_1_neg2_neg2"}
+{"input": "solve(x^3 - 4*x, x)", "area": "solve", "ref": "cubic_0_2_neg2"}
+{"input": "solve(x^4 - 5*x^2, x)", "area": "solve", "ref": "quartic_0_sqrt5_neg_sqrt5"}
+{"input": "solve(x^3 + x^2 + x, x)", "area": "solve", "ref": "cubic_zero_complex"}
+{"input": "solve(x^5 - 32, x)", "area": "solve", "ref": "fifth_roots_2"}
+{"input": "solve(x^2 - 12, x)", "area": "solve", "ref": "quad_pm_2sqrt3"}
+{"input": "solve(x^2 + 6*x + 5, x)", "area": "solve", "ref": "quad_neg1_neg5"}
+{"input": "solve(x^2 - 11*x + 28, x)", "area": "solve", "ref": "quad_4_7"}
+{"input": "solve(x^2 + x - 30, x)", "area": "solve", "ref": "quad_5_neg6"}
+{"input": "solve(x^3 - 6*x^2 + 5*x, x)", "area": "solve", "ref": "cubic_0_1_5"}
+{"input": "solve(x^4 - 10*x^2 + 9, x)", "area": "solve", "ref": "biquad_1_3_pm"}
+{"input": "solve(x^3 - 2*x^2 - 5*x + 6, x)", "area": "solve", "ref": "cubic_1_neg2_3"}
+{"input": "solve(x^4 - 3*x^2 - 4, x)", "area": "solve", "ref": "biquad_neg1_4"}

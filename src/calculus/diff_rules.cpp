@@ -1,5 +1,6 @@
 #include "calculus_internal.hpp"
 #include "cas/error.hpp"
+#include "cas/error_helpers.hpp"
 
 #include <string>
 #include <vector>
@@ -80,10 +81,13 @@ Result<ExprPtr> differentiate_transcendental(
         outer = make_binary(arena, BinaryOp::Div, make_integer(arena, 1),
             make_power(arena, make_function(arena, BuiltinOp::Cosh, {argument}), make_integer(arena, 2)));
     } else {
-        return fail<ExprPtr>(CASError{
-            .kind = CASErrorKind::Unimplemented,
-            .message = "Function is not a transcendental function handled by diff_rules",
-        });
+        // F0.8-MIGRATED
+        return make_unimplemented<ExprPtr>(
+            "calculus", "diff_transcendental_function",
+            "FuncCall with unrecognized BuiltinOp for differentiation",
+            cas::error::reason_codes::DIFF_UNKNOWN_FUNCTION,
+            "Add a derivative rule for this BuiltinOp in diff_rules.cpp",
+            "F0.8");
     }
 
     // Chain rule: d/dx f(g(x)) = f'(g(x)) * g'(x)

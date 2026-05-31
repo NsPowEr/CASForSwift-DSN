@@ -1,0 +1,80 @@
+{"input": "diff(x^n, x)", "area": "diff", "ref": "power_rule"}
+{"input": "diff(x^3, x)", "area": "diff", "ref": "power_3"}
+{"input": "diff(x^5, x)", "area": "diff", "ref": "power_5"}
+{"input": "diff(exp(x), x)", "area": "diff", "ref": "exp_x"}
+{"input": "diff(log(x), x)", "area": "diff", "ref": "log_x"}
+{"input": "diff(sin(x), x)", "area": "diff", "ref": "sin_x"}
+{"input": "diff(cos(x), x)", "area": "diff", "ref": "cos_x"}
+{"input": "diff(tan(x), x)", "area": "diff", "ref": "tan_x"}
+{"input": "diff(x^2 + 3*x + 5, x)", "area": "diff", "ref": "poly_sum"}
+{"input": "diff(x*exp(x), x)", "area": "diff", "ref": "product_rule"}
+{"input": "diff(sin(x)*cos(x), x)", "area": "diff", "ref": "product_trig"}
+{"input": "diff(x/sin(x), x)", "area": "diff", "ref": "quotient_rule"}
+{"input": "diff(sin(x^2), x)", "area": "diff", "ref": "chain_sin_x2"}
+{"input": "diff(exp(x^2), x)", "area": "diff", "ref": "chain_exp_x2"}
+{"input": "diff(log(sin(x)), x)", "area": "diff", "ref": "chain_log_sin"}
+{"input": "diff(sin(exp(x)), x)", "area": "diff", "ref": "chain_sin_exp"}
+{"input": "diff((x^2 + 1)^5, x)", "area": "diff", "ref": "chain_power"}
+{"input": "diff(sqrt(x), x)", "area": "diff", "ref": "sqrt_x"}
+{"input": "diff(1/x, x)", "area": "diff", "ref": "neg_power"}
+{"input": "diff(x^x, x)", "area": "diff", "ref": "logarithmic_diff", "assume": "x > 0"}
+{"input": "diff(sin(x), x, 2)", "area": "diff", "ref": "second_order_sin"}
+{"input": "diff(exp(x), x, 3)", "area": "diff", "ref": "third_order_exp"}
+{"input": "diff(x^4, x, 4)", "area": "diff", "ref": "fourth_order_poly"}
+{"input": "diff(log(x), x, 2)", "area": "diff", "ref": "second_log"}
+{"input": "diff(atan(x), x)", "area": "diff", "ref": "arctan"}
+{"input": "diff(asin(x), x)", "area": "diff", "ref": "arcsin"}
+{"input": "diff(acos(x), x)", "area": "diff", "ref": "arccos"}
+{"input": "diff(x^2*sin(x), x)", "area": "diff", "ref": "product_poly_trig"}
+{"input": "diff((x+1)/(x-1), x)", "area": "diff", "ref": "quotient_linear"}
+{"input": "diff(sinh(x), x)", "area": "diff", "ref": "sinh_x"}
+{"input": "diff(x^4, x)", "area": "diff", "ref": "power_4"}
+{"input": "diff(x^6, x)", "area": "diff", "ref": "power_6"}
+{"input": "diff(x^(1/2), x)", "area": "diff", "ref": "half_power"}
+{"input": "diff(x^(-2), x)", "area": "diff", "ref": "neg_power_2"}
+{"input": "diff(3*x^2 + 2*x, x)", "area": "diff", "ref": "poly_2terms"}
+{"input": "diff(x^4 - x^2 + 1, x)", "area": "diff", "ref": "poly_3terms"}
+{"input": "diff(7, x)", "area": "diff", "ref": "constant"}
+{"input": "diff(5*x, x)", "area": "diff", "ref": "linear_coeff"}
+{"input": "diff(x^2 * exp(x), x)", "area": "diff", "ref": "product_x2_exp"}
+{"input": "diff(x^3 * sin(x), x)", "area": "diff", "ref": "product_x3_sin"}
+{"input": "diff(x * cos(x), x)", "area": "diff", "ref": "product_x_cos"}
+{"input": "diff(exp(x) * sin(x), x)", "area": "diff", "ref": "product_exp_sin"}
+{"input": "diff(exp(x) * cos(x), x)", "area": "diff", "ref": "product_exp_cos"}
+{"input": "diff(log(x) * sin(x), x)", "area": "diff", "ref": "product_log_sin"}
+{"input": "diff(sin(x) / cos(x), x)", "area": "diff", "ref": "tan_quotient"}
+{"input": "diff(exp(x) / x, x)", "area": "diff", "ref": "quotient_exp_x"}
+{"input": "diff(x^2 / (x + 1), x)", "area": "diff", "ref": "quotient_poly_linear"}
+{"input": "diff((x^2 + 1) / (x^2 - 1), x)", "area": "diff", "ref": "quotient_two_polys"}
+{"input": "diff(sin(3*x), x)", "area": "diff", "ref": "chain_sin_3x"}
+{"input": "diff(cos(2*x), x)", "area": "diff", "ref": "chain_cos_2x"}
+{"input": "diff(tan(x^2), x)", "area": "diff", "ref": "chain_tan_x2"}
+{"input": "diff(log(x^2), x)", "area": "diff", "ref": "chain_log_x2"}
+{"input": "diff(log(x^2 + 1), x)", "area": "diff", "ref": "chain_log_x2plus1"}
+{"input": "diff(exp(sin(x)), x)", "area": "diff", "ref": "chain_exp_sin"}
+{"input": "diff(sin(cos(x)), x)", "area": "diff", "ref": "chain_sin_cos"}
+{"input": "diff(log(log(x)), x)", "area": "diff", "ref": "chain_log_log"}
+{"input": "diff(sqrt(x^2 + 1), x)", "area": "diff", "ref": "chain_sqrt_x2plus1"}
+{"input": "diff(sqrt(sin(x)), x)", "area": "diff", "ref": "chain_sqrt_sin"}
+{"input": "diff((x^3 + 1)^4, x)", "area": "diff", "ref": "chain_cubic_power_4"}
+{"input": "diff((x^2 + x + 1)^3, x)", "area": "diff", "ref": "chain_quad_power_3"}
+{"input": "diff(sin(x), x, 4)", "area": "diff", "ref": "fourth_order_sin"}
+{"input": "diff(cos(x), x, 2)", "area": "diff", "ref": "second_order_cos"}
+{"input": "diff(log(x), x, 3)", "area": "diff", "ref": "third_order_log"}
+{"input": "diff(x^5, x, 5)", "area": "diff", "ref": "fifth_order_x5"}
+{"input": "diff(x^6, x, 6)", "area": "diff", "ref": "sixth_order_x6"}
+{"input": "diff(exp(x), x, 5)", "area": "diff", "ref": "fifth_order_exp"}
+{"input": "diff(atan(x^2), x)", "area": "diff", "ref": "chain_arctan_x2"}
+{"input": "diff(asin(x^2), x)", "area": "diff", "ref": "chain_arcsin_x2"}
+{"input": "diff(acos(sqrt(x)), x)", "area": "diff", "ref": "chain_arccos_sqrt"}
+{"input": "diff(cosh(x), x)", "area": "diff", "ref": "cosh_x"}
+{"input": "diff(tanh(x), x)", "area": "diff", "ref": "tanh_x"}
+{"input": "diff(x^2*log(x), x)", "area": "diff", "ref": "product_x2_log"}
+{"input": "diff(log(x)/x, x)", "area": "diff", "ref": "quotient_log_x"}
+{"input": "diff(x*atan(x), x)", "area": "diff", "ref": "product_x_arctan"}
+{"input": "diff(x*asin(x), x)", "area": "diff", "ref": "product_x_arcsin"}
+{"input": "diff((x+1)^10, x)", "area": "diff", "ref": "chain_linear_power_10"}
+{"input": "diff((2*x+3)^5, x)", "area": "diff", "ref": "chain_2x3_power_5"}
+{"input": "diff(exp(x^3), x)", "area": "diff", "ref": "chain_exp_x3"}
+{"input": "diff(sin(x^3), x)", "area": "diff", "ref": "chain_sin_x3"}
+{"input": "diff(log(sin(x^2)), x)", "area": "diff", "ref": "triple_chain_log_sin_x2"}

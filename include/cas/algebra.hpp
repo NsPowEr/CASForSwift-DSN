@@ -85,6 +85,12 @@ struct SquareFreeFactorization {
     const Symbol& var,
     symbolic::CASContext& ctx,
     std::optional<ExprPtr> extension = std::nullopt);
+// F3.2 — Wang multivariate factorization over Z (EEZ / Extended Zassenhaus).
+// Factors a multivariate polynomial into irreducible factors with multiplicities.
+// content holds the integer content; factors hold the irreducible parts.
+[[nodiscard]] Result<Factorization> factor_multivariate(
+    ExprPtr poly,
+    symbolic::CASContext& ctx);
 [[nodiscard]] Result<std::vector<ExprPtr>> partial_fractions(
     ExprPtr rational_expr,
     const Symbol& var,

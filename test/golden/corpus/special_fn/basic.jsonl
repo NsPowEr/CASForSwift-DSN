@@ -1,0 +1,80 @@
+{"input": "gamma(1)", "area": "special_fn", "ref": "gamma_1"}
+{"input": "gamma(2)", "area": "special_fn", "ref": "gamma_2"}
+{"input": "gamma(5)", "area": "special_fn", "ref": "gamma_5_is_24"}
+{"input": "gamma(1/2)", "area": "special_fn", "ref": "gamma_half_sqrt_pi"}
+{"input": "factorial(5)", "area": "special_fn", "ref": "factorial_5"}
+{"input": "factorial(10)", "area": "special_fn", "ref": "factorial_10"}
+{"input": "binomial(5, 2)", "area": "special_fn", "ref": "binom_52"}
+{"input": "binomial(10, 3)", "area": "special_fn", "ref": "binom_103"}
+{"input": "binomial(n, 0)", "area": "special_fn", "ref": "binom_n0"}
+{"input": "binomial(n, 1)", "area": "special_fn", "ref": "binom_n1"}
+{"input": "diff(gamma(x), x)", "area": "special_fn", "ref": "digamma_def"}
+{"input": "BesselJ(0, 0)", "area": "special_fn", "ref": "bessel_j0_0"}
+{"input": "BesselJ(1, 0)", "area": "special_fn", "ref": "bessel_j1_0"}
+{"input": "erf(0)", "area": "special_fn", "ref": "erf_zero"}
+{"input": "erf(inf)", "area": "special_fn", "ref": "erf_inf"}
+{"input": "LegendreP(0, x)", "area": "special_fn", "ref": "legendre_p0"}
+{"input": "LegendreP(1, x)", "area": "special_fn", "ref": "legendre_p1"}
+{"input": "LegendreP(2, x)", "area": "special_fn", "ref": "legendre_p2"}
+{"input": "zeta(2)", "area": "special_fn", "ref": "zeta_2_pi2_6"}
+{"input": "zeta(0)", "area": "special_fn", "ref": "zeta_0"}
+{"input": "gamma(3)", "area": "special_fn", "ref": "gamma_3_is_2"}
+{"input": "gamma(4)", "area": "special_fn", "ref": "gamma_4_is_6"}
+{"input": "gamma(6)", "area": "special_fn", "ref": "gamma_6_is_120"}
+{"input": "gamma(3/2)", "area": "special_fn", "ref": "gamma_3half"}
+{"input": "gamma(5/2)", "area": "special_fn", "ref": "gamma_5half"}
+{"input": "gamma(7/2)", "area": "special_fn", "ref": "gamma_7half"}
+{"input": "factorial(0)", "area": "special_fn", "ref": "factorial_0"}
+{"input": "factorial(1)", "area": "special_fn", "ref": "factorial_1"}
+{"input": "factorial(3)", "area": "special_fn", "ref": "factorial_3"}
+{"input": "factorial(7)", "area": "special_fn", "ref": "factorial_7"}
+{"input": "factorial(12)", "area": "special_fn", "ref": "factorial_12"}
+{"input": "factorial(15)", "area": "special_fn", "ref": "factorial_15"}
+{"input": "binomial(4, 2)", "area": "special_fn", "ref": "binom_42"}
+{"input": "binomial(6, 3)", "area": "special_fn", "ref": "binom_63"}
+{"input": "binomial(7, 2)", "area": "special_fn", "ref": "binom_72"}
+{"input": "binomial(8, 4)", "area": "special_fn", "ref": "binom_84"}
+{"input": "binomial(10, 5)", "area": "special_fn", "ref": "binom_105"}
+{"input": "binomial(n, n)", "area": "special_fn", "ref": "binom_nn"}
+{"input": "binomial(n, 2)", "area": "special_fn", "ref": "binom_n2"}
+{"input": "erf(1)", "area": "special_fn", "ref": "erf_1"}
+{"input": "erfc(0)", "area": "special_fn", "ref": "erfc_0"}
+{"input": "erfc(1)", "area": "special_fn", "ref": "erfc_1"}
+{"input": "BesselJ(0, 1)", "area": "special_fn", "ref": "bessel_j0_1"}
+{"input": "BesselJ(1, 1)", "area": "special_fn", "ref": "bessel_j1_1"}
+{"input": "BesselJ(2, 0)", "area": "special_fn", "ref": "bessel_j2_0"}
+{"input": "LegendreP(3, x)", "area": "special_fn", "ref": "legendre_p3"}
+{"input": "LegendreP(4, x)", "area": "special_fn", "ref": "legendre_p4"}
+{"input": "LegendreP(0, 1)", "area": "special_fn", "ref": "legendre_p0_1"}
+{"input": "LegendreP(1, 0)", "area": "special_fn", "ref": "legendre_p1_0"}
+{"input": "LegendreP(2, 1)", "area": "special_fn", "ref": "legendre_p2_1"}
+{"input": "zeta(4)", "area": "special_fn", "ref": "zeta_4_pi4_90"}
+{"input": "zeta(-1)", "area": "special_fn", "ref": "zeta_neg1"}
+{"input": "zeta(1/2)", "area": "special_fn", "ref": "zeta_half"}
+{"input": "LaguerreL(0, x)", "area": "special_fn", "ref": "laguerre_0"}
+{"input": "LaguerreL(1, x)", "area": "special_fn", "ref": "laguerre_1"}
+{"input": "LaguerreL(2, x)", "area": "special_fn", "ref": "laguerre_2"}
+{"input": "LaguerreL(3, x)", "area": "special_fn", "ref": "laguerre_3"}
+{"input": "HermiteH(0, x)", "area": "special_fn", "ref": "hermite_0"}
+{"input": "HermiteH(1, x)", "area": "special_fn", "ref": "hermite_1"}
+{"input": "HermiteH(2, x)", "area": "special_fn", "ref": "hermite_2"}
+{"input": "HermiteH(3, x)", "area": "special_fn", "ref": "hermite_3"}
+{"input": "HermiteH(4, x)", "area": "special_fn", "ref": "hermite_4"}
+{"input": "ChebyshevT(0, x)", "area": "special_fn", "ref": "chebyshev_T0"}
+{"input": "ChebyshevT(1, x)", "area": "special_fn", "ref": "chebyshev_T1"}
+{"input": "ChebyshevT(2, x)", "area": "special_fn", "ref": "chebyshev_T2"}
+{"input": "ChebyshevT(3, x)", "area": "special_fn", "ref": "chebyshev_T3"}
+{"input": "ChebyshevU(0, x)", "area": "special_fn", "ref": "chebyshev_U0"}
+{"input": "ChebyshevU(1, x)", "area": "special_fn", "ref": "chebyshev_U1"}
+{"input": "ChebyshevU(2, x)", "area": "special_fn", "ref": "chebyshev_U2"}
+{"input": "diff(factorial(x), x)", "area": "special_fn", "ref": "factorial_derivative"}
+{"input": "gamma(x+1)", "area": "special_fn", "ref": "gamma_recurrence"}
+{"input": "gamma(n+1)", "area": "special_fn", "ref": "gamma_n_factorial", "assume": "n integer, n >= 0"}
+{"input": "binomial(2*n, n)", "area": "special_fn", "ref": "central_binom_coeff"}
+{"input": "factorial(2*n)", "area": "special_fn", "ref": "double_factorial_even"}
+{"input": "zeta(3)", "area": "special_fn", "ref": "apery_constant"}
+{"input": "erf(-x)", "area": "special_fn", "ref": "erf_odd"}
+{"input": "diff(erf(x), x)", "area": "special_fn", "ref": "erf_derivative"}
+{"input": "limit(erf(x), x, 0)", "area": "special_fn", "ref": "erf_limit_0"}
+{"input": "diff(BesselJ(0, x), x)", "area": "special_fn", "ref": "bessel_j0_derivative"}
+{"input": "BesselJ(3, 0)", "area": "special_fn", "ref": "bessel_j3_0"}

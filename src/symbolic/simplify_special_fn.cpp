@@ -1,5 +1,6 @@
 #include "simplify_impl.hpp"
 #include "cas/numtheory.hpp"
+#include "cas/error_helpers.hpp"
 
 namespace cas::symbolic::detail {
 
@@ -109,8 +110,13 @@ Result<ExprPtr> Simplifier::simplify_funcall_special(
         if (const auto* il = expr_cast<IntegerLit>(args.front())) {
             if (il->value > BigInt(0)) {
                 if (il->value.bit_length() > 16)
-                    return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
-                        "Digamma: positive integer too large"));
+                    // F0.8-MIGRATED
+                    return make_unimplemented<ExprPtr>(
+                        "symbolic", "simplify_funcall_special",
+                        "Digamma ψ(n) with positive integer n > 2^16",
+                        error::reason_codes::SYMBOLIC_DEGREE_TOO_LARGE,
+                        "Reduce n or use the asymptotic expansion ψ(n) ≈ ln(n) - 1/(2n) - ...",
+                        "F1.x");
                 const std::uint64_t n = il->value.to_u64();
                 std::vector<ExprPtr> terms;
                 terms.push_back(build_euler_gamma());
@@ -215,8 +221,13 @@ Result<ExprPtr> Simplifier::simplify_funcall_special(
         ExprPtr x_arg = args[0];
         if (const auto* il = expr_cast<IntegerLit>(args[1])) {
             if (il->value.bit_length() > 16)
-                return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
-                    "Pochhammer: degree too large for symbolic expansion"));
+                // F0.8-MIGRATED
+                return make_unimplemented<ExprPtr>(
+                    "symbolic", "simplify_funcall_special",
+                    "Pochhammer (x)_n with n > 2^16",
+                    error::reason_codes::SYMBOLIC_DEGREE_TOO_LARGE,
+                    "Cap n via ctx.max_polynomial_degree or use Gamma(x+n)/Gamma(x) identity",
+                    "F1.x");
             if (il->value.is_zero()) return ok(make_integer(arena_, BigInt(1)));
             if (!il->value.is_negative()) {
                 const std::uint64_t n = il->value.to_u64();
@@ -270,8 +281,13 @@ Result<ExprPtr> Simplifier::simplify_funcall_special(
                 return ok(arena_.make<RationalLit>(BigInt(-1), BigInt(2)));
             if (n.is_negative()) {
                 if (n.bit_length() > 30)
-                    return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
-                        "zeta: negative integer magnitude too large"));
+                    // F0.8-MIGRATED
+                    return make_unimplemented<ExprPtr>(
+                        "symbolic", "simplify_funcall_special",
+                        "Zeta(n) with negative integer n, |n| > 2^30",
+                        error::reason_codes::SYMBOLIC_ZETA_OVERFLOW,
+                        "Bernoulli number computation requires |n| ≤ 2^30; use ctx.max_bernoulli_index",
+                        "F1.x");
                 const std::uint64_t magu = (-n).to_u64();
                 if (magu % 2U == 0U) return ok(make_integer(arena_, BigInt(0)));
                 const unsigned int two_k = static_cast<unsigned int>(magu + 1U);
@@ -283,8 +299,13 @@ Result<ExprPtr> Simplifier::simplify_funcall_special(
             }
             if (n > BigInt(0)) {
                 if (n.bit_length() > 30)
-                    return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
-                        "zeta: positive integer magnitude too large"));
+                    // F0.8-MIGRATED
+                    return make_unimplemented<ExprPtr>(
+                        "symbolic", "simplify_funcall_special",
+                        "Zeta(n) with positive even integer n > 2^30",
+                        error::reason_codes::SYMBOLIC_ZETA_OVERFLOW,
+                        "Bernoulli number computation requires n ≤ 2^30; use ctx.max_bernoulli_index",
+                        "F1.x");
                 const std::uint64_t nu = n.to_u64();
                 if (nu % 2U != 0U) return ok(target_before);
                 const unsigned int two_k = static_cast<unsigned int>(nu);

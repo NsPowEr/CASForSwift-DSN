@@ -1,4 +1,5 @@
 #include "cas/algebra.hpp"
+#include "cas/error_helpers.hpp"
 #include "cas/rational.hpp"
 #include "cas/symbolic.hpp"
 #include "algebra_internal.hpp"
@@ -141,9 +142,13 @@ Result<std::vector<ExprPtr>> partial_fractions(
     }
 
     if (factors.empty()) {
-        return fail<std::vector<ExprPtr>>(make_error(
-            CASErrorKind::Unimplemented,
-            "partial_fractions richiede almeno un fattore nel denominatore"));
+        // F0.8-MIGRATED
+        return make_unimplemented<std::vector<ExprPtr>>(
+            "algebra", "partial_fractions",
+            "denominator factored into zero factors",
+            cas::error::reason_codes::POLY_FACTOR_EXTENSION,
+            "Factorization returned empty; ensure denominator is non-constant before calling apart()",
+            "F0.8");
     }
 
     Rational lc_D = D.leading_coeff();

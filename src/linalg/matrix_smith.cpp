@@ -1,6 +1,7 @@
 #include "cas/linalg/Matrix.hpp"
 #include "cas/numtheory.hpp"
 #include "cas/ast.hpp"
+#include "cas/error_helpers.hpp"
 
 #include <algorithm>
 #include <optional>
@@ -10,10 +11,6 @@
 
 namespace cas::linalg {
 namespace {
-
-[[nodiscard]] CASError make_error(CASErrorKind kind, std::string message) {
-    return CASError{.kind = kind, .message = std::move(message), .hint = std::nullopt};
-}
 
 [[nodiscard]] ExprPtr integer(symbolic::CASContext& ctx, const BigInt& value) {
     return ctx.arena().make<IntegerLit>(value);
@@ -122,7 +119,17 @@ Result<SmithNormalForm> smith_normal_form(const MatrixExpr& matrix, symbolic::CA
         for (std::size_t i = p; i < rows; ++i) {
             for (std::size_t j = p; j < cols; ++j) {
                 auto val = try_get_bigint(S(i, j));
-                if (!val) return fail<SmithNormalForm>(make_error(CASErrorKind::Unimplemented, "Smith Normal Form currently only supports integer matrices"));
+                if (!val) {
+                    // F0.8-MIGRATED
+                    return make_unimplemented<SmithNormalForm>(
+                        "linalg", "smith_normal_form",
+                        "matrix entry at (" + std::to_string(i) + "," + std::to_string(j)
+                            + ") is not an integer literal",
+                        error::reason_codes::LINALG_SMITH_NON_INTEGER,
+                        "Smith Normal Form requires integer matrices; "
+                        "convert symbolic entries to integers first (e.g., evaluate constants)",
+                        "L3-13");
+                }
                 if (val->is_zero()) continue;
                 
                 BigInt abs_val = val->is_negative() ? -*val : *val;

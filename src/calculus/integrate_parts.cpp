@@ -105,16 +105,80 @@ private:
 
 }  // namespace
 
+// Returns true if expr contains a FuncCall(Exp, arg) where arg is not a
+// polynomial in var (e.g. exp(1/x), exp(1/x²)).  Used to abort IBP early
+// for integrands that the Risch DE solver handles but IBP loops on
+// (BUG-HANG-001: growing-denominator infinite IBP recursion).
+[[nodiscard]] static bool ibp_has_exp_non_poly_arg(ExprPtr expr, const Symbol& var) {
+    if (!expr) return false;
+    if (const auto* fc = expr_cast<FuncCall>(expr)) {
+        if (fc->func_id == BuiltinOp::Exp && fc->args.size() == 1U) {
+            ExprPtr arg = fc->args[0];
+            // Walk the arg: if it contains x^n with n<0, Div(a,f(x)), or
+            // FuncCall(var-dependent), it is not a polynomial.
+            struct Walk {
+                const Symbol& v;
+                bool found = false;
+                void operator()(ExprPtr e) {
+                    if (!e || found) return;
+                    if (const auto* b = expr_cast<Binary>(e)) {
+                        if (b->op == BinaryOp::Div && depends_on(b->right, v)) {
+                            found = true; return;
+                        }
+                        if (b->op == BinaryOp::Pow && depends_on(b->left, v)) {
+                            if (const auto* il = expr_cast<IntegerLit>(b->right))
+                                if (il->value < BigInt(0)) { found = true; return; }
+                            if (expr_is<RationalLit>(b->right)) { found = true; return; }
+                            if (depends_on(b->right, v)) { found = true; return; }
+                        }
+                        (*this)(b->left); (*this)(b->right); return;
+                    }
+                    if (const auto* u = expr_cast<Unary>(e)) { (*this)(u->operand); return; }
+                    if (const auto* s = expr_cast<Sum>(e))
+                        for (ExprPtr t : s->terms) (*this)(t);
+                    if (const auto* p = expr_cast<Product>(e))
+                        for (ExprPtr f : p->factors) (*this)(f);
+                    if (const auto* fc2 = expr_cast<FuncCall>(e))
+                        for (ExprPtr a : fc2->args) (*this)(a);
+                }
+            } w{var};
+            w(arg);
+            if (w.found) return true;
+        }
+        // Recurse into function args.
+        for (ExprPtr a : fc->args) if (ibp_has_exp_non_poly_arg(a, var)) return true;
+        return false;
+    }
+    if (const auto* u = expr_cast<Unary>(expr)) return ibp_has_exp_non_poly_arg(u->operand, var);
+    if (const auto* b = expr_cast<Binary>(expr))
+        return ibp_has_exp_non_poly_arg(b->left, var) || ibp_has_exp_non_poly_arg(b->right, var);
+    if (const auto* s = expr_cast<Sum>(expr))
+        { for (ExprPtr t : s->terms) if (ibp_has_exp_non_poly_arg(t, var)) return true; return false; }
+    if (const auto* p = expr_cast<Product>(expr))
+        { for (ExprPtr f : p->factors) if (ibp_has_exp_non_poly_arg(f, var)) return true; return false; }
+    return false;
+}
+
 Result<ExprPtr> integrate_by_parts(
     ExprPtr expr,
     const Symbol& var,
     symbolic::CASContext& context) {
+    // BUG-HANG-001: IBP on exp(non-polynomial) * rational diverges.
+    // The Risch DE solver handles these; skip IBP to prevent infinite loop.
+    if (ibp_has_exp_non_poly_arg(expr, var)) {
+        return fail<ExprPtr>(CASError{
+            .kind = CASErrorKind::Unimplemented,
+            .message = "integrate_by_parts: exp(non-polynomial) factor detected; defer to Risch DE (BUG-HANG-001)",
+            .hint = "integrate_risch with Risch DE rational solver",
+        });
+    }
+
     IntegrationByPartsGuard guard(expr, context.max_integrate_by_parts_depth());
     auto guard_result = guard.enter();
     if (guard_result.is_error()) {
         return fail<ExprPtr>(guard_result.error());
     }
-    
+
     const auto* product = expr_cast<Product>(expr);
     if (!product || product->factors.size() < 2) {
         return fail<ExprPtr>(CASError{

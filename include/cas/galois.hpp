@@ -13,7 +13,12 @@
 //   "D4"       : dihedral of 8 (generic irreducible quartic with sqrt resolvent)
 //   "A4"       : alternating on 4 (square disc + irreducible resolvent cubic)
 //   "S4"       : symmetric on 4 (generic irreducible quartic)
-//   "unknown"  : degree > 4 or analysis inconclusive
+//   "C5"       : cyclic of order 5
+//   "D5"       : dihedral of order 10
+//   "F20"      : Frobenius metacyclic group AGL(1,F_5), order 20
+//   "A5"       : alternating on 5 letters (order 60, simple non-abelian)
+//   "S5"       : symmetric on 5 letters (order 120)
+//   "unknown"  : degree > 5 or analysis inconclusive
 
 #pragma once
 

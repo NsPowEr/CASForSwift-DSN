@@ -2,6 +2,7 @@
 
 #include "cas/algebra.hpp"
 #include "cas/differential_algebra.hpp"
+#include "cas/error_helpers.hpp"
 #include "../algebra/polynomial_internal.hpp"
 
 #include <utility>
@@ -15,7 +16,13 @@ Integrator::Integrator(symbolic::CASContext& context) noexcept : context_(contex
 
 Result<ExprPtr> Integrator::integrate(ExprPtr expr, const Symbol& var) {
     if (depth_ >= context_.max_integration_depth()) {
-        return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Integration recursion budget exceeded"));
+        // F0.8-MIGRATED
+        return make_unimplemented<ExprPtr>(
+            "calculus", "Integrator::integrate",
+            "recursion depth exceeded max_integration_depth",
+            cas::error::reason_codes::INTEGRATE_DEPTH_EXCEEDED,
+            "Increase ctx.max_integration_depth() or simplify the integrand before calling integrate()",
+            "F0.8");
     }
     DepthGuard guard(depth_);
 
@@ -55,8 +62,13 @@ Result<ExprPtr> Integrator::integrate(ExprPtr expr, const Symbol& var) {
         }
     }
 
-    return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
-        "Symbolic integration failed: no applicable strategy"));
+    // F0.8-MIGRATED
+    return make_unimplemented<ExprPtr>(
+        "calculus", "Integrator::integrate",
+        "expression has no applicable integration strategy",
+        cas::error::reason_codes::INTEGRATE_NO_STRATEGY,
+        "Try supplying assumptions, simplifying, or extending the Risch pipeline",
+        "F0.8");
 }
 
 Result<bool> Integrator::expressions_match_after_simplify(ExprPtr lhs, ExprPtr rhs) {
@@ -150,7 +162,13 @@ Result<ExprPtr> Integrator::integrate_once(ExprPtr expr, const Symbol& var) {
         return ok(make_product(arena_, {expr, arena_.make<Symbol>(var)}));
     }
     if (expr_is<DecimalLit>(expr)) {
-        return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Decimal literals are not supported in symbolic integration"));
+        // F0.8-MIGRATED
+        return make_unimplemented<ExprPtr>(
+            "calculus", "Integrator::integrate_once",
+            "DecimalLit",
+            cas::error::reason_codes::INTEGRATE_DECIMAL_INPUT,
+            "Convert DecimalLit to Rational before calling integrate()",
+            "F0.8");
     }
     if (const auto* symbol = expr_cast<Symbol>(expr)) {
         if (symbol->name == var.name) {
@@ -172,7 +190,13 @@ Result<ExprPtr> Integrator::integrate_once(ExprPtr expr, const Symbol& var) {
             }
             return ok(make_unary(arena_, UnaryOp::Neg, inner.value()));
         }
-        return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Factorial integration is not implemented"));
+        // F0.8-MIGRATED
+        return make_unimplemented<ExprPtr>(
+            "calculus", "Integrator::integrate_once",
+            "Unary non-Neg (likely Factorial)",
+            cas::error::reason_codes::INTEGRATE_FACTORIAL,
+            "Factorial integration is not supported; rewrite the integrand manually",
+            "F0.8");
     }
     if (const auto* binary = expr_cast<Binary>(expr)) {
         return integrate_binary(*binary, var);
@@ -196,7 +220,13 @@ Result<ExprPtr> Integrator::integrate_once(ExprPtr expr, const Symbol& var) {
         return integrate_product(*product, var);
     }
 
-    return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Symbolic integration is not implemented for this expression kind"));
+    // F0.8-MIGRATED
+    return make_unimplemented<ExprPtr>(
+        "calculus", "Integrator::integrate_once",
+        "unknown expression kind",
+        cas::error::reason_codes::INTEGRATE_UNKNOWN_EXPR,
+        "Add a dispatch branch in integrate_once() for this expression node type",
+        "F0.8");
 }
 
 Result<ExprPtr> Integrator::integrate_binary(const Binary& binary, const Symbol& var) {
@@ -373,13 +403,25 @@ Result<ExprPtr> Integrator::integrate_binary(const Binary& binary, const Symbol&
     case BinaryOp::Pow:
         return integrate_power(binary, var);
     case BinaryOp::Mod:
-        return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Modulo integration is not implemented"));
+        // F0.8-MIGRATED
+        return make_unimplemented<ExprPtr>(
+            "calculus", "Integrator::integrate_binary",
+            "BinaryOp::Mod expression",
+            cas::error::reason_codes::INTEGRATE_MODULO,
+            "Modulo integration is undefined in the symbolic domain; reformulate the integrand",
+            "F0.8");
     case BinaryOp::Equal:
     case BinaryOp::Less:
     case BinaryOp::Greater:
     case BinaryOp::LessEqual:
     case BinaryOp::GreaterEqual:
-        return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Integration of comparison operators is not implemented"));
+        // F0.8-MIGRATED
+        return make_unimplemented<ExprPtr>(
+            "calculus", "Integrator::integrate_binary",
+            "comparison/relational BinaryOp",
+            cas::error::reason_codes::INTEGRATE_COMPARISON,
+            "Integration of comparison operators is not defined; use Piecewise or conditional integration",
+            "F0.8");
     }
 
     return fail<ExprPtr>(make_error(CASErrorKind::InternalError, "Unknown binary operator"));

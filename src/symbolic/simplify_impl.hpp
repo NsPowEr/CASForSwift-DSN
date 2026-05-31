@@ -177,6 +177,7 @@ private:
 
     // FuncCall domain sub-dispatchers (called by simplify_node(FuncCall))
     [[nodiscard]] Result<ExprPtr> simplify_funcall_trig(ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr target_before);
+    [[nodiscard]] Result<ExprPtr> simplify_funcall_arc_trig(ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr target_before);
     [[nodiscard]] Result<ExprPtr> simplify_funcall_exp_log_sqrt(ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr target_before);
     [[nodiscard]] Result<ExprPtr> simplify_funcall_special(ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr target_before);
     [[nodiscard]] Result<ExprPtr> simplify_funcall_bessel_orthogonal(ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr target_before);

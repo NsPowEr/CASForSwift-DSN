@@ -4,6 +4,7 @@
 
 #include "cas/algebra.hpp"
 #include "cas/error.hpp"
+#include "cas/error_helpers.hpp"
 #include "cas/symbolic.hpp"
 
 #include <unordered_map>
@@ -101,9 +102,13 @@ Result<ExprPtr> make_quantity_from_unit(ExprPtr value,
                                         symbolic::CASContext& ctx) {
     auto info = lookup_unit(unit_name);
     if (!info) {
-        return fail<ExprPtr>(CASError{
-            CASErrorKind::Unimplemented,
-            "Unknown unit: " + unit_name, std::nullopt});
+        // F0.8-MIGRATED
+        return make_unimplemented<ExprPtr>(
+            "symbolic", "make_quantity_from_unit",
+            "unit name '" + unit_name + "' not in SI unit registry",
+            error::reason_codes::SYMBOLIC_UNITS_UNKNOWN,
+            "Register the unit in the unit lookup table in units.cpp or use SI base units directly",
+            "L3-08");
     }
     AstArena& arena = ctx.arena();
     // Multiply value by scale (Rational → expression).
@@ -128,9 +133,13 @@ Result<ExprPtr> convert_quantity(ExprPtr quantity,
     }
     auto info = lookup_unit(unit_name);
     if (!info) {
-        return fail<ExprPtr>(CASError{
-            CASErrorKind::Unimplemented,
-            "Unknown target unit: " + unit_name, std::nullopt});
+        // F0.8-MIGRATED
+        return make_unimplemented<ExprPtr>(
+            "symbolic", "convert_quantity",
+            "target unit name '" + unit_name + "' not in SI unit registry",
+            error::reason_codes::SYMBOLIC_UNITS_UNKNOWN,
+            "Register the target unit in the unit lookup table in units.cpp",
+            "L3-08");
     }
     if (!(qty->dimensions == info->dimensions)) {
         return fail<ExprPtr>(CASError{

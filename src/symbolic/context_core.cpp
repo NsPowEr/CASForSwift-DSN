@@ -429,6 +429,10 @@ void CASContext::set_min_gcd_division_steps(std::size_t steps) noexcept {
     min_gcd_division_steps_ = (steps < 1U) ? 1U : steps;
 }
 
+void CASContext::set_max_gcd_total_calls(std::size_t n) noexcept {
+    max_gcd_total_calls_ = (n < 16U) ? 16U : n;
+}
+
 void CASContext::set_max_cyclotomic_n(int n) noexcept {
     max_cyclotomic_n_ = n;
 }

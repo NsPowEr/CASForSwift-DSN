@@ -1,6 +1,8 @@
 #pragma once
 
 #include "cas/ast.hpp"
+#include "cas/cas_cache_keys.hpp"
+#include "cas/cas_context_params.hpp"
 #include "cas/result.hpp"
 #include "cas/trace.hpp"
 
@@ -29,84 +31,6 @@ namespace cas::symbolic {
 
 using MatchMap = std::unordered_map<std::string, ExprPtr>;
 
-struct CacheMetrics {
-    std::uint64_t hits{0};
-    std::uint64_t misses{0};
-    std::uint64_t evictions{0};
-};
-
-template <typename Key, typename Value, typename Hash = std::hash<Key>, typename Equal = std::equal_to<Key>>
-class CacheContainer {
-public:
-    using ListType = std::list<Key>;
-    using MapType = std::unordered_map<Key, std::pair<Value, typename ListType::iterator>, Hash, Equal>;
-
-    explicit CacheContainer(std::size_t max_size = 1000) : max_size_(max_size) {}
-
-    void set_max_size(std::size_t size) {
-        max_size_ = size;
-        evict_if_needed();
-    }
-
-    [[nodiscard]] std::size_t max_size() const noexcept { return max_size_; }
-    [[nodiscard]] std::size_t size() const noexcept { return map_.size(); }
-
-    [[nodiscard]] std::optional<Value> get(const Key& key) {
-        auto it = map_.find(key);
-        if (it == map_.end()) {
-            metrics_.misses++;
-            return std::nullopt;
-        }
-        metrics_.hits++;
-        list_.splice(list_.begin(), list_, it->second.second);
-        return it->second.first;
-    }
-
-    void put(const Key& key, Value value) {
-        if (max_size_ == 0) return;
-
-        auto it = map_.find(key);
-        if (it != map_.end()) {
-            it->second.first = value;
-            list_.splice(list_.begin(), list_, it->second.second);
-            return;
-        }
-
-        list_.push_front(key);
-        map_[key] = {value, list_.begin()};
-        evict_if_needed();
-    }
-
-    void clear() noexcept {
-        map_.clear();
-        list_.clear();
-    }
-
-    [[nodiscard]] CacheMetrics& metrics() noexcept { return metrics_; }
-    [[nodiscard]] const CacheMetrics& metrics() const noexcept { return metrics_; }
-    void reset_metrics() noexcept { metrics_ = {}; }
-
-    [[nodiscard]] auto begin() { return map_.begin(); }
-    [[nodiscard]] auto end() { return map_.end(); }
-    [[nodiscard]] auto begin() const { return map_.begin(); }
-    [[nodiscard]] auto end() const { return map_.end(); }
-    [[nodiscard]] bool empty() const noexcept { return map_.empty(); }
-
-private:
-    void evict_if_needed() {
-        while (map_.size() > max_size_ && !list_.empty()) {
-            Key last = list_.back();
-            list_.pop_back();
-            map_.erase(last);
-            metrics_.evictions++;
-        }
-    }
-
-    std::size_t max_size_;
-    MapType map_;
-    ListType list_;
-    CacheMetrics metrics_;
-};
 
 class Assumptions;
 
@@ -219,7 +143,12 @@ private:
 
 class Substituter;
 
-class CASContext {
+// CASContext inherits CASContextParams to expose all algorithm-tuning
+// getter/setter pairs directly on ctx without any call-site changes.
+// Simple inline setters/getters live in cas_context_params.hpp.
+// Setters with clamping/validation are declared here and defined in
+// context_core.cpp (they access protected fields via inheritance).
+class CASContext : public CASContextParams {
 public:
     CASContext();
 
@@ -240,102 +169,32 @@ public:
     void enable_trace(bool enabled) noexcept;
     [[nodiscard]] const ComputationTrace& get_trace() const noexcept;
     void set_timeout(std::chrono::milliseconds timeout) noexcept;
+    // Read-only access to the per-operation timeout budget.  Used by long-running
+    // outer loops (e.g. factor_polynomial_tower shift search) that own their wall-clock
+    // deadline independently of the CASContext operation-start mechanism.
+    [[nodiscard]] std::chrono::milliseconds timeout() const noexcept { return timeout_; }
+
+    // Setters with clamping/validation (implemented in context_core.cpp).
+    // Getters for these are inherited from CASContextParams.
     void set_timeout_check_interval(std::uint64_t interval) noexcept;
-    [[nodiscard]] std::uint64_t timeout_check_interval() const noexcept { return timeout_check_interval_; }
-
     void set_max_simplification_depth(int depth) noexcept;
-    [[nodiscard]] int max_simplification_depth() const noexcept { return max_simplification_depth_; }
-
     void set_max_integration_depth(std::size_t depth) noexcept;
-    [[nodiscard]] std::size_t max_integration_depth() const noexcept { return max_integration_depth_; }
-
     void set_gcd_error_probability(double prob) noexcept;
-    [[nodiscard]] double gcd_error_probability() const noexcept { return gcd_error_probability_; }
-
-    // L3-03 Float contestuale — precisione default per eval_mpfr.
-    // Min 6 digits (≈ 20 bits), max 10000 (≈ 33k bits), clamp on set.
     void set_numeric_precision_digits(unsigned int digits) noexcept;
-    [[nodiscard]] unsigned int numeric_precision_digits() const noexcept { return numeric_precision_digits_; }
-
-    // L2-21 Branch cuts globali — quando true, identities che richiedono
-    // dominio principale (ln(x·y)=ln(x)+ln(y), exp(ln(x))=x, sqrt(x²)=x)
-    // sono rifiutate senza positivity assumption esplicita. Default false
-    // mantiene comportamento storico: identità applicate sotto assunzione
-    // implicita di reale principale.
-    void set_strict_branch_cuts(bool strict) noexcept { strict_branch_cuts_ = strict; }
-    [[nodiscard]] bool strict_branch_cuts() const noexcept { return strict_branch_cuts_; }
-
-    void set_max_trig_power_reduction(long long n) noexcept { max_trig_power_reduction_ = n; }
-    [[nodiscard]] long long max_trig_power_reduction() const noexcept { return max_trig_power_reduction_; }
-
     void set_max_rootof_explicit_degree(std::size_t deg) noexcept;
-    [[nodiscard]] std::size_t max_rootof_explicit_degree() const noexcept { return max_rootof_explicit_degree_; }
-
     void set_max_gcd_recursion_depth(std::size_t depth) noexcept;
-    [[nodiscard]] std::size_t max_gcd_recursion_depth() const noexcept { return max_gcd_recursion_depth_; }
-
     void set_min_gcd_division_steps(std::size_t steps) noexcept;
-    [[nodiscard]] std::size_t min_gcd_division_steps() const noexcept { return min_gcd_division_steps_; }
-
-    // -1 = auto-derive from polynomial degree (2*(deg+1)); set to higher value for unusual composites
+    void set_max_gcd_total_calls(std::size_t n) noexcept;
     void set_max_cyclotomic_n(int n) noexcept;
-    [[nodiscard]] int max_cyclotomic_n() const noexcept { return max_cyclotomic_n_; }
-
-    // HC-001..006 configurable knobs.
     void set_max_q_alpha_bridge_depth(std::size_t depth) noexcept;
-    [[nodiscard]] std::size_t max_q_alpha_bridge_depth() const noexcept { return max_q_alpha_bridge_depth_; }
     void set_max_gamma_recursion(std::size_t iters) noexcept;
-    [[nodiscard]] std::size_t max_gamma_recursion() const noexcept { return max_gamma_recursion_; }
     void set_improper_leading_order_scan(std::size_t window) noexcept;
-    [[nodiscard]] std::size_t improper_leading_order_scan() const noexcept { return improper_leading_order_scan_; }
-
-    // Opt-in: expand BesselJ(n, x) and BesselY(n, x) with integer n >= 2 via the
-    // three-term recurrence  J_{n}(x) = (2(n-1)/x) J_{n-1}(x) - J_{n-2}(x)
-    // until the order reaches {0, 1}.  Default false because the expanded form
-    // is rarely what the user wants in symbolic answers.
     void set_expand_bessel_recurrence(bool enabled) noexcept;
-    [[nodiscard]] bool expand_bessel_recurrence() const noexcept { return expand_bessel_recurrence_; }
-
-    // L3-06: maximum shift attempts (s1, s2) when searching for a square-free
-    // composite Trager norm Res_y2(m2, Res_y1(m1, f(x - s1*y1 - s2*y2))).
-    // Default 0 → auto-derive from discriminant collision bound.
     void set_max_trager_tower_shift_attempts(std::size_t attempts) noexcept;
-    [[nodiscard]] std::size_t max_trager_tower_shift_attempts() const noexcept { return max_trager_tower_shift_attempts_; }
-
-    // F4 Macaulay-matrix memory safety caps. These are hardware guards
-    // (not algorithmic bounds) — when exceeded, the F4 step falls back
-    // to Buchberger on the original seed, which (post-Sugar) handles
-    // the seed at theoretical minimum basis cardinality. Exposed as
-    // configurable for users with larger memory budgets; defaults
-    // preserve historical behaviour.
-    void set_f4_max_macaulay_rows(std::size_t n) noexcept { f4_max_macaulay_rows_ = n; }
-    [[nodiscard]] std::size_t f4_max_macaulay_rows() const noexcept { return f4_max_macaulay_rows_; }
-    void set_f4_max_macaulay_monomials(std::size_t n) noexcept { f4_max_macaulay_monomials_ = n; }
-    [[nodiscard]] std::size_t f4_max_macaulay_monomials() const noexcept { return f4_max_macaulay_monomials_; }
-    void set_f4_max_pending_monomials(std::size_t n) noexcept { f4_max_pending_monomials_ = n; }
-    [[nodiscard]] std::size_t f4_max_pending_monomials() const noexcept { return f4_max_pending_monomials_; }
-
-    // Integration-by-parts recursion depth budget. Defaults to 8;
-    // typical IBP problems converge in 1-3 levels. Deeper exotic
-    // integrands can be unlocked by raising this, paired with the
-    // built-in structural cycle detection in `IntegrationByPartsGuard`.
-    void set_max_integrate_by_parts_depth(std::size_t n) noexcept { max_integrate_by_parts_depth_ = n; }
-    [[nodiscard]] std::size_t max_integrate_by_parts_depth() const noexcept { return max_integrate_by_parts_depth_; }
-
-    // LLL reduction quality parameter (Lenstra-Lenstra-Lovász 1982).
-    // Higher delta produces shorter basis vectors at higher cost. Default
-    // 0.75 (LLL standard); raise toward 0.9999 for tighter bounds in
-    // factorization recombination.
-    void set_lll_delta(double delta) noexcept { lll_delta_ = delta; }
-    [[nodiscard]] double lll_delta() const noexcept { return lll_delta_; }
 
     // HC-004: fresh symbol generator.  Returns a Symbol whose name is unique
     // within this context across all previous make_fresh_symbol calls AND
     // does not collide with any name currently registered through `define`.
-    // The returned Symbol is guaranteed unique by construction: an internal
-    // counter is monotonically incremented and the candidate name is
-    // probed against the user-defined variable map until a free slot is
-    // found.
     [[nodiscard]] Symbol make_fresh_symbol(const std::string& prefix);
 
     void interrupt() noexcept { interrupted_ = true; }
@@ -396,27 +255,6 @@ public:
     std::chrono::milliseconds timeout_{1000};
     std::chrono::steady_clock::time_point operation_started_at_{};
     std::uint64_t ops_count_{0};
-    std::uint64_t timeout_check_interval_{1024U};
-    int max_simplification_depth_{300};
-    std::size_t max_integration_depth_{16U};
-    double gcd_error_probability_{0.001};
-    unsigned int numeric_precision_digits_{15U};
-    bool strict_branch_cuts_{false};
-    std::size_t max_rootof_explicit_degree_{2U};
-    std::size_t max_gcd_recursion_depth_{16U};
-    std::size_t min_gcd_division_steps_{8U};
-    int max_cyclotomic_n_{-1};
-    std::size_t max_q_alpha_bridge_depth_{256U};
-    std::size_t max_gamma_recursion_{1024U};
-    std::size_t improper_leading_order_scan_{8U};
-    bool expand_bessel_recurrence_{false};
-    long long max_trig_power_reduction_{32LL};
-    std::size_t max_trager_tower_shift_attempts_{0U};
-    std::size_t f4_max_macaulay_rows_{512U};
-    std::size_t f4_max_macaulay_monomials_{512U};
-    std::size_t f4_max_pending_monomials_{1024U};
-    std::size_t max_integrate_by_parts_depth_{8U};
-    double lll_delta_{0.75};
     std::uint64_t fresh_symbol_counter_{0U};
     PostSimplifyHook post_simplify_hook_{nullptr};
     std::atomic_bool interrupted_{false};

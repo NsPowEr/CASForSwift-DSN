@@ -85,6 +85,101 @@ Policy e baseline correnti:
 - `test/benchmarks/policy.json`
 - `test/benchmarks/baseline_release.txt`
 
+## Coverage (F0.3)
+
+Line coverage via gcov/lcov. Enable with:
+
+```bash
+cmake -S . -B build_cov -G Ninja \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DENABLE_COVERAGE=ON \
+  -DCAS_ENABLE_SANITIZERS=OFF
+cmake --build build_cov
+cmake --build build_cov --target coverage
+# Report: build_cov/coverage/index.html
+```
+
+Requires `lcov` and `genhtml` (`brew install lcov` on macOS).
+Coverage target: ≥90% line coverage per area marked `Risolta` (F0 exit gate).
+
+## Property-Based Tests (F0.4)
+
+Property tests use [rapidcheck](https://github.com/emil-e/rapidcheck) (fetched automatically via CMake FetchContent).
+
+Run all property tests:
+
+```bash
+ctest --test-dir build -R property --output-on-failure
+```
+
+Six test areas: GCD/LCM identity, D(∫f)=f corpus, roots substitution, matrix inverse, factor reconstruction, partial fractions roundtrip.
+
+## Sanitizers (F0.6)
+
+ASan + UBSan are enabled in `Debug` and `RelWithDebInfo` builds by default (`CAS_ENABLE_SANITIZERS=ON`).
+
+Dedicated sanitizer build:
+
+```bash
+cmake -S . -B build_san -G Ninja \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DCAS_ENABLE_SANITIZERS=ON
+cmake --build build_san
+ASAN_OPTIONS=detect_leaks=0 ctest --test-dir build_san --output-on-failure
+```
+
+TSan (thread sanitizer) availability is detected at configure time and logged.
+
+## Build Cache (F0.6)
+
+ccache is the recommended compiler launcher to speed up incremental rebuilds:
+
+```bash
+cmake -S . -B build -G Ninja \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+  -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+```
+
+On macOS: `brew install ccache`. Typically provides 5–20× speedup on rebuilds during active development.
+
+## Anti-Monolith Gate (F0.6)
+
+All `.cpp` and `.hpp` files under `src/` and `include/` must be ≤ 500 lines.
+Pre-existing violations are whitelisted in `scripts/file_size_whitelist.txt` with mandatory split tickets.
+
+Check locally:
+
+```bash
+bash scripts/check_file_size.sh --verbose
+```
+
+This check also runs as a CI job on every push and PR (`anti-monolith` job).
+
+## Benchmark Regression Gate (F0.6)
+
+After building the benchmark, compare against the pinned baseline:
+
+```bash
+bash scripts/check_bench_regression.sh \
+  --current build-bench/current.txt \
+  --threshold 10
+```
+
+Exit 1 if any metric regresses by more than 10%. The baseline is `test/benchmarks/baseline_release.txt`.
+
+## Mutation Testing (F0.6, optional)
+
+Mutation testing via [mull](https://github.com/mull-project/mull) (optional, runs weekly in CI):
+
+```bash
+brew install mull          # macOS
+bash scripts/run_mutation.sh
+# Report: mutation-report/index.html
+```
+
+Target mutation score: ≥70% per module. Non-blocking on PR; weekly scheduled CI job only.
+
 ## Scope Rules
 
 - Pure C++ engine only in this phase

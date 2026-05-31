@@ -18,6 +18,7 @@
 #include "cas/algebra.hpp"
 #include "cas/ast.hpp"
 #include "cas/error.hpp"
+#include "cas/error_helpers.hpp"
 #include "cas/symbolic.hpp"
 
 #include <vector>
@@ -104,10 +105,13 @@ Result<QRDecomposition> qr_decompose(const MatrixExpr& matrix,
         ExprPtr norm_v = norm(v_k, ctx);
         // Check non-zero norm (linear independence).
         if (auto* il = expr_cast<IntegerLit>(norm_v); il && il->value.is_zero()) {
-            return fail<QRDecomposition>(CASError{
-                CASErrorKind::Unimplemented,
-                "qr_decompose: column " + std::to_string(k)
-                    + " linearly dependent (zero norm)", std::nullopt});
+            // F0.8-MIGRATED
+            return make_unimplemented<QRDecomposition>(
+                "linalg", "qr_decompose",
+                "column " + std::to_string(k) + " linearly dependent (zero Gram-Schmidt norm)",
+                error::reason_codes::LINALG_LINEAR_DEPENDENT,
+                "Remove linearly dependent columns before QR, or use rank-revealing QR (follow-up)",
+                "L3-17");
         }
         R(k, k) = norm_v;
         // q_k = v_k / norm_v

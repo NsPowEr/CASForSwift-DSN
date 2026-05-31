@@ -1,4 +1,5 @@
 #include "cas/ast.hpp"
+#include "cas/error_helpers.hpp"
 #include "cas/numtheory.hpp"
 #include "cas/rational.hpp"
 #include "cas/symbolic.hpp"
@@ -8,10 +9,6 @@
 #include <vector>
 
 namespace cas::calculus {
-
-[[nodiscard]] static CASError make_error(CASErrorKind kind, std::string message) {
-    return CASError{.kind = kind, .message = std::move(message), .hint = std::nullopt};
-}
 
 [[nodiscard]] static bool is_one(ExprPtr expr) {
     if (const auto* integer = expr_cast<IntegerLit>(expr)) {
@@ -95,7 +92,13 @@ namespace cas::calculus {
 
 [[nodiscard]] static Result<ExprPtr> zeta_even_value(unsigned int exponent, symbolic::CASContext& ctx) {
     if (exponent == 0U || (exponent % 2U) != 0U) {
-        return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "p-series summation is implemented exactly only for positive even exponents"));
+        // F0.8-MIGRATED
+        return make_unimplemented<ExprPtr>(
+            "calculus", "zeta_even_value",
+            "p-series with odd or zero exponent",
+            cas::error::reason_codes::SUMMATION_GENERAL,
+            "Implement zeta at odd arguments (open problem) or return unevaluated Zeta(n) form",
+            "F0.8");
     }
 
     const unsigned int m = exponent / 2U;
@@ -128,9 +131,13 @@ namespace cas::calculus {
         }
     }
     
-    return fail<ExprPtr>(make_error(
-        CASErrorKind::Unimplemented,
-        "General hypergeometric summation requires Gosper/Petkovsek-WZ and is not implemented yet"));
+    // F0.8-MIGRATED
+    return make_unimplemented<ExprPtr>(
+        "calculus", "sum_closed_form",
+        "general summand not in closed-form table",
+        cas::error::reason_codes::SUMMATION_GENERAL,
+        "Implement Gosper's algorithm and Petkovšek-WZ for hypergeometric summation",
+        "F0.8");
 }
 
 Result<ExprPtr> sum(

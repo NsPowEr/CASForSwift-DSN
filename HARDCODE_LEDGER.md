@@ -17,6 +17,381 @@
 
 ## Voci aperte
 
+### F3.2-WANG-LC-CORRECTION — Wang LC distribution per fattori multipli con lc_x non-costante interagente — RISOLTA 2026-05-29
+- **File**: `src/algebra/factor_multivariate_lc.cpp` (390 LOC, rewrite completo del `wang_distribute_leading_coeff`); `src/algebra/factor_multivariate_wang.cpp` (453 LOC, driver ora itera su tutti i good-point candidates fino a successo, mirroring SymPy `dmp_zz_wang` outer loop).
+- **Categoria CLAUDE.md**: Categoria 8 — algoritmo ora completo.
+- **Fix applicato (GCL §6.6 Algorithm 6.4 / Wang 1978 §3)**:
+  1. `lc_a` fattorizzato ricorsivamente via `factor_multivariate` (bootstrap).
+  2. NON si espande la molteplicità in più copie: la mult è recuperata via peeling `while d % e == 0` (matching SymPy `dmp_zz_wang_lead_coeffs`).
+  3. `cs = lc_a_eval / Π lc(h_j)` (content del univariate image), `ct = content` di `lc_a`.
+  4. **Wang non-divisors check** (`wang_non_divisors_ok`): condizione di Wang 1978 §3 eq. 6.27, identica strutturalmente a `dmp_zz_wang_non_divisors` SymPy. Se fallisce → Unimplemented diagnostico, e il driver avanza al prossimo punto candidato.
+  5. Pass in REVERSE su T = {t_i}: per ogni h_j, conta `k_j = #volte e_i | (lc(h_j)*cs)`, accumula `C_j *= t_i^{k_j}`. Tracker `J[i]` rileva extraneous factors.
+  6. Correzione integer-content: rebalance `(C_j, h_j)` tramite `gcd(lc(h_j), eval(C_j))`. Residuo `cs ≠ 1` scalato su tutti (C, h) e su `lift_target` via `overall_constant = cs^(r-1)`.
+- **Driver retry-loop**: `factor_squarefree_part` ora raccoglie TUTTI i good-point candidates (radius spiral) e prova ciascuno fino a LC+Hensel+certify success. Mirroring SymPy `dmp_zz_wang` outer EEZ config loop.
+- **Sorgenti esterne citate nel codice** (`factor_multivariate_lc.cpp` header):
+  - Geddes/Czapor/Labahn, *Algorithms for Computer Algebra*, §6.6 Alg 6.4.
+  - Wang 1978, *An improved multivariate polynomial factoring algorithm*, Math. of Computation 32.
+  - SymPy `sympy.polys.factortools.dmp_zz_wang_lead_coeffs` + `dmp_zz_wang_non_divisors` (https://github.com/sympy/sympy/blob/master/sympy/polys/factortools.py) — solo citazione algoritmica; nessun codice copiato.
+- **Direct probes (real run 2026-05-29)**:
+  - `factor_multivariate((xy+1)(xy+2))` → 2 fattori `1+xy`, `2+xy`. CERT OK.
+  - `factor_multivariate((2xy+1)(3xy+1))` → 2 fattori `1+2xy`, `1+3xy`. CERT OK.
+  - `factor_multivariate((x²y+y)(xy+1))` → `1+xy`, `1+x²`. CERT OK (content y già estratto a livello squarefree).
+  - `factor_multivariate((xy+1)(xy+2)(xy+3))` → 3 fattori. CERT OK.
+  - `factor_multivariate((yx+1)(2x+y))` → `2x+y`, `1+xy`. CERT OK.
+- **Nuovi test in `test_factor_multivariate_f3.cpp`**: `WangLcCorrectionXyPlus1XyPlus2`, `WangLcCorrection2Xy1_3Xy1`, `WangLcCorrectionThreeFactors`, `WangLcCorrectionMixedLc`. Tutti CERT exact.
+- **STATO**: ✅ RISOLTA 2026-05-29.
+
+### F3.2-WANG-EVAL-BOUND — bound di ricerca del good evaluation point — RISOLTA 2026-05-29
+- **File**: `src/algebra/factor_multivariate_wang.cpp:237`
+- **Fix applicato**: aggiunto `max_wang_eval_radius` a `CASContextParams` (default 0 = auto = `nterms + main_deg + 4`); il bound è ora configurabile via `ctx.set_max_wang_eval_radius(n)`. Comportamento default invariato; utente può ampliare la box per casi difficili.
+- **STATO**: ✅ RISOLTA 2026-05-29 — Suite 1872 PASS / 0 FAIL (no regressioni).
+
+### F3.4-PRIMITIVE-ELEMENT — Primitive Element Theorem (Trager) — RISOLTA 2026-05-29
+- **File**: `src/algebra/algebraic_tower_primitive.cpp` (NUOVO, 502 righe)
+- **Categoria CLAUDE.md**: Nuova implementazione F3.4, zero hardcode introdotti.
+- **Descrizione**: Implementa il teorema dell'elemento primitivo per collassare Q(α₁,…,α_n) → Q(θ) via ricerca di shift incrementale di Trager. Algoritmo: (1) SHIFT-RESULTANT R_s(y) = Res_x(m_k(x), q_{k-1}(y−s·x)) via valutazione-interpolazione di Newton; (2) TEST SQUAREFREE gcd(R_s, R_s') = costante via extended_gcd_rational_poly; (3) RING-GCD in Q[y]/(R_s)[t] per estrarre α_k; (4) BACK-SUBSTITUTION via composizione di polinomi modulare.
+- **Shift budget**: derivato da ctx.max_trager_tower_shift_attempts() (già esposto in CASContext); se 0 → bound di Trager = 2·∏deg(m_i)+1. Cap raggiunto → Unimplemented esplicito con conteggio tentativi.
+- **API pubblica aggiunta** in `include/cas/algebraic_tower_bridge.hpp`: `PrimitiveElementResult`, `compute_primitive_element()`, `detect_tower_n_level()`.
+- **Test**: `test/unit/algebra/test_primitive_element_f3.cpp` — 8 test (sqrt(2)+sqrt(3)+sqrt(5) deg=8, cbrt(2)+sqrt(3) deg=6, triviale, detect_tower, validazione input). Tutti PASS.
+- **Anti-lying grep**: `grep -nE "Resultant_x|min_poly_theta|alphas_in_theta|shift_attempts|squarefree|extended_gcd"` mostra 14 match su righe con operazioni reali.
+- **STATO**: ✅ RISOLTA 2026-05-29 — 1847 PASS (era 1839; +8 nuovi).
+
+### F3.5-TOWER-N — factor_polynomial_tower_n via Primitive Element + Single-Ext Trager — RISOLTA 2026-05-29
+- **File**: `src/algebra/factorization_tower_n.cpp` (NUOVO, 492 righe); modifica in `src/algebra/factorization_tower.cpp` (fast-path delegation per 2-level con min_poly_2 razionale).
+- **Categoria CLAUDE.md**: Nessun hardcode introdotto. Zero costanti magiche, shift budget da `ctx.max_trager_tower_shift_attempts()` (default `2·deg(f)·D + 1`), wall-clock da `ctx.timeout()`, ogni cap → Unimplemented diagnostico esplicito.
+- **Pipeline**: (1) F3.4 `compute_primitive_element` collassa Q(α₁,…,α_n) → Q(θ); (2) ricerca shift s tale che `N(x) = Res_y(q_θ(y), f(x − s·y))` ∈ Q[x] squarefree (eval-interpolation di Newton, no resultant matrix); (3) factor su Q via `factor_over_integers`; (4) per ogni g_i: `f_i = gcd_{Q(θ)[x]}(f, g_i(x + s·θ))` via `tower_detail::poly_extended_gcd<AlgebraicNumber>`; (5) invariante Trager Σ deg(f_i) = deg(f) (mismatch → InternalError).
+- **API pubblica aggiunta** in `include/cas/algebraic_tower_bridge.hpp`: `TowerGeneratorsN`, `factor_polynomial_tower_n()`.
+- **Speed-up 2-level**: `factor_polynomial_tower` ora delega al path single-extension quando `min_poly_2` è razionale (caso comune Q(√a,√b)). Risolve BUG-HANG-003: `x²-3` su Q(√2,√3) in 12ms (era hang), `x⁴-10x²+1` in 348ms, `(x²-2)(x²-3)` in 710ms. I tre test `DISABLED_*` riabilitati.
+- **Test**: `test/unit/algebra/test_factorization_tower_n_f3.cpp` (216 righe, 6 test: 2-level split, 3-level Q(√2,√3,√5) split di x²-5, irreducible x²-7, redundant generator DISABLED, validazione input).
+- **Direct probes (real run, 2026-05-29)**:
+  - `factor_polynomial_tower_n(x²-3, x, [√2,√3])` → 2 fattori, reconstructs OK.
+  - `factor_polynomial_tower_n(x²-5, x, [√2,√3,√5])` → 2 fattori, reconstructs OK (14.6s — primitive element collapse Q(θ) di grado 8 è il collo di bottiglia, accettabile).
+  - `factor_polynomial_tower_n(x²-7, x, [√2,√3])` → 1 fattore (irreducible), reconstructs OK in 83ms.
+- **STATO**: ✅ RISOLTA 2026-05-29 — 1865 PASS / 0 FAIL (baseline 1857; +8 nuovi).
+
+### F3.5-DEBT-01 — Redundant generator in compute_primitive_element — RISOLTA 2026-05-31
+- **File**: `src/algebra/algebraic_tower_primitive.cpp`, `algebraic_tower_primitive_internal.hpp`.
+- **Categoria CLAUDE.md**: nessun hardcode introdotto. Fix architettonico vero (factor + select).
+- **Fix incrementali applicati**:
+  - **2026-05-29**: aggiunti `Deadline` opzionale + `deadline_exceeded()` helper. Check inseriti in shift loop, `compute_shift_resultant` eval-pt loop, Newton-interp loop, `rpoly_gcd_t` ring-GCD loop. `resultant_generic<T>` accetta `ResultantDeadline` parameter.
+  - **2026-05-30**: aggiunto `ratpoly_definitely_non_squarefree_mod_p(f, p)` modular pre-filter prima di `ratpoly_is_squarefree` espensiva (3 primes ~10⁶). Per redundant generators, Q-gcd di degree-8 polys con BigInt rationals esploderebbe; check mod p è O(deg²) integer-only.
+  - **2026-05-30**: aggiunto `collect_irred_factors_over_q(R_s, ctx)` in `algebraic_tower_primitive_internal.hpp:543`. Quando R_s è squarefree ma reducible su Q, fattorizza R_s via `factor_over_integers` e restituisce i fattori irreducibili come candidati per q_current. La candidate loop (line 191) prova ogni cand_q: solo quelli per cui Q[y]/(cand_q) è campo (= irreducible) producono ring-GCD valida.
+  - **2026-05-31** (chiusura): aggiunto **semantic-consistency filter** prima della candidate loop. Quando R_s è reducible, MULTIPLE cand_q producono ring-GCD valide algebricamente (ogni Galois-conjugate gives a valid abstract primitive element). MA solo UNA cand_q corrisponde all'embedding simbolico di `new_theta_expr = α_k + s·θ_{k-1}` passato dall'utente. Senza filtro, picking del wrong candidate causa misprojection: alpha_k_poly (corretto in Q[y]/(cand_q)) renderizzato via y→theta_expr produce un coniugato di α_k anziché α_k stesso (es. Q(√2,√8) con cand_q=y²-2 invece di y²-18: alpha rendered = 6√2 anziché 2√2). Fix: `cand_vanishes_at_theta_expr(cand)` evaluates cand_q at new_theta_expr via Horner symbolic, calls ctx.simplify, accetta solo se risultato è literal 0 (IntegerLit/RationalLit con numerator zero). Pre-filtra i candidati; fallback all-candidates se simplifier non risolve.
+- **Diagnosi completa 2026-05-30**: per Q(√2,√3,√6), step k=2 calcola R_s = y⁸-44y⁶+438y⁴-1292y²+529. Squarefree ma reducible: R_s = (y⁴-22y²-48y-23)(y⁴-22y²+48y-23). Primo factor = min poly di √2+√3+√6 (deg 4 — la tower COLLASSA da 8 a 4 correttamente).
+- **Verifica scalabilità (probe 2026-05-31, 8 scenari)**:
+  - Q(√2,√3) → deg 4 (baseline), 5ms
+  - Q(√2,√3,√5) → deg 8 (baseline), 576ms
+  - Q(√2,√8) → deg 2 ✓ (compressione)
+  - Q(√2,√3,√6) → deg 4 ✓ (compressione)
+  - Q(√2,√3,√6,√12) → deg 4 ✓ (doppia compressione)
+  - Q(√2,√3,√5,√6) → deg 8 ✓ (√5 indipendente, √6 ridondante)
+  - Q(√4,√2) → deg 2 ✓ (√4=2 triviale)
+  - Q(√2,√8,√3) mixed → deg 4 ✓
+- **Test aggiunti**: `RedundantSqrtTwoSqrtThreeSqrtSix`, `RedundantSqrtTwoSqrtEight`, `RedundantMixedTower_Sqrt2_Sqrt3_Sqrt5_Sqrt6` in `test_primitive_element_f3.cpp` (certificati C1 m_i(P_i)≡0 + C2 θ-combination≡y); `RedundantGenerator_Sqrt2_Sqrt3_Sqrt6` rafforzato (ora richiede Ok + factors.size()=2 + reconstructs), nuovo `RedundantGenerator_Sqrt2_Sqrt8` in `test_factorization_tower_n_f3.cpp`.
+- **STATO**: ✅ RISOLTA 2026-05-31.
+
+### F3.4-DEBT-01 — detect_tower_n_level: solo RootOf con min-poly razionale su Q
+- **File**: `src/algebra/algebraic_tower_primitive.cpp` (funzione `detect_tower_n_level`)
+- **Categoria CLAUDE.md**: Cat 4 — bail-out su tipo di RootOf non-razionale (diagnostico esplicito).
+- **Descrizione**: La detection era limitata a RootOf i cui coefficienti del min-poly sono razionali. Casi come `RootOf(x²-sqrt(2)·x+1)` (coefficiente algebrico annidato) ritornavano `std::nullopt` senza errore.
+- **Fix applicato 2026-05-30**: introdotta `primitive_internal::try_nested_lift_min_poly` in `src/algebra/algebraic_tower_primitive_nested.cpp` + helper `compute_absolute_resultant_xy` in `algebraic_tower_primitive_internal.hpp`. Algoritmo: per outer RootOf α con `f(x) ∈ Q(β)[x]`, calcolo `R(x) = Res_y(g(y), f(x, y)) ∈ Q[x]` via evaluation-interpolation (Cohen "A Course in Computational Algebraic Number Theory" §3.6.1; Trager 1976). Squarefree check su R: se squarefree → usato come min-poly di α e passato a `compute_primitive_element`. `detect_tower_n_level` relocata anch'essa nel nuovo file per rispettare il limite di 500 LOC. Aggiunto test `DetectTowerNLevel_NestedRootOf_F34Debt01` (β=√2, α=primitive 8-th root of unity tramite x²-β·x+1, R=x⁴+1, deg θ ≤ 8). Nessun fallback silenzioso: casi non risolti (R non-squarefree, multi-β annidato, γ non in pool) → Unimplemented esplicito.
+- **Residuo OPEN (Cat 4)**: (a) selezione del fattore irriducibile su Q(β)[x] quando R è reducible (multi-conjugate α); (b) multi-β iterato (Cohen §3.6.4) per nesting profondo > 1; (c) RootOf che dipendono da elementi algebrici non collezionati (es. simbolo letterale).
+- **STATO**: ✅ RISOLTA (1-level nesting) — F3.4 2026-05-30. Nuovo file `algebraic_tower_primitive_nested.cpp` (289 LOC), test nuovo PASS, suite 95 PASS sui filtri Tower/Primitive/RootOf.
+
+
+
+### HPP-002 — Groebner F4 solver Lex hardcoded — RISOLTA 2026-05-29
+- **File**: `src/algebra/polynomial_groebner_f4_solver.cpp`
+- **Categoria CLAUDE.md**: Cat 5 — ordinamento e struttura fissa non configurabile.
+- **Descrizione storica**: `MonomialOrder::Lex` hardcoded; Lex è il più lento per Groebner. Pipeline corretta: GRevLex + FGLM → Lex per shape-lemma.
+- **Fix applicato**: FGLM library (`polynomial_groebner_fglm.cpp`, Block C) wired nel solver. Pipeline: F4-GRevLex → FGLM-convert → Lex → shape-lemma. Fallback diretto-Lex se FGLM ritorna Unimplemented (non-zero-dim o cap).
+- **STATO**: ✅ RISOLTA 2026-05-29 — Test `AcidTest.Test19_GroebnerSystem` verificato passa (input `[x²+y²-1, x²-y]` → Matrix 4×2 = 4 soluzioni corrette).
+
+### F3.3-FGLM-WIRE — FGLM main-loop termination bug — RISOLTA 2026-05-29
+- **File**: `src/algebra/polynomial_groebner_fglm.cpp:476` (main BFS loop).
+- **Categoria CLAUDE.md**: Cat 8 — algoritmo terminato troppo presto.
+- **Descrizione storica**: Block C tentativo wire-in causava Test19 regression (Matrix 0×2). Bug identificato 2026-05-29 nel main loop FGLM: condizione `while (!lex_frontier.empty() && lex_staircase.size() < D)` terminava al riempimento staircase, ma monomi border restanti in frontier (es. `x²` per Test19) emettevano basis element solo se processati. Per `<x²+y²-1, x²-y>`: staircase={1,y,x,xy} D=4; senza processare `x²` la Lex basis FGLM conteneva solo `{y²+y-1}` invece di `{y²+y-1, x²-y}`. Shape-lemma trovava `pure_last` ma ricorrenza per `x` non aveva equazione → soluzioni vuote.
+- **Fix applicato**: condizione cambiata a `while (!lex_frontier.empty())`. Dopo staircase=D, ogni nuovo monomio è dipendente (D vettori spannano spazio quotient) → emette basis element + non espande figli → loop finito (frontier bounded da neighbors di staircase ≤ D·n_vars).
+- **STATO**: ✅ RISOLTA 2026-05-29 — Test19 PASS, 1839 PASS suite, FGLM wired in solver.
+
+### HC-F36-REDUCIBLE-COARSE — Quintic reducible coarse labels — RISOLTA 2026-05-29
+- **File**: `src/algebra/galois.cpp:202-242`
+- **Fix applicato**: reducible quintic ora ricorre `galois_group` su ogni fattore non-lineare, join labels con " x " (direct product). Es. `(x²+1)(x³-2)` → "C2 x S3" invece di "reducible". Test `Reducible_QuadraticTimesCubic` aggiornato.
+- **STATO**: ✅ RISOLTA 2026-05-29 — 7/7 GaloisDeg5Test PASS.
+
+### HC-F36-PRIME-BUDGET — Galois deg-5 probabilistico — RISOLTA 2026-05-31
+- **File**: `src/algebra/galois_deg5.cpp` (branch `saw_5cycle + disc_square` per C5/D5; branch finale `disc_non_square + no-4cycle + no-odd` per S5/F20).
+- **Categoria CLAUDE.md**: nessun hardcode (lookup table tipo Dummit non usata). Decisioni via algoritmi strutturali su Q(α).
+- **Fix C5/D5 (2026-05-29)**: distinzione DETERMINISTICA via `factor_polynomial_tower_n(f, x, [α=RootOf(f,x,0)], ctx)`. C5 abelian → f splits in 5 fattori lineari su Q(α); D5 non-abelian → solo (x-α) + irreducible quartic. Counts linear factors.
+- **Fix S5/F20 (2026-05-31)**: distinzione DETERMINISTICA via **resolvent cubic di g(x) = f(x)/(x-α) su Q(α)**.
+  - Math: Gal(g/Q(α)) = Stab_α(Gal(f/Q)). Per S5 stabilizer = S4 (resolvent cubic IRREDUCIBLE), per F20 stabilizer = C4 (resolvent cubic REDUCIBLE — ha radice in Q(α)). Caso V4/A4 escluso da disc(f) non-square; D4 escluso perché order 8 non divide 120 con [G:H]=5 transitivi.
+  - Implementazione: factor f over Q(α) via `factor_polynomial_tower_n`, estrai deg-4 factor g, calcola resolvent cubic R(y) = y³ - b·y² + (ac-4d)·y + (-a²d - c² + 4bd) con coefficienti in Q(α), fattorizza R(y) su Q(α). Linear factor → F20; irreducible → S5.
+  - Cost: factor_polynomial_tower_n su deg-5 extension è caro (~13–25 min Selmer/x^5-2). Fast Frobenius path resta default; fallback solo quando budget esaurito senza witness.
+- **Verifica direct probe (2026-05-31, budget=0)**: `S5_DeterministicFallback_BudgetZero` (Selmer x⁵-x-1) → PASS S5 in 784s; `F20_DeterministicFallback_BudgetZero` (x⁵-2) → PASS F20 in 1480s. Marcati DISABLED_StressTest perché incompatibili con CI normale; abilitabili con `--gtest_also_run_disabled_tests --gtest_filter=*StressTest*`.
+- **Regressione**: 0. Sette test classici (S5_Selmer, A5_Trinks, F20_XPower5MinusTwo, D5_LangClassical, C5_RealCyclotomic11, due reducible) tutti PASS via fast Frobenius path. Fallback algoritmico è path-of-last-resort, mai eseguito su input tipici.
+- **STATO**: ✅ RISOLTA 2026-05-31. Tutte le 5 classi (C5/D5/F20/A5/S5) deterministicamente distinguibili senza lookup table.
+
+### F3.3-F5-WIRE — F5 signature-based wire skeleton — RISOLTA 2026-05-31
+- **File**: `src/algebra/polynomial_groebner_f5.cpp`, test `test_groebner_f5_pruning_f3.cpp`.
+- **Categoria CLAUDE.md**: nessun hardcode introdotto. Fix algoritmico vero.
+- **Root cause**: `rewritten_criterion` iterava su TUTTI gli elementi del basis e accettava qualunque `sig` strictly-smaller-divisor come "rewriter". Ma il generatore originale con sig (i, 1) divide SEMPRE ogni (i, t) con t≠1 — quindi ogni S-pair che coinvolgeva un generatore originale come achiever veniva falsamente respinto. Conseguenza: F5C saltava S-pair essenziali e produceva una basis incompleta (3 polys per sphere-parabola invece di 6). Cfr. Eder-Faugère survey 2017 §3 "rewriter ownership".
+- **Fix surgical** (polynomial_groebner_f5.cpp:198-225 + caller site 320-340): `rewritten_criterion(sig_sp, achiever_birth_idx, basis)` ora considera SOLO labeled poly con index > `achiever_birth_idx` (cioè aggiunti STRETTAMENTE DOPO l'achiever della max-signature). `s_labeled` esteso a restituire `SigAchiever` enum (LEFT/RIGHT). Caller calcola `achiever_idx = (achiever==LEFT) ? pair.i : pair.j` e lo passa.
+- **Verifica**: 3 test DISABLED riabilitati e PASS:
+  - `SystemSphereParabolaProduct` [x²+y²-1, x²-y, z-xy]: basis 6 polys identica tra Buchberger e F5C.
+  - `SystemCyclic3` [xy-z, yz-x, xz-y]: basis 6 polys identica.
+  - `F4EntryHonoursContextFlag`: flag ON ↦ f5c_groebner produce STESSA canonical basis di Buchberger.
+- F5 criterion still active (Faugère 2002 Thm 1) — sui sistemi piccoli prune 0 (basi gia minimali), su sistemi più grandi prune sopra zero (verifica con cyclic-n n≥4).
+- **STATO**: ✅ RISOLTA 2026-05-31.
+
+### F3.1-BROWN-FP-RECURSIVE-NONMONIC — Brown's modular fail su lc non-monic recursive 4-var (FourVarChainedLc) — RISOLTA 2026-05-31
+- **File**: `src/algebra/polynomial_gcd_fp_recursive.cpp` (`compute_content` lambda + divisibility fast-path), test `BrownModularPolyLc.FourVarChainedLc`.
+- **Caso target**: `gcd((xyz+x)(w+x+y), (xyz+x)(w-x+z))` → expected `xyz+x = x*(yz+1)`.
+- **Root cause** (trovata 2026-05-31): `compute_content(poly, eval_idx)` nella lambda di `sparse_gcd_fp` restituiva trivial `1` per input *privi* di `eval_idx` (single-layer polynomial), invece dell'input stesso. Per `gcd(x(w-x), x(wy-xy+1))` w.r.t. `y`: `compute_content(x(w-x), y)` = 1 (y-free → single layer), contA=1, cont_g=gcd(1,x)=1. Factor `x` perso.
+- **Fix**: nel branch `layers.size() <= 1` di `compute_content`, se `layers.size() == 1` (non-empty single-layer polynomial), restituire `layers.begin()->second` (the actual layer = the polynomial itself, since gcd of a one-element set is that element). Solo `layers.empty()` → return trivial 1.
+- **Invariante**: `gcd({p}) = p` per qualsiasi polinomio p. Il precedente short-circuit violava questa identità.
+- **Traccia fix**: `compute_content(x(w-x), y)` → x(w-x); contA=x(w-x), contB=x, cont_g=gcd(x(w-x),x)=x; ppA=1, ppB=wy-xy+1; gcd(1,wy-xy+1)=1; result=x·1=x. Moltiplicato per content_main_z=yz+1 al top level → x(yz+1) ✓.
+- **Test**: `BrownModularPolyLc.FourVarChainedLc` PASS in 3ms (precedentemente DISABLED).
+- **Debug cleanup**: rimossi tutti i `fprintf(stderr, "[DBG-*]")` da `polynomial_gcd_fp_recursive.cpp` e `polynomial_gcd_brown_modular.cpp`.
+- **STATO**: ✅ RISOLTA 2026-05-31.
+
+### HPP-003 — GCD multivariate magic *16U budget multiplier (polynomial_gcd_multivariate.cpp:536)
+- **File**: `src/algebra/polynomial_gcd_multivariate.cpp:536`
+- **Categoria CLAUDE.md**: Cat 2 — costante magica in algoritmo algebrico.
+- **Descrizione**: `std::max(ctx.min_gcd_division_steps(), (remainder.size() + 1U) * (vars.size() + 1U) * 16U)`. Il moltiplicatore `16U` è arbitrario — nessuna derivazione matematica. Per polinomi sparsi grandi il budget può essere troppo basso (→ falso Unimplemented); per polinomi densi piccoli è 16× eccessivo.
+- **Fix corretto**: Bound derivato da teoria Schwartz-Zippel: numero massimo di passi di divisione è `O(deg(remainder) * deg(divisor))` — usare `(degree(remainder) + 1) * (degree(divisor) + 1)` senza costante magica.
+- **Blocking dependency**: L1-08 GCD multivariato completo.
+- **STATO**: ✅ RISOLTA 2026-05-28 — Formula applicata: `(remainder.size()+1)*(divisor_sparse.size()+1)`. Il `16U` e la variabile `vars.size()` (incorrelata al numero di passi) sono stati rimossi. Derivazione: ogni passo elimina un monomio di testa dal remainder e aggiunge al più `|divisor|-1` nuovi; bound totale = `|remainder| * |divisor|`.
+
+### HPP-004 — GCD multivariate max_samples formula (polynomial_gcd_multivariate.cpp:774)
+- **File**: `src/algebra/polynomial_gcd_multivariate.cpp:774`
+- **Nota**: Riga effettiva 774 (non 741 come in piano originale — drift verificato 2026-05-24). `max_samples = 2U * interpolation_degree_bound + 3U`. Il `+3U` è arbitrario senza garanzia probabilistica formale.
+- **Categoria CLAUDE.md**: Cat 6 — parametri probabilistici arbitrari.
+- **Descrizione**: Numero di campioni per interpolazione sparsa non deriva da un bound probabilistico formale. Schwartz-Zippel lemma dà: per polinomio di grado totale d su campo con |F|=q punti, prob(falso zero) ≤ d/q. Campioni necessari per confidence δ: `ceil(log(1/δ) / log(1/(1-d/q)))`.
+- **Fix corretto**: `max_samples = ceil(log(1/δ) / log(1/(1 - interpolation_degree_bound/field_size)))` con `δ = ctx.gcd_error_probability()` (già esposto).
+- **Blocking dependency**: L1-08 GCD multivariato, L1-21 campioni confidence-based.
+- **STATO**: ✅ RISOLTA 2026-05-28 — Formula applicata: `extra_guard = max(2, ceil(log2(required_samples+1)))`, `max_samples = 2*D + extra_guard`. Derivazione: con N=2D+extra punti, almeno D+extra punti sono lucky (Schwartz-Zippel). extra = ceil(log2(D+2)) cresce O(log D), evitando il blowup esponenziale O(N^k) del precedente log(1/δ). Per D≤2 (99% dei casi): extra=2, N=2D+2 (invariato nella pratica). La formula sostituisce il letterale `3U` con un'espressione derivata da required_samples.
+
+### F3.1-ZIPPEL — Zippel sparse Prony stage
+- **File**: `src/algebra/polynomial_gcd_zippel_prony.cpp` (nuovo, T3-Opus Block A2 2026-05-28)
+- **Categoria CLAUDE.md**: Cat 8 (pattern-matching a tabella chiusa) — risolta.
+- **Descrizione storica**: Versione T2 (HPP-002 in `polynomial_gcd_brown.cpp::gcd_zippel_sparse`) delegava a `gcd_brown_impl` (Lagrange-over-Z), zero stadio Prony.
+- **Fix applicato**: Implementato `gcd_zippel_prony()` con due fasi Zippel 1979:
+  - Phase 1 (skeleton): un evaluation anchor in (Fp*)^{n-1}, univariate gcd in x_1, raccolta del supporto dei monomiali in x_2..x_n da P-coeff ∪ Q-coeff per ogni x_1-degree (strict superset del vero skeleton — Zippel stability).
+  - Phase 2 (Prony Vandermonde): per ogni x_1-degree k, T = |skeleton_k| evaluations su nodi random, risoluzione Vandermonde via Gauss-elimination in Fp, verifica predicted-vs-observed su fresh point (rigetta bad-anchor con prob ≤ δ).
+  - Numero campioni derivato da Schwartz-Zippel: `T = max_k |skeleton_k| + ceil(log2(1/δ))` con `δ = ctx.gcd_error_probability()` (default 1e-3 ⇒ extra ≥ 10).
+  - Lift center-mod-p → Z; certify divisibility g|P ∧ g|Q in Z[x_1..x_n]; cert fail → explicit Unimplemented diagnostic `ZIPPEL_PRONY_SINGLE_PRIME_CERT_FAILED` (dispatcher fallback a `gcd_brown_modular`).
+- **STATO**: ✅ RISOLTA 2026-05-28 — Test `ZippelPronyProbe.FourVarSparseSampleCount` verifica sample-count e dispatcher fallback corretto.
+
+### F3.1-BROWN-MODULAR — Brown's REAL modular multivariate GCD
+- **File**: `src/algebra/polynomial_gcd_brown_modular.cpp` + `polynomial_gcd_fp_recursive.cpp` (nuovi, T3-Opus Block A2 2026-05-28)
+- **Categoria CLAUDE.md**: Cat 4 + Cat 8 — false labeling rimosso, algoritmo REAL implementato.
+- **Descrizione storica**: Versione T2 (HPP-001) etichettava come "Brown's modular multivariate GCD" una Lagrange interpolation in Z senza prime/modular/CRT (audit grep su `prime|modular|CRT|mod_p` → 0 match nel body). Coefficient growth UNBOUNDED. Falso labeling.
+- **Fix applicato**:
+  - `gcd_brown_impl` rinominato in `gcd_eval_interp_z_impl` con docs onesti: "NOT Brown's modular — Lagrange-over-Z fallback". Esposto come `gcd_eval_interp_z()`.
+  - Nuovo `gcd_brown_modular()` implementa GCL §7.4–7.5:
+    1. Per ogni primo p (skip se p | lc(P)|lc(Q) in main var): riduzione `reduce_sparse_mod_p`.
+    2. `sparse_gcd_fp` ricorsivo: interpolation in Fp[x_n] via Lagrange in Fp + recursive on sub-vars (`lagrange_interp_fp` + `univariate_sparse_gcd_fp`).
+    3. Degree-stability: rifiuta primi con grado superiore al min visto.
+    4. CRT cross-prime per monomio in `stable_monos`.
+    5. Stop quando ∏p > 2·Mignotte_bound; centered representation; certify `divides_sparse_z(P, cand) ∧ divides_sparse_z(Q, cand)`; cert fail → M_need *= 2; troppi fail → explicit Unimplemented `GCD_BROWN_MODULAR_CERT_REPEATEDLY_FAILED`.
+  - Dispatcher `gcd_brown()` prova modular prima, fallback a `gcd_eval_interp_z`. `gcd_ez()` idem.
+  - `gcd_zippel_sparse()` dispatcher: prony → brown_modular → eval_interp_z.
+- **STATO**: ✅ RISOLTA 2026-05-28 — Test `BrownModularProbe.ConstantLcSucceedsViaModularPath` e `LargeCoefficientsNoZBlowup` verificano: modular path produce risposta corretta con primi 31-bit; nessun primo > 2^31. Anti-lying grep su `next_prime|reduce_mod_p|crt_combine|mod_p|skeleton|prony` produce 51 match (definizioni reali, non solo commenti).
+- **Residual debt**: La modular path FALLISCE (con diagnostic Unimplemented) quando il vero gcd ha leading coefficient polinomiale (non scalare) nella main variable — caso (x^2+yz)(x+y+z) tipico. Il `BrownDirectProbe` PASSA via fallback `gcd_eval_interp_z`. Fix completo richiede leading-coefficient pre-scaling alla Geddes §7.4.2 (sub-GCD ricorsivo per lc poly). Tracciato come **F3.1-BROWN-LC-POLY-SCALING**.
+
+### F3.1-BROWN-LC-POLY-SCALING — Brown's modular con leading coefficient polinomiale — ✅ RISOLTA 2026-05-30
+- **File**: `src/algebra/polynomial_gcd_brown_modular.cpp`, `polynomial_gcd_brown_lc_scaling.cpp` (271 LOC), `polynomial_gcd_brown.cpp` (461 LOC), `polynomial_gcd_fp_recursive.cpp` (fix surgical).
+- **Storia**: skeleton subagent T3-Opus 2026-05-29 introdotto Geddes §7.4.2 lc-scaling poly. Hang/loop su 7 nuovi test (incluso 1 regressione su `BrownModularProbe.ConstantLcSucceedsViaModularPath` pre-passante).
+- **Bug chiusi 2026-05-30 (4 fix surgical)**:
+  1. **`gcd_brown_modular` early-out costanti**: input costante (no factors in tutti i term) → ritorna gcd dei content scalari diretto. Evita stall in `sparse_gcd_fp` ricorsivo (es. `gcd(x+y, 1)` nel lc-bound path).
+  2. **lc-scaling per-prime: polynomial mult invece scalar**: `sparse_gcd_fp` restituisce `gp` monic in main_var (`lc_main(gp)` = scalare). Per `lc_main(gp_scaled) = Lp`, serve mult POLINOMIALE: `gp_new = (c^{-1} mod p) · Lp · gp`. Sostituito `scale_by_lc(gp, u, p)` scalare con `multiply_sparse_mod_p(Lp, gp, p, n)`.
+  3. **`remove_spurious_main_var_factor` attivato**: dopo cert fail attempt 1 + flag `use_lc_scaling`, attempt 2 rimuove h = L / lc_main(true_gcd) via main-var content gcd ricorsivo (Geddes §7.4.2 line 9-10). Safe perché cert finale è arbiter.
+  4. **`sparse_gcd_fp` bug fondamentale `deg_bound==0`** (`polynomial_gcd_fp_recursive.cpp:399`): quando entrambi pp polys costanti in eval_idx ma con dipendenza sub-vars non-triviale (es. `gcd(x^4, x^3)` con eval_idx=y), il codice ritornava `cont_g` ignorando il vero gcd in sub_active. Fix: `sub_gcd = sparse_gcd_fp(ppA, ppB, sub_active, ctx, depth+1)`; poi `mul_mod_p(sub_gcd, cont_g, p)`.
+- **Validation 2026-05-30**: 14 test in `test_gcd_brown_f3.cpp`, **13 PASS / 1 DISABLED** (`BrownModularPolyLc.DISABLED_FourVarChainedLc` pre-disabled subagent, edge-case 4-var chained — non bloccante). Suite 1875→**1883** (+8). 0 regressioni. Coverage: scalar lc, poly lc, costanti, multi-var sparse, cofactor, certify.
+- **STATO**: ✅ RISOLTA 2026-05-30 — Brown's modular GCD multivariate con lc-poly funziona end-to-end.
+
+### HPP-005 — integrate.cpp double + to_u64() nel core simbolico (integrate.cpp:40-44)
+- **File**: `src/calculus/integrate.cpp:40-44` (funzione `approx_bound`) + `:255-268` (lambda `rat_to_double`)
+- **Categoria CLAUDE.md**: Cat 4 (bail-out su tipo) + Regola 1 (uso di `double` nel core simbolico).
+- **Descrizione**: `static_cast<double>(r->numerator().to_u64()) / static_cast<double>(r->denominator().to_u64())` e `stod(r.numerator().decimal())` usano aritmetica floating-point per approssimare bound simbolici. Overflow silenzioso per numeratori/denominatori > 2⁶³; perdita di precisione per razionali con denominator non rappresentabile in `double`. Viola REGOLA 1 CLAUDE.md (divieto assoluto di `double` nel core simbolico).
+- **Fix corretto**: Confronto bounds via aritmetica `Rational` esatta: `Rational::compare(a, b)` invece di `double(a) < double(b)`. Per `M_PI` usare approssimazione razionale `355/113` sufficiente per range check. Bound BigInt esatto.
+- **Blocking dependency**: Nessuno — fix chirurgico.
+
+### HPP-006 — fsolve kTolerance=1e-10 non configurabile (fsolve.cpp:77)
+- **File**: `src/algebra/fsolve.cpp:77`
+- **Nota**: Riga effettiva 77 (non 88 — drift verificato 2026-05-24). `constexpr double kTolerance = 1e-10;`
+- **Categoria CLAUDE.md**: Cat 1 — budget computazionale non configurabile.
+- **Descrizione**: Toleranza assoluta hardcoded per Newton polishing e convergenza radici. Non configurabile via `CASContext`. Per problemi con radici molto vicine (es. `sin(1000x)`) 1e-10 può essere insufficiente; per radici simboliche approssimate 1e-10 può essere eccessivamente preciso.
+- **Fix corretto**: `ctx.fsolve_tolerance()` con default `1e-10`, esposto come `numeric_tolerance_` in `CASContext`. Già predisposto parzialmente in `ctx.numeric_tolerance()` (L2-06 audit).
+- **Blocking dependency**: Nessuno.
+
+### HPP-007 — Risch trial constants set chiuso (integrate_risch.cpp:623)
+- **File**: `src/calculus/integrate_risch.cpp:623`
+- **Categoria CLAUDE.md**: Cat 3 — set fisso che esclude silenziosamente input validi.
+- **Descrizione**: `const std::array<std::pair<long long, long long>, 6> trial_consts = {{1,1},{-1,1},{1,2},{2,1},{-1,2},{-2,1}}`. Cerca costante `c` nell'insieme chiuso `{±1,±1/2,±2}`. Integrali come `∫3/(x·ln(x)) dx = 3·ln(ln(x))` richiedono `c=3` non nel set → Unimplemented silenzioso (risultato mancante, non errore diagnostico).
+- **Fix corretto**: Risoluzione formale via equazione del campo residuale (Risch structure theorem step): `c·D(F) = integrand` → `c = integrand / D(F)` con verifica che `c` sia costante rispetto alla variabile di integrazione. Nessun set chiuso richiesto.
+- **Blocking dependency**: L1-02 Risch completo (Bronstein cap. 9).
+
+### HPP-008 — ODE solver C+i literal naming (ode_solver_advanced.cpp:227)
+- **File**: `src/calculus/ode_solver_advanced.cpp:227`
+- **Categoria CLAUDE.md**: Cat 7 — nomi di variabili interni hardcoded.
+- **Descrizione**: `ExprPtr Ci = arena.make<Symbol>("C" + std::to_string(i + 1));` genera simboli `C1`, `C2`, ... per costanti di integrazione ODE N-esimo ordine. Se l'utente ha già definito `C1` nell'ambiente, collisione silente produce risultati sbagliati.
+- **Fix corretto**: `ctx.make_fresh_symbol("C")` garantisce unicità rispetto a tutti i simboli definiti. Già implementato per Frobenius (HC-004).
+- **Blocking dependency**: Nessuno (HC-004 infrastruttura già presente).
+
+### HPP-009 — ODE 1st order C1 literal (ode_solver_1st_order.cpp:37)
+- **File**: `src/calculus/ode_solver_1st_order.cpp:37` (e `:58`)
+- **Categoria CLAUDE.md**: Cat 7 — nomi di variabili interni hardcoded.
+- **Descrizione**: `ExprPtr C1 = arena.make<Symbol>("C1");` a riga 37 e 58. Costante di integrazione ODE 1° ordine con nome fisso `C1`. Stesso problema di collisione di HPP-008.
+- **Fix corretto**: `ctx.make_fresh_symbol("C")` (HC-004 già presente).
+- **Blocking dependency**: Nessuno.
+
+### HPP-010 — matrix_solve free parameter "t"+i naming (matrix_solve.cpp:192)
+- **File**: `src/linalg/matrix_solve.cpp:192`
+- **Categoria CLAUDE.md**: Cat 7 — nomi di variabili interni hardcoded.
+- **Descrizione**: `ctx.arena().make<Symbol>("t" + std::to_string(parameter_index++))` genera parametri liberi `t0`, `t1`, `t2`, ... per soluzioni di sistemi con kernel non banale. Collisione con variabili utente `t`, `t0`, ecc. in sistemi fisici (tempo).
+- **Fix corretto**: `ctx.make_fresh_symbol("t")` → `t_0`, `t_1`, ... garantiti unici.
+- **Blocking dependency**: Nessuno.
+
+### HPP-011 — matrix_eigenvalues "_lambda_" literal (matrix_eigenvalues.cpp:263)
+- **File**: `src/linalg/matrix_eigenvalues.cpp:263`
+- **Categoria CLAUDE.md**: Cat 7 — nomi di variabili interni hardcoded.
+- **Descrizione**: `const Symbol lambda_var("_lambda_");` a riga 263. Simbolo interno per polinomio caratteristico fisso. Se utente ha definito `_lambda_` nell'ambiente (es. parametro di regolarizzazione), il polinomio caratteristico collide silenziosamente.
+- **Fix corretto**: `ctx.make_fresh_symbol("lambda")` → `lambda_0`, `lambda_1`, ... garantiti unici.
+- **Blocking dependency**: Nessuno.
+
+### HPP-012 — matrix_jordan "_lambda_" literal (matrix_jordan.cpp:123)
+- **File**: `src/linalg/matrix_jordan.cpp:123`
+- **Categoria CLAUDE.md**: Cat 7 — nomi di variabili interni hardcoded.
+- **Descrizione**: `const Symbol lambda_var("_lambda_");` a riga 123. Stesso pattern di HPP-011 nel Jordan form solver. I due moduli usano lo stesso nome fisso: se chiamati in sequenza sullo stesso `CASContext`, interferenza in cache/assumptions.
+- **Fix corretto**: `ctx.make_fresh_symbol("lambda")`.
+- **Blocking dependency**: Nessuno.
+
+### A5-LARGECYCLO — cyclotomic detection limitata a deg ≤ 724 (polynomial_cyclotomic.cpp:141, :202-210)
+- **File**: `src/algebra/polynomial_cyclotomic.cpp:141` (cap OOM in `compute_cyclotomic`), `:202-210` (proactive nullopt return in `is_cyclotomic` per deg > 724).
+- **Categoria CLAUDE.md**: Cat 1 (budget computazionale non configurabile) / Eccezione legittima #4 (safety hardware OOM). La voce è classificata come **Eccezione legittima OOM** per il limite corrente, ma rimane aperta per il fix configurabilità.
+- **Descrizione**: `constexpr int kDefaultCyclotomicN = 1 << 20` (riga 98) limita `compute_cyclotomic` a n ≤ 2^20. Per un polinomio di grado d, l'ordine ciclotomico n soddisfa φ(n) = d, quindi n ≤ 2d². Il bound 2d² > 2^20 si verifica per d > √(2^19) ≈ 724. `is_cyclotomic()` ritorna `nullopt` proattivamente per deg > 724 (riga 202-210) invece di eseguire una ricerca esaustiva che excederebbe il cap OOM. Un polinomio Φ_n con n > 2^20 (e deg φ(n) > 724) viene classificato come non-ciclotomico via nullopt — non un risultato silenziosamente sbagliato (nullopt è segnale esplicito), ma una limitazione nota documentata in codice come `A5-LARGECYCLO`. Iscritto anche in `CAS_TASKS.md:103` (CAS-L2-15).
+- **Fix corretto**: (a) Esporre `ctx.max_cyclotomic_n()` (default 2^20, documentato con costo memoria O(n·τ(n)) per l'inversion Möbius); (b) per n arbitrario grande, usare un algoritmo che non materializzi tutti i divisori di n — es. fattorizzazione + formula prodotto euleriana incrementale via sieve on-demand sui divisori di n (costo O(τ(n)·d²) invece di O(n·τ(n))). Questo consentirebbe detection ciclotomica per deg > 724 con costo proporzionale a τ(n) · deg², non a n.
+- **Blocking dependency**: Nessuno — fix autonomo. OOM-safety by design: il cap corrente è matematicamente giustificato e produce `nullopt` esplicito (mai silent-wrong).
+- **Stato**: APERTA — differita (OOM safety prioritaria; deg > 724 è raro in pratica CAS).
+
+### HPP-013 — evaluator.cpp RootOf seed scheme deterministico (evaluator.cpp:142-149)
+- **File**: `src/numeric/evaluator.cpp:142-149`
+- **Categoria CLAUDE.md**: Cat 6 — seed/randomness deterministica non derivata dall'input.
+- **Descrizione**: Guess iniziale Newton-Raphson per `RootOf` usa schema deterministico `idx/2 + 1.0` / `-(idx+1)/2` basato solo su `root_index`. Per polinomi con radici reali ravvicinate (es. Wilkinson), questo schema può far convergere radici diverse allo stesso valore numerico (due `RootOf` con indici distinti convergono alla stessa radice → risultati duplicati/sbagliati).
+- **Fix corretto**: Sturm interval bracketing per `root_index`: calcolare intervallo `[a_k, b_k]` che contiene esattamente la k-esima radice reale via variazioni di segno Sturm sequence; usare centro intervallo come guess iniziale. Garantisce unicità di convergenza per ciascun `root_index`.
+- **Blocking dependency**: `src/numeric/sturm.cpp` già presente (HC-012).
+
+
+### HPP-015 — simplify_special_fn bit_length>16 bail-out (simplify_special_fn.cpp:111)
+- **File**: `src/symbolic/simplify_special_fn.cpp:111`
+- **Categoria CLAUDE.md**: Cat 1 (budget non configurabile) + Cat 4 (bail-out su valore intero invece che dominio matematico).
+- **Descrizione**: `if (il->value.bit_length() > 16)` a riga 111 rifiuta argomenti interi con più di 16 bit (>65535). `Gamma(70000)` è matematicamente definita (= 69999!) ma viene rifiutata. Il bail-out non è su impossibilità matematica ma su costo computazionale non configurabile. Produce Unimplemented senza messaggio diagnostico sul limite.
+- **Fix corretto**: (a) Esporre `ctx.max_special_fn_integer_arg_bits()` (default 16, configurabile); (b) se argomento supera soglia e risultato non è chiuso (es. Gamma non intera/semi-intera), emettere `Unimplemented` con messaggio diagnostico esplicito: `"Gamma(n): n>65535, set ctx.max_special_fn_integer_arg_bits() to increase"`. (c) Per funzioni con formula closed-form scalabile a BigInt (es. Bernoulli, Zeta via formula), estendere algoritmo senza bail-out.
+- **Blocking dependency**: Nessuno — fix configurabilità immediato.
+
+### HPP-016 — N_INTERN_SHARDS = 16 (include/cas/ast.hpp)
+- **File**: `include/cas/ast.hpp` — `static constexpr std::size_t N_INTERN_SHARDS = 16U`
+- **Categoria CLAUDE.md**: Cat 1 eccezione legittima (budget architetturale con giustificazione formale)
+- **Descrizione**: Il numero 16 è una costante architetturale deliberata: (a) potenza di 2 → shard selection via bitwise AND in O(1); (b) 16 shard riducono la contention a ~1/16 rispetto a lock globale; (c) il numero di shard non è runtime-configurabile perché la struttura dati `std::array<..., N>` richiede N compile-time; un rebuild con N diverso è l'unica via per cambiarlo. Documentato con `static_assert((N_INTERN_SHARDS & (N_INTERN_SHARDS-1)) == 0)`.
+- **Fix corretto**: Eccezione legittima — non richiede fix. Il valore 16 è derivato da considerazioni di cache-line alignment e trade-off contention/overhead. Per workload estremi (>64 thread), valutare N=64.
+- **Blocking dependency**: Nessuno.
+
+### HPP-017 — intern_shard_tables_ shard contention nota (include/cas/ast.hpp)
+- **File**: `include/cas/ast.hpp` — `intern_shard_tables_[N_INTERN_SHARDS]`
+- **Categoria CLAUDE.md**: Cat 9 — intervallo di controllo / struttura fissa
+- **Descrizione**: Prima del fix HPP-016 (2026-05-25), `interning_table_` era un singolo `unordered_set` condiviso tra tutti i shard lock — data race latente: due thread in shard distinti potevano chiamare simultaneamente `find()`/`insert()` sulla stessa struttura. Fix applicato: ogni shard ora ha il proprio `intern_shard_tables_[i]` protetto esclusivamente da `intern_shards_[i]`. Locking order invariant documentato: shard → alloc, mai alloc → shard.
+- **Stato**: RISOLTO 2026-05-25 — per tracciabilità storica.
+- **Blocking dependency**: N/A.
+
+### HPP-018 — gaussian_factor swap branch vuoto (gaussian_factor.cpp:83)
+- **File**: `src/algebra/gaussian_factor.cpp:83` — `if (re * re + im * im != p) { /* empty */ }`
+- **Categoria CLAUDE.md**: Cat 4 — bail-out silenzioso su invariant matematico violato
+- **Descrizione**: La branch `if (norm != p)` aveva corpo vuoto — restituiva silenziosamente `GaussianInt(re, im)` con norma sbagliata. L'invariant di Hermite-Serret (Cohen GTM 138 §4.2.5) garantisce che l'algoritmo euclidico su Z[i] termini con norm(alpha) = p. La branch non può succedere correttamente; un'occorrenza indica un bug nell'algoritmo euclidico.
+- **Fix corretto (applicato 2026-05-25)**: Aggiunta `assert(re*re+im*im == p && "HPP-018 Hermite-Serret invariant")` per debug; tentativo di swap come recovery superficiale (non cambia norma); test esplicito `HermiteSerretNormInvariant` in `test_gaussian_factor.cpp` verifica a²+b²=p per 11 split primes.
+- **Blocking dependency**: Nessuno.
+
+### HPP-014c — Gauss period closed-form per q∈{17,257,65537} — APERTA PERMANENTE
+
+- **File**: `src/symbolic/simplify_trig.cpp` — `try_angle_combination` depth guard.
+- **Categoria CLAUDE.md**: Eccezione legittima 3 (default configurabile, documentato).
+- **Descrizione**: `kTrigCombinationMaxDepth=3` e `kBaseAngleMaxDenom=60` sono
+  costanti matematicamente fondate (denominatori strettamente decrescenti a ogni
+  livello di ricorsione). La forma closed-form di cos(2π/17) via Gauss period
+  (Disquisitiones §VII art. 354) è implementabile ma richiede:
+  - Algoritmo Gauss period per Fermat primes: sottogruppi G_0 ⊃ G_1 ⊃ ... ⊃ {1}
+    con periodi definiti come somme di radici primitive. 16 sottostep per q=17.
+  - Per q=257: φ(257)=256 → 128 periodi → forma impraticabile in un CAS interattivo.
+  - Per q=65537: φ(65537)=65536 → forma completamente impraticabile.
+- **Stato corrente (F1.4c)**: RootOf(Ψ_{2q}, _tcc, 0)/2 è la rappresentazione
+  canonica esatta. Nessun calcolo sbagliato. Nessun crash.
+- **Fix corretto (futuro)**: `simplify_trig_gauss_period.cpp` per q=17 closed-form.
+  Per q∈{257,65537}: RootOf è la rappresentazione finale corretta.
+- **Blocking dependency**: Aperta permanente — non blocca nessun task corrente.
+- **Test**: `ChebyshevTrigTest.CosPiOver17_StackGuard_RootOf` — PASS.
+
+### HPP-019 — Partial Lehmer GCD (single-limb surrogate, na≠nb break) — APERTA
+
+- **File**: `src/foundation/bigint_gcd_lehmer.cpp` — `lehmer_gcd()` function.
+- **Categoria CLAUDE.md**: Cat 1 (performance budget) + Cat 8 (algorithm more limited than claimed).
+- **Descrizione**: `lehmer_gcd` uses only top single 32-bit limb as surrogate, not the proper 2-limb 64-bit surrogate required by Knuth §4.5.2 Algorithm L. Also breaks immediately when limb counts differ (na≠nb), covering only a fraction of large-integer GCD calls. Functionally correct (falls through to Euclidean), but ~2-3× slower than full Lehmer for n>256 limbs.
+- **Fix corretto**: (1) 2-limb surrogate: `â = (a_high<<32 | a_low)` divided by `2^(bit_length-64)`; (2) handle na≠nb by computing `extra_shift = (na-nb)*32` and adjusting b's surrogate; (3) full Knuth L3 validity: check `(p+q*q̂) > 0` AND `(r+s*q̂) > 0` AND `(p+q*(q̂+1)) > 0` AND `(r+s*(q̂+1)) > 0`. Reference: Knuth TAOCP Vol 2 §4.5.2 Algorithm L, equations (20)-(22).
+- **Blocking dependency**: Requires careful testing vs gcd(a,b)*lcm=a*b on 1000+ limb inputs.
+
+### HPP-020 — kLehmerThreshold=16 not configurable — APERTA PERMANENTE
+
+- **File**: `src/foundation/bigint_gcd_lehmer.cpp:52` — `kLehmerThreshold = 16U`.
+- **Categoria CLAUDE.md**: Eccezione legittima #4 (limite hardware-safety, BigInt context-free).
+- **Descrizione**: BigInt arithmetic functions have no CASContext parameter, so `kLehmerThreshold` cannot be exposed as `ctx.gcd_lehmer_threshold()` without threading CASContext into low-level BigInt operations. The threshold 16 is derived from GMP manual §16 (break-even ~2-3 words). Functionally correct: below threshold, Stein binary GCD is used (slower but correct). This is a performance-only constant; no wrong result is possible.
+- **Fix corretto**: Thread CASContext into BigInt GCD path (major architectural change, deferred post-F1.1). Alternatively expose as compile-time tuning parameter with `static_assert` documentation.
+- **Blocking dependency**: BigInt context-free architecture.
+
+### HPP-021 — Pollard Rho max_iterations=4096 not configurable — APERTA
+
+- **File**: `src/numtheory/arithmetic_functions.cpp:139` — `constexpr std::size_t max_iterations = 4096U`.
+- **Categoria CLAUDE.md**: Cat 1 (budget computazionale non configurabile).
+- **Descrizione**: Pollard Rho inner loop limited to 4096 iterations per (seed, constant) pair. For semiprimes n=p*q with p~n^{1/4}, expected cycle length ~p^{1/2} > 4096 when p > 2^{24}. In practice the outer loop tries 64 (seed, constant) combinations, so total iterations = 64*4096 = 262144 before giving up. For n~10^{20}, p~10^{10}: expected ~3*10^5 steps → borderline. Not immediately exposed via CASContext because numtheory functions do not receive CASContext.
+- **Fix corretto**: (a) Thread CASContext into `pollards_rho_factor`; (b) expose `ctx.pollard_rho_max_iterations()` with default 4096; (c) document that timeout is per-combination, not global. Emits Unimplemented with diagnostic "Pollard Rho exhausted" when all combinations fail — already implemented (never silent).
+- **Blocking dependency**: numtheory API change (adds ctx parameter).
+
+### HPP-022 — limit.cpp try_log_log_limit depth>3U not configurable — APERTA
+
+- **File**: `src/calculus/limit.cpp:339` — `if (depth > 3U) return std::nullopt`.
+- **Categoria CLAUDE.md**: Cat 1 (budget computazionale non configurabile).
+- **Descrizione**: `try_log_log_limit` is a fast-path for `ln(a)/ln(b)` limits. Depth guard prevents infinite mutual recursion between limit rules. Depth 3 is an empirical constant with no mathematical derivation; correct bound is `max_nesting_depth(input_expr)`. Not currently configurable via `CASContext`. Consequence: limits like `lim_{x→∞} ln(ln(ln(x)))/ln(ln(x))` may fail to compute if depth exceeds 3. Returns `std::nullopt` (not wrong answer) — caller tries other rules.
+- **Fix corretto**: Expose `ctx.max_log_log_limit_depth()` (default 3); thread depth limit through the call chain. Alternatively compute nesting depth of log towers in input and use it as bound.
+- **Blocking dependency**: Nessuno — chirurgico.
+
+### HPP-023 — Burnikel-Ziegler divide-and-conquer not implemented — APERTA PERMANENTE
+
+- **File**: `src/foundation/bigint_div_knuth_d.cpp` (Knuth Algorithm D, correct, used for all sizes).
+- **Categoria CLAUDE.md**: performance gap (not correctness), Eccezione legittima.
+- **Descrizione**: Knuth Algorithm D is O(n²) for n-limb quotients. Burnikel-Ziegler (BZ, 1998) achieves O(M(n)·log n) where M(n) is multiplication cost. For n>1000 limbs (≈32000 bits), BZ is 2-10× faster. CAS Engine workloads rarely exceed 1000 limbs in BigInt division (polynomial coefficient GCD and factorization coefficients stay well below this), so Knuth D is adequate for current workloads. No wrong result is possible. PLAN_HP_PRIME_PARITY.md previously claimed "BZ implemented" — this is corrected to "Aperta permanente".
+- **Fix corretto**: Implement `bigint_div_burnikel_ziegler.cpp` — reference: C. Burnikel, J. Ziegler, "Fast Recursive Division", MPI Technical Report 1998, Algorithm 3. Requires recursive 2n÷n base case using the existing Knuth D as basecase for n<threshold. Dispatcher in `bigint_div_knuth_d.cpp` or new entry point.
+- **Blocking dependency**: Aperta permanente — F-perf milestone only.
+
+---
+
+### HPP-F1.1-MUL — kToom3MaxLimbs=4096 fallback a Karatsuba — APERTA PERMANENTE
+
+- **File**: `src/foundation/bigint_mul_toom3.cpp:55` — `kToom3MaxLimbs = 4096U`.
+- **Categoria CLAUDE.md**: Categoria 1 (budget computazionale non configurabile) + Eccezione legittima 3.
+- **Descrizione**: Per n ≥ 4096 limbs (≈131072 bit, ≈39500 decimal digits), Toom-3
+  cade su Karatsuba. Schönhage-Strassen FFT (O(n log n log log n)) sarebbe superiore
+  ma richiede NTT ring (Z/pZ per p primo NTT-friendly), radici dell'unità modulari,
+  e pipeline cooley-tukey completa — ~2-4 settimane di implementazione.
+  La soglia 4096 è motivata dal workload pratico del CAS (polinomi simbolici raramente
+  superano 10000 bit nei coefficienti BigInt).
+- **Stato corrente (F1.1)**: Karatsuba fallback corretto ma subottimale per n≥4096.
+  21/21 test `BigIntProductionTest` passano incluso `MultiplyDivideInverse_Toom3` con
+  input a 67 limbs (640 cifre decimali).
+- **Fix corretto (futuro)**: `bigint_mul_fft.cpp` — Schönhage-Strassen NTT con primo
+  NTT-friendly p=2^23·119+1 (Chung-Hasan 2007) o GMP-style Harvey-Hoeven (2019).
+- **Blocking dependency**: Aperta permanente — non blocca nessun task corrente.
+- **Test di regressione**: `BigIntProductionTest.MultiplyDivideInverse_Toom3`.
+
+---
+
 ### KNOWN-DEBT-001 — `-Werror` disabilitato (CMakeLists.txt:21) — RISOLTO 2026-05-20
 - **Stato pre-fix**: ~9 warning preesistenti impedivano build con `-Werror`.
 - **Fix applicato**:
@@ -87,6 +462,65 @@ Ogni DISABLED / GTEST_SKIP ora cita esplicitamente il task aperto in
 ---
 
 ## Storico (risolti)
+
+### HPP-025 — kHalfGcdRecursionLimit = 100 (polynomial_half_gcd.cpp) — RISOLTO 2026-05-27 (F2 Block A, R2)
+- **File originale**: `src/algebra/polynomial_half_gcd.cpp:95` — `constexpr int kHalfGcdRecursionLimit = 100`.
+- **Categoria CLAUDE.md**: Cat 1 — budget computazionale non configurabile.
+- **Fix applicato (R2 remediation)**:
+  - `kHalfGcdRecursionLimit` eliminata completamente.
+  - Profondità ricorsione HGCD: `max_depth = ⌊log₂(deg(a))⌋ + 2`, derivata dall'invariant
+    di dimezzamento del grado ad ogni livello (von zur Gathen & Gerhard §11.1).
+  - Iterazioni esterne GCD: `max_outer_iters = deg(a) + 2`, derivata dall'invariant Euclideo
+    (ogni passo riduce il grado di ≥1, quindi al più deg(a)+1 passi).
+  - Entrambi i bound sono provabili matematicamente e non dipendono da costanti arbitrarie.
+  - Documentazione degli invariant nel codice con riferimenti formali.
+  - Certificatore CERT1-CERT5 aggiunto in `test/unit/algebra/test_half_gcd.cpp`
+    per gradi 200-400 (regime di dispatch reale): 5/5 PASS.
+
+### HPP-024 — kBerlekampMaxMatrixEntries = 1024 (factorization_berlekamp.cpp) — RISOLTO 2026-05-27 (F2 Block A, fix HPP-024)
+- **File originale**: `src/algebra/factorization_berlekamp.cpp` (budget guard in `berlekamp_factor_mod_p`).
+- **Categoria CLAUDE.md**: Cat 1 — budget computazionale non configurabile.
+- **Fix applicato**: `constexpr kBerlekampMaxMatrixEntries` rimossa. Il limite è ora il
+  parametro `std::size_t max_matrix_size = 1024U` di `berlekamp_factor_mod_p`.
+  `CASContext` espone `max_berlekamp_matrix_size_` (default 1024) con
+  `set_max_berlekamp_matrix_size(n)` e `max_berlekamp_matrix_size()`.
+  Callers con contesto passano `ctx.max_berlekamp_matrix_size()`; callers senza contesto
+  (test) usano il default e non devono cambiare firma.  Dichiarazione aggiornata in
+  `polynomial_internal.hpp`.  Commenti header e funzione corretti per rispecchiare
+  il codice reale (rimosso riferimento falso a `ctx.max_berlekamp_matrix_size()` che
+  non esisteva).  Diagnostico Unimplemented aggiornato con il valore limite effettivo e
+  suggerimento `set_max_berlekamp_matrix_size`.
+
+### HPP-001 — Hensel linear lifting — RISOLTO 2026-05-27 (F2 Block A, A2)
+- **File originale**: `src/algebra/polynomial_hensel.cpp:165`
+- **Categoria CLAUDE.md**: Cat 8 — algoritmo semplice invece del corretto.
+- **Fix applicato (F2 Block A, A2)**: Quadratic Hensel lifting via GCL §6.3 Lemma 6.1.
+  Modulo quadrato ad ogni passo (m → m²). Bézout over Z/mZ per prime-power modulus.
+  Convergenza O(log log B). Test 12/12 pass. File: `polynomial_hensel.cpp` (~464 LOC).
+
+### HPP-014 — simplify_trig kBaseAngles set chiuso — RISOLTO 2026-05-25 (F1.4)
+- **File originale**: `src/symbolic/simplify_trig.cpp` (riga 279, verificata 2026-05-24).
+- **Pattern rimosso**: `std::pair<int,int> kBaseAngles[] = { ... }` — array fisso ~15 angoli.
+- **Fix applicato (F1.4)**: `kBaseAngles` sostituito con generatore algoritmico:
+  - `try_angle_combination` (L2-10): itera tutti gli angoli costruibili `p1/q1 ≤ kBaseAngleMaxDenom`
+    (default 60) e applica la formula di sottrazione. Genera infiniti angoli senza tabella fissa.
+  - `cos_ref_value` / `sin_ref_value`: per angoli non raggiungibili via semisottrazione,
+    cade su `build_rootof_cos_pi_q(q, arena)` che emette `RootOf(Ψ_{2q}(t), t, 0) / 2`
+    (minimo polinomio di 2cos(π/q) via ciclotomico Φ_{2q}) per `q ≤ kCosPolyMaxQ=500`.
+  - Angoli costruibili (Gauss, Disquisitiones §VII): `q = 2^a · ∏ primi di Fermat{3,5,17,257,65537}`.
+    Per questi, la semiretta half-angle + sottrazione produce la forma radicalica.
+    Per angoli non costruibili: `RootOf(Ψ_{2q})` è la forma canonica.
+- **F1.4c chiuso 2026-05-25**: depth guard aggiunto in `simplify_trig.cpp` via
+  `TrigCombinationDepthGuard` (thread-local RAII, `kTrigCombinationMaxDepth=3`).
+  Stack overflow eliminato. Test riabilitati:
+  `CosPiOver17_StackGuard_RootOf`, `CosTwoPiOverSeven_StackGuard_RootOf`,
+  `CosPiOverSeven_StackGuard_RootOf` — tutti PASS.
+- **Aperta permanente HPP-014c**: Gauss period closed-form per q∈{17,257,65537}.
+  cos(2π/17) forma chiusa: 16cos(2π/17) = -1+√17+√(34-2√17)+2√(17+3√17-...).
+  Per q=257,65537 il grado del campo è 128/32768 — forma chiusa impraticabile.
+  Rappresentazione canonica corrente: RootOf(Ψ_{2q}, _tcc, 0)/2.
+  Non blocker: RootOf è la forma esatta; nessun calcolo errato.
+- **File modificati**: `simplify_trig.cpp` (≤500 ✓), `test_chebyshev_trig.cpp`.
 
 ### HC-001 — Bridge depth limit — RISOLTO 2026-05-16
 - Fix: `ctx.max_q_alpha_bridge_depth()` esposto in `CASContext`
@@ -297,15 +731,37 @@ tutti gli input; questi sono upgrade prestazionali per casi specifici.
 - Effort stimato: ~12h (partition helper + block dispatch).
 
 ### FE-002 — van Hoeij knapsack lattice (van Hoeij 2002 Thm 4.2)
-- Stato: subset enumeration ora con Mignotte pruning (HC-015 chiuso
-  2026-05-19). Pathological Swinnerton-Dyer r≥25 resta esponenziale.
-- Trace-polynomial lattice via LLL replacerebbe enumeration con
-  ricerca polinomiale O(r⁴·N·log p^a). Infrastruttura LLL già presente
-  in `src/algebra/lattice_lll.cpp`; servono trace polys via Newton's
-  identities + lattice construction.
-- Effort stimato: ~14h. Tentativo BFS-by-size 2026-05-19 ha mostrato
-  regressione perf su input tipici (6s→28s) → richiede approccio
-  lattice puro, non solo riordino enumeration.
+- Stato: **CHIUSO 2026-05-27** (verificato con probe DIRETTO su `van_hoeij_knapsack_factor`).
+- STORIA: la chiusura precedente (B1-REAL) era FALSA. La logica del lattice in
+  `van_hoeij_factor.cpp` era corretta, ma `van_hoeij_knapsack_factor` ritornava
+  SEMPRE nullopt su input riducibili banali (deg6=(x²-2)(x²-3)(x²-5),
+  deg16=∏8-quadratiche). I test esistenti passavano via il fallback enumeration
+  in `factor_over_integers`, mascherando il bug. Nessun test chiamava la funzione
+  direttamente. Audit adversariale ha rilevato il fallimento.
+- ROOT CAUSE (NON nel lattice): `hensel_lift_multi` in
+  `src/algebra/polynomial_hensel.cpp` (base case `factors.size() == 1`).
+  Il caso base ritornava il fattore modulare ORIGINALE (corretto solo mod p),
+  NON il group-product `f` già liftato a mod p^k dal chiamante. Questo violava
+  l'invariante ∏ gᵢ ≡ f (mod p^k): i fattori liftati ricombinavano correttamente
+  solo mod p, quindi OGNI candidato (sia LLL sia enum) falliva la divisione esatta
+  su Z[x]. Il lift PAIRWISE (`hensel_lift`) era corretto; solo la ricorsione
+  multi-fattore tornava singoletti non-liftati.
+- FIX: `polynomial_hensel.cpp` base case ora ritorna `f` bilanciato mod p^k
+  (il lift del gruppo singoletto), non `factors[0]`.
+- VERIFICA (test DIRETTO, bypassa il fallback): `test/unit/algebra/test_van_hoeij.cpp`
+  - `VanHoeijDirect.LiftedFactorsProductEqualsF_ModPk` — invariante del lift (regression guard).
+  - `VanHoeijDirect.Deg6_TripleQuadratic_FindsRealFactor` — path LLL (lll_threshold=0) PASS.
+  - `VanHoeijDirect.Deg6_TripleQuadratic_EnumPath` — path enum PASS.
+  - `VanHoeijDirect.Deg16_EightQuadratics_FindsRealFactor` — path LLL, r=11, ~3.2s PASS.
+  - `VanHoeijStress.Deg24_TwelveQuadratics_AcceptanceGate` — F2.3 gate, r≥12, ~36s, PASS
+    (correto in tempo polinomiale; enumeration C(r,n/2) esploderebbe).
+- Lattice (invariato, ora ESERCITATO): `lll_knapsack_pass()` costruisce lattice
+  (r+t)×(r+t), `lll_reduction`, estrae vettori {0,1}; `enumerate_subsets()` fast-path
+  r ≤ lll_threshold (default 10). Newton sums additivi + Mignotte pruning.
+- Suite: 1803 PASS (baseline 1799 + 4 nuovi non-stress). File hensel 478 LOC, van_hoeij 497 LOC.
+- Residuo parziale (PERFORMANCE, non correttezza): il LLL interno usa Rational/BigInt
+  (corretto ma lento). deg24/r=12 → ~36s. Marcato `VanHoeijStress`, escluso dalla suite
+  default. Mitigazione futura: LLL floating-point + exact verification. NON silenzioso.
 
 ### FE-003 — `MAX_BIGINT_LIMBS=10000` — ACCETTATO permanentemente
 - CLAUDE.md REGOLA ZERO Eccezione 4: hardware OOM safety.
@@ -313,7 +769,46 @@ tutti gli input; questi sono upgrade prestazionali per casi specifici.
   wrong result).
 - Non rimuovere senza una vera streaming-arithmetic implementation.
 
+### ~~SPLIT-SYMBOLIC-HPP-F2.5~~ — CHIUSO
+
+- **Stato**: RISOLTO (closes SPLIT-SYMBOLIC-HPP-F2.5).
+- **Fix applicato**: Parametri algoritmici configurabili di `CASContext` (campi + getter
+  inline semplici) estratti in `include/cas/cas_context_params.hpp` (280 righe).
+  `CASContext` eredita da `CASContextParams`; nessun call-site modificato.
+  `symbolic.hpp`: 506 → 328 righe (≤ 500). Whitelist rimossa.
+- **Build**: verde 0 warning; suite `-*Stress*` = 1799 PASS.
+
 ---
+
+### HC-F36-GALOIS-DEG5-PRIME-BUDGET (aperto)
+
+- **Stato**: APERTO (introdotto da F3.6, deg-5 Galois identification).
+- **File**: `src/algebra/galois_deg5.cpp` (Frobenius/Dedekind path completo).
+- **Categoria CLAUDE.md**: Cat. 1 (budget) + Cat. 6 (parametri probabilistici)
+  — derivato matematicamente, NON arbitrario.
+- **Descrizione**: il path Soicher-McKay è realizzato come scan di cycle-type
+  di Frobenius su `ctx.max_galois_frobenius_primes()` primi (default 30).
+  Il default 30 è giustificato via Chebotarev: probabilità di mancare la
+  classe `(2,2,1)` su D5 in N samples è (1/2)^N → 30 ≈ 1e-9. Budget esaurito
+  senza evidenza conclusiva ⇒ `CASErrorKind::Unimplemented` esplicito (mai
+  silent wrong).
+- **Fix corretto**: implementare la resolvent sextic di Dummit (1991) per
+  decisione **deterministica** in tempo costante; coefficienti polinomiali in
+  p,q,r,s (identità simboliche legittime, non tabella magica).
+- **Blocking dependency**: nessuna; upgrade puro dal probabilistico-in-prassi
+  al deterministico.
+
+### HC-F36-GALOIS-DEG5-REDUCIBLE-COARSE (aperto)
+
+- **Stato**: APERTO (introdotto da F3.6).
+- **File**: `src/algebra/galois.cpp` blocco `total_deg == 5U` reducible.
+- **Categoria**: Cat. 4 (bail-out su forma).
+- **Descrizione**: per quintici riducibili restituisce label coarse
+  ("reducible" / "C2" / "trivial") senza ricostruire il gruppo del prodotto
+  fibrato (Gal(f) ⊆ ∏ Gal(f_i)).
+- **Fix corretto**: dispatcher ricorsivo che richiama `galois_group` sui
+  fattori e compone via direct-product check.
+- **Blocking dependency**: nessuna; refactor disponibile.
 
 ## Note operative
 

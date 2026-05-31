@@ -1,3 +1,11 @@
+// polynomial_gcd_modular.cpp — Dispatch layer for modular/probabilistic multivariate GCD.
+//
+// Entry points:
+//   gcd_modular(P, Q)       — Brown's evaluation/interpolation/CRT (F3.1).
+//   gcd_probabilistic(P, Q) — Las Vegas dispatch: GCDHEU → eval-interp → Brown's.
+//
+// The actual Brown algorithm lives in polynomial_gcd_brown.cpp.
+
 #include "cas/algebra.hpp"
 #include "cas/symbolic.hpp"
 #include "cas/numtheory.hpp"
@@ -10,54 +18,62 @@
 
 namespace cas::algebra {
 
-// Brown's Modular GCD Algorithm (Recursive version)
-// For simplicity in this turn, we provide a structured placeholder that handles
-// the fallback logic. A full implementation of recursive CRT + interpolation
-// would require several hundred lines of code.
-
-Result<MultivariatePolynomial> gcd_modular(const MultivariatePolynomial& P, const MultivariatePolynomial& Q) {
+// gcd_modular: Brown's modular GCD, F3.1.
+// Pipeline:
+//   1. Trivial cases (one operand zero, constants, univariate → handled by Brown's recursion).
+//   2. Try GCDHEU heuristic first (very fast for dense polynomials with small coefficients).
+//   3. If GCDHEU fails, use Brown's recursive evaluation/interpolation.
+//   4. If Brown's fails (unlucky points or budget), fall back to eval-interp (existing robust path).
+// Every error path returns an explicit Unimplemented — never a wrong result.
+Result<MultivariatePolynomial> gcd_modular(
+        const MultivariatePolynomial& P,
+        const MultivariatePolynomial& Q) {
     if (P.is_zero()) return ok(Q);
     if (Q.is_zero()) return ok(P);
+
+    // Build a minimal CASContext for budget parameters.
+    // Brown's needs ctx for gcd_error_probability() and budget knobs.
+    // We create a default context here; callers who want custom budgets
+    // should use gcd_brown() directly with their own ctx.
+    symbolic::CASContext ctx;
 
     auto vars = P.variables();
     if (vars.empty()) {
-        // P and Q are constants
-        BigInt g = gcd(P.terms()[0].coefficient, Q.terms()[0].coefficient);
+        // Both are constants.
+        BigInt g(0);
+        for (const auto& t : P.terms()) g = (g.is_zero()) ? t.coefficient.abs() : g;
+        for (const auto& t : Q.terms()) {
+            BigInt tmp = g; BigInt qt = t.coefficient.abs();
+            while (!qt.is_zero()) { BigInt r = tmp % qt; tmp = qt; qt = r; }
+            g = tmp;
+        }
         return ok(MultivariatePolynomial({{ .coefficient = g, .factors = {} }}));
     }
 
-    // If univariate, we can use the existing subresultant GCD for univariate polynomials
-    if (vars.size() == 1) {
-        // Convert to univariate, use subresultant, convert back.
-        // (already handled in polynomial_gcd_core for univariate ExprPtr)
-    }
+    // Step 1: Try GCDHEU heuristic (fast path).
+    auto heu = gcd_heuristic(P, Q);
+    if (heu.is_ok()) return heu;
 
-    // Brown's Algorithm high-level:
-    // 1. Choose a prime p
-    // 2. Map P, Q to Z_p[x1...xn]
-    // 3. Compute GCD in Z_p
-    // 4. Use CRT to lift to Z
-    
-    // For now, since GCDHEU is very powerful for most cases, we provide this as a 
-    // structured fallback. In a production CAS, this would be the main recursive logic.
-    
-    return fail<MultivariatePolynomial>(make_error(CASErrorKind::Unimplemented, "Brown's Modular GCD not fully implemented for multivariate case"));
+    // Step 2: Brown's recursive evaluation/interpolation.
+    auto brown = gcd_brown(P, Q, ctx);
+    if (brown.is_ok()) return brown;
+
+    // Step 3: Fall back to the eval-interp multivariate engine (robust certified path).
+    auto interp = gcd_multivariate_eval_interp(P, Q, ctx);
+    if (interp.is_ok()) return interp;
+
+    // All paths exhausted — report the Brown's failure (most informative).
+    return brown;
 }
 
-// CAS-L3-15 — Las Vegas probabilistic dispatch: tries GCDHEU heuristic
-// first (fast probabilistic) and falls back to deterministic subresultant
-// when heuristic fails. Confidence-based via ctx.gcd_error_probability().
-// Returns same result as deterministic path (Las Vegas: never wrong, may
-// retry). The actual probabilistic engine is GCDHEU + multivariate path
-// (already certified in L1-08/L1-19/L1-21).
+// gcd_probabilistic: Las Vegas dispatch.
+// Guaranteed correct when it returns ok(); may return Unimplemented.
 Result<MultivariatePolynomial> gcd_probabilistic(
-    const MultivariatePolynomial& P, const MultivariatePolynomial& Q) {
+        const MultivariatePolynomial& P,
+        const MultivariatePolynomial& Q) {
     if (P.is_zero()) return ok(Q);
     if (Q.is_zero()) return ok(P);
-    // Dispatch to existing GCD pipeline (heuristic + certified divisibility
-    // check). Las Vegas guarantee: the returned GCD is certified, no
-    // tolerance window.
     return gcd_modular(P, Q);
 }
 
-} // namespace cas::algebra
+}  // namespace cas::algebra

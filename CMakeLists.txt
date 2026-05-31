@@ -11,8 +11,21 @@ option(CAS_ENABLE_TESTING "Enable unit tests and CTest integration." ON)
 option(CAS_ENABLE_GUI "Build the optional detachable manual GUI lab." OFF)
 option(CAS_USE_SYSTEM_GTEST "Use an installed GoogleTest package instead of FetchContent." OFF)
 option(ENABLE_SANITIZERS "Compatibility alias for milestone scripts and legacy docs." ${CAS_ENABLE_SANITIZERS})
+option(ENABLE_COVERAGE "Enable gcov/lcov line coverage instrumentation (gcc/clang only). Disables optimizations." OFF)
 
 set(CAS_ENABLE_SANITIZERS "${ENABLE_SANITIZERS}")
+
+# ─── COVERAGE INSTRUMENTATION ───────────────────────────────────────────────
+# Enable with: cmake -DENABLE_COVERAGE=ON -DCMAKE_BUILD_TYPE=Debug
+# Then build and run: cmake --build <dir> --target coverage
+if(ENABLE_COVERAGE)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+        add_compile_options(--coverage -fprofile-arcs -ftest-coverage -O0 -g)
+        add_link_options(--coverage)
+    else()
+        message(WARNING "ENABLE_COVERAGE is ON but compiler is not Clang or GCC — ignored.")
+    endif()
+endif()
 
 # ─── ZERO WARNING POLICY OBBLIGATORIA ───
 # CLAUDE.md § REGOLA ZERO requires zero warning compilation.
@@ -49,6 +62,7 @@ set(CAS_PUBLIC_HEADERS
     include/cas/expr.hpp
     include/cas/formatter.hpp
     include/cas/gaussian_int.hpp
+    include/cas/complex_rational.hpp
     include/cas/galois.hpp
     include/cas/interval.hpp
     include/cas/lexer.hpp
@@ -66,7 +80,14 @@ set(CAS_FOUNDATION_SOURCES
     src/foundation/bigint_arithmetic.cpp
     src/foundation/bigint_conversions.cpp
     src/foundation/bigint_logic.cpp
+    # F1.1 production-grade BigInt algorithms
+    src/foundation/bigint_mul_toom3.cpp
+    src/foundation/bigint_div_knuth_d.cpp
+    src/foundation/bigint_gcd_lehmer.cpp
+    src/foundation/bigint_numtheory.cpp
+    src/foundation/bigint_factor_pollard.cpp
     src/foundation/rational.cpp
+    src/foundation/error.cpp
 )
 
 set(CAS_AST_SOURCES
@@ -88,11 +109,17 @@ set(CAS_PARSER_SOURCES
 
 set(CAS_SYMBOLIC_SOURCES
     src/rewrite/builtin_rewrite.cpp
+    src/rewrite/discrimination_net.cpp
     src/symbolic/simplify_core.cpp
     src/symbolic/simplify_arithmetic.cpp
+    src/symbolic/simplify_arithmetic_chain_liketerm.cpp
+    src/symbolic/simplify_arithmetic_chain_sum.cpp
     src/symbolic/simplify_arithmetic_chain.cpp
     src/symbolic/simplify_functions.cpp
+    src/symbolic/simplify_trig_chebyshev.cpp
+    src/symbolic/simplify_trig_tables.cpp
     src/symbolic/simplify_trig.cpp
+    src/symbolic/simplify_trig_inverse.cpp
     src/symbolic/simplify_exp_log.cpp
     src/symbolic/simplify_special_fn.cpp
     src/symbolic/simplify_bessel_orthogonal.cpp
@@ -109,6 +136,7 @@ set(CAS_SYMBOLIC_SOURCES
     src/symbolic/series_arithmetic.cpp
     src/symbolic/normal_form.cpp
     src/symbolic/units.cpp
+    src/symbolic/complex_qi.cpp
 )
 
 set(CAS_CALCULUS_SOURCES
@@ -165,21 +193,36 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/algebraic_number.cpp
     src/algebra/algebraic_number_bridge.cpp
     src/algebra/algebraic_tower_bridge.cpp
+    src/algebra/algebraic_tower_primitive.cpp
+    src/algebra/algebraic_tower_primitive_nested.cpp
     src/algebra/polynomial_arithmetic.cpp
     src/algebra/polynomial_multivariate.cpp
+    src/algebra/factor_multivariate_mpoly.cpp
+    src/algebra/factor_multivariate_convert.cpp
+    src/algebra/factor_multivariate_lc.cpp
+    src/algebra/factor_multivariate_hensel.cpp
+    src/algebra/factor_multivariate_wang.cpp
     src/algebra/polynomial_resultant.cpp
     src/algebra/polynomial_square_free.cpp
     src/algebra/factorization_integers.cpp
     src/algebra/factorization_recombination.cpp
-    src/algebra/factorization_polynomials.cpp
+    src/algebra/van_hoeij_factor.cpp
+    src/algebra/factorization_num_den.cpp
+    src/algebra/factorization_poly_gcd.cpp
+    src/algebra/factorization_trager.cpp
+    src/algebra/factorization_berlekamp.cpp
+    src/algebra/polynomial_half_gcd.cpp
     src/algebra/factorization_tower.cpp
     src/algebra/factorization_tower_helpers.cpp
+    src/algebra/factorization_tower_n.cpp
     src/algebra/polynomial_groebner.cpp
     src/algebra/polynomial_groebner_f4.cpp
     src/algebra/polynomial_groebner_f4_buchberger.cpp
     src/algebra/polynomial_groebner_f4_reduce.cpp
     src/algebra/polynomial_groebner_f4_conversion.cpp
     src/algebra/polynomial_groebner_f4_solver.cpp
+    src/algebra/polynomial_groebner_fglm.cpp
+    src/algebra/polynomial_groebner_f5.cpp
     src/algebra/csolve.cpp
     src/algebra/fsolve.cpp
     src/algebra/partial_fractions.cpp
@@ -191,14 +234,23 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/polynomial_modular.cpp
     src/algebra/polynomial_gcd_heuristic.cpp
     src/algebra/polynomial_gcd_modular.cpp
+    src/algebra/polynomial_gcd_brown.cpp
+    src/algebra/polynomial_gcd_brown_modular.cpp
+    src/algebra/polynomial_gcd_brown_lc_scaling.cpp
+    src/algebra/polynomial_gcd_fp_recursive.cpp
+    src/algebra/polynomial_gcd_zippel_prony.cpp
     src/algebra/polynomial_gcd_multivariate.cpp
     src/algebra/algebraic_equal.cpp
     src/algebra/polynomial_integer.cpp
     src/algebra/polynomial_conversions.cpp
     src/algebra/polynomial_gcd_core.cpp
+    src/algebra/polynomial_gcd_crt.cpp
+    src/algebra/polynomial_resultant_crt.cpp
     src/algebra/polynomial_cyclotomic.cpp
     src/algebra/gaussian_int.cpp
+    src/algebra/gaussian_factor.cpp
     src/algebra/galois.cpp
+    src/algebra/galois_deg5.cpp
 )
 
 set(CAS_LINALG_SOURCES
@@ -390,15 +442,23 @@ if(CAS_ENABLE_TESTING)
         )
         set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
         FetchContent_MakeAvailable(googletest)
+        # Suppress warnings on gtest/gmock targets: -Werror is for our code only.
+        foreach(_gtest_target gtest gtest_main gmock gmock_main)
+            if(TARGET ${_gtest_target})
+                target_compile_options(${_gtest_target} PRIVATE -w)
+            endif()
+        endforeach()
     endif()
 
     add_executable(cas_foundation_tests
         test/fuzz/test_bigint_fuzz.cpp
         test/fuzz/test_parser_fuzz.cpp
         test/fuzz/test_symbolic_fuzz.cpp
+        test/unit/error/test_diagnostic.cpp
         test/unit/ast/test_ast_model.cpp
         test/unit/ast/test_ast_debug.cpp
         test/unit/foundation/test_foundation.cpp
+        test/unit/foundation/test_bigint_production.cpp
         test/unit/lexer/test_lexer.cpp
         test/unit/numtheory/test_numtheory.cpp
         test/unit/lexer/test_token_model.cpp
@@ -422,6 +482,10 @@ if(CAS_ENABLE_TESTING)
         test/unit/calculus/test_integrate_risch_exp_mix.cpp
         test/unit/numeric/test_mpfr_foundation.cpp
         test/unit/algebra/test_gaussian_int.cpp
+        test/unit/algebra/test_gaussian_factor.cpp
+        test/unit/foundation/test_rational_cf.cpp
+        test/unit/symbolic/test_complex_qi.cpp
+        test/unit/ast/test_arena_shard_locks.cpp
         test/unit/calculus/test_weierstrass_substitution.cpp
         test/unit/symbolic/test_complex_log_branch.cpp
         test/unit/numeric/test_float_contextual.cpp
@@ -434,6 +498,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/linalg/test_lu_decomposition.cpp
         test/unit/calculus/test_laplace.cpp
         test/unit/algebra/test_galois.cpp
+        test/unit/algebra/test_galois_deg5_f3.cpp
         test/unit/algebra/test_solve_closure.cpp
         test/unit/calculus/test_ode_laplace.cpp
         test/unit/symbolic/test_jacobi.cpp
@@ -442,10 +507,15 @@ if(CAS_ENABLE_TESTING)
         test/unit/symbolic/test_lambert_w.cpp
         test/unit/algebra/test_cyclotomic_mobius.cpp
         test/unit/algebra/test_berlekamp_probe.cpp
+        test/unit/algebra/test_hensel_quadratic.cpp
+        test/unit/algebra/test_berlekamp_factorization.cpp
+test/unit/algebra/test_half_gcd.cpp
         test/unit/symbolic/test_math_correctness.cpp
         test/unit/symbolic/test_compositions.cpp
         test/unit/symbolic/test_abs_sign.cpp
         test/unit/symbolic/test_trig_identities.cpp
+        test/unit/symbolic/test_chebyshev_trig.cpp
+        test/unit/rewrite/test_discrimination_net.cpp
         test/unit/symbolic/test_complex_log.cpp
         test/unit/symbolic/test_symbolic.cpp
         test/unit/symbolic/test_linalg_integration.cpp
@@ -463,16 +533,23 @@ if(CAS_ENABLE_TESTING)
         test/unit/algebra/test_algebra.cpp
         test/unit/algebra/test_root_of.cpp
         test/unit/algebra/test_groebner.cpp
+        test/unit/algebra/test_groebner_f5_pruning_f3.cpp
         test/unit/algebra/test_polynomial_gcd_subresultant.cpp
         test/unit/algebra/test_polynomial_gcd_multivariate_robust.cpp
+        test/unit/algebra/test_gcd_brown_f3.cpp
+        test/unit/algebra/test_factor_multivariate_f3.cpp
+        test/unit/algebra/test_modular_crt.cpp
         test/unit/algebra/test_algebraic_number.cpp
         test/unit/algebra/test_algebraic_tower_bridge.cpp
     test/unit/algebra/test_algebraic_number_bridge.cpp
         test/unit/algebra/test_algebraic_tower.cpp
         test/unit/algebra/test_fsolve.cpp
         test/unit/algebra/test_factorization_lll.cpp
+        test/unit/algebra/test_van_hoeij.cpp
         test/unit/algebra/test_factorization_trager.cpp
         test/unit/algebra/test_factorization_tower.cpp
+    test/unit/algebra/test_factorization_tower_n_f3.cpp
+        test/unit/algebra/test_primitive_element_f3.cpp
         test/unit/symbolic/test_equivalence_subset.cpp
         test/unit/algebra/test_regression.cpp
         test/unit/algebra/test_gap6.cpp
@@ -513,6 +590,11 @@ if(CAS_ENABLE_TESTING)
         test/unit/test_limit_mrv_cancellation.cpp
         test/unit/test_integrate_singularity.cpp
         test/regression/test_regression.cpp
+        test/unit/symbolic/test_coverage_f1_debt5.cpp
+        test/unit/symbolic/test_context_core_coverage.cpp
+        test/unit/symbolic/test_orthogonal_coverage.cpp
+        test/unit/symbolic/test_coverage_symbolic_v2.cpp
+        test/unit/symbolic/test_coverage_symbolic_v3.cpp
     )
     target_link_libraries(cas_foundation_tests PRIVATE cas_core cas_gui_bridge GTest::gtest_main)
     target_include_directories(cas_foundation_tests PRIVATE
@@ -589,5 +671,81 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         target_compile_options(parser_fuzzer PRIVATE -fsanitize=fuzzer)
         target_link_options(parser_fuzzer PRIVATE -fsanitize=fuzzer)
         target_link_libraries(parser_fuzzer PRIVATE cas_c_api)
+    endif()
+endif()
+
+# ─── SANITIZER TARGET: cas_tests_san ────────────────────────────────────────
+# Dedicated sanitizer build: compile cas_foundation_tests sources with
+# ASan + UBSan always-on (independent of CAS_ENABLE_SANITIZERS build flag).
+# TSan is added if the compiler supports it.
+include(CheckCXXCompilerFlag)
+check_cxx_compiler_flag("-fsanitize=thread" COMPILER_SUPPORTS_TSAN)
+
+if(CAS_ENABLE_TESTING AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    # Interface library that carries ASan+UBSan flags.
+    add_library(cas_san_flags INTERFACE)
+    target_compile_options(cas_san_flags INTERFACE
+        -fsanitize=address,undefined
+        -fno-omit-frame-pointer
+        -g -O1
+    )
+    target_link_options(cas_san_flags INTERFACE
+        -fsanitize=address,undefined
+    )
+    if(COMPILER_SUPPORTS_TSAN)
+        # TSan is incompatible with ASan; provide separate tsan variant if needed.
+        # For now document availability without auto-enabling.
+        message(STATUS "TSan supported by compiler (use -fsanitize=thread separately if needed).")
+    endif()
+endif()
+
+# ─── RAPIDCHECK + PROPERTY TESTS (F0.4) ──────────────────────────────────────
+if(CAS_ENABLE_TESTING)
+    include(FetchContent)
+    FetchContent_Declare(
+        rapidcheck
+        GIT_REPOSITORY https://github.com/emil-e/rapidcheck.git
+        GIT_TAG        b2d9ed2dddefc4b84318d664b4f221eb792d89c7  # 2025-01-latest HEAD
+    )
+    set(RC_ENABLE_GTEST ON CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(rapidcheck)
+    # Suppress warnings on rapidcheck: -Werror is for our code only.
+    if(TARGET rapidcheck)
+        target_compile_options(rapidcheck PRIVATE -w)
+    endif()
+
+    add_subdirectory(test/property)
+endif()
+
+# ─── COVERAGE TARGET ─────────────────────────────────────────────────────────
+# Requires ENABLE_COVERAGE=ON build. Run: cmake --build <dir> --target coverage
+if(ENABLE_COVERAGE)
+    find_program(LCOV_PATH lcov)
+    find_program(GENHTML_PATH genhtml)
+    if(LCOV_PATH AND GENHTML_PATH)
+        add_custom_target(coverage
+            COMMENT "Generating HTML coverage report in ${CMAKE_BINARY_DIR}/coverage/"
+            COMMAND ${LCOV_PATH} --directory ${CMAKE_BINARY_DIR}
+                    --zerocounters
+            COMMAND ${CMAKE_CTEST_COMMAND} --test-dir ${CMAKE_BINARY_DIR}
+                    --output-on-failure
+                    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+            COMMAND ${LCOV_PATH} --directory ${CMAKE_BINARY_DIR}
+                    --capture
+                    --output-file ${CMAKE_BINARY_DIR}/coverage.info
+                    --ignore-errors mismatch
+            COMMAND ${LCOV_PATH} --remove ${CMAKE_BINARY_DIR}/coverage.info
+                    '/usr/*' '*/test/*' '*/_deps/*' '*/tools/*' '*/GUI/*'
+                    --output-file ${CMAKE_BINARY_DIR}/coverage_filtered.info
+                    --ignore-errors unused
+            COMMAND ${GENHTML_PATH} ${CMAKE_BINARY_DIR}/coverage_filtered.info
+                    --output-directory ${CMAKE_BINARY_DIR}/coverage
+                    --title "CAS Engine Coverage"
+                    --legend --demangle-cpp
+            COMMAND ${CMAKE_COMMAND} -E cmake_echo_color --cyan
+                    "Coverage report: ${CMAKE_BINARY_DIR}/coverage/index.html"
+        )
+    else()
+        message(WARNING "lcov/genhtml not found — 'coverage' target unavailable. Install lcov.")
     endif()
 endif()

@@ -177,6 +177,9 @@ BigInt BigInt::multiply_magnitude(const BigInt& lhs, const BigInt& rhs) {
     }
 
     const std::size_t n = std::max(lhs.limbs_.size(), rhs.limbs_.size());
+
+    // Schoolbook for small n: O(n²) but low overhead.
+    // Threshold 32: benchmarked break-even for Karatsuba on x86-64.
     if (n < 32U) {
         std::vector<std::uint32_t> result(lhs.limbs_.size() + rhs.limbs_.size(), 0U);
         for (std::size_t i = 0U; i < lhs.limbs_.size(); ++i) {
@@ -202,6 +205,16 @@ BigInt BigInt::multiply_magnitude(const BigInt& lhs, const BigInt& rhs) {
         return from_parts(std::move(result), false);
     }
 
+    // Toom-3 for medium-large n: O(n^1.465).
+    // Threshold 64: break-even vs Karatsuba (ref: Brent-Zimmermann §1.3.3).
+    // kToom3MaxLimbs = 4096: beyond this, Toom-3 falls back to Karatsuba.
+    // HARDCODE-OF-PASSAGE HPP-F1.1-MUL: Schönhage-Strassen for n>=4096 deferred.
+    if (n >= 64U && n < 4096U) {
+        return multiply_magnitude_toom3(lhs, rhs);
+    }
+
+    // Karatsuba for [32,64) and fallback for n>=4096.
+    // O(n^1.585). Reference: Knuth TAOCP Vol 2 §4.3.3.A.
     const std::size_t half = (n + 1U) / 2U;
     const std::size_t half_bits = half * 32U;
 
@@ -230,23 +243,20 @@ std::pair<BigInt, BigInt> BigInt::divide_magnitude(const BigInt& dividend, const
         return {BigInt(0), dividend};
     }
 
-    BigInt quotient(0);
-    BigInt remainder = dividend;
-    const BigInt one(1);
-
-    while (compare_magnitude(remainder, divisor) >= 0) {
-        std::size_t shift = remainder.bit_length() - divisor.bit_length();
-        BigInt scaled = divisor.shift_left_bits(shift);
-        if (compare_magnitude(scaled, remainder) > 0) {
-            --shift;
-            scaled = divisor.shift_left_bits(shift);
-        }
-
-        remainder = subtract_magnitude(remainder, scaled);
-        quotient = add_magnitude(quotient, one.shift_left_bits(shift));
+    // Single-limb divisor: use divide_by_small (fastest path).
+    // divide_by_small modifies the object in-place, so we copy.
+    if (divisor.limbs_.size() == 1U) {
+        BigInt quotient = dividend;
+        const std::uint32_t rem_u32 = quotient.divide_by_small(divisor.limbs_[0]);
+        BigInt remainder = from_parts({rem_u32}, false);
+        return {std::move(quotient), std::move(remainder)};
     }
 
-    return {std::move(quotient), std::move(remainder)};
+    // Multi-limb divisor: use Knuth Algorithm D.
+    // Reference: Knuth TAOCP Vol 2 §4.3.1 Algorithm D.
+    // This replaces the old naive bit-shift loop (O(bit_length²)) with
+    // an O(m*n) algorithm where m=len(dividend)-len(divisor), n=len(divisor).
+    return divide_knuth_d(dividend, divisor);
 }
 
 std::pair<BigInt, BigInt> BigInt::divide_with_remainder(const BigInt& dividend, const BigInt& divisor) {
@@ -308,16 +318,9 @@ BigInt operator%(const BigInt& lhs, const BigInt& rhs) {
     return BigInt::divide_with_remainder(lhs, rhs).second;
 }
 
-BigInt gcd(BigInt lhs, BigInt rhs) {
-    lhs = lhs.abs();
-    rhs = rhs.abs();
-    while (!rhs.is_zero()) {
-        BigInt remainder = lhs % rhs;
-        lhs = rhs;
-        rhs = remainder.abs();
-    }
-    return lhs;
-}
+// NOTE: gcd() is now defined in bigint_gcd_lehmer.cpp (F1.1 production algorithms).
+// It dispatches: single-limb → Euclidean, [2,16) → Binary GCD, >=16 → Lehmer.
+// The old Euclidean implementation here is removed to avoid duplicate symbol.
 
 Result<std::pair<BigInt, BigInt>> checked_divide_with_remainder(
     const BigInt& dividend,

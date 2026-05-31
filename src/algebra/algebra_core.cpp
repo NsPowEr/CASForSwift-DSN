@@ -1,5 +1,6 @@
 #include "cas/algebra.hpp"
 #include "cas/symbolic.hpp"
+#include "cas/error_helpers.hpp"
 #include "algebra_internal.hpp"
 #include <algorithm>
 #include <chrono>
@@ -308,7 +309,13 @@ Result<MultivariatePolynomial> MultivariatePolynomial::evaluate_at(const Symbol&
     // Se value non è un intero, per ora falliamo come da specifiche attuali del test (integers only)
     const auto* integer_val = expr_cast<IntegerLit>(value);
     if (!integer_val) {
-        return fail<MultivariatePolynomial>(make_error(CASErrorKind::Unimplemented, "Valutazione multivariata supporta solo interi per ora"));
+        // F0.8-MIGRATED
+        return make_unimplemented<MultivariatePolynomial>(
+            "algebra", "MultivariatePolynomial::evaluate_at",
+            "non-IntegerLit value",
+            cas::error::reason_codes::ALGEBRA_MULTIVAR_NON_INTEGER,
+            "Extend evaluate_at to accept RationalLit and RootOf values",
+            "F0.8");
     }
 
     for (const auto& term : terms_) {
@@ -346,8 +353,13 @@ Result<ExprPtr> MultivariatePolynomial::evaluate_at_rational(
             if (factor.first.name != var.name) { has_other_vars = true; break; }
         }
         if (has_other_vars) {
-            return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
-                "evaluate_at_rational: remaining symbolic variables not yet supported"));
+            // F0.8-MIGRATED
+            return make_unimplemented<ExprPtr>(
+                "algebra", "MultivariatePolynomial::evaluate_at_rational",
+                "term with remaining free variables after substitution",
+                cas::error::reason_codes::ALGEBRA_MULTIVAR_REMAINING_VARS,
+                "Add recursive substitution for all free variables before calling evaluate_at_rational",
+                "F0.8");
         }
         unsigned int exponent = 0;
         for (const auto& factor : term.factors) {

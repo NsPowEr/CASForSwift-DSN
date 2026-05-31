@@ -1,0 +1,81 @@
+{"input": "gcd(x^2 - 1, x - 1)", "area": "gcd", "ref": "poly_gcd_linear"}
+{"input": "gcd(x^2 - 4, x^2 - x - 2)", "area": "gcd", "ref": "poly_gcd_quad"}
+{"input": "gcd(x^3 - 1, x^2 - 1)", "area": "gcd", "ref": "poly_gcd_cubic"}
+{"input": "gcd(x^2 + 2*x + 1, x + 1)", "area": "gcd", "ref": "poly_gcd_perfect_sq"}
+{"input": "gcd(x^2, x)", "area": "gcd", "ref": "poly_gcd_power"}
+{"input": "gcd(6*x^2, 9*x)", "area": "gcd", "ref": "poly_gcd_coeff"}
+{"input": "gcd(x^4 - 1, x^2 - 1)", "area": "gcd", "ref": "poly_gcd_x4"}
+{"input": "gcd(x^3 + x^2, x^2 + x)", "area": "gcd", "ref": "poly_gcd_x2_x"}
+{"input": "gcd(x^2 - 3*x + 2, x^2 - 1)", "area": "gcd", "ref": "poly_gcd_coprime_factor"}
+{"input": "gcd(2*x^3 - 2*x, 4*x^2 - 4)", "area": "gcd", "ref": "poly_gcd_with_coeffs"}
+{"input": "gcd(x^5 - x^4, x^4 - x^3)", "area": "gcd", "ref": "poly_gcd_high_degree"}
+{"input": "gcd(x*y - x, x*y - y)", "area": "gcd", "ref": "multivar_gcd_xy"}
+{"input": "gcd(x^2*y, x*y^2)", "area": "gcd", "ref": "multivar_gcd_powers"}
+{"input": "gcd(x^2 - y^2, x - y)", "area": "gcd", "ref": "multivar_diff_sq"}
+{"input": "gcd(x^3 - x, x^2 - 1)", "area": "gcd", "ref": "cubic_vs_quad"}
+{"input": "gcd(x^2 + x, x^2 - x)", "area": "gcd", "ref": "sum_diff_x"}
+{"input": "gcd(x^6 - 1, x^3 - 1)", "area": "gcd", "ref": "sixth_third"}
+{"input": "gcd(x^4 - x^2, x^3 - x)", "area": "gcd", "ref": "fourth_vs_cubic"}
+{"input": "gcd(x^2 + 2*x + 1, x^2 - 1)", "area": "gcd", "ref": "perfect_vs_diff"}
+{"input": "gcd(3*x^3 - 3*x, 6*x^2 - 6)", "area": "gcd", "ref": "coeff_factor_cubic"}
+{"input": "gcd(x^2 - 9, x + 3)", "area": "gcd", "ref": "diff_sq_9_linear"}
+{"input": "gcd(x^2 - 25, x - 5)", "area": "gcd", "ref": "diff_sq_25_linear"}
+{"input": "gcd(x^3 + x^2, x^2 + 2*x + 1)", "area": "gcd", "ref": "cubic_perfect_sq"}
+{"input": "gcd(x^2 + 2*x, x^2 - 4)", "area": "gcd", "ref": "common_x_plus_2"}
+{"input": "gcd(x^3 - x, x^2 + x)", "area": "gcd", "ref": "cubic_vs_quad_x"}
+{"input": "gcd(2*x^2 - 2, 4*x - 4)", "area": "gcd", "ref": "common_2_x_minus_1"}
+{"input": "gcd(x^2 - 4*x + 4, x - 2)", "area": "gcd", "ref": "perfect_sq_vs_linear"}
+{"input": "gcd(x^3 + 1, x + 1)", "area": "gcd", "ref": "sum_cubes_vs_linear"}
+{"input": "gcd(x^3 - 1, x - 1)", "area": "gcd", "ref": "diff_cubes_vs_linear"}
+{"input": "gcd(x^4 + x^3 + x^2 + x + 1, x^5 - 1)", "area": "gcd", "ref": "cyclotomic_5th"}
+{"input": "gcd(x^2 + 1, x^2 - 1)", "area": "gcd", "ref": "coprime_sum_diff"}
+{"input": "gcd(x^2 + x + 1, x - 1)", "area": "gcd", "ref": "coprime_irreducible"}
+{"input": "gcd(x^3 + x, x^2 + 1)", "area": "gcd", "ref": "gcd_x_times_irred"}
+{"input": "gcd(5*x^2 - 5, 10*x - 10)", "area": "gcd", "ref": "coeff_5_x_minus_1"}
+{"input": "gcd(x^2*y^2 - x^2, x*y - x)", "area": "gcd", "ref": "multivar_x_factor"}
+{"input": "gcd(x^3*y - x*y^3, x^2*y - x*y^2)", "area": "gcd", "ref": "multivar_xy_common"}
+{"input": "gcd(x^2 - y^2, x^2 + 2*x*y + y^2)", "area": "gcd", "ref": "multivar_diff_plus_sq"}
+{"input": "gcd(a*x^2 - a, a*x + a)", "area": "gcd", "ref": "param_a_factor"}
+{"input": "gcd(x^5 - 1, x^4 + x^3 + x^2 + x + 1)", "area": "gcd", "ref": "fifth_unity_cyclotomic"}
+{"input": "gcd(x^2 - 5*x + 6, x^2 - 4)", "area": "gcd", "ref": "shared_x_minus_2"}
+{"input": "gcd(x^3 - x^2 - x + 1, x^2 - 2*x + 1)", "area": "gcd", "ref": "shared_x_minus_1_sq"}
+{"input": "gcd(x^4 - 1, x^3 + x^2 - x - 1)", "area": "gcd", "ref": "fourth_vs_cubic_x_minus_1"}
+{"input": "gcd(12*x^3, 8*x^2)", "area": "gcd", "ref": "int_coeff_gcd_4x2"}
+{"input": "gcd(15*x^4, 10*x^3)", "area": "gcd", "ref": "int_coeff_gcd_5x3"}
+{"input": "gcd(x^2 + 3*x + 2, x^2 + 4*x + 4)", "area": "gcd", "ref": "shared_x_plus_2"}
+{"input": "gcd(x^2 - 7*x + 12, x^2 - 5*x + 6)", "area": "gcd", "ref": "shared_x_minus_3"}
+{"input": "gcd(x^3 + 2*x^2 + x, x^2 + 2*x + 1)", "area": "gcd", "ref": "x_times_perf_sq"}
+{"input": "gcd(x^2 - 4, x^2 + 4*x + 4)", "area": "gcd", "ref": "shared_x_plus_2_b"}
+{"input": "gcd(x^3 - 8, x^2 - 4)", "area": "gcd", "ref": "diff_cubes_8_diff_sq_4"}
+{"input": "gcd(x^4 + 2*x^3 + x^2, x^3 + 2*x^2 + x)", "area": "gcd", "ref": "x_perf_sq_cubic"}
+{"input": "gcd(x, x^2 + x)", "area": "gcd", "ref": "linear_vs_x2_plus_x"}
+{"input": "gcd(x + 1, x^2 + x)", "area": "gcd", "ref": "linear_vs_x_times_linear"}
+{"input": "gcd(x^2 - 1, x^3 - x^2 - x + 1)", "area": "gcd", "ref": "sq_minus_1_vs_cubic"}
+{"input": "gcd(x^3 - x, x^4 - x^2)", "area": "gcd", "ref": "cubic_vs_quartic_x3_x"}
+{"input": "gcd(x^2 + 5*x + 6, x^2 + 6*x + 9)", "area": "gcd", "ref": "shared_x_plus_3"}
+{"input": "gcd(x^2 - 9, x^2 - 6*x + 9)", "area": "gcd", "ref": "shared_x_minus_3_b"}
+{"input": "gcd(x^2 - 16, x^2 - 8*x + 16)", "area": "gcd", "ref": "shared_x_minus_4"}
+{"input": "gcd(x^3 + 3*x^2 + 3*x + 1, x^2 + 2*x + 1)", "area": "gcd", "ref": "cube_vs_perf_sq"}
+{"input": "gcd(x^4 - 4*x^2 + 4, x^2 - 2)", "area": "gcd", "ref": "biquad_vs_irred_sqrt2"}
+{"input": "gcd(x^6 - x^3, x^3 - 1)", "area": "gcd", "ref": "sixth_cubic_factor"}
+{"input": "gcd(x^5 - x^3, x^4 - x^2)", "area": "gcd", "ref": "fifth_fourth_x3"}
+{"input": "gcd(x*y^2 - x, x*y - x)", "area": "gcd", "ref": "multivar_x_y2_minus_1"}
+{"input": "gcd(x^2*y - y, x*y - y)", "area": "gcd", "ref": "multivar_y_factor"}
+{"input": "gcd(x^3 + x^2*y, x^2 + x*y)", "area": "gcd", "ref": "multivar_x_common_3"}
+{"input": "gcd(4*x^3 - 4*x, 6*x^2 - 6)", "area": "gcd", "ref": "coeff_2_x2_minus_1"}
+{"input": "gcd(x^4 - 2*x^2 + 1, x^2 - 1)", "area": "gcd", "ref": "biquad_vs_x2_minus_1"}
+{"input": "gcd(x^5 + x^4 - x - 1, x^4 - 1)", "area": "gcd", "ref": "fifth_fourth_x_plus_1"}
+{"input": "gcd(x^3 - x^2 - 4*x + 4, x^2 - 4)", "area": "gcd", "ref": "cubic_vs_diff_sq_4"}
+{"input": "gcd(x^4 + x^3 - x^2 - x, x^3 - 1)", "area": "gcd", "ref": "quartic_vs_cube_unity"}
+{"input": "gcd(x^2 + 2*x + 1, x^3 + x^2)", "area": "gcd", "ref": "perf_sq_vs_x2_cubic"}
+{"input": "gcd(x^5 - x, x^4 + x^3 - x - 1)", "area": "gcd", "ref": "quintic_vs_quartic_gcd"}
+{"input": "gcd(x^3 - 4*x, x^2 + 2*x)", "area": "gcd", "ref": "cubic_x_plus_2_factor"}
+{"input": "gcd(x^4 - x, x^3 - 1)", "area": "gcd", "ref": "quartic_x_vs_cube_unity"}
+{"input": "gcd(x^2 + 3*x, x^2 - 9)", "area": "gcd", "ref": "x_factor_vs_diff_sq_9"}
+{"input": "gcd(x^3 - 4*x^2 + 4*x, x^2 - 4*x + 4)", "area": "gcd", "ref": "cubic_double_vs_sq_double"}
+{"input": "gcd(x^4 - x^3 - x + 1, x^3 - x^2)", "area": "gcd", "ref": "quartic_cubic_x2_factor"}
+{"input": "gcd(x^2*y^2 - 4, x*y - 2)", "area": "gcd", "ref": "multivar_diff_sq_vs_linear"}
+{"input": "gcd(x^2 - y^2, x^3 - y^3)", "area": "gcd", "ref": "multivar_sq_cube_diff"}
+{"input": "gcd(x^4 + x^3 + x^2 + x, x^3 + x^2 + x + 1)", "area": "gcd", "ref": "quartic_vs_cubic_x_plus_1"}
+{"input": "gcd(x^2 - 7*x + 10, x^2 - 3*x - 10)", "area": "gcd", "ref": "shared_x_minus_5"}
+{"input": "gcd(x^6 - x^2, x^4 - x^2)", "area": "gcd", "ref": "sixth_fourth_x2_factor"}

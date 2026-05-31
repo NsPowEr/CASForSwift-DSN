@@ -136,6 +136,13 @@ Result<Integer> pollards_rho_factor(const Integer& n) {
 
     static const std::array<std::int64_t, 8> seeds = {2, 3, 5, 7, 11, 13, 17, 19};
     static const std::array<std::int64_t, 8> constants = {1, 3, 5, 7, 11, 13, 17, 19};
+    // HARDCODE-OF-PASSAGE HPP-021: max_iterations=4096 in Pollard Rho.
+    // BigInt arithmetic functions have no CASContext parameter; this limit cannot
+    // currently be exposed via ctx.* without architectural change.
+    // 4096 is a hardware-safety limit: at this bound the loop terminates with
+    // Unimplemented (outer caller retries with different seed/constant) rather
+    // than looping forever. For n with very large factors, rho may require
+    // O(n^{1/4}) steps >> 4096. See HARDCODE_LEDGER.md HPP-021.
     constexpr std::size_t max_iterations = 4096U;
 
     for (std::int64_t seed_value : seeds) {

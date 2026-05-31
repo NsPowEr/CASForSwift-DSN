@@ -1,4 +1,5 @@
 #include "cas/numeric.hpp"
+#include "cas/error_helpers.hpp"
 #include <cmath>
 #include <numbers>
 
@@ -42,14 +43,28 @@ Result<double> NumericEvaluator::evaluate(ExprPtr expr) {
                     case MathConstant::E: return ok(std::numbers::e);
                     case MathConstant::Infinity: return ok(static_cast<double>(INFINITY));
                     case MathConstant::EulerGamma: return ok(0.5772156649015328606);
-                    default: return fail<double>(make_error(CASErrorKind::Unimplemented, "Constant not supported in numeric evaluator"));
+                    default:
+                        // F0.8-MIGRATED
+                        return make_unimplemented<double>(
+                            "numeric", "NumericEvaluator::evaluate",
+                            "math constant not mapped to double in numeric evaluator",
+                            error::reason_codes::NUMERIC_UNSUPPORTED_CONSTANT,
+                            "Add a case for the missing MathConstant in evaluator.cpp",
+                            "F1.x");
                 }
             } else if constexpr (std::is_same_v<NodeT, Unary>) {
                 auto op_res = evaluate(node.operand);
                 if (op_res.is_error()) return op_res;
                 switch (node.op) {
                     case UnaryOp::Neg: return ok(-op_res.value());
-                    default: return fail<double>(make_error(CASErrorKind::Unimplemented, "Unary op not supported in numeric evaluator"));
+                    default:
+                        // F0.8-MIGRATED
+                        return make_unimplemented<double>(
+                            "numeric", "NumericEvaluator::evaluate",
+                            "unary operator not dispatched in double numeric evaluator",
+                            error::reason_codes::NUMERIC_UNSUPPORTED_UNARY_OP,
+                            "Add dispatch for the missing UnaryOp in evaluator.cpp",
+                            "F1.x");
                 }
             } else if constexpr (std::is_same_v<NodeT, Binary>) {
                 auto left = evaluate(node.left);
@@ -70,7 +85,14 @@ Result<double> NumericEvaluator::evaluate(ExprPtr expr) {
                         if (std::isnan(val)) return fail<double>(make_error(CASErrorKind::Undefined, "Math domain error in power operation"));
                         return ok(val);
                     }
-                    default: return fail<double>(make_error(CASErrorKind::Unimplemented, "Binary op not supported in numeric evaluator"));
+                    default:
+                        // F0.8-MIGRATED
+                        return make_unimplemented<double>(
+                            "numeric", "NumericEvaluator::evaluate",
+                            "binary operator not dispatched in double numeric evaluator",
+                            error::reason_codes::NUMERIC_UNSUPPORTED_BINARY_OP,
+                            "Add dispatch for the missing BinaryOp in evaluator.cpp",
+                            "F1.x");
                 }
             } else if constexpr (std::is_same_v<NodeT, Sum>) {
                 double total = 0.0;
@@ -115,7 +137,13 @@ Result<double> NumericEvaluator::evaluate(ExprPtr expr) {
                 if (node.func_id == BuiltinOp::Abs) return ok(std::abs(args[0]));
                 if (node.name == "atan2") return ok(std::atan2(args[0], args[1]));
                 
-                return fail<double>(make_error(CASErrorKind::Unimplemented, "Function '" + node.name + "' not supported in numeric evaluator"));
+                // F0.8-MIGRATED
+                return make_unimplemented<double>(
+                    "numeric", "NumericEvaluator::evaluate",
+                    "function '" + node.name + "' not dispatched in double numeric evaluator",
+                    error::reason_codes::NUMERIC_UNSUPPORTED_FUNCTION,
+                    "Add std:: dispatch for '" + node.name + "' in evaluator.cpp or extend FuncCall handler",
+                    "F1.x");
             } else if constexpr (std::is_same_v<NodeT, RootOf>) {
                 // Newton-Raphson per trovare una radice numerica del polinomio P(x) = 0
                 const std::string& var_name = node.variable.name;
@@ -177,7 +205,13 @@ Result<double> NumericEvaluator::evaluate(ExprPtr expr) {
                 if (found) return ok(x);
                 return fail<double>(make_error(CASErrorKind::Undefined, "Newton-Raphson failed to converge for RootOf"));
             } else {
-                return fail<double>(make_error(CASErrorKind::Unimplemented, "Node type not supported in numeric evaluator"));
+                // F0.8-MIGRATED
+                return make_unimplemented<double>(
+                    "numeric", "NumericEvaluator::evaluate",
+                    "AST node type not handled in double numeric evaluator dispatch",
+                    error::reason_codes::NUMERIC_UNSUPPORTED_NODE_TYPE,
+                    "Add a constexpr branch for the missing node type in evaluator.cpp",
+                    "F1.x");
             }
         });
 }

@@ -1,0 +1,90 @@
+{"input": "integrate(1/(x^2 - 1), x)", "area": "integrate", "ref": "pfd_x2_minus_1", "book_ref": "Bronstein, ch.5, ex.1"}
+{"input": "integrate(1/(x^2 + x), x)", "area": "integrate", "ref": "pfd_x_xplus1", "book_ref": "Bronstein, ch.5, ex.2"}
+{"input": "integrate(1/(x^3 - x), x)", "area": "integrate", "ref": "pfd_cubic_split", "book_ref": "Bronstein, ch.5, ex.3"}
+{"input": "integrate(x/(x^2 - 1), x)", "area": "integrate", "ref": "pfd_x_over_diff_sq", "book_ref": "Bronstein, ch.5, ex.4"}
+{"input": "integrate(1/(x^2*(x + 1)), x)", "area": "integrate", "ref": "pfd_double_pole", "book_ref": "Bronstein, ch.5, ex.5"}
+{"input": "integrate((x^2 + 1)/(x^3 - x), x)", "area": "integrate", "ref": "pfd_numerator_deg2", "book_ref": "Bronstein, ch.5, ex.6"}
+{"input": "integrate(1/(x^4 - 1), x)", "area": "integrate", "ref": "pfd_x4_minus_1", "book_ref": "Bronstein, ch.5, ex.7"}
+{"input": "integrate(x^2/(x^4 - 1), x)", "area": "integrate", "ref": "pfd_x2_x4", "book_ref": "Bronstein, ch.5, ex.8"}
+{"input": "integrate(1/(x*(x^2 + 1)), x)", "area": "integrate", "ref": "pfd_mixed_linear_quad", "book_ref": "Bronstein, ch.5, ex.9"}
+{"input": "integrate((2*x + 3)/(x^2 + 3*x + 2), x)", "area": "integrate", "ref": "pfd_linear_numerator", "book_ref": "Bronstein, ch.5, ex.10"}
+{"input": "integrate(log(x), x)", "area": "integrate", "ref": "risch_log_x_IBP", "book_ref": "Bronstein, ch.6, ex.1"}
+{"input": "integrate(log(x)^2, x)", "area": "integrate", "ref": "risch_log2_IBP", "book_ref": "Bronstein, ch.6, ex.2"}
+{"input": "integrate(x*log(x), x)", "area": "integrate", "ref": "risch_x_log", "book_ref": "Bronstein, ch.6, ex.3"}
+{"input": "integrate(log(x^2 + 1), x)", "area": "integrate", "ref": "risch_log_quad", "book_ref": "Bronstein, ch.6, ex.4"}
+{"input": "integrate(log(x + 1)/(x + 1), x)", "area": "integrate", "ref": "risch_log_subst", "book_ref": "Bronstein, ch.6, ex.5"}
+{"input": "integrate(1/(x*log(x)), x)", "area": "integrate", "ref": "risch_log_log", "book_ref": "Bronstein, ch.6, ex.6"}
+{"input": "integrate(log(x)/x^2, x)", "area": "integrate", "ref": "risch_log_over_x2", "book_ref": "Bronstein, ch.6, ex.7"}
+{"input": "integrate(x^2*log(x), x)", "area": "integrate", "ref": "risch_x2_log", "book_ref": "Bronstein, ch.6, ex.8"}
+{"input": "integrate(log(x + sqrt(x^2 + 1)), x)", "area": "integrate", "ref": "risch_arcsinh_log", "book_ref": "Bronstein, ch.6, ex.9"}
+{"input": "integrate((log(x))^2/x, x)", "area": "integrate", "ref": "risch_log2_over_x", "book_ref": "Bronstein, ch.6, ex.10"}
+{"input": "integrate(exp(x)/x, x)", "area": "integrate", "ref": "ei_unimplemented", "book_ref": "Bronstein, ch.7, ex.1"}
+{"input": "integrate(exp(x)*x, x)", "area": "integrate", "ref": "risch_exp_IBP", "book_ref": "Bronstein, ch.7, ex.2"}
+{"input": "integrate(exp(x^2), x)", "area": "integrate", "ref": "erf_extension", "book_ref": "Bronstein, ch.7, ex.3"}
+{"input": "integrate(exp(x)/(x + 1), x)", "area": "integrate", "ref": "risch_exp_linear_denom", "book_ref": "Bronstein, ch.7, ex.4"}
+{"input": "integrate(exp(x)*sin(x), x)", "area": "integrate", "ref": "risch_cyclic_exp_sin", "book_ref": "Bronstein, ch.7, ex.5"}
+{"input": "integrate(exp(x)*cos(x), x)", "area": "integrate", "ref": "risch_cyclic_exp_cos", "book_ref": "Bronstein, ch.7, ex.6"}
+{"input": "integrate(sin(x)/x, x)", "area": "integrate", "ref": "si_unimplemented", "book_ref": "Bronstein, ch.7, ex.7"}
+{"input": "integrate(exp(-x)*log(x), x)", "area": "integrate", "ref": "risch_exp_neg_log", "book_ref": "Bronstein, ch.7, ex.8"}
+{"input": "integrate(exp(2*x)*sin(3*x), x)", "area": "integrate", "ref": "risch_cyclic_2_3", "book_ref": "Bronstein, ch.7, ex.9"}
+{"input": "integrate(x*exp(-x^2), x)", "area": "integrate", "ref": "gauss_subst", "book_ref": "Bronstein, ch.7, ex.10"}
+{"input": "integrate(sin(x)^3, x)", "area": "integrate", "ref": "trig_ch8_power3_sin", "book_ref": "Bronstein, ch.8, ex.1"}
+{"input": "integrate(cos(x)^3, x)", "area": "integrate", "ref": "trig_ch8_power3_cos", "book_ref": "Bronstein, ch.8, ex.2"}
+{"input": "integrate(sin(x)^4, x)", "area": "integrate", "ref": "trig_ch8_power4_sin", "book_ref": "Bronstein, ch.8, ex.3"}
+{"input": "integrate(sin(x)*cos(x)^2, x)", "area": "integrate", "ref": "trig_ch8_mixed_12", "book_ref": "Bronstein, ch.8, ex.4"}
+{"input": "integrate(sin(x)^2*cos(x)^2, x)", "area": "integrate", "ref": "trig_ch8_product_22", "book_ref": "Bronstein, ch.8, ex.5"}
+{"input": "integrate(1/(sin(x)^2*cos(x)^2), x)", "area": "integrate", "ref": "trig_ch8_csc2_sec2", "book_ref": "Bronstein, ch.8, ex.6"}
+{"input": "integrate(1/(1 + sin(x)), x)", "area": "integrate", "ref": "trig_ch8_weierstrass_sin", "book_ref": "Bronstein, ch.8, ex.7"}
+{"input": "integrate(1/(2 + cos(x)), x)", "area": "integrate", "ref": "trig_ch8_weierstrass_cos", "book_ref": "Bronstein, ch.8, ex.8"}
+{"input": "integrate(tan(x)^2, x)", "area": "integrate", "ref": "trig_ch8_tan_sq", "book_ref": "Bronstein, ch.8, ex.9"}
+{"input": "integrate(sin(3*x)*cos(2*x), x)", "area": "integrate", "ref": "trig_ch8_product_formula", "book_ref": "Bronstein, ch.8, ex.10"}
+{"input": "integrate(x^2/(x^3 + 1), x)", "area": "integrate", "ref": "bronstein_ch5_ex11", "book_ref": "Bronstein, ch.5, ex.11"}
+{"input": "integrate((x + 1)/(x^3 - x), x)", "area": "integrate", "ref": "bronstein_ch5_ex12", "book_ref": "Bronstein, ch.5, ex.12"}
+{"input": "integrate(1/(x^4 + x^2 + 1), x)", "area": "integrate", "ref": "bronstein_ch5_ex13", "book_ref": "Bronstein, ch.5, ex.13"}
+{"input": "integrate(x^3/(x^4 - 1), x)", "area": "integrate", "ref": "bronstein_ch5_ex14", "book_ref": "Bronstein, ch.5, ex.14"}
+{"input": "integrate((2*x^2 - 1)/(x^4 - 1), x)", "area": "integrate", "ref": "bronstein_ch5_ex15", "book_ref": "Bronstein, ch.5, ex.15"}
+{"input": "integrate(1/(x^2*(x^2 + 1)), x)", "area": "integrate", "ref": "bronstein_ch5_ex16", "book_ref": "Bronstein, ch.5, ex.16"}
+{"input": "integrate((x^2 + x + 1)/(x^3 - 1), x)", "area": "integrate", "ref": "bronstein_ch5_ex17", "book_ref": "Bronstein, ch.5, ex.17"}
+{"input": "integrate(1/((x + 1)^2*(x - 1)), x)", "area": "integrate", "ref": "bronstein_ch5_ex18", "book_ref": "Bronstein, ch.5, ex.18"}
+{"input": "integrate(x^2/((x^2 + 1)^2), x)", "area": "integrate", "ref": "bronstein_ch5_ex19", "book_ref": "Bronstein, ch.5, ex.19"}
+{"input": "integrate((x^3 + 1)/(x^4 - x^2), x)", "area": "integrate", "ref": "bronstein_ch5_ex20", "book_ref": "Bronstein, ch.5, ex.20"}
+{"input": "integrate(x*log(x^2 + 1), x)", "area": "integrate", "ref": "bronstein_ch6_ex12", "book_ref": "Bronstein, ch.6, ex.12"}
+{"input": "integrate(log(x + 1)/x, x)", "area": "integrate", "ref": "bronstein_ch6_ex13", "book_ref": "Bronstein, ch.6, ex.13"}
+{"input": "integrate(log(x)/(x^2 + 1), x)", "area": "integrate", "ref": "bronstein_ch6_ex14", "book_ref": "Bronstein, ch.6, ex.14"}
+{"input": "integrate(x^2*log(x)^2, x)", "area": "integrate", "ref": "bronstein_ch6_ex15", "book_ref": "Bronstein, ch.6, ex.15"}
+{"input": "integrate(log(x)^3/x, x)", "area": "integrate", "ref": "bronstein_ch6_ex16", "book_ref": "Bronstein, ch.6, ex.16"}
+{"input": "integrate(log(sqrt(x)), x)", "area": "integrate", "ref": "bronstein_ch6_ex17", "book_ref": "Bronstein, ch.6, ex.17"}
+{"input": "integrate(x/(x^2 + 1)*log(x), x)", "area": "integrate", "ref": "bronstein_ch6_ex18", "book_ref": "Bronstein, ch.6, ex.18"}
+{"input": "integrate(log(x + 1)^2, x)", "area": "integrate", "ref": "bronstein_ch6_ex19", "book_ref": "Bronstein, ch.6, ex.19"}
+{"input": "integrate((log(x))^2 / (x^2), x)", "area": "integrate", "ref": "bronstein_ch6_ex20", "book_ref": "Bronstein, ch.6, ex.20"}
+{"input": "integrate(x^2*exp(2*x), x)", "area": "integrate", "ref": "bronstein_ch7_ex11", "book_ref": "Bronstein, ch.7, ex.11"}
+{"input": "integrate(x^3*exp(-x), x)", "area": "integrate", "ref": "bronstein_ch7_ex12", "book_ref": "Bronstein, ch.7, ex.12"}
+{"input": "integrate(exp(x)*sin(2*x), x)", "area": "integrate", "ref": "bronstein_ch7_ex13", "book_ref": "Bronstein, ch.7, ex.13"}
+{"input": "integrate(exp(-x)*cos(x), x)", "area": "integrate", "ref": "bronstein_ch7_ex14", "book_ref": "Bronstein, ch.7, ex.14"}
+{"input": "integrate(exp(x)/(x^2 + 1), x)", "area": "integrate", "ref": "bronstein_ch7_ex15_ei", "book_ref": "Bronstein, ch.7, ex.15"}
+{"input": "integrate(x*exp(-x^2/2), x)", "area": "integrate", "ref": "bronstein_ch7_ex16", "book_ref": "Bronstein, ch.7, ex.16"}
+{"input": "integrate(exp(2*x)*cos(3*x), x)", "area": "integrate", "ref": "bronstein_ch7_ex17", "book_ref": "Bronstein, ch.7, ex.17"}
+{"input": "integrate(exp(x)*log(x), x)", "area": "integrate", "ref": "bronstein_ch7_ex18_ei_log", "book_ref": "Bronstein, ch.7, ex.18"}
+{"input": "integrate(exp(x)/(x^2), x)", "area": "integrate", "ref": "bronstein_ch7_ex19_ei", "book_ref": "Bronstein, ch.7, ex.19"}
+{"input": "integrate(x^2*exp(-x)*sin(x), x)", "area": "integrate", "ref": "bronstein_ch7_ex20", "book_ref": "Bronstein, ch.7, ex.20"}
+{"input": "integrate(sin(x)^3*cos(x)^2, x)", "area": "integrate", "ref": "bronstein_ch8_ex11", "book_ref": "Bronstein, ch.8, ex.11"}
+{"input": "integrate(sin(x)^2*cos(x)^4, x)", "area": "integrate", "ref": "bronstein_ch8_ex12", "book_ref": "Bronstein, ch.8, ex.12"}
+{"input": "integrate(cos(x)^5, x)", "area": "integrate", "ref": "bronstein_ch8_ex13", "book_ref": "Bronstein, ch.8, ex.13"}
+{"input": "integrate(sin(x)^6, x)", "area": "integrate", "ref": "bronstein_ch8_ex14", "book_ref": "Bronstein, ch.8, ex.14"}
+{"input": "integrate(sin(x)^4*cos(x)^4, x)", "area": "integrate", "ref": "bronstein_ch8_ex15", "book_ref": "Bronstein, ch.8, ex.15"}
+{"input": "integrate(1/(sin(x)*cos(x)^2), x)", "area": "integrate", "ref": "bronstein_ch8_ex16", "book_ref": "Bronstein, ch.8, ex.16"}
+{"input": "integrate(1/(sin(x)^2*cos(x)), x)", "area": "integrate", "ref": "bronstein_ch8_ex17", "book_ref": "Bronstein, ch.8, ex.17"}
+{"input": "integrate(1/(1 + sin(x) + cos(x)), x)", "area": "integrate", "ref": "bronstein_ch8_ex18", "book_ref": "Bronstein, ch.8, ex.18"}
+{"input": "integrate(1/(3 + 4*sin(x)), x)", "area": "integrate", "ref": "bronstein_ch8_ex19", "book_ref": "Bronstein, ch.8, ex.19"}
+{"input": "integrate(1/(2 - sin(x)), x)", "area": "integrate", "ref": "bronstein_ch8_ex20", "book_ref": "Bronstein, ch.8, ex.20"}
+{"input": "integrate(sqrt(x^2 + 1), x)", "area": "integrate", "ref": "bronstein_ch9_ex1", "book_ref": "Bronstein, ch.9, ex.1"}
+{"input": "integrate(1/sqrt(x^2 - 1), x)", "area": "integrate", "ref": "bronstein_ch9_ex2", "book_ref": "Bronstein, ch.9, ex.2"}
+{"input": "integrate(sqrt(x^2 - 1), x)", "area": "integrate", "ref": "bronstein_ch9_ex3", "book_ref": "Bronstein, ch.9, ex.3"}
+{"input": "integrate(x/sqrt(x^2 + 4), x)", "area": "integrate", "ref": "bronstein_ch9_ex4", "book_ref": "Bronstein, ch.9, ex.4"}
+{"input": "integrate(x^2/sqrt(1 - x^2), x)", "area": "integrate", "ref": "bronstein_ch9_ex5", "book_ref": "Bronstein, ch.9, ex.5"}
+{"input": "integrate(1/((x^2+1)*sqrt(x^2+2)), x)", "area": "integrate", "ref": "bronstein_ch9_ex6", "book_ref": "Bronstein, ch.9, ex.6"}
+{"input": "integrate(x^2*sqrt(1 - x^2), x)", "area": "integrate", "ref": "bronstein_ch9_ex7", "book_ref": "Bronstein, ch.9, ex.7"}
+{"input": "integrate(1/(x*sqrt(x^2 + 1)), x)", "area": "integrate", "ref": "bronstein_ch9_ex8", "book_ref": "Bronstein, ch.9, ex.8"}
+{"input": "integrate(sqrt(1 - x^2)/x^2, x)", "area": "integrate", "ref": "bronstein_ch9_ex9", "book_ref": "Bronstein, ch.9, ex.9"}
+{"input": "integrate(x^3/sqrt(x^2 + 1), x)", "area": "integrate", "ref": "bronstein_ch9_ex10", "book_ref": "Bronstein, ch.9, ex.10"}
+{"input": "integrate(log(x)^2/(x+1), x)", "area": "integrate", "ref": "bronstein_ch6_ex11b", "book_ref": "Bronstein, ch.6, ex.11b"}

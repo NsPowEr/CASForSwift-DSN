@@ -6,10 +6,20 @@
 // factorization holds and Euclidean GCD terminates.
 //
 // Units of Z[i]: {1, -1, i, -i} — exactly the elements with norm 1.
+//
+// F1.6-NEW: factor_gaussian — Gaussian prime factorization.
+// Classifies rational primes p:
+//   p = 2  → (1+i)²·(-i)  [ramified]
+//   p ≡ 1 mod 4 → (a+bi)(a-bi) [split]; a,b via Hermite-Serret algorithm
+//   p ≡ 3 mod 4 → p remains prime in Z[i] [inert]
+// Then lifts the rational factorization of n to Z[i] via norm identity.
 
 #pragma once
 
 #include "cas/bigint.hpp"
+#include "cas/result.hpp"
+
+#include <vector>
 
 namespace cas {
 
@@ -85,5 +95,23 @@ struct GaussianDivision {
 // gcd via Euclidean algorithm. Result canonical up to unit multiplication
 // (representative chosen with real > 0, or real = 0 and imag > 0).
 [[nodiscard]] GaussianInt gaussian_gcd(GaussianInt a, GaussianInt b);
+
+// F1.6-NEW: GaussianFactor — a Gaussian prime with its multiplicity.
+struct GaussianFactor {
+    GaussianInt prime;      // canonical Gaussian prime (real>0 or real=0,imag>0)
+    unsigned int exponent;  // ≥ 1
+};
+
+// F1.6-NEW: Factorize n ∈ Z>0 into Gaussian primes.
+// Returns the unit and the list of Gaussian prime factors with exponents such
+// that  unit · ∏ prime^exponent  ≡ n  (as a Gaussian integer with zero imag).
+// Errors: n ≤ 0 → CASErrorKind::InvalidArgument.
+// Depends on numtheory::factor_integer for the rational factorization.
+struct GaussianFactorization {
+    GaussianInt unit;                    // ∈ {1, -1, i, -i}
+    std::vector<GaussianFactor> factors; // sorted by norm ascending
+};
+
+[[nodiscard]] Result<GaussianFactorization> factor_gaussian(const BigInt& n);
 
 }  // namespace cas

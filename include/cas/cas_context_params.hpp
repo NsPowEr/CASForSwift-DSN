@@ -1,0 +1,332 @@
+#pragma once
+
+// cas_context_params.hpp — Configurable algorithm parameter storage for CASContext.
+//
+// Defines CASContextParams: a base struct that carries every tuneable knob
+// (thresholds, budgets, quality parameters) exposed by CASContext.
+//
+// Simple setters (no clamping) are inline here.
+// Setters with clamping/validation remain as CASContext out-of-line methods
+// in context_core.cpp (they are declared in symbolic.hpp).
+//
+// CASContext inherits from CASContextParams so all ctx.<getter/setter>() calls
+// work without any call-site changes.  Protected field storage is accessible
+// to CASContext setters via inheritance.
+//
+// Anti-monolith: moving field declarations + accessors here keeps symbolic.hpp
+// under 500 lines (debt SPLIT-SYMBOLIC-HPP-F2.5 closed).
+
+#include <cstddef>
+#include <cstdint>
+
+namespace cas::symbolic {
+
+struct CASContextParams {
+    // ── Simplifier ──────────────────────────────────────────────────────────
+    // (setter with clamping declared in CASContext / context_core.cpp)
+    [[nodiscard]] int max_simplification_depth() const noexcept {
+        return max_simplification_depth_;
+    }
+
+    // ── Integrator ──────────────────────────────────────────────────────────
+    // (setter with clamping declared in CASContext / context_core.cpp)
+    [[nodiscard]] std::size_t max_integration_depth() const noexcept {
+        return max_integration_depth_;
+    }
+
+    // ── GCD probabilistic error bound ───────────────────────────────────────
+    // (setter with clamping declared in CASContext / context_core.cpp)
+    [[nodiscard]] double gcd_error_probability() const noexcept {
+        return gcd_error_probability_;
+    }
+
+    // ── Numeric floating-point precision (L3-03) ────────────────────────────
+    // (setter with clamping declared in CASContext / context_core.cpp)
+    [[nodiscard]] unsigned int numeric_precision_digits() const noexcept {
+        return numeric_precision_digits_;
+    }
+
+    // ── Branch cuts (L2-21) ─────────────────────────────────────────────────
+    // when true, identities requiring the principal branch are refused without
+    // explicit positivity. Default false = historical behaviour.
+    void set_strict_branch_cuts(bool strict) noexcept {
+        strict_branch_cuts_ = strict;
+    }
+    [[nodiscard]] bool strict_branch_cuts() const noexcept {
+        return strict_branch_cuts_;
+    }
+
+    // ── Trig power reduction ─────────────────────────────────────────────────
+    void set_max_trig_power_reduction(long long n) noexcept {
+        max_trig_power_reduction_ = n;
+    }
+    [[nodiscard]] long long max_trig_power_reduction() const noexcept {
+        return max_trig_power_reduction_;
+    }
+
+    // ── Exact trig evaluation ────────────────────────────────────────────────
+    // Maximum denominator q for exact cos(p·π/q)/sin(p·π/q).
+    // Default 100 (Disquisitiones §VII: Gauss constructibility criterion).
+    void set_max_trig_exact_denom(int q) noexcept { max_trig_exact_denom_ = q; }
+    [[nodiscard]] int max_trig_exact_denom() const noexcept {
+        return max_trig_exact_denom_;
+    }
+
+    // ── RootOf ──────────────────────────────────────────────────────────────
+    // (setter with clamping declared in CASContext / context_core.cpp)
+    [[nodiscard]] std::size_t max_rootof_explicit_degree() const noexcept {
+        return max_rootof_explicit_degree_;
+    }
+
+    // ── GCD recursion ────────────────────────────────────────────────────────
+    // (setters with clamping declared in CASContext / context_core.cpp)
+    [[nodiscard]] std::size_t max_gcd_recursion_depth() const noexcept {
+        return max_gcd_recursion_depth_;
+    }
+
+    [[nodiscard]] std::size_t min_gcd_division_steps() const noexcept {
+        return min_gcd_division_steps_;
+    }
+
+    // Maximum total recursive calls in the multivariate GCD engine.
+    // Derivation: 4096 = 4^6 ≈ (3 offsets × 3 samples)^3 levels.
+    // Exceeded → Unimplemented (GCD_MULTIVARIATE_BUDGET_EXCEEDED).
+    // (setter with clamping declared in CASContext / context_core.cpp)
+    [[nodiscard]] std::size_t max_gcd_total_calls() const noexcept {
+        return max_gcd_total_calls_;
+    }
+
+    // ── Cyclotomic ───────────────────────────────────────────────────────────
+    // -1 = auto-derive from polynomial degree (2*(deg+1)).
+    // (setter trivial; kept in CASContext for symmetry with other GCD setters)
+    [[nodiscard]] int max_cyclotomic_n() const noexcept {
+        return max_cyclotomic_n_;
+    }
+
+    // ── Half-GCD dispatch threshold ──────────────────────────────────────────
+    // For univariate integer GCD: if min(deg(a),deg(b)) > threshold use Half-GCD
+    // (Knuth-Schönhage O(M(n)log n)) instead of subresultant PRS. Default 200.
+    void set_half_gcd_degree_threshold(std::size_t n) noexcept {
+        half_gcd_degree_threshold_ = n;
+    }
+    [[nodiscard]] std::size_t half_gcd_degree_threshold() const noexcept {
+        return half_gcd_degree_threshold_;
+    }
+
+    // ── Modular GCD CRT dispatch threshold (B2.1) ───────────────────────────
+    // When max coefficient bit-length exceeds this, try CRT GCD before subresultant.
+    // Default 48 bits; 0 → always CRT; SIZE_MAX → disable CRT.
+    // Derivation: 48 = 3 * 16 (three limbs of 16 bits safe for Mignotte bound).
+    void set_modular_gcd_coeff_bits(std::size_t bits) noexcept {
+        modular_gcd_coeff_bits_ = bits;
+    }
+    [[nodiscard]] std::size_t modular_gcd_coeff_bits() const noexcept {
+        return modular_gcd_coeff_bits_;
+    }
+
+    // ── Berlekamp Q-matrix budget ────────────────────────────────────────────
+    // berlekamp_factor_mod_p returns Unimplemented when deg(f)*p > limit.
+    // Caller falls back to Cantor-Zassenhaus. Default 1024.
+    void set_max_berlekamp_matrix_size(std::size_t n) noexcept {
+        max_berlekamp_matrix_size_ = (n < 1U) ? 1U : n;
+    }
+    [[nodiscard]] std::size_t max_berlekamp_matrix_size() const noexcept {
+        return max_berlekamp_matrix_size_;
+    }
+
+    // ── HC-001..003 configurable knobs ──────────────────────────────────────
+    // (setters with clamping declared in CASContext / context_core.cpp)
+    [[nodiscard]] std::size_t max_q_alpha_bridge_depth() const noexcept {
+        return max_q_alpha_bridge_depth_;
+    }
+
+    [[nodiscard]] std::size_t max_gamma_recursion() const noexcept {
+        return max_gamma_recursion_;
+    }
+
+    [[nodiscard]] std::size_t improper_leading_order_scan() const noexcept {
+        return improper_leading_order_scan_;
+    }
+
+    // ── Bessel recurrence expansion ──────────────────────────────────────────
+    // Opt-in: expand BesselJ/Y(n,x) via three-term recurrence. Default false.
+    // (setter trivial; kept in CASContext for symmetry with HC-001..003 group)
+    [[nodiscard]] bool expand_bessel_recurrence() const noexcept {
+        return expand_bessel_recurrence_;
+    }
+
+    // ── Trager tower shift attempts (L3-06) ──────────────────────────────────
+    // 0 = auto-derive from discriminant collision bound.
+    // (setter trivial; kept in CASContext for symmetry)
+    [[nodiscard]] std::size_t max_trager_tower_shift_attempts() const noexcept {
+        return max_trager_tower_shift_attempts_;
+    }
+
+    // ── Wang multivariate factor good-evaluation-point search radius (F3.2) ──
+    // 0 = auto-derive from nterms + main_var degree + 4 (Schwartz-Zippel-style).
+    // Exceeded → explicit Unimplemented diagnostic ("no good evaluation point").
+    [[nodiscard]] std::size_t max_wang_eval_radius() const noexcept {
+        return max_wang_eval_radius_;
+    }
+    void set_max_wang_eval_radius(std::size_t r) noexcept {
+        max_wang_eval_radius_ = r;
+    }
+
+    // ── F4 Macaulay matrix caps ──────────────────────────────────────────────
+    // Hardware guards; exceeded → F4 step falls back to Buchberger.
+    void set_f4_max_macaulay_rows(std::size_t n) noexcept {
+        f4_max_macaulay_rows_ = n;
+    }
+    [[nodiscard]] std::size_t f4_max_macaulay_rows() const noexcept {
+        return f4_max_macaulay_rows_;
+    }
+
+    void set_f4_max_macaulay_monomials(std::size_t n) noexcept {
+        f4_max_macaulay_monomials_ = n;
+    }
+    [[nodiscard]] std::size_t f4_max_macaulay_monomials() const noexcept {
+        return f4_max_macaulay_monomials_;
+    }
+
+    void set_f4_max_pending_monomials(std::size_t n) noexcept {
+        f4_max_pending_monomials_ = n;
+    }
+    [[nodiscard]] std::size_t f4_max_pending_monomials() const noexcept {
+        return f4_max_pending_monomials_;
+    }
+
+    // ── FGLM dimension cap ───────────────────────────────────────────────────
+    // Maximum standard-monomial dimension D = dim_Q(Q[x]/I) for FGLM order
+    // conversion. Exceeded → explicit Unimplemented diagnostic (not silent truncation).
+    // Default 512 handles 0-dimensional ideals up to 512 solutions over Q̄.
+    void set_fglm_max_dimension(std::size_t n) noexcept {
+        fglm_max_dimension_ = n;
+    }
+    [[nodiscard]] std::size_t fglm_max_dimension() const noexcept {
+        return fglm_max_dimension_;
+    }
+
+    // ── Integration-by-parts depth ───────────────────────────────────────────
+    // Default 8; typical IBP converges in 1-3 levels.
+    void set_max_integrate_by_parts_depth(std::size_t n) noexcept {
+        max_integrate_by_parts_depth_ = n;
+    }
+    [[nodiscard]] std::size_t max_integrate_by_parts_depth() const noexcept {
+        return max_integrate_by_parts_depth_;
+    }
+
+    // ── Risch DE rational ansatz degree (BUG-HANG-001) ──────────────────────
+    // Default 32 covers all common elementary integrals.
+    void set_max_risch_rational_ansatz_degree(std::size_t n) noexcept {
+        max_risch_rational_ansatz_degree_ = n;
+    }
+    [[nodiscard]] std::size_t max_risch_rational_ansatz_degree() const noexcept {
+        return max_risch_rational_ansatz_degree_;
+    }
+
+    // ── LLL quality parameter ────────────────────────────────────────────────
+    // Default 0.75 (LLL standard, Lenstra-Lenstra-Lovász 1982).
+    void set_lll_delta(double delta) noexcept { lll_delta_ = delta; }
+    [[nodiscard]] double lll_delta() const noexcept { return lll_delta_; }
+
+    // ── Van Hoeij factorization knobs ────────────────────────────────────────
+    // Modular factor count above which van Hoeij LLL replaces subset enumeration.
+    // Default 8: 2^8=256 subset budget; van Hoeij O(r^4·n·log(p^a)) for r ≥ 8.
+    void set_van_hoeij_threshold(std::size_t t) noexcept {
+        van_hoeij_threshold_ = t;
+    }
+    [[nodiscard]] std::size_t van_hoeij_threshold() const noexcept {
+        return van_hoeij_threshold_;
+    }
+
+    // Max refinement iterations in van Hoeij LLL knapsack. 0 = auto (4*r).
+    void set_max_van_hoeij_iterations(std::size_t n) noexcept {
+        max_van_hoeij_iterations_ = n;
+    }
+    [[nodiscard]] std::size_t max_van_hoeij_iterations() const noexcept {
+        return max_van_hoeij_iterations_;
+    }
+
+    // Fast-path subset threshold within van Hoeij.
+    // Default 10: C(10,5)=252 tractable with Newton-sum Mignotte pruning.
+    // r > threshold → mandatory LLL path.
+    void set_van_hoeij_lll_threshold(std::size_t t) noexcept {
+        van_hoeij_lll_threshold_ = t;
+    }
+    [[nodiscard]] std::size_t van_hoeij_lll_threshold() const noexcept {
+        return van_hoeij_lll_threshold_;
+    }
+
+    // ── Timeout check interval ────────────────────────────────────────────────
+    // (setter with clamping declared in CASContext / context_core.cpp)
+    [[nodiscard]] std::uint64_t timeout_check_interval() const noexcept {
+        return timeout_check_interval_;
+    }
+
+    // ── F5 signature-based S-pair pruning (F3.3-F5-WIRE) ─────────────────────
+    // When true, f4_groebner routes through f5c_groebner which applies the F5
+    // criterion (Faugère 2002) + Rewritten criterion to S-pair selection,
+    // skipping S-pairs whose signature is divisible by a known syzygy signature.
+    // Default false: existing F4/Buchberger pipeline unchanged.
+    void set_enable_f5_signature_pruning(bool b) noexcept {
+        enable_f5_signature_pruning_ = b;
+    }
+    [[nodiscard]] bool enable_f5_signature_pruning() const noexcept {
+        return enable_f5_signature_pruning_;
+    }
+
+    // ── Galois Frobenius / Dedekind prime budget ─────────────────────────────
+    // Number of small primes tested for cycle-type evidence in deg-5 Galois
+    // identification (Soicher-McKay / Frobenius / Dedekind path).
+    // Default 30 = enough to distinguish C5/D5/F20/A5/S5 with high reliability
+    // for typical small-coefficient quintics (Chebotarev density argument:
+    // expected hit on each cycle type within ~|G|/|class| samples; |G| ≤ 120).
+    // Exceeding budget without conclusive evidence → explicit Unimplemented
+    // diagnostic (NOT silent wrong group).
+    void set_max_galois_frobenius_primes(std::size_t n) noexcept {
+        max_galois_frobenius_primes_ = n;
+    }
+    [[nodiscard]] std::size_t max_galois_frobenius_primes() const noexcept {
+        return max_galois_frobenius_primes_;
+    }
+
+protected:
+    // All fields with their mathematically-derived or documented defaults.
+    // Setters with clamping are CASContext out-of-line methods (context_core.cpp).
+    int           max_simplification_depth_{300};
+    std::size_t   max_integration_depth_{16U};
+    double        gcd_error_probability_{0.001};
+    unsigned int  numeric_precision_digits_{15U};
+    bool          strict_branch_cuts_{false};
+    long long     max_trig_power_reduction_{32LL};
+    int           max_trig_exact_denom_{100};
+    std::size_t   max_rootof_explicit_degree_{2U};
+    std::size_t   max_gcd_recursion_depth_{16U};
+    std::size_t   min_gcd_division_steps_{8U};
+    std::size_t   max_gcd_total_calls_{4096U};
+    int           max_cyclotomic_n_{-1};
+    std::size_t   half_gcd_degree_threshold_{200U};
+    std::size_t   modular_gcd_coeff_bits_{48U};   // B2.1: CRT GCD dispatch threshold
+    std::size_t   max_berlekamp_matrix_size_{1024U};
+    std::size_t   max_q_alpha_bridge_depth_{256U};
+    std::size_t   max_gamma_recursion_{1024U};
+    std::size_t   improper_leading_order_scan_{8U};
+    bool          expand_bessel_recurrence_{false};
+    std::size_t   max_trager_tower_shift_attempts_{0U};
+    std::size_t   max_wang_eval_radius_{0U};  // 0 = auto (nterms + main_deg + 4)
+    std::size_t   f4_max_macaulay_rows_{512U};
+    std::size_t   f4_max_macaulay_monomials_{512U};
+    std::size_t   f4_max_pending_monomials_{1024U};
+    std::size_t   fglm_max_dimension_{512U};
+    std::size_t   max_integrate_by_parts_depth_{8U};
+    std::size_t   max_risch_rational_ansatz_degree_{32U};
+    double        lll_delta_{0.75};
+    std::size_t   van_hoeij_threshold_{8U};
+    std::size_t   max_van_hoeij_iterations_{0U};  // 0 = auto (4*r)
+    std::size_t   van_hoeij_lll_threshold_{10U};  // r > this → mandatory LLL
+    std::uint64_t timeout_check_interval_{1024U};
+    std::size_t   max_galois_frobenius_primes_{30U};
+    bool          enable_f5_signature_pruning_{false};  // F3.3-F5-WIRE
+};
+
+}  // namespace cas::symbolic
