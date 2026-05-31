@@ -262,8 +262,12 @@ TEST(MatrixBasicTest, SolvesUnderdeterminedLinearSystemWithFreeParameter) {
     auto solution = linsolve(a, b, context);
     ASSERT_TRUE(solution.is_ok()) << solution.error().message;
     ASSERT_EQ(solution.value().size(), 2U);
-    expect_equivalent(solution.value()[0], "3-t1");
-    expect_equivalent(solution.value()[1], "t1");
+    // Free parameter has a context-fresh name; assert structural form via
+    // the actual symbol name returned in solution[1].
+    const auto* free_sym = expr_cast<Symbol>(solution.value()[1]);
+    ASSERT_NE(free_sym, nullptr);
+    expect_equivalent(solution.value()[0], "3-" + free_sym->name);
+    expect_equivalent(solution.value()[1], free_sym->name);
 }
 
 TEST(MatrixBasicTest, RejectsInconsistentLinearSystem) {

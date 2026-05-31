@@ -33,8 +33,9 @@ namespace cas::calculus {
         auto int_muQ_res = integrate_risch(muQ, classification.x, ctx);
         if (int_muQ_res.is_error()) return fail<ExprPtr>(int_muQ_res.error());
         
-        // y = (integral(muQ) + C) / mu
-        ExprPtr C1 = arena.make<Symbol>("C1");
+        // y = (integral(muQ) + C) / mu — C generata fresh per evitare collisione utente.
+        Symbol C_fresh = ctx.make_fresh_symbol("C");
+        ExprPtr C1 = arena.make<Symbol>(C_fresh.name);
         ExprPtr num = arena.make<Binary>(BinaryOp::Add, int_muQ_res.value(), C1);
         ExprPtr sol = arena.make<Binary>(BinaryOp::Div, num, mu);
         
@@ -55,7 +56,8 @@ namespace cas::calculus {
         if (int_Ny_res.is_error()) return fail<ExprPtr>(int_Ny_res.error());
         if (int_Mx_res.is_error()) return fail<ExprPtr>(int_Mx_res.error());
         
-        ExprPtr C1 = arena.make<Symbol>("C1");
+        Symbol C_fresh = ctx.make_fresh_symbol("C");
+        ExprPtr C1 = arena.make<Symbol>(C_fresh.name);
         ExprPtr rhs = arena.make<Binary>(BinaryOp::Add, int_Mx_res.value(), C1);
         
         // Restituiamo una relazione implicita tramite FuncCall "equal"

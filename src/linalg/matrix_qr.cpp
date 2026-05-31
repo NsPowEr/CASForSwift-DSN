@@ -1,19 +1,26 @@
-// CAS-L3-17 — QR decomposition via classical Gram-Schmidt (symbolic).
+// CAS-F4.1b — QR decomposition via Householder reflections (symbolic).
 //
-// A = Q · R, Q orthonormal columns, R upper triangular.
+// A = Q · R, dove Q ha colonne ortonormali (Q^T·Q = I_n) e R è
+// triangolare superiore.  Restituisce la factorizzazione "reduced":
+//   Q : m×n
+//   R : n×n
+// con la convenzione segno: alpha_k = sgn(x_{0}^{(k)}) · ‖x^{(k)}‖.
 //
-// Algoritmo:
-//   q_1 = a_1 / ||a_1||
-//   r_{1,1} = ||a_1||
-//   for k = 2..n:
-//     v_k = a_k - Σ_{j<k} (q_j · a_k) · q_j
-//     r_{k,k} = ||v_k||
-//     q_k = v_k / r_{k,k}
-//     r_{j,k} = q_j · a_k  for j < k
+// Algoritmo (Golub-Van Loan §5.1.3):
+//   per ogni colonna k in [0, min(n, m−1)):
+//     x = R_work[k:m, k]
+//     alpha = sgn(x_0) · ‖x‖     (sgn=+ se sconosciuto)
+//     u = x − alpha · e_1
+//     se u = 0 → colonna già canonica, salta riflessione
+//     H_k = I − 2 u u^T / (u^T u)  applicato in-place a R_work[k:m, k:n]
+//     accumula H_k a destra in Q_full
 //
-// Norma simbolica: sqrt(Σ entry²).
+// Singolarità: se durante la riflessione k-esima la norma del residuo è
+// zero (colonna dipendente dalle precedenti), restituisce Unimplemented
+// con reason code LINALG_LINEAR_DEPENDENT.
 
 #include "cas/linalg/Matrix.hpp"
+#include "cas/linalg/matrix_expr_helpers.hpp"
 
 #include "cas/algebra.hpp"
 #include "cas/ast.hpp"
@@ -21,112 +28,139 @@
 #include "cas/error_helpers.hpp"
 #include "cas/symbolic.hpp"
 
+#include <algorithm>
+#include <cstddef>
 #include <vector>
 
 namespace cas::linalg {
-
-namespace {
-
-[[nodiscard]] ExprPtr zero_e(symbolic::CASContext& ctx) {
-    return ctx.arena().make<IntegerLit>(BigInt(0));
-}
-
-// Inner product of two column vectors (length n).
-[[nodiscard]] ExprPtr inner_product(const std::vector<ExprPtr>& a,
-                                     const std::vector<ExprPtr>& b,
-                                     symbolic::CASContext& ctx) {
-    AstArena& arena = ctx.arena();
-    ExprPtr sum = zero_e(ctx);
-    for (std::size_t i = 0; i < a.size(); ++i) {
-        ExprPtr prod = arena.make<Binary>(BinaryOp::Mul, a[i], b[i]);
-        sum = arena.make<Binary>(BinaryOp::Add, sum, prod);
-    }
-    auto s = ctx.simplify(sum);
-    return s.is_ok() ? s.value() : sum;
-}
-
-// Norm of column = sqrt(<v, v>).
-[[nodiscard]] ExprPtr norm(const std::vector<ExprPtr>& v, symbolic::CASContext& ctx) {
-    ExprPtr ip = inner_product(v, v, ctx);
-    ExprPtr sqrt_ip = ctx.arena().make<FuncCall>(BuiltinOp::Sqrt,
-        std::vector<ExprPtr>{ip});
-    auto s = ctx.simplify(sqrt_ip);
-    return s.is_ok() ? s.value() : sqrt_ip;
-}
-
-}  // namespace
 
 Result<QRDecomposition> qr_decompose(const MatrixExpr& matrix,
                                        symbolic::CASContext& ctx) {
     const std::size_t m = matrix.rows();
     const std::size_t n = matrix.cols();
-    if (m < n) {
+    if (m == 0U || n == 0U) {
         return fail<QRDecomposition>(CASError{
-            CASErrorKind::InvalidArgument,
-            "qr_decompose: requires rows ≥ cols (tall or square)", std::nullopt});
-    }
-    if (n == 0U) {
-        return fail<QRDecomposition>(CASError{
-            CASErrorKind::InvalidArgument,
-            "qr_decompose: empty matrix", std::nullopt});
+            CASErrorKind::InvalidArgument, "qr_decompose: empty matrix", std::nullopt});
     }
 
-    AstArena& arena = ctx.arena();
-    MatrixExpr Q(m, n);
-    MatrixExpr R(n, n);
-    // Initialize.
-    for (std::size_t i = 0; i < m; ++i)
-        for (std::size_t j = 0; j < n; ++j) Q(i, j) = zero_e(ctx);
-    for (std::size_t i = 0; i < n; ++i)
-        for (std::size_t j = 0; j < n; ++j) R(i, j) = zero_e(ctx);
+    MatrixExpr R_work(m, n, matrix.elements());
+    auto Qi = identity(m, ctx);
+    if (Qi.is_error()) return fail<QRDecomposition>(Qi.error());
+    MatrixExpr Q_full = std::move(Qi.value());
 
-    // Extract column k as vector.
-    auto column = [&](const MatrixExpr& M, std::size_t k) {
-        std::vector<ExprPtr> col(M.rows());
-        for (std::size_t i = 0; i < M.rows(); ++i) col[i] = M(i, k);
-        return col;
-    };
+    for (std::size_t k = 0; k < std::min(n, m); ++k) {
+        const std::size_t len = m - k;
+        if (len == 0U) break;
 
-    std::vector<std::vector<ExprPtr>> q_cols;
-    for (std::size_t k = 0; k < n; ++k) {
-        std::vector<ExprPtr> a_k = column(matrix, k);
-        std::vector<ExprPtr> v_k = a_k;
-        // Subtract projections onto previous q_j.
-        for (std::size_t j = 0; j < k; ++j) {
-            ExprPtr proj = inner_product(q_cols[j], a_k, ctx);
-            R(j, k) = proj;
-            for (std::size_t i = 0; i < m; ++i) {
-                ExprPtr scaled = arena.make<Binary>(BinaryOp::Mul, proj, q_cols[j][i]);
-                v_k[i] = arena.make<Binary>(BinaryOp::Sub, v_k[i], scaled);
-                auto s = ctx.simplify(v_k[i]);
-                if (s.is_ok()) v_k[i] = s.value();
+        std::vector<ExprPtr> x(len);
+        for (std::size_t i = 0; i < len; ++i) x[i] = R_work(k + i, k);
+
+        auto norm_sq_res = sym_norm_sq(x, ctx);
+        if (norm_sq_res.is_error()) return fail<QRDecomposition>(norm_sq_res.error());
+        auto norm_sq_simp = simplify(ctx, norm_sq_res.value());
+        ExprPtr norm_sq = norm_sq_simp.is_ok() ? norm_sq_simp.value() : norm_sq_res.value();
+if (is_zero_expr(norm_sq)) {
+    return make_unimplemented<QRDecomposition>(
+        "linalg", "qr_decompose", "matrix column is linearly dependent",
+        error::reason_codes::LINALG_LINEAR_DEPENDENT,
+        "Matrix must have full column rank for this QR implementation",
+        "F4.1b");
+}
+
+        auto norm_res = sym_norm(x, ctx);
+        if (norm_res.is_error()) return fail<QRDecomposition>(norm_res.error());
+        ExprPtr norm = norm_res.value();
+
+        // alpha = sgn(x[0]) * norm.
+        ExprPtr alpha = norm;
+        if (ctx.assumptions().is_negative(x[0])) {
+            auto neg_norm = negate_expr(ctx, norm);
+            if (neg_norm.is_error()) return fail<QRDecomposition>(neg_norm.error());
+            alpha = neg_norm.value();
+        }
+
+        // u = x - alpha * e_1
+        std::vector<ExprPtr> u = x;
+        auto u0_res = sub_expr(ctx, u[0], alpha);
+        if (u0_res.is_error()) return fail<QRDecomposition>(u0_res.error());
+        u[0] = u0_res.value();
+
+        // denom = 2 * (norm^2 - alpha * x[0])
+        auto ax0 = mul_expr(ctx, alpha, x[0]);
+        if (ax0.is_error()) return fail<QRDecomposition>(ax0.error());
+        auto diff = sub_expr(ctx, norm_sq, ax0.value());
+        if (diff.is_error()) return fail<QRDecomposition>(diff.error());
+        auto denom_res = mul_expr(ctx, integer(ctx, 2), diff.value());
+        if (denom_res.is_error()) return fail<QRDecomposition>(denom_res.error());
+        ExprPtr denom = denom_res.value();
+
+        if (is_zero_expr(denom)) continue;
+
+        // Apply Householder to R_work
+        for (std::size_t j = k; j < n; ++j) {
+            ExprPtr uv = integer(ctx, 0);
+            for (std::size_t i = 0; i < len; ++i) {
+                auto prod = mul_expr(ctx, u[i], R_work(k + i, j));
+                if (prod.is_error()) return fail<QRDecomposition>(prod.error());
+                auto next_sum = add_expr(ctx, uv, prod.value());
+                if (next_sum.is_error()) return fail<QRDecomposition>(next_sum.error());
+                uv = next_sum.value();
+            }
+            auto num = mul_expr(ctx, integer(ctx, 2), uv);
+            if (num.is_error()) return fail<QRDecomposition>(num.error());
+            auto coeff_res = div_expr(ctx, num.value(), denom);
+            if (coeff_res.is_error()) return fail<QRDecomposition>(coeff_res.error());
+            ExprPtr coeff = coeff_res.value();
+
+            if (is_zero_expr(coeff)) continue;
+            for (std::size_t i = 0; i < len; ++i) {
+                auto update = mul_expr(ctx, coeff, u[i]);
+                if (update.is_error()) return fail<QRDecomposition>(update.error());
+                auto next_r = sub_expr(ctx, R_work(k + i, j), update.value());
+                if (next_r.is_error()) return fail<QRDecomposition>(next_r.error());
+                auto simp_r = simplify(ctx, next_r.value());
+                R_work(k + i, j) = simp_r.is_ok() ? simp_r.value() : next_r.value();
             }
         }
-        ExprPtr norm_v = norm(v_k, ctx);
-        // Check non-zero norm (linear independence).
-        if (auto* il = expr_cast<IntegerLit>(norm_v); il && il->value.is_zero()) {
-            // F0.8-MIGRATED
-            return make_unimplemented<QRDecomposition>(
-                "linalg", "qr_decompose",
-                "column " + std::to_string(k) + " linearly dependent (zero Gram-Schmidt norm)",
-                error::reason_codes::LINALG_LINEAR_DEPENDENT,
-                "Remove linearly dependent columns before QR, or use rank-revealing QR (follow-up)",
-                "L3-17");
+
+        // Apply Householder to Q_full (accumulate from right: Q = H1*H2*...*Hk)
+        for (std::size_t j = 0; j < m; ++j) {
+            ExprPtr uv = integer(ctx, 0);
+            for (std::size_t i = 0; i < len; ++i) {
+                auto prod = mul_expr(ctx, u[i], Q_full(j, k + i));
+                if (prod.is_error()) return fail<QRDecomposition>(prod.error());
+                auto next_sum = add_expr(ctx, uv, prod.value());
+                if (next_sum.is_error()) return fail<QRDecomposition>(next_sum.error());
+                uv = next_sum.value();
+            }
+            auto num = mul_expr(ctx, integer(ctx, 2), uv);
+            if (num.is_error()) return fail<QRDecomposition>(num.error());
+            auto coeff_res = div_expr(ctx, num.value(), denom);
+            if (coeff_res.is_error()) return fail<QRDecomposition>(coeff_res.error());
+            ExprPtr coeff = coeff_res.value();
+
+            if (is_zero_expr(coeff)) continue;
+            for (std::size_t i = 0; i < len; ++i) {
+                auto update = mul_expr(ctx, coeff, u[i]);
+                if (update.is_error()) return fail<QRDecomposition>(update.error());
+                auto next_q = sub_expr(ctx, Q_full(j, k + i), update.value());
+                if (next_q.is_error()) return fail<QRDecomposition>(next_q.error());
+                auto simp_q = simplify(ctx, next_q.value());
+                Q_full(j, k + i) = simp_q.is_ok() ? simp_q.value() : next_q.value();
+            }
         }
-        R(k, k) = norm_v;
-        // q_k = v_k / norm_v
-        std::vector<ExprPtr> q_k(m);
-        for (std::size_t i = 0; i < m; ++i) {
-            ExprPtr q_i = arena.make<Binary>(BinaryOp::Div, v_k[i], norm_v);
-            auto t = algebra::together(q_i, ctx);
-            ExprPtr norm_q = t.is_ok() ? t.value() : q_i;
-            auto s = ctx.simplify(norm_q);
-            q_k[i] = s.is_ok() ? s.value() : norm_q;
-        }
-        q_cols.push_back(q_k);
-        for (std::size_t i = 0; i < m; ++i) Q(i, k) = q_k[i];
     }
-    return ok(QRDecomposition{std::move(Q), std::move(R)});
+
+    // Reduced QR: return first n columns of Q and first n rows of R.
+    MatrixExpr Q_red(m, n);
+    for (std::size_t i = 0; i < m; ++i)
+        for (std::size_t j = 0; j < n; ++j) Q_red(i, j) = Q_full(i, j);
+
+    MatrixExpr R_red(n, n);
+    for (std::size_t i = 0; i < n; ++i)
+        for (std::size_t j = 0; j < n; ++j) R_red(i, j) = (i <= j) ? R_work(i, j) : integer(ctx, 0);
+
+    return ok(QRDecomposition{std::move(Q_red), std::move(R_red)});
 }
 
 }  // namespace cas::linalg

@@ -113,6 +113,7 @@ set(CAS_SYMBOLIC_SOURCES
     src/symbolic/simplify_core.cpp
     src/symbolic/simplify_arithmetic.cpp
     src/symbolic/simplify_arithmetic_chain_liketerm.cpp
+    src/symbolic/summation_gosper.cpp
     src/symbolic/simplify_arithmetic_chain_sum.cpp
     src/symbolic/simplify_arithmetic_chain.cpp
     src/symbolic/simplify_functions.cpp
@@ -190,6 +191,8 @@ set(CAS_NUMTHEORY_SOURCES
 
 set(CAS_ALGEBRA_SOURCES
     src/algebra/algebra_core.cpp
+    src/algebra/algebra_polynomial_api.cpp
+    src/algebra/polynomial_sparse_interpolation.cpp
     src/algebra/algebraic_number.cpp
     src/algebra/algebraic_number_bridge.cpp
     src/algebra/algebraic_tower_bridge.cpp
@@ -266,6 +269,11 @@ set(CAS_LINALG_SOURCES
     src/linalg/matrix_bareiss.cpp
     src/linalg/matrix_lu.cpp
     src/linalg/matrix_qr.cpp
+    src/linalg/matrix_expr_helpers.cpp
+    src/linalg/matrix_cholesky.cpp
+    src/linalg/matrix_determinant.cpp
+    src/linalg/matrix_companion.cpp
+    src/linalg/matrix_hermite.cpp
 )
 
 set(CAS_NUMERIC_SOURCES
@@ -474,6 +482,9 @@ if(CAS_ENABLE_TESTING)
         test/unit/calculus/test_differentiate_smoke.cpp
         test/unit/calculus/test_limit_smoke.cpp
         test/unit/calculus/test_integrate_risch_smoke.cpp
+        test/unit/calculus/test_integrate_substitution.cpp
+        test/unit/algebra/test_polynomial_sparse_interpolation.cpp
+        test/unit/symbolic/test_summation_gosper.cpp
         test/unit/algebra/test_factorization_polynomials_smoke.cpp
         test/unit/algebra/test_polynomial_gcd_multivariate_smoke.cpp
         test/unit/parser/test_decimal_to_rational.cpp
@@ -503,6 +514,13 @@ if(CAS_ENABLE_TESTING)
         test/unit/calculus/test_ode_laplace.cpp
         test/unit/symbolic/test_jacobi.cpp
         test/unit/linalg/test_qr_decomposition.cpp
+test/unit/linalg/test_cholesky_ldlt.cpp
+test/unit/linalg/test_companion_matrix.cpp
+test/unit/linalg/test_jordan_certificator.cpp
+test/unit/linalg/test_special_determinants.cpp
+test/unit/linalg/test_smith_qx.cpp
+test/unit/linalg/test_hermite.cpp
+test/unit/linalg/test_f4_stress.cpp
         test/unit/calculus/test_pfd_inverse_laplace.cpp
         test/unit/symbolic/test_lambert_w.cpp
         test/unit/algebra/test_cyclotomic_mobius.cpp

@@ -1,161 +1,167 @@
 #include "cas/linalg/Matrix.hpp"
+#include "cas/linalg/matrix_expr_helpers.hpp"
+#include "cas/algebra.hpp"
+#include "cas/error_helpers.hpp"
 
 #include <optional>
 #include <string>
 #include <utility>
 
 namespace cas::linalg {
+
 namespace {
 
 [[nodiscard]] CASError make_error(CASErrorKind kind, std::string message) {
     return CASError{.kind = kind, .message = std::move(message), .hint = std::nullopt};
 }
 
-[[nodiscard]] ExprPtr integer(symbolic::CASContext& ctx, long long value) {
-    return ctx.arena().make<IntegerLit>(BigInt(value));
+void swap_rows(MatrixExpr& matrix, MatrixExpr& identity, std::size_t r1, std::size_t r2) {
+    if (r1 == r2) return;
+    for (std::size_t c = 0; c < matrix.cols(); ++c) std::swap(matrix(r1, c), matrix(r2, c));
+    for (std::size_t c = 0; c < identity.cols(); ++c) std::swap(identity(r1, c), identity(r2, c));
 }
 
-[[nodiscard]] ExprPtr neg(symbolic::CASContext& ctx, ExprPtr operand) {
-    return ctx.arena().make<Unary>(UnaryOp::Neg, operand);
-}
-
-[[nodiscard]] Result<ExprPtr> simplify(symbolic::CASContext& ctx, ExprPtr expr) {
-    return ctx.simplify(expr);
-}
-
-[[nodiscard]] bool is_zero_expr(ExprPtr expr) {
-    if (const auto* integer_lit = expr_cast<IntegerLit>(expr)) {
-        return integer_lit->value.is_zero();
+[[nodiscard]] Result<void> scale_row(MatrixExpr& matrix, MatrixExpr& identity, std::size_t row, ExprPtr divisor, symbolic::CASContext& ctx) {
+    if (is_one_expr(divisor)) return ok();
+    if (!is_known_nonzero(divisor, ctx)) {
+        return make_unimplemented<void>(
+            "linalg", "inverse",
+            "pivot expression cannot be decided nonzero",
+            error::reason_codes::LINALG_RREF_UNDECIDABLE_PIVOT,
+            "Add assumptions about pivot variables", "L3-13");
     }
-    if (const auto* rational_lit = expr_cast<RationalLit>(expr)) {
-        return rational_lit->numerator.is_zero();
+    for (std::size_t c = 0; c < matrix.cols(); ++c) {
+        auto res = div_expr(ctx, matrix(row, c), divisor);
+        if (res.is_error()) return fail<void>(res.error());
+        matrix(row, c) = res.value();
     }
-    return false;
-}
-
-[[nodiscard]] bool is_one_expr(ExprPtr expr) {
-    if (const auto* integer_lit = expr_cast<IntegerLit>(expr)) {
-        return integer_lit->value == BigInt(1);
+    for (std::size_t c = 0; c < identity.cols(); ++c) {
+        auto res = div_expr(ctx, identity(row, c), divisor);
+        if (res.is_error()) return fail<void>(res.error());
+        identity(row, c) = res.value();
     }
-    if (const auto* rational_lit = expr_cast<RationalLit>(expr)) {
-        return rational_lit->numerator == BigInt(1) && rational_lit->denominator == BigInt(1);
+    return ok();
+}
+
+[[nodiscard]] Result<void> eliminate_row(MatrixExpr& matrix, MatrixExpr& identity, std::size_t target, std::size_t pivot_row, std::size_t col, symbolic::CASContext& ctx) {
+    ExprPtr factor = matrix(target, col);
+    if (is_zero_expr(factor)) return ok();
+
+    for (std::size_t c = 0; c < matrix.cols(); ++c) {
+        auto prod = mul_expr(ctx, factor, matrix(pivot_row, c));
+        if (prod.is_error()) return fail<void>(prod.error());
+        auto diff = sub_expr(ctx, matrix(target, c), prod.value());
+        if (diff.is_error()) return fail<void>(diff.error());
+        auto simp = simplify(ctx, diff.value());
+        matrix(target, c) = simp.is_ok() ? simp.value() : diff.value();
     }
-    return false;
-}
-
-[[nodiscard]] bool is_structurally_nonzero(ExprPtr expr) {
-    if (!expr) return false;
-    if (const auto* i = expr_cast<IntegerLit>(expr)) return !i->value.is_zero();
-    if (const auto* r = expr_cast<RationalLit>(expr)) return !r->numerator.is_zero();
-    if (expr_is<Constant>(expr)) {
-        auto c = expr_ref<Constant>(expr).value;
-        return c != MathConstant::NaN;
+    for (std::size_t c = 0; c < identity.cols(); ++c) {
+        auto prod = mul_expr(ctx, factor, identity(pivot_row, c));
+        if (prod.is_error()) return fail<void>(prod.error());
+        auto diff = sub_expr(ctx, identity(target, c), prod.value());
+        if (diff.is_error()) return fail<void>(diff.error());
+        auto simp = simplify(ctx, diff.value());
+        identity(target, c) = simp.is_ok() ? simp.value() : diff.value();
     }
-    if (expr_is<Symbol>(expr)) return true;
-    return !is_zero_expr(expr);
+    return ok();
 }
 
-[[nodiscard]] bool is_known_nonzero_expr(ExprPtr expr) {
-    return is_structurally_nonzero(expr);
-}
-
-[[nodiscard]] Result<ExprPtr> div_expr(symbolic::CASContext& ctx, ExprPtr lhs, ExprPtr rhs) {
-    if (is_zero_expr(lhs)) return ok(integer(ctx, 0));
-    if (is_one_expr(rhs)) return ok(lhs);
-    if (lhs == rhs) return ok(integer(ctx, 1));
-    return simplify(ctx, ctx.arena().make<Binary>(BinaryOp::Div, lhs, rhs));
-}
-
-[[nodiscard]] Result<MatrixExpr> minor_matrix(const MatrixExpr& matrix, std::size_t skip_row, std::size_t skip_col) {
-    const std::size_t n = matrix.rows();
-    MatrixExpr result(n - 1U, n - 1U);
-    std::size_t target_row = 0U;
-    for (std::size_t row = 0; row < n; ++row) {
-        if (row == skip_row) continue;
-        std::size_t target_col = 0U;
-        for (std::size_t col = 0; col < n; ++col) {
-            if (col == skip_col) continue;
-            result(target_row, target_col) = matrix(row, col);
-            ++target_col;
-        }
-        ++target_row;
-    }
-    return ok(std::move(result));
-}
-
-}  // namespace
+} // namespace
 
 Result<MatrixExpr> inverse(const MatrixExpr& matrix, symbolic::CASContext& ctx) {
-    if (matrix.rows() != matrix.cols()) {
+    const std::size_t n = matrix.rows();
+    if (n != matrix.cols()) {
         return fail<MatrixExpr>(make_error(CASErrorKind::InvalidArgument, "Inverse requires a square matrix"));
     }
+    if (n == 0) {
+        return fail<MatrixExpr>(make_error(CASErrorKind::InvalidArgument, "Inverse of empty matrix"));
+    }
 
-    const std::size_t n = matrix.rows();
-    if (n == 0U) return ok(MatrixExpr(0U, 0U));
+    if (n == 2) {
+        auto det_res = determinant(matrix, ctx);
+        if (det_res.is_error()) return fail<MatrixExpr>(det_res.error());
+        ExprPtr det = det_res.value();
+        if (is_zero_expr(det)) return fail<MatrixExpr>(make_error(CASErrorKind::Undefined, "inverse: matrix is singular"));
 
-    // Small symbolic inverses stay in adjugate form; larger matrices use RREF
-    // with delayed normalization to control expression swell.
-    if (n <= 3U) {
-        auto det = determinant(matrix, ctx);
-        if (det.is_error()) return fail<MatrixExpr>(det.error());
-        if (is_zero_expr(det.value())) {
-            return fail<MatrixExpr>(make_error(CASErrorKind::Undefined, "Singular matrix has no inverse"));
-        }
-
-        MatrixExpr result(n, n);
-        if (n == 1U) {
-            auto val = div_expr(ctx, integer(ctx, 1), matrix(0U, 0U));
-            if (val.is_error()) return fail<MatrixExpr>(val.error());
-            result(0U, 0U) = val.value();
-            return ok(std::move(result));
-        }
-
-        for (std::size_t row = 0; row < n; ++row) {
-            for (std::size_t col = 0; col < n; ++col) {
-                auto minor = minor_matrix(matrix, row, col);
-                auto cofactor = determinant(minor.value(), ctx);
-                if (cofactor.is_error()) return fail<MatrixExpr>(cofactor.error());
-                ExprPtr val = cofactor.value();
-                if (((row + col) % 2U) != 0U) {
-                    auto negated = simplify(ctx, neg(ctx, val));
-                    if (negated.is_error()) return fail<MatrixExpr>(negated.error());
-                    val = negated.value();
-                }
-                auto entry = div_expr(ctx, val, det.value());
-                if (entry.is_error()) return fail<MatrixExpr>(entry.error());
-                result(col, row) = entry.value();
+        MatrixExpr res(2, 2);
+        auto d_res = div_expr(ctx, matrix(1, 1), det);
+        auto mb_r = negate_expr(ctx, matrix(0, 1));
+        auto mc_r = negate_expr(ctx, matrix(1, 0));
+        if (mb_r.is_error() || mc_r.is_error()) return fail<MatrixExpr>(make_error(CASErrorKind::InternalError, "negate failed"));
+        
+        auto mb_res = div_expr(ctx, mb_r.value(), det);
+        auto mc_res = div_expr(ctx, mc_r.value(), det);
+        auto a_res = div_expr(ctx, matrix(0, 0), det);
+        
+        if (d_res.is_error() || mb_res.is_error() || mc_res.is_error() || a_res.is_error())
+            return fail<MatrixExpr>(make_error(CASErrorKind::InternalError, "2x2 inverse failed"));
+            
+        res(0, 0) = d_res.value();
+        res(0, 1) = mb_res.value();
+        res(1, 0) = mc_res.value();
+        res(1, 1) = a_res.value();
+        
+        for (std::size_t i = 0; i < 2; ++i) {
+            for (std::size_t j = 0; j < 2; ++j) {
+                auto s = simplify(ctx, res(i, j));
+                if (s.is_ok()) res(i, j) = s.value();
             }
         }
-        return ok(std::move(result));
+        return ok(std::move(res));
     }
 
-    MatrixExpr augmented(n, 2U * n);
-    for (std::size_t row = 0; row < n; ++row) {
-        for (std::size_t col = 0; col < n; ++col) {
-            augmented(row, col) = matrix(row, col);
-        }
-        for (std::size_t col = 0; col < n; ++col) {
-            augmented(row, n + col) = integer(ctx, (row == col) ? 1 : 0);
-        }
-    }
-
-    auto reduced_res = rref(augmented, ctx);
-    if (reduced_res.is_error()) return fail<MatrixExpr>(reduced_res.error());
-    const auto& reduced = reduced_res.value();
+    MatrixExpr a(n, n, matrix.elements());
+    auto id_res = identity(n, ctx);
+    if (id_res.is_error()) return id_res;
+    MatrixExpr inv = std::move(id_res.value());
 
     for (std::size_t i = 0; i < n; ++i) {
-        if (!is_known_nonzero_expr(reduced(i, i))) {
-            return fail<MatrixExpr>(make_error(CASErrorKind::Undefined, "Singular matrix has no inverse"));
+        // Find pivot
+        std::size_t sel = n;
+        PivotScore best{-1, 0, 0};
+        for (std::size_t r = i; r < n; ++r) {
+            if (is_zero_expr(a(r, i))) continue;
+            PivotScore s = make_pivot_score(a(r, i), ctx);
+            if (sel == n || s > best) {
+                best = s;
+                sel = r;
+                if (s.certainty == 3) break;
+            }
+        }
+
+        if (sel == n || best.certainty < 0) {
+            return fail<MatrixExpr>(make_error(CASErrorKind::Undefined, "Matrix is singular (or pivot cannot be decided nonzero)"));
+        }
+
+        swap_rows(a, inv, i, sel);
+
+        auto scale_res = scale_row(a, inv, i, a(i, i), ctx);
+        if (scale_res.is_error()) return fail<MatrixExpr>(scale_res.error());
+
+        for (std::size_t r = 0; r < n; ++r) {
+            if (r != i) {
+                auto elim_res = eliminate_row(a, inv, r, i, i, ctx);
+                if (elim_res.is_error()) return fail<MatrixExpr>(elim_res.error());
+            }
         }
     }
 
-    MatrixExpr result(n, n);
-    for (std::size_t row = 0; row < n; ++row) {
-        for (std::size_t col = 0; col < n; ++col) {
-            result(row, col) = reduced(row, n + col);
+    for (std::size_t i = 0; i < n; ++i) {
+        for (std::size_t j = 0; j < n; ++j) {
+            auto s = simplify(ctx, inv(i, j));
+            if (s.is_ok()) {
+                auto exp = algebra::expand(s.value(), ctx);
+                auto val = exp.is_ok() ? exp.value() : s.value();
+                auto tg = algebra::together(val, ctx);
+                inv(i, j) = tg.is_ok() ? tg.value() : val;
+            }
         }
     }
-    return ok(std::move(result));
+    
+    // DEBUG
+    // if (n == 2) std::cout << "INV(0,0): " << formatter::format(inv(0,0)) << std::endl;
+
+    return ok(std::move(inv));
 }
 
-}  // namespace cas::linalg
+} // namespace cas::linalg

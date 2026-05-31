@@ -290,6 +290,16 @@ struct CASContextParams {
         return max_galois_frobenius_primes_;
     }
 
+    // ── Smith Normal Form stabilization ─────────────────────────────────────
+    // multiplier used to calculate the stabilization guard (rows + cols) * multiplier.
+    // Default 64.
+    void set_smith_stabilization_multiplier(std::size_t n) noexcept {
+        smith_stabilization_multiplier_ = n;
+    }
+    [[nodiscard]] std::size_t smith_stabilization_multiplier() const noexcept {
+        return smith_stabilization_multiplier_;
+    }
+
 protected:
     // All fields with their mathematically-derived or documented defaults.
     // Setters with clamping are CASContext out-of-line methods (context_core.cpp).
@@ -326,6 +336,7 @@ protected:
     std::size_t   van_hoeij_lll_threshold_{10U};  // r > this → mandatory LLL
     std::uint64_t timeout_check_interval_{1024U};
     std::size_t   max_galois_frobenius_primes_{30U};
+    std::size_t   smith_stabilization_multiplier_{64U};
     bool          enable_f5_signature_pruning_{false};  // F3.3-F5-WIRE
 };
 

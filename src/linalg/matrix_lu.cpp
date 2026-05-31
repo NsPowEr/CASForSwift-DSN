@@ -12,6 +12,7 @@
 // to bareiss for det/rank, or permuted LU when implemented).
 
 #include "cas/linalg/Matrix.hpp"
+#include "cas/linalg/matrix_expr_helpers.hpp"
 
 #include "cas/algebra.hpp"
 #include "cas/ast.hpp"
@@ -19,27 +20,11 @@
 #include "cas/error_helpers.hpp"
 #include "cas/symbolic.hpp"
 
+#include <algorithm>
+#include <cstddef>
 #include <vector>
 
 namespace cas::linalg {
-
-namespace {
-
-[[nodiscard]] ExprPtr make_zero(symbolic::CASContext& ctx) {
-    return ctx.arena().make<IntegerLit>(BigInt(0));
-}
-[[nodiscard]] ExprPtr make_one(symbolic::CASContext& ctx) {
-    return ctx.arena().make<IntegerLit>(BigInt(1));
-}
-
-[[nodiscard]] bool is_zero_expr(ExprPtr e) {
-    if (!e) return true;
-    if (const auto* il = expr_cast<IntegerLit>(e)) return il->value.is_zero();
-    if (const auto* rl = expr_cast<RationalLit>(e)) return rl->numerator.is_zero();
-    return false;
-}
-
-}  // namespace
 
 Result<LUDecomposition> lu_decompose(const MatrixExpr& matrix,
                                       symbolic::CASContext& ctx) {
@@ -59,28 +44,29 @@ Result<LUDecomposition> lu_decompose(const MatrixExpr& matrix,
     MatrixExpr U(n, n);
     for (std::size_t i = 0; i < n; ++i) {
         for (std::size_t j = 0; j < n; ++j) {
-            L(i, j) = (i == j) ? make_one(ctx) : make_zero(ctx);
-            U(i, j) = make_zero(ctx);
+            L(i, j) = (i == j) ? integer(ctx, 1) : integer(ctx, 0);
+            U(i, j) = integer(ctx, 0);
         }
     }
 
-    AstArena& arena = ctx.arena();
     for (std::size_t k = 0; k < n; ++k) {
         // Compute U[k][j] for j ≥ k.
         for (std::size_t j = k; j < n; ++j) {
-            ExprPtr sum = make_zero(ctx);
+            ExprPtr sum = integer(ctx, 0);
             for (std::size_t s = 0; s < k; ++s) {
-                ExprPtr prod = arena.make<Binary>(BinaryOp::Mul, L(k, s), U(s, j));
-                sum = arena.make<Binary>(BinaryOp::Add, sum, prod);
+                auto prod = mul_expr(ctx, L(k, s), U(s, j));
+                if (prod.is_error()) return fail<LUDecomposition>(prod.error());
+                auto next_sum = add_expr(ctx, sum, prod.value());
+                if (next_sum.is_error()) return fail<LUDecomposition>(next_sum.error());
+                sum = next_sum.value();
             }
-            ExprPtr u_kj = arena.make<Binary>(BinaryOp::Sub, matrix(k, j), sum);
-            auto simp = ctx.simplify(u_kj);
-            U(k, j) = simp.is_ok() ? simp.value() : u_kj;
+            auto u_kj = sub_expr(ctx, matrix(k, j), sum);
+            if (u_kj.is_error()) return fail<LUDecomposition>(u_kj.error());
+            U(k, j) = u_kj.value();
         }
 
         // Check pivot U[k][k] ≠ 0.
         if (is_zero_expr(U(k, k))) {
-            // F0.8-MIGRATED
             return make_unimplemented<LUDecomposition>(
                 "linalg", "lu_decompose",
                 "zero pivot at row " + std::to_string(k) + " in Doolittle LU",
@@ -91,15 +77,21 @@ Result<LUDecomposition> lu_decompose(const MatrixExpr& matrix,
 
         // Compute L[i][k] for i > k.
         for (std::size_t i = k + 1; i < n; ++i) {
-            ExprPtr sum = make_zero(ctx);
+            ExprPtr sum = integer(ctx, 0);
             for (std::size_t s = 0; s < k; ++s) {
-                ExprPtr prod = arena.make<Binary>(BinaryOp::Mul, L(i, s), U(s, k));
-                sum = arena.make<Binary>(BinaryOp::Add, sum, prod);
+                auto prod = mul_expr(ctx, L(i, s), U(s, k));
+                if (prod.is_error()) return fail<LUDecomposition>(prod.error());
+                auto next_sum = add_expr(ctx, sum, prod.value());
+                if (next_sum.is_error()) return fail<LUDecomposition>(next_sum.error());
+                sum = next_sum.value();
             }
-            ExprPtr num = arena.make<Binary>(BinaryOp::Sub, matrix(i, k), sum);
-            ExprPtr quot = arena.make<Binary>(BinaryOp::Div, num, U(k, k));
-            auto t = algebra::together(quot, ctx);
-            ExprPtr norm = t.is_ok() ? t.value() : quot;
+            auto num = sub_expr(ctx, matrix(i, k), sum);
+            if (num.is_error()) return fail<LUDecomposition>(num.error());
+            auto quot = div_expr(ctx, num.value(), U(k, k));
+            if (quot.is_error()) return fail<LUDecomposition>(quot.error());
+            
+            auto t = algebra::together(quot.value(), ctx);
+            ExprPtr norm = t.is_ok() ? t.value() : quot.value();
             auto simp = ctx.simplify(norm);
             L(i, k) = simp.is_ok() ? simp.value() : norm;
         }
@@ -127,37 +119,43 @@ Result<PLUDecomposition> lu_decompose_pivoted(const MatrixExpr& matrix,
     std::vector<std::size_t> P(n);
     for (std::size_t i = 0; i < n; ++i) P[i] = i;
 
-    AstArena& arena = ctx.arena();
     MatrixExpr L(n, n);
     MatrixExpr U(n, n);
     for (std::size_t i = 0; i < n; ++i) {
         for (std::size_t j = 0; j < n; ++j) {
-            L(i, j) = (i == j) ? make_one(ctx) : make_zero(ctx);
-            U(i, j) = make_zero(ctx);
+            L(i, j) = (i == j) ? integer(ctx, 1) : integer(ctx, 0);
+            U(i, j) = integer(ctx, 0);
         }
     }
 
     for (std::size_t k = 0; k < n; ++k) {
-        // Find best pivot row among rows [k, n) for column k.
-        // Use simple non-zero criterion (production: PivotScore).
+        // Find best pivot row among rows [k, n) for column k via PivotScore:
+        // numerico esatto > simbolico nonzero (penalizzato per complessità) > zero.
         std::size_t pivot_row = n;
+        PivotScore best_score{-1, 0, 0};
         for (std::size_t i = k; i < n; ++i) {
             // Compute candidate pivot value = A_perm[i][k] - Σ L[i][s]·U[s][k]
-            ExprPtr sum = make_zero(ctx);
+            ExprPtr sum = integer(ctx, 0);
             for (std::size_t s = 0; s < k; ++s) {
-                ExprPtr prod = arena.make<Binary>(BinaryOp::Mul, L(i, s), U(s, k));
-                sum = arena.make<Binary>(BinaryOp::Add, sum, prod);
+                auto prod = mul_expr(ctx, L(i, s), U(s, k));
+                if (prod.is_error()) return fail<PLUDecomposition>(prod.error());
+                auto next_sum = add_expr(ctx, sum, prod.value());
+                if (next_sum.is_error()) return fail<PLUDecomposition>(next_sum.error());
+                sum = next_sum.value();
             }
-            ExprPtr candidate = arena.make<Binary>(BinaryOp::Sub, A_perm(i, k), sum);
-            auto simp = ctx.simplify(candidate);
-            ExprPtr v = simp.is_ok() ? simp.value() : candidate;
-            if (!is_zero_expr(v)) {
+            auto cand_res = sub_expr(ctx, A_perm(i, k), sum);
+            if (cand_res.is_error()) return fail<PLUDecomposition>(cand_res.error());
+            ExprPtr v = cand_res.value();
+            
+            PivotScore score = is_zero_expr(v) ? PivotScore{-1, 0, 0} : make_pivot_score(v, ctx);
+            if (pivot_row == n || score > best_score) {
+                best_score = score;
                 pivot_row = i;
-                break;
+                if (score.certainty == 3) break;  // numerico esatto, ottimo
             }
         }
+        if (best_score.certainty < 0) pivot_row = n;
         if (pivot_row == n) {
-            // F0.8-MIGRATED
             return make_unimplemented<PLUDecomposition>(
                 "linalg", "lu_decompose_pivoted",
                 "singular matrix: all-zero pivot column " + std::to_string(k),
@@ -178,26 +176,35 @@ Result<PLUDecomposition> lu_decompose_pivoted(const MatrixExpr& matrix,
         }
         // Now compute U[k][j] for j ≥ k.
         for (std::size_t j = k; j < n; ++j) {
-            ExprPtr sum = make_zero(ctx);
+            ExprPtr sum = integer(ctx, 0);
             for (std::size_t s = 0; s < k; ++s) {
-                ExprPtr prod = arena.make<Binary>(BinaryOp::Mul, L(k, s), U(s, j));
-                sum = arena.make<Binary>(BinaryOp::Add, sum, prod);
+                auto prod = mul_expr(ctx, L(k, s), U(s, j));
+                if (prod.is_error()) return fail<PLUDecomposition>(prod.error());
+                auto next_sum = add_expr(ctx, sum, prod.value());
+                if (next_sum.is_error()) return fail<PLUDecomposition>(next_sum.error());
+                sum = next_sum.value();
             }
-            ExprPtr u_kj = arena.make<Binary>(BinaryOp::Sub, A_perm(k, j), sum);
-            auto simp = ctx.simplify(u_kj);
-            U(k, j) = simp.is_ok() ? simp.value() : u_kj;
+            auto u_kj = sub_expr(ctx, A_perm(k, j), sum);
+            if (u_kj.is_error()) return fail<PLUDecomposition>(u_kj.error());
+            U(k, j) = u_kj.value();
         }
         // L[i][k] per i > k.
         for (std::size_t i = k + 1; i < n; ++i) {
-            ExprPtr sum = make_zero(ctx);
+            ExprPtr sum = integer(ctx, 0);
             for (std::size_t s = 0; s < k; ++s) {
-                ExprPtr prod = arena.make<Binary>(BinaryOp::Mul, L(i, s), U(s, k));
-                sum = arena.make<Binary>(BinaryOp::Add, sum, prod);
+                auto prod = mul_expr(ctx, L(i, s), U(s, k));
+                if (prod.is_error()) return fail<PLUDecomposition>(prod.error());
+                auto next_sum = add_expr(ctx, sum, prod.value());
+                if (next_sum.is_error()) return fail<PLUDecomposition>(next_sum.error());
+                sum = next_sum.value();
             }
-            ExprPtr num = arena.make<Binary>(BinaryOp::Sub, A_perm(i, k), sum);
-            ExprPtr quot = arena.make<Binary>(BinaryOp::Div, num, U(k, k));
-            auto t = algebra::together(quot, ctx);
-            ExprPtr norm = t.is_ok() ? t.value() : quot;
+            auto num = sub_expr(ctx, A_perm(i, k), sum);
+            if (num.is_error()) return fail<PLUDecomposition>(num.error());
+            auto quot = div_expr(ctx, num.value(), U(k, k));
+            if (quot.is_error()) return fail<PLUDecomposition>(quot.error());
+            
+            auto t = algebra::together(quot.value(), ctx);
+            ExprPtr norm = t.is_ok() ? t.value() : quot.value();
             auto simp = ctx.simplify(norm);
             L(i, k) = simp.is_ok() ? simp.value() : norm;
         }
@@ -219,31 +226,40 @@ Result<std::vector<ExprPtr>> lu_solve(const LUDecomposition& lu,
             CASErrorKind::InvalidArgument,
             "lu_solve: b size mismatch", std::nullopt});
     }
-    AstArena& arena = ctx.arena();
+
     // Forward substitution: L·y = b. L unit triangular → y[i] = b[i] - Σ L[i][j] y[j]
     std::vector<ExprPtr> y(n);
     for (std::size_t i = 0; i < n; ++i) {
-        ExprPtr sum = arena.make<IntegerLit>(BigInt(0));
+        ExprPtr sum = integer(ctx, 0);
         for (std::size_t j = 0; j < i; ++j) {
-            ExprPtr prod = arena.make<Binary>(BinaryOp::Mul, lu.L(i, j), y[j]);
-            sum = arena.make<Binary>(BinaryOp::Add, sum, prod);
+            auto prod = mul_expr(ctx, lu.L(i, j), y[j]);
+            if (prod.is_error()) return fail<std::vector<ExprPtr>>(prod.error());
+            auto next_sum = add_expr(ctx, sum, prod.value());
+            if (next_sum.is_error()) return fail<std::vector<ExprPtr>>(next_sum.error());
+            sum = next_sum.value();
         }
-        ExprPtr yi = arena.make<Binary>(BinaryOp::Sub, b[i], sum);
-        auto simp = ctx.simplify(yi);
-        y[i] = simp.is_ok() ? simp.value() : yi;
+        auto yi = sub_expr(ctx, b[i], sum);
+        if (yi.is_error()) return fail<std::vector<ExprPtr>>(yi.error());
+        y[i] = yi.value();
     }
     // Back substitution: U·x = y. x[i] = (y[i] - Σ_{j>i} U[i][j] x[j]) / U[i][i]
     std::vector<ExprPtr> x(n);
     for (std::ptrdiff_t i = static_cast<std::ptrdiff_t>(n) - 1; i >= 0; --i) {
-        ExprPtr sum = arena.make<IntegerLit>(BigInt(0));
+        ExprPtr sum = integer(ctx, 0);
         for (std::size_t j = static_cast<std::size_t>(i) + 1; j < n; ++j) {
-            ExprPtr prod = arena.make<Binary>(BinaryOp::Mul, lu.U(i, j), x[j]);
-            sum = arena.make<Binary>(BinaryOp::Add, sum, prod);
+            auto prod = mul_expr(ctx, lu.U(i, j), x[j]);
+            if (prod.is_error()) return fail<std::vector<ExprPtr>>(prod.error());
+            auto next_sum = add_expr(ctx, sum, prod.value());
+            if (next_sum.is_error()) return fail<std::vector<ExprPtr>>(next_sum.error());
+            sum = next_sum.value();
         }
-        ExprPtr num = arena.make<Binary>(BinaryOp::Sub, y[i], sum);
-        ExprPtr quot = arena.make<Binary>(BinaryOp::Div, num, lu.U(i, i));
-        auto t = algebra::together(quot, ctx);
-        ExprPtr norm = t.is_ok() ? t.value() : quot;
+        auto num = sub_expr(ctx, y[i], sum);
+        if (num.is_error()) return fail<std::vector<ExprPtr>>(num.error());
+        auto quot = div_expr(ctx, num.value(), lu.U(i, i));
+        if (quot.is_error()) return fail<std::vector<ExprPtr>>(quot.error());
+        
+        auto t = algebra::together(quot.value(), ctx);
+        ExprPtr norm = t.is_ok() ? t.value() : quot.value();
         auto simp = ctx.simplify(norm);
         x[i] = simp.is_ok() ? simp.value() : norm;
     }

@@ -32,6 +32,13 @@ struct QuotientView {
     const Symbol& var,
     symbolic::CASContext& context);
 
+/// @brief Automated Variable Substitution (u-substitution recognition).
+/// Returns nullopt if no substitution was found.
+[[nodiscard]] Result<std::optional<ExprPtr>> integrate_by_substitution(
+    const ExprPtr& integrand,
+    const Symbol& var,
+    symbolic::CASContext& ctx);
+
 /// @brief Partial Risch Algorithm for Logarithmic and Exponential extensions.
 [[nodiscard]] Result<ExprPtr> integrate_risch(
     ExprPtr expr,

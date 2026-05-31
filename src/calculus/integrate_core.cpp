@@ -34,6 +34,14 @@ Result<ExprPtr> Integrator::integrate(ExprPtr expr, const Symbol& var) {
         }
     }
 
+    // NEW: Try general u-substitution recognition (CAS-L2-16)
+    {
+        auto sub_res = integrate_by_substitution(expr, var, context_);
+        if (sub_res.is_ok() && sub_res.value().has_value()) {
+            return ok(sub_res.value().value());
+        }
+    }
+
     // 2. Simplify then retry elementary patterns
     auto simplified = context_.simplify(expr);
     if (simplified.is_ok() && !structural_equal(simplified.value(), expr)) {

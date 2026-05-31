@@ -810,6 +810,46 @@ tutti gli input; questi sono upgrade prestazionali per casi specifici.
   fattori e compone via direct-product check.
 - **Blocking dependency**: nessuna; refactor disponibile.
 
+### HC-F43-CIRCULANT-GT4 (aperto)
+
+- **Stato**: APERTO (introdotto da F4.3).
+- **File**: `src/linalg/matrix_structured_determinant.cpp` in `determinant_circulant_if_applicable`.
+- **Categoria**: Cat. 4 (bail-out su forma).
+- **Descrizione**: per n > 4 ritorna nullopt (usa Bareiss standard) perché la formula chiusa richiede estensioni ciclotomiche Q(ω_n).
+- **Fix corretto**: implementare aritmetica in Q(ω_n) e usare formula ∏ P(ω^k).
+- **Blocking dependency**: nessuna.
+
+### HC-F43-TOEPLITZ (aperto)
+
+- **Stato**: APERTO (introdotto da F4.3).
+- **File**: `src/linalg/matrix_structured_determinant.cpp` in `determinant_toeplitz_if_applicable`.
+- **Categoria**: Cat. 4 (bail-out su forma, fast-path mancante).
+- **Descrizione**: il detector ritorna sempre `nullopt`; le matrici Toeplitz cadono su general path (Bareiss/cofactor O(n³)) anziché beneficiare di Trench/Levinson simbolico O(n²). Risultato è corretto, solo non ottimo.
+- **Fix corretto**: implementare algoritmo di Trench/Levinson simbolico (richiede gestione singolarità intermedia + together).
+- **Blocking dependency**: nessuna.
+
+### HC-F4-QR-SYMBOLIC-TIMEOUT (aperto)
+
+- **Stato**: APERTO (pre-esistente, emerso da test cert F4.5).
+- **File**: `src/linalg/matrix_qr.cpp` (Householder); cascade in `simplify` core.
+- **Categoria**: Cat. 1 (budget non configurabile) + Cat. 9 (intervalli polling fissi).
+- **Descrizione**: per matrici 8×8 random a coefficienti razionali, QR Householder produce R contenente `sqrt(Σ x_i²)` su tutta la diagonale; la cascade `simplify(2*sqrt(p/q)*x_0)` triggera factorization su numeratore/denominatore razionali grandi, esaurendo il budget `ctx.simplify_timeout`. Il fix preliminare in `matrix_expr_helpers.cpp::sym_norm` evita un `simplify(sqrt(...))` esplicito ma il bottleneck rimane in simplify globale.
+- **Test impattati**: `F4StressTest.Householder_QR_8x8_RandomQ_CorrectAndTimed` (timeout 79s), `QRTest.SymbolicQR_DefaultSignConvention_2x2` (skipped per timeout 1.6s su 2×2 simbolico).
+- **Fix corretto**:
+  - aggiungere fast-path `simplify(sqrt(a)*sqrt(a)) → a` riconoscendo Pow/FuncCall stesso pointer (assunzione `a ≥ 0` valida per sum-of-squares);
+  - oppure introdurre `Q(sqrt)` extension explicit con simplifier dedicato (lazy normal form);
+  - oppure QR via Cholesky di A^T A con LDL^T (no-sqrt) + ricostruzione finale.
+- **Blocking dependency**: nessuna; richiede ridisegno simplify rule per radici.
+
+### HC-F43-BANDED (aperto)
+
+- **Stato**: APERTO (introdotto da F4.3).
+- **File**: `src/linalg/matrix_structured_determinant.cpp` in `determinant_banded_if_applicable`.
+- **Categoria**: Cat. 4 (bail-out su forma, fast-path mancante).
+- **Descrizione**: il detector ora calcola la bandwidth k della matrice; per k≥2 ritorna `nullopt` perché LU specializzato banded (O(n·k²)) non è implementato. Casi k=0/1 sono gestiti dai detector diagonale/tridiagonale. Risultato sempre corretto via fallback Bareiss O(n³).
+- **Fix corretto**: implementare LU banded simbolico con storage ridotto a (2k+1) bande.
+- **Blocking dependency**: nessuna.
+
 ## Note operative
 
 - **Cadenza revisione**: ad ogni nuova sessione, leggere questo file per primo

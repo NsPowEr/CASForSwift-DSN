@@ -16,8 +16,13 @@ public:
     size_t rows() const { return rows_; }
     size_t cols() const { return cols_; }
     const std::vector<T>& elements() const { return data_; }
+    std::vector<T>& elements() { return data_; }
     T& operator()(size_t r, size_t c) { return data_[r * cols_ + c]; }
     const T& operator()(size_t r, size_t c) const { return data_[r * cols_ + c]; }
+    
+    void fill(const T& value) {
+        std::fill(data_.begin(), data_.end(), value);
+    }
 private:
     size_t rows_, cols_;
     std::vector<T> data_;
@@ -74,6 +79,27 @@ struct QRDecomposition {
 };
 [[nodiscard]] Result<QRDecomposition> qr_decompose(
     const MatrixExpr& matrix, symbolic::CASContext& ctx);
+
+// F4.1c — Cholesky LDL^T per matrici simmetriche.
+// A = L · D · L^T, con L unit-lower triangular e D diagonale (storata come
+// vettore di n entries). Non richiede sqrt (rispetto a Cholesky classico L·L^T)
+// e funziona anche per matrici indefinite finché tutti i D_j != 0 (no
+// Bunch-Kaufman pivoting in questa versione: fallisce esplicitamente con
+// reason code se D_j = 0).  Requisito: A simmetrica (verificato).
+struct LDLTDecomposition {
+    MatrixExpr L;
+    std::vector<ExprPtr> D;
+};
+[[nodiscard]] Result<LDLTDecomposition> cholesky_ldlt(
+    const MatrixExpr& matrix, symbolic::CASContext& ctx);
+
+// F4.2d — Companion matrix di p(x) = c_0 + c_1 x + ... + c_{n-1} x^{n-1} + x^n.
+// Restituisce la matrice n×n con 1 sulla sub-diagonale e [-c_0, -c_1, ...,
+// -c_{n-1}] nell'ultima colonna (forma di Frobenius standard).  Richiede
+// che `polynomial` sia monico in `var` (lc = 1 dopo normalizzazione).
+[[nodiscard]] Result<MatrixExpr> companion_matrix(
+    ExprPtr polynomial, const Symbol& var, symbolic::CASContext& ctx);
+
 Result<std::vector<ExprPtr>> linsolve(const MatrixExpr& a, const std::vector<ExprPtr>& b, symbolic::CASContext& ctx);
 Result<std::size_t> rank(const MatrixExpr& matrix, symbolic::CASContext& ctx);
 Result<ExprPtr> trace(const MatrixExpr& matrix, symbolic::CASContext& ctx);
@@ -115,4 +141,16 @@ struct SmithNormalForm {
 };
 
 Result<SmithNormalForm> smith_normal_form(const MatrixExpr& matrix, symbolic::CASContext& ctx);
+
+// F4.2c — Hermite Normal Form (HNF). Per A m×n su PID R esiste U unimodulare
+// m×m tale che U·A = H è upper-triangular con entries "ridotte":
+//   - su Z:    0 ≤ H[i][j] < H[i][i] per j > i (modulo pivot)
+//   - su Q[x]: deg(H[i][j]) < deg(H[i][i]) per j > i
+// Routing: matrice tutta-integer → Z path; entries polinomiali in 1 var → Q[x].
+struct HermiteNormalForm {
+    MatrixExpr H;
+    MatrixExpr U;
+};
+[[nodiscard]] Result<HermiteNormalForm> hermite_normal_form(
+    const MatrixExpr& matrix, symbolic::CASContext& ctx);
 }

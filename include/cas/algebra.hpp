@@ -75,6 +75,43 @@ struct SquareFreeFactorization {
 // Boundary pubblico F3: API stabile, implementazione incrementale dietro Result<T>.
 [[nodiscard]] Result<ExprPtr> expand(ExprPtr expr, symbolic::CASContext& ctx);
 [[nodiscard]] Result<ExprPtr> collect(ExprPtr expr, const Symbol& var, symbolic::CASContext& ctx);
+
+// F4.2d — Estrai coefficienti di un polinomio univariato in `var`.
+// Restituisce vettore [c_0, c_1, ..., c_n] tale che expr = Σ c_k · var^k.
+// Coefficienti rimanenti possono dipendere da altri simboli. Fallisce se
+// `expr` non riducibile a forma polinomiale in `var` (es. termini con
+// var al denominatore o esponenti non interi non-negativi).
+[[nodiscard]] Result<std::vector<ExprPtr>> univariate_coefficients(
+    ExprPtr expr, const Symbol& var, symbolic::CASContext& ctx);
+
+// F4.2b — Bezout identity per polinomi su Q[x]: dati a, b restituisce
+// (g, s, t) tali che s·a + t·b = g = gcd(a, b).  Usato da Smith Q[x].
+struct PolynomialBezout {
+    ExprPtr gcd;
+    ExprPtr s;
+    ExprPtr t;
+};
+[[nodiscard]] Result<PolynomialBezout> polynomial_bezout(
+    ExprPtr a, ExprPtr b, const Symbol& var, symbolic::CASContext& ctx);
+
+// F4.2b — divisione esatta a / b in Q[x]. Fallisce se b non divide a esattamente.
+[[nodiscard]] Result<ExprPtr> polynomial_exact_divide(
+    ExprPtr a, ExprPtr b, const Symbol& var, symbolic::CASContext& ctx);
+
+/**
+ * @brief Performs polynomial division with remainder: a = q*b + r.
+ * @return struct with quotient q and remainder r.
+ */
+struct PolynomialDivMod {
+    ExprPtr quotient;
+    ExprPtr remainder;
+};
+[[nodiscard]] Result<PolynomialDivMod> polynomial_divmod(
+    ExprPtr a, ExprPtr b, const Symbol& var, symbolic::CASContext& ctx);
+
+// F4.2b — grado del polinomio in var (su Q[x], coefficienti razionali ammessi).
+[[nodiscard]] Result<std::size_t> polynomial_degree(
+    ExprPtr a, const Symbol& var, symbolic::CASContext& ctx);
 [[nodiscard]] Result<ExprPtr> together(ExprPtr expr, symbolic::CASContext& ctx);
 [[nodiscard]] Result<RationalParts> apart_num_den(ExprPtr expr, symbolic::CASContext& ctx);
 [[nodiscard]] Result<ExprPtr> polynomial_gcd(ExprPtr p, ExprPtr q, const Symbol& var, symbolic::CASContext& ctx);

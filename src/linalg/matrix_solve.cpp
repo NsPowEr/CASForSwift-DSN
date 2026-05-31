@@ -1,4 +1,5 @@
 #include "cas/linalg/Matrix.hpp"
+#include "cas/linalg/matrix_expr_helpers.hpp"
 #include "cas/error_helpers.hpp"
 
 #include <optional>
@@ -7,55 +8,11 @@
 #include <vector>
 
 namespace cas::linalg {
+
 namespace {
 
 [[nodiscard]] CASError make_error(CASErrorKind kind, std::string message) {
     return CASError{.kind = kind, .message = std::move(message), .hint = std::nullopt};
-}
-
-[[nodiscard]] ExprPtr integer(symbolic::CASContext& ctx, long long value) {
-    return ctx.arena().make<IntegerLit>(BigInt(value));
-}
-
-[[nodiscard]] Result<ExprPtr> simplify(symbolic::CASContext& ctx, ExprPtr expr) {
-    return ctx.simplify(expr);
-}
-
-[[nodiscard]] Result<ExprPtr> sub_expr(symbolic::CASContext& ctx, ExprPtr lhs, ExprPtr rhs) {
-    return simplify(ctx, ctx.arena().make<Binary>(BinaryOp::Sub, lhs, rhs));
-}
-
-[[nodiscard]] Result<ExprPtr> mul_expr(symbolic::CASContext& ctx, ExprPtr lhs, ExprPtr rhs) {
-    return simplify(ctx, ctx.arena().make<Binary>(BinaryOp::Mul, lhs, rhs));
-}
-
-[[nodiscard]] Result<ExprPtr> div_expr(symbolic::CASContext& ctx, ExprPtr lhs, ExprPtr rhs) {
-    return simplify(ctx, ctx.arena().make<Binary>(BinaryOp::Div, lhs, rhs));
-}
-
-[[nodiscard]] bool is_zero_expr(ExprPtr expr, symbolic::CASContext* ctx = nullptr) {
-    if (const auto* integer_lit = expr_cast<IntegerLit>(expr)) {
-        return integer_lit->value.is_zero();
-    }
-    if (const auto* rational_lit = expr_cast<RationalLit>(expr)) {
-        return rational_lit->numerator.is_zero();
-    }
-    if (ctx) {
-        auto eq_res = symbolic::mathematically_equal(expr, integer(*ctx, 0), *ctx);
-        if (eq_res.is_ok()) return eq_res.value();
-    }
-    return false;
-}
-
-[[nodiscard]] bool is_known_nonzero_expr(ExprPtr expr, symbolic::CASContext* ctx = nullptr) {
-    if (!expr) return false;
-    if (const auto* integer_lit = expr_cast<IntegerLit>(expr)) {
-        return !integer_lit->value.is_zero();
-    }
-    if (const auto* rational_lit = expr_cast<RationalLit>(expr)) {
-        return !rational_lit->numerator.is_zero();
-    }
-    return !is_zero_expr(expr, ctx);
 }
 
 void swap_rows(MatrixExpr& matrix, std::size_t lhs, std::size_t rhs) {
@@ -66,8 +23,8 @@ void swap_rows(MatrixExpr& matrix, std::size_t lhs, std::size_t rhs) {
 }
 
 [[nodiscard]] Result<void> scale_row(MatrixExpr& matrix, std::size_t row, ExprPtr divisor, symbolic::CASContext& ctx) {
-    if (!is_known_nonzero_expr(divisor, &ctx)) {
-        // F0.8-MIGRATED
+    if (is_one_expr(divisor)) return ok();
+    if (!is_known_nonzero(divisor, ctx)) {
         return make_unimplemented<void>(
             "linalg", "scale_row",
             "RREF pivot expression cannot be decided nonzero under current assumptions",
@@ -83,146 +40,174 @@ void swap_rows(MatrixExpr& matrix, std::size_t lhs, std::size_t rhs) {
     return ok();
 }
 
-[[nodiscard]] Result<void> eliminate_row(
-    MatrixExpr& matrix,
-    std::size_t target_row,
-    std::size_t pivot_row,
-    std::size_t start_col,
-    symbolic::CASContext& ctx) {
-    ExprPtr factor = matrix(target_row, start_col);
-    if (is_zero_expr(factor, &ctx)) return ok();
+[[nodiscard]] Result<void> eliminate_row(MatrixExpr& matrix, std::size_t target_row, std::size_t pivot_row, std::size_t col, symbolic::CASContext& ctx) {
+    ExprPtr factor = matrix(target_row, col);
+    if (is_zero_expr(factor)) return ok();
 
-    for (std::size_t col = start_col; col < matrix.cols(); ++col) {
-        auto product = mul_expr(ctx, factor, matrix(pivot_row, col));
+    for (std::size_t j = col; j < matrix.cols(); ++j) {
+        auto product = mul_expr(ctx, factor, matrix(pivot_row, j));
         if (product.is_error()) return fail<void>(product.error());
-        auto value = sub_expr(ctx, matrix(target_row, col), product.value());
-        if (value.is_error()) return fail<void>(value.error());
-        matrix(target_row, col) = value.value();
+        auto diff = sub_expr(ctx, matrix(target_row, j), product.value());
+        if (diff.is_error()) return fail<void>(diff.error());
+        matrix(target_row, j) = diff.value();
     }
     return ok();
 }
 
-[[nodiscard]] bool row_has_nonzero_coefficients(const MatrixExpr& matrix, std::size_t row, std::size_t coefficient_cols, symbolic::CASContext* ctx = nullptr) {
-    for (std::size_t col = 0; col < coefficient_cols; ++col) {
-        if (!is_zero_expr(matrix(row, col), ctx)) return true;
-    }
-    return false;
-}
-
-[[nodiscard]] std::optional<std::size_t> first_nonzero_column(
-    const MatrixExpr& matrix,
-    std::size_t row,
-    std::size_t coefficient_cols,
-    symbolic::CASContext* ctx = nullptr) {
-    for (std::size_t col = 0; col < coefficient_cols; ++col) {
-        if (!is_zero_expr(matrix(row, col), ctx)) return col;
-    }
-    return std::nullopt;
-}
-
-}  // namespace
+} // namespace
 
 Result<MatrixExpr> rref(const MatrixExpr& matrix, symbolic::CASContext& ctx) {
-    MatrixExpr result(matrix.rows(), matrix.cols(), matrix.elements());
-    std::size_t lead = 0U;
+    const std::size_t rows = matrix.rows();
+    const std::size_t cols = matrix.cols();
+    MatrixExpr result(rows, cols, matrix.elements());
 
-    for (std::size_t pivot_row = 0; pivot_row < result.rows() && lead < result.cols(); ++pivot_row) {
-        std::size_t candidate_row = pivot_row;
-        while (candidate_row < result.rows() && is_zero_expr(result(candidate_row, lead), &ctx)) {
-            ++candidate_row;
-        }
-        while (candidate_row == result.rows()) {
-            ++lead;
-            if (lead == result.cols()) {
-                return ok(std::move(result));
+    std::size_t pivot_row = 0;
+    for (std::size_t col = 0; col < cols && pivot_row < rows; ++col) {
+        // Find pivot
+        std::size_t sel_row = rows;
+        PivotScore best_score{-1, 0, 0};
+        for (std::size_t i = pivot_row; i < rows; ++i) {
+            if (is_zero_expr(result(i, col))) continue;
+            PivotScore score = make_pivot_score(result(i, col), ctx);
+            if (sel_row == rows || score > best_score) {
+                best_score = score;
+                sel_row = i;
+                if (score.certainty == 3) break;
             }
-            candidate_row = pivot_row;
-            while (candidate_row < result.rows() && is_zero_expr(result(candidate_row, lead), &ctx)) {
-                ++candidate_row;
+        }
+
+        if (sel_row == rows || best_score.certainty < 0) continue;
+
+        swap_rows(result, pivot_row, sel_row);
+
+        auto scale_res = scale_row(result, pivot_row, result(pivot_row, col), ctx);
+        if (scale_res.is_error()) return fail<MatrixExpr>(scale_res.error());
+
+        for (std::size_t i = 0; i < rows; ++i) {
+            if (i != pivot_row) {
+                auto elim_res = eliminate_row(result, i, pivot_row, col, ctx);
+                if (elim_res.is_error()) return fail<MatrixExpr>(elim_res.error());
             }
         }
-
-        swap_rows(result, pivot_row, candidate_row);
-        ExprPtr pivot = result(pivot_row, lead);
-        auto scaled = scale_row(result, pivot_row, pivot, ctx);
-        if (scaled.is_error()) return fail<MatrixExpr>(scaled.error());
-
-        for (std::size_t row = 0; row < result.rows(); ++row) {
-            if (row == pivot_row) continue;
-            auto eliminated = eliminate_row(result, row, pivot_row, lead, ctx);
-            if (eliminated.is_error()) return fail<MatrixExpr>(eliminated.error());
-        }
-        ++lead;
+        ++pivot_row;
     }
 
-    return ok(std::move(result));
+    return ok(result);
 }
 
 Result<std::vector<ExprPtr>> linsolve(const MatrixExpr& a, const std::vector<ExprPtr>& b, symbolic::CASContext& ctx) {
     if (a.rows() != b.size()) {
-        return fail<std::vector<ExprPtr>>(make_error(
-            CASErrorKind::InvalidArgument,
-            "Linear system dimensions must satisfy A.rows == b.size"));
+        return fail<std::vector<ExprPtr>>(make_error(CASErrorKind::InvalidArgument, "solve_linear_system: matrix rows and vector size mismatch"));
     }
 
-    MatrixExpr augmented(a.rows(), a.cols() + 1U);
-    for (std::size_t row = 0; row < a.rows(); ++row) {
-        for (std::size_t col = 0; col < a.cols(); ++col) {
-            augmented(row, col) = a(row, col);
+    const std::size_t n = a.rows();
+    const std::size_t m = a.cols();
+
+    // Augmented matrix [A|b]
+    MatrixExpr augmented(n, m + 1);
+    for (std::size_t i = 0; i < n; ++i) {
+        for (std::size_t j = 0; j < m; ++j) {
+            augmented(i, j) = a(i, j);
         }
-        augmented(row, a.cols()) = b[row];
+        augmented(i, m) = b[i];
     }
 
-    auto reduced = bareiss(augmented, ctx);
-    if (reduced.is_error()) return fail<std::vector<ExprPtr>>(reduced.error());
+    auto rref_res = rref(augmented, ctx);
+    if (rref_res.is_error()) return fail<std::vector<ExprPtr>>(rref_res.error());
+    const auto& rref = rref_res.value();
 
-    for (std::size_t row = 0; row < reduced.value().rows(); ++row) {
-        if (!row_has_nonzero_coefficients(reduced.value(), row, a.cols(), &ctx) &&
-            !is_zero_expr(reduced.value()(row, a.cols()), &ctx)) {
-            return fail<std::vector<ExprPtr>>(make_error(CASErrorKind::Undefined, "Linear system is inconsistent"));
+    std::vector<ExprPtr> solution(m);
+    std::vector<bool> pivot_found(m, false);
+
+    for (std::size_t i = 0; i < n; ++i) {
+        std::size_t col = 0;
+        while (col < m && is_zero_expr(rref(i, col))) col++;
+
+        if (col == m) {
+            // Check consistency
+            if (!is_zero_expr(rref(i, m))) {
+                return fail<std::vector<ExprPtr>>(make_error(CASErrorKind::Undefined, "solve_linear_system: inconsistent system"));
+            }
+            continue;
+        }
+        
+        pivot_found[col] = true;
+    }
+
+    // 2. Assign symbols to free variables
+    for (std::size_t j = 0; j < m; ++j) {
+        if (!pivot_found[j]) {
+            std::string name = "c" + std::to_string(j + 1);
+            solution[j] = ctx.arena().make<Symbol>(name);
         }
     }
 
-    std::vector<std::optional<std::size_t>> pivot_row_for_col(a.cols());
-    for (std::size_t row = 0; row < reduced.value().rows(); ++row) {
-        auto pivot_col = first_nonzero_column(reduced.value(), row, a.cols(), &ctx);
-        if (pivot_col.has_value()) {
-            pivot_row_for_col[*pivot_col] = row;
+    // 3. Back-substitution for pivots
+    for (int i = static_cast<int>(n) - 1; i >= 0; --i) {
+        std::size_t col = 0;
+        while (col < m && is_zero_expr(rref(static_cast<std::size_t>(i), col))) col++;
+
+        if (col < m) {
+            ExprPtr val = rref(static_cast<std::size_t>(i), m);
+            for (std::size_t j = col + 1; j < m; ++j) {
+                if (!is_zero_expr(rref(static_cast<std::size_t>(i), j))) {
+                    auto term = mul_expr(ctx, rref(static_cast<std::size_t>(i), j), solution[j]);
+                    if (term.is_error()) return fail<std::vector<ExprPtr>>(term.error());
+                    auto next_val = sub_expr(ctx, val, term.value());
+                    if (next_val.is_error()) return fail<std::vector<ExprPtr>>(next_val.error());
+                    val = next_val.value();
+                }
+            }
+            solution[col] = val;
         }
     }
 
-    std::vector<ExprPtr> solution(a.cols(), integer(ctx, 0));
-    std::vector<ExprPtr> free_parameters(a.cols());
-    std::size_t parameter_index = 1U;
-    for (std::size_t col = 0; col < a.cols(); ++col) {
-        if (!pivot_row_for_col[col].has_value()) {
-            free_parameters[col] = ctx.arena().make<Symbol>("t" + std::to_string(parameter_index++));
-            solution[col] = free_parameters[col];
+    for (ExprPtr& s : solution) {
+        auto simp = simplify(ctx, s);
+        if (simp.is_ok()) s = simp.value();
+    }
+
+    return ok(solution);
+}
+
+Result<std::vector<std::vector<ExprPtr>>> null_space(const MatrixExpr& matrix, symbolic::CASContext& ctx) {
+    auto rref_res = rref(matrix, ctx);
+    if (rref_res.is_error()) return fail<std::vector<std::vector<ExprPtr>>>(rref_res.error());
+    const auto& rref = rref_res.value();
+
+    const std::size_t n = matrix.rows();
+    const std::size_t m = matrix.cols();
+
+    std::vector<int> pivot_col(n, -1);
+    std::vector<bool> is_pivot_col(m, false);
+    std::size_t r = 0;
+    for (std::size_t i = 0; i < n; ++i) {
+        for (std::size_t j = 0; j < m; ++j) {
+            if (!is_zero_expr(rref(i, j))) {
+                pivot_col[i] = static_cast<int>(j);
+                is_pivot_col[j] = true;
+                ++r;
+                break;
+            }
         }
     }
 
-    for (std::size_t col = a.cols(); col > 0U; --col) {
-        const std::size_t variable_col = col - 1U;
-        if (!pivot_row_for_col[variable_col].has_value()) continue;
-
-        const std::size_t row = *pivot_row_for_col[variable_col];
-        ExprPtr pivot_val = reduced.value()(row, variable_col);
-        ExprPtr value = reduced.value()(row, a.cols());
-        for (std::size_t next_col = variable_col + 1U; next_col < a.cols(); ++next_col) {
-            ExprPtr coefficient = reduced.value()(row, next_col);
-            if (is_zero_expr(coefficient, &ctx)) continue;
-            auto product = mul_expr(ctx, coefficient, solution[next_col]);
-            if (product.is_error()) return fail<std::vector<ExprPtr>>(product.error());
-            auto next = sub_expr(ctx, value, product.value());
-            if (next.is_error()) return fail<std::vector<ExprPtr>>(next.error());
-            value = next.value();
+    std::vector<std::vector<ExprPtr>> basis;
+    for (std::size_t j = 0; j < m; ++j) {
+        if (!is_pivot_col[j]) {
+            std::vector<ExprPtr> v(m, integer(ctx, 0));
+            v[j] = integer(ctx, 1);
+            for (std::size_t i = 0; i < r; ++i) {
+                if (pivot_col[i] != -1) {
+                    auto neg_val = simplify(ctx, ctx.arena().make<Unary>(UnaryOp::Neg, rref(i, j)));
+                    if (neg_val.is_error()) return fail<std::vector<std::vector<ExprPtr>>>(neg_val.error());
+                    v[static_cast<std::size_t>(pivot_col[i])] = neg_val.value();
+                }
+            }
+            basis.push_back(std::move(v));
         }
-        auto final_val = div_expr(ctx, value, pivot_val);
-        if (final_val.is_error()) return fail<std::vector<ExprPtr>>(final_val.error());
-        solution[variable_col] = final_val.value();
     }
-
-    return ok(std::move(solution));
+    return ok(std::move(basis));
 }
 
 }  // namespace cas::linalg

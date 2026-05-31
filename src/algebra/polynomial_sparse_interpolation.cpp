@@ -1,0 +1,292 @@
+#include "polynomial_sparse_interpolation_internal.hpp"
+#include "algebra_internal.hpp"
+#include "polynomial_internal.hpp"
+#include "cas/numtheory.hpp"
+#include "cas/error_helpers.hpp"
+
+#include <algorithm>
+#include <map>
+#include <set>
+#include <vector>
+
+namespace cas::algebra {
+
+namespace {
+
+using Monomial = std::vector<unsigned int>;
+
+struct SparseTerm {
+    Monomial monomial;
+    Rational coefficient;
+};
+
+/**
+ * @brief Simple Gaussian elimination to solve Ax = b over Rational.
+ */
+Result<std::vector<Rational>> solve_linear_system(
+    std::vector<std::vector<Rational>> A,
+    std::vector<Rational> b) {
+    const std::size_t n = b.size();
+    if (A.empty() || A.size() != n || A[0].size() != n) {
+        return fail<std::vector<Rational>>(make_error(
+            CASErrorKind::InternalError, "sparse_interpolate: invalid system dimensions"));
+    }
+
+    // Augmented matrix
+    for (std::size_t i = 0; i < n; ++i) {
+        A[i].push_back(b[i]);
+    }
+
+    for (std::size_t i = 0; i < n; ++i) {
+        // Pivot
+        std::size_t pivot = i;
+        while (pivot < n && A[pivot][i].numerator().is_zero()) {
+            pivot++;
+        }
+        if (pivot == n) {
+            // Singular matrix - might happen if points are not good or skeleton is wrong
+            return fail<std::vector<Rational>>(make_error(
+                CASErrorKind::InternalError, "sparse_interpolate: singular matrix in system solving"));
+        }
+        std::swap(A[i], A[pivot]);
+
+        Rational factor = A[i][i];
+        for (std::size_t j = i; j <= n; ++j) {
+            A[i][j] = A[i][j] / factor;
+        }
+
+        for (std::size_t k = 0; k < n; ++k) {
+            if (k != i) {
+                Rational f = A[k][i];
+                for (std::size_t j = i; j <= n; ++j) {
+                    A[k][j] = A[k][j] - f * A[i][j];
+                }
+            }
+        }
+    }
+
+    std::vector<Rational> x(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        x[i] = A[i][n];
+    }
+    return ok(x);
+}
+
+/**
+ * @brief Evaluate a monomial at a point.
+ */
+Rational evaluate_monomial(const Monomial& m, const std::vector<Rational>& point) {
+    Rational result(BigInt(1));
+    for (std::size_t i = 0; i < m.size(); ++i) {
+        if (m[i] > 0) {
+            Rational base = point[i];
+            for (unsigned int e = 0; e < m[i]; ++e) {
+                result = result * base;
+            }
+        }
+    }
+    return result;
+}
+
+} // namespace
+
+Result<ExprPtr> sparse_interpolate(
+    const InterpolationOracle& oracle,
+    const std::vector<Symbol>& variables,
+    const std::vector<std::size_t>& degree_bounds,
+    symbolic::CASContext& ctx) {
+
+    if (variables.empty()) {
+        auto val = oracle({});
+        if (val.is_error()) return val;
+        return val;
+    }
+
+    const std::size_t n_vars = variables.size();
+    if (degree_bounds.size() != n_vars) {
+        return fail<ExprPtr>(make_error(
+            CASErrorKind::InvalidArgument, "sparse_interpolate: degree_bounds size mismatch"));
+    }
+
+    // Zippel-like recursive interpolation.
+    // We start with a skeleton for the first variable and expand.
+    
+    // Skeleton: set of Monomials (indices into 'variables')
+    std::vector<SparseTerm> current_poly;
+    
+    auto extract_rational = [&](ExprPtr expr) -> Result<Rational> {
+        auto simplified = simplify_expr(expr, ctx);
+        if (simplified.is_error()) return fail<Rational>(simplified.error());
+        
+        auto num_res = expr_to_integer_coefficient(simplified.value());
+        if (num_res.is_ok()) return ok(Rational(num_res.value()));
+        
+        auto parts = split_num_den(simplified.value(), ctx);
+        if (parts.is_ok()) {
+            auto n = expr_to_integer_coefficient(parts.value().numerator);
+            auto d = expr_to_integer_coefficient(parts.value().denominator);
+            if (n.is_ok() && d.is_ok()) return ok(Rational(n.value(), d.value()));
+        }
+        return fail<Rational>(make_error(CASErrorKind::InternalError, "sparse_interpolate: oracle returned non-rational expression"));
+    };
+
+    // Base case: interpolate the first variable x0.
+    // P(x0, a1, a2, ..., an-1)
+    std::size_t d0 = degree_bounds[0];
+    std::vector<Rational> pts;
+    std::vector<Rational> vals;
+    for (std::size_t i = 0; i <= d0; ++i) {
+        pts.push_back(Rational(BigInt(static_cast<long long>(i + 2)))); // Points 2, 3, 4, ...
+        
+        std::vector<ExprPtr> eval_point;
+        eval_point.push_back(make_rational_expr(ctx.arena(), pts.back()));
+        for (std::size_t j = 1; j < n_vars; ++j) {
+            // Anchor values for other variables: 11, 13, 17, ... (primes to avoid collisions)
+            long long anchor = static_cast<long long>(numtheory::next_prime(BigInt(10 + 2 * j)).value().to_u64());
+            eval_point.push_back(make_rational_expr(ctx.arena(), Rational(BigInt(anchor))));
+        }
+        
+        auto res = oracle(eval_point);
+        if (res.is_error()) return res;
+        auto rat_res = extract_rational(res.value());
+        if (rat_res.is_error()) return fail<ExprPtr>(rat_res.error());
+        vals.push_back(rat_res.value());
+    }
+
+    // Univariate Lagrange interpolation for the first variable.
+    // (Standard dense interpolation to get the initial skeleton)
+    // Since I already have solve_linear_system, I'll use it for univariate too.
+    std::vector<std::vector<Rational>> v_mat(d0 + 1, std::vector<Rational>(d0 + 1));
+    for (std::size_t i = 0; i <= d0; ++i) {
+        Rational p = pts[i];
+        Rational acc(BigInt(1));
+        for (std::size_t j = 0; j <= d0; ++j) {
+            v_mat[i][j] = acc;
+            acc = acc * p;
+        }
+    }
+    auto univariate_coeffs = solve_linear_system(v_mat, vals);
+    if (univariate_coeffs.is_error()) return fail<ExprPtr>(univariate_coeffs.error());
+
+    for (std::size_t i = 0; i < univariate_coeffs.value().size(); ++i) {
+        if (!univariate_coeffs.value()[i].numerator().is_zero()) {
+            Monomial m(n_vars, 0);
+            m[0] = static_cast<unsigned int>(i);
+            current_poly.push_back({m, univariate_coeffs.value()[i]});
+        }
+    }
+
+    // Recursive step: for variables x1, ..., xn-1
+    for (std::size_t k = 1; k < n_vars; ++k) {
+        std::size_t dk = degree_bounds[k];
+        
+        // Potential monomials in (x0...xk) are (m in current_poly) * xk^e
+        std::vector<Monomial> candidate_skeleton;
+        for (const auto& term : current_poly) {
+            for (unsigned int e = 0; e <= dk; ++e) {
+                Monomial m = term.monomial;
+                m[k] = e;
+                candidate_skeleton.push_back(m);
+            }
+        }
+
+        if (candidate_skeleton.empty()) break;
+
+        // Solve for coefficients of candidate_skeleton.
+        // We need |candidate_skeleton| points.
+        std::size_t T = candidate_skeleton.size();
+        std::vector<std::vector<Rational>> A(T, std::vector<Rational>(T));
+        std::vector<Rational> b(T);
+
+        for (std::size_t i = 0; i < T; ++i) {
+            // Pick a point (r0, r1, ..., rk, ak+1, ..., an-1)
+            std::vector<Rational> rand_point(n_vars);
+            std::vector<ExprPtr> expr_point;
+            for (std::size_t j = 0; j < n_vars; ++j) {
+                long long val = 0;
+                if (j <= k) {
+                    // Use primes for variable parts to minimize collisions
+                    val = static_cast<long long>(numtheory::next_prime(BigInt(100 + i * n_vars + j)).value().to_u64());
+                } else {
+                    // Anchor
+                    val = static_cast<long long>(numtheory::next_prime(BigInt(10 + 2 * j)).value().to_u64());
+                }
+                rand_point[j] = Rational(BigInt(val));
+                expr_point.push_back(make_rational_expr(ctx.arena(), rand_point[j]));
+            }
+
+            auto res_expr = oracle(expr_point);
+            if (res_expr.is_error()) return res_expr;
+            
+            auto rat_res = extract_rational(res_expr.value());
+            if (rat_res.is_error()) return fail<ExprPtr>(rat_res.error());
+            b[i] = rat_res.value();
+
+            for (std::size_t j = 0; j < T; ++j) {
+                A[i][j] = evaluate_monomial(candidate_skeleton[j], rand_point);
+            }
+        }
+
+        auto solved_coeffs = solve_linear_system(A, b);
+        if (solved_coeffs.is_error()) return fail<ExprPtr>(solved_coeffs.error());
+
+        current_poly.clear();
+        for (std::size_t i = 0; i < T; ++i) {
+            if (!solved_coeffs.value()[i].numerator().is_zero()) {
+                current_poly.push_back({candidate_skeleton[i], solved_coeffs.value()[i]});
+            }
+        }
+    }
+
+    // Convert current_poly to ExprPtr
+    std::vector<MultivariateTerm> terms;
+    for (const auto& sp_term : current_poly) {
+        if (sp_term.coefficient.denominator() != BigInt(1)) {
+             // For now, only support integer coefficients in final result or return error if not possible
+             // Actually MultivariateTerm has BigInt coefficient.
+             // If we have rational coefficients, we should return a Sum of terms / denominator.
+             // But the task says polynomial interpolation, usually implies Z[x].
+             // Let's check if I can return a general ExprPtr.
+             // I'll return an expression built from components.
+        }
+        
+        std::vector<std::pair<Symbol, unsigned int>> factors;
+        for (std::size_t i = 0; i < n_vars; ++i) {
+            if (sp_term.monomial[i] > 0) {
+                factors.emplace_back(variables[i], sp_term.monomial[i]);
+            }
+        }
+        // Since MultivariateTerm only supports BigInt coefficient, we handle Rational separately.
+    }
+
+    // Build the expression manually to support rational coefficients.
+    ExprPtr result = nullptr;
+    for (const auto& sp_term : current_poly) {
+        ExprPtr term_expr = make_rational_expr(ctx.arena(), sp_term.coefficient);
+        for (std::size_t i = 0; i < n_vars; ++i) {
+            if (sp_term.monomial[i] > 0) {
+                ExprPtr var_expr = ctx.arena().make<Symbol>(variables[i]);
+                ExprPtr pow_e = nullptr;
+                if (sp_term.monomial[i] == 1) {
+                    pow_e = var_expr;
+                } else {
+                    pow_e = ctx.arena().make<Binary>(BinaryOp::Pow, var_expr, ctx.arena().make<IntegerLit>(static_cast<long long>(sp_term.monomial[i])));
+                }
+                term_expr = ctx.arena().make<Binary>(BinaryOp::Mul, term_expr, pow_e);
+            }
+        }
+        if (!result) {
+            result = term_expr;
+        } else {
+            result = ctx.arena().make<Binary>(BinaryOp::Add, result, term_expr);
+        }
+    }
+
+    if (!result) {
+        result = ctx.arena().make<IntegerLit>(0);
+    }
+
+    return simplify(result, ctx);
+}
+
+} // namespace cas::algebra

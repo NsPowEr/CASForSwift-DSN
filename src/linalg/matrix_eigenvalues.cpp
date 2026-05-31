@@ -1,4 +1,5 @@
 #include "cas/linalg/Matrix.hpp"
+#include "cas/linalg/matrix_expr_helpers.hpp"
 #include "cas/algebra.hpp"
 
 #include <optional>
@@ -7,37 +8,15 @@
 #include <vector>
 
 namespace cas::linalg {
+
 namespace {
 
 [[nodiscard]] CASError make_error(CASErrorKind kind, std::string message) {
     return CASError{.kind = kind, .message = std::move(message), .hint = std::nullopt};
 }
 
-[[nodiscard]] ExprPtr integer(symbolic::CASContext& ctx, long long value) {
-    return ctx.arena().make<IntegerLit>(BigInt(value));
-}
-
-[[nodiscard]] bool is_zero_expr(ExprPtr expr) {
-    if (const auto* il = expr_cast<IntegerLit>(expr)) return il->value.is_zero();
-    if (const auto* rl = expr_cast<RationalLit>(expr)) return rl->numerator.is_zero();
-    return false;
-}
-
-[[nodiscard]] Result<ExprPtr> add_expr(symbolic::CASContext& ctx, ExprPtr lhs, ExprPtr rhs) {
-    return ctx.simplify(ctx.arena().make<Binary>(BinaryOp::Add, lhs, rhs));
-}
-
-[[nodiscard]] Result<ExprPtr> sub_expr(symbolic::CASContext& ctx, ExprPtr lhs, ExprPtr rhs) {
-    return ctx.simplify(ctx.arena().make<Binary>(BinaryOp::Sub, lhs, rhs));
-}
-
-[[nodiscard]] Result<ExprPtr> mul_expr(symbolic::CASContext& ctx, ExprPtr lhs, ExprPtr rhs) {
-    return ctx.simplify(ctx.arena().make<Binary>(BinaryOp::Mul, lhs, rhs));
-}
-
 // Division-free cofactor expansion — correct for symbolic entries where Bareiss pivots
 // may not be decidably nonzero (e.g., entries of the form a_ii - lambda).
-// DEPRECATED for large matrices; kept as fallback for non-square or small sizes if needed.
 [[nodiscard]] Result<ExprPtr> cofactor_det(const MatrixExpr& matrix, symbolic::CASContext& ctx) {
     const std::size_t n = matrix.rows();
     if (n == 0U) return ok(integer(ctx, 1));
@@ -75,7 +54,7 @@ namespace {
 
         ExprPtr signed_term = term.value();
         if ((col % 2U) != 0U) {
-            auto negated = ctx.simplify(ctx.arena().make<Unary>(UnaryOp::Neg, signed_term));
+            auto negated = simplify(ctx, ctx.arena().make<Unary>(UnaryOp::Neg, signed_term));
             if (negated.is_error()) return negated;
             signed_term = negated.value();
         }
@@ -87,245 +66,178 @@ namespace {
     return ok(result);
 }
 
-[[nodiscard]] Result<MatrixExpr> mat_scale_id(ExprPtr s, std::size_t n, symbolic::CASContext& ctx) {
-    MatrixExpr res(n, n);
-    for (std::size_t i = 0; i < n; ++i) {
-        for (std::size_t j = 0; j < n; ++j) {
-            res(i, j) = (i == j) ? s : integer(ctx, 0);
-        }
-    }
-    return ok(res);
-}
+} // namespace
 
-// Faddeev-Leverrier algorithm for characteristic polynomial.
-// p(lambda) = det(lambda*I - A) = lambda^n + c_{n-1}*lambda^{n-1} + ... + c_0
-// Note: our signature returns det(A - lambda*I) to match standard CAS conventions.
-[[nodiscard]] Result<ExprPtr> faddeev_leverrier(const MatrixExpr& matrix, const Symbol& lambda_var, symbolic::CASContext& ctx) {
+Result<ExprPtr> characteristic_polynomial(const MatrixExpr& matrix, const Symbol& lambda, symbolic::CASContext& ctx) {
     const std::size_t n = matrix.rows();
-    if (n == 0U) return ok(integer(ctx, 1));
+    if (n != matrix.cols()) {
+        return fail<ExprPtr>(make_error(CASErrorKind::InvalidArgument, "characteristic_polynomial: non-square matrix"));
+    }
 
-    std::vector<ExprPtr> coeffs(n + 1, ExprPtr{});
-    coeffs[0] = integer(ctx, 1); // lambda^n coefficient
+    if (n <= 4) { // Small matrix, cofactor is fine
+        MatrixExpr lambda_i(n, n);
+        ExprPtr lambda_expr = ctx.arena().make<Symbol>(lambda.name);
+        for (std::size_t i = 0; i < n; ++i) {
+            for (std::size_t j = 0; j < n; ++j) {
+                if (i == j) {
+                    auto diff = sub_expr(ctx, matrix(i, j), lambda_expr);
+                    if (diff.is_error()) return diff;
+                    lambda_i(i, j) = diff.value();
+                } else {
+                    lambda_i(i, j) = matrix(i, j);
+                }
+            }
+        }
+        return cofactor_det(lambda_i, ctx);
+    }
 
-    MatrixExpr M = identity(n, ctx).value();
+    // Faddeev-Leverrier algorithm (n > 4)
+    // p(lambda) = det(lambda*I - A) = lambda^n + c_{n-1}*lambda^(n-1) + ... + c_0
+    // M_1 = A, c_{n-1} = -tr(M_1)
+    // M_k = A*(M_{k-1} + c_{n-k+1}*I), c_{n-k} = -1/k * tr(M_k)
+    
+    std::vector<ExprPtr> c(n + 1);
+    c[n] = integer(ctx, 1);
+    
+    MatrixExpr B(n, n);
+    B.fill(integer(ctx, 0));
+    MatrixExpr M(n, n);
+    M.fill(integer(ctx, 0));
+    
     for (std::size_t k = 1; k <= n; ++k) {
-        auto AM = multiply(matrix, M, ctx);
-        if (AM.is_error()) return fail<ExprPtr>(AM.error());
+        // B = M + c_{n-k+1}*I (where M is from previous step)
+        for (std::size_t i = 0; i < n; ++i) {
+            for (std::size_t j = 0; j < n; ++j) {
+                if (k == 1) {
+                    B(i, j) = (i == j) ? integer(ctx, 1) : integer(ctx, 0); // Not used for k=1
+                } else {
+                    if (i == j) {
+                        auto val = add_expr(ctx, M(i, j), c[n - k + 1]);
+                        if (val.is_error()) return val;
+                        B(i, j) = val.value();
+                    } else {
+                        B(i, j) = M(i, j);
+                    }
+                }
+            }
+        }
         
-        auto tr = trace(AM.value(), ctx);
-        if (tr.is_error()) return tr;
+        // M = A * B (except for k=1, M=A)
+        if (k == 1) {
+            for (std::size_t i = 0; i < n; ++i)
+                for (std::size_t j = 0; j < n; ++j)
+                    M(i, j) = matrix(i, j);
+        } else {
+            auto prod_res = multiply(matrix, B, ctx);
+            if (prod_res.is_error()) return fail<ExprPtr>(prod_res.error());
+            M = std::move(prod_res.value());
+        }
         
-        auto neg_tr = ctx.simplify(ctx.arena().make<Unary>(UnaryOp::Neg, tr.value()));
+        // c_{n-k} = -1/k * tr(M)
+        auto tr_res = trace(M, ctx);
+        if (tr_res.is_error()) return tr_res;
+        
+        auto neg_tr = simplify(ctx, ctx.arena().make<Unary>(UnaryOp::Neg, tr_res.value()));
         if (neg_tr.is_error()) return neg_tr;
         
-        auto ck = ctx.simplify(ctx.arena().make<Binary>(BinaryOp::Div, neg_tr.value(), integer(ctx, k)));
-        if (ck.is_error()) return ck;
+        auto coeff = div_expr(ctx, neg_tr.value(), integer(ctx, static_cast<long long>(k)));
+        if (coeff.is_error()) return coeff;
         
-        coeffs[k] = ck.value();
-        
-        if (k < n) {
-            auto ckI = mat_scale_id(ck.value(), n, ctx);
-            if (ckI.is_error()) return fail<ExprPtr>(ckI.error());
-            auto next_M = add(AM.value(), ckI.value(), ctx);
-            if (next_M.is_error()) return fail<ExprPtr>(next_M.error());
-            M = std::move(next_M.value());
-        }
+        // M-FIX: Faddeev-Leverrier together
+        auto tg = algebra::together(coeff.value(), ctx);
+        c[n - k] = tg.is_ok() ? tg.value() : coeff.value();
     }
-    // This is det(lambda*I - A).
-    // To get det(A - lambda*I), we multiply by (-1)^n.
-    ExprPtr lambda_expr = ctx.arena().make<Symbol>(lambda_var);
-    std::vector<ExprPtr> terms;
-    for (std::size_t k = 0; k <= n; ++k) {
-        ExprPtr coeff = coeffs[k];
-        if (is_zero_expr(coeff)) continue;
-        
-        ExprPtr pwr;
-        if (n - k == 0) {
-            pwr = coeff;
-        } else if (n - k == 1) {
-            if (const auto* il = expr_cast<IntegerLit>(coeff); il && il->value == BigInt(1)) {
-                pwr = lambda_expr;
-            } else {
-                auto res = mul_expr(ctx, coeff, lambda_expr);
-                if (res.is_error()) return res;
-                pwr = res.value();
-            }
-        } else {
-            auto exp = ctx.arena().make<Binary>(BinaryOp::Pow, lambda_expr, integer(ctx, n - k));
-            if (const auto* il = expr_cast<IntegerLit>(coeff); il && il->value == BigInt(1)) {
-                pwr = exp;
-            } else {
-                auto res = mul_expr(ctx, coeff, exp);
-                if (res.is_error()) return res;
-                pwr = res.value();
-            }
-        }
-        terms.push_back(pwr);
-    }
-
-    auto poly = ctx.simplify(ctx.arena().make<Sum>(std::move(terms)));
-    if (poly.is_error()) return poly;
-
-    if (n % 2 != 0) {
-        return ctx.simplify(ctx.arena().make<Unary>(UnaryOp::Neg, poly.value()));
-    }
-    return poly;
-}
-
-}  // namespace
-
-Result<std::vector<std::vector<ExprPtr>>> null_space(
-    const MatrixExpr& matrix, symbolic::CASContext& ctx) {
-    const std::size_t n_cols = matrix.cols();
-
-    auto reduced = rref(matrix, ctx);
-    if (reduced.is_error()) {
-        return fail<std::vector<std::vector<ExprPtr>>>(reduced.error());
-    }
-
-    // Identify pivot columns and their rows.
-    std::vector<std::optional<std::size_t>> pivot_row_for_col(n_cols, std::nullopt);
-    std::vector<bool> is_pivot_col(n_cols, false);
     
-    std::size_t current_row = 0;
-    for (std::size_t c = 0; c < n_cols && current_row < reduced.value().rows(); ++c) {
-        if (!is_zero_expr(reduced.value()(current_row, c))) {
-            is_pivot_col[c] = true;
-            pivot_row_for_col[c] = current_row;
-            ++current_row;
-        }
-    }
-
-    // For each free column, build a null space basis vector.
-    std::vector<std::vector<ExprPtr>> basis;
-    for (std::size_t free_col = 0; free_col < n_cols; ++free_col) {
-        if (is_pivot_col[free_col]) continue;
-
-        std::vector<ExprPtr> vec(n_cols, integer(ctx, 0));
-        vec[free_col] = integer(ctx, 1);
-
-        for (std::size_t pivot_c = 0; pivot_c < n_cols; ++pivot_c) {
-            if (!is_pivot_col[pivot_c] || !pivot_row_for_col[pivot_c].has_value()) {
-                continue;
+    // Build the polynomial: det(A - lambda*I). 
+    // Faddeev-Leverrier gives det(lambda*I - A).
+    // det(A - lambda*I) = (-1)^n * det(lambda*I - A)
+    
+    std::vector<ExprPtr> terms;
+    ExprPtr lambda_expr = ctx.arena().make<Symbol>(lambda.name);
+    for (std::size_t i = 0; i <= n; ++i) {
+        if (is_zero_expr(c[i])) continue;
+        
+        ExprPtr term;
+        if (i == 0) {
+            term = c[i];
+        } else {
+            ExprPtr pow_l;
+            if (i == 1) {
+                pow_l = lambda_expr;
+            } else {
+                pow_l = ctx.arena().make<Binary>(BinaryOp::Pow, lambda_expr, integer(ctx, static_cast<long long>(i)));
             }
-            const std::size_t r = *pivot_row_for_col[pivot_c];
-            ExprPtr coeff = reduced.value()(r, free_col);
-            if (is_zero_expr(coeff)) continue;
-            auto neg_coeff = ctx.simplify(ctx.arena().make<Unary>(UnaryOp::Neg, coeff));
-            if (neg_coeff.is_error()) {
-                return fail<std::vector<std::vector<ExprPtr>>>(neg_coeff.error());
-            }
-            vec[pivot_c] = neg_coeff.value();
+            auto prod = mul_expr(ctx, c[i], pow_l);
+            if (prod.is_error()) return prod;
+            term = prod.value();
         }
-
-        basis.push_back(std::move(vec));
+        terms.push_back(term);
     }
-
-    return ok(std::move(basis));
+    
+    ExprPtr poly = (terms.size() == 1) ? terms[0] : ctx.arena().make<Sum>(std::move(terms));
+    auto poly_s = simplify(ctx, poly);
+    if (poly_s.is_error()) return poly_s;
+    
+    if (n % 2 != 0) {
+        return simplify(ctx, ctx.arena().make<Unary>(UnaryOp::Neg, poly_s.value()));
+    }
+    return poly_s;
 }
 
-Result<ExprPtr> characteristic_polynomial(
-    const MatrixExpr& matrix, const Symbol& lambda_var, symbolic::CASContext& ctx) {
-    if (matrix.rows() != matrix.cols()) {
-        return fail<ExprPtr>(make_error(CASErrorKind::InvalidArgument,
-            "Characteristic polynomial requires a square matrix"));
-    }
-
+Result<std::vector<ExprPtr>> eigenvalues(const MatrixExpr& matrix, symbolic::CASContext& ctx) {
     const std::size_t n = matrix.rows();
-    if (n <= 3) {
-        // For very small matrices, cofactor is fine and often produces cleaner terms
-        ExprPtr lambda_expr = ctx.arena().make<Symbol>(lambda_var);
-        MatrixExpr char_matrix(n, n);
-        for (std::size_t r = 0; r < n; ++r) {
-            for (std::size_t c = 0; c < n; ++c) {
-                if (r == c) {
-                    auto entry = sub_expr(ctx, matrix(r, c), lambda_expr);
-                    if (entry.is_error()) return entry;
-                    char_matrix(r, c) = entry.value();
-                } else {
-                    char_matrix(r, c) = matrix(r, c);
-                }
-            }
-        }
-        return cofactor_det(char_matrix, ctx);
-    }
+    if (n == 0) return ok(std::vector<ExprPtr>{});
 
-    return faddeev_leverrier(matrix, lambda_var, ctx);
+    Symbol lambda{"lambda"};
+    auto poly_res = characteristic_polynomial(matrix, lambda, ctx);
+    if (poly_res.is_error()) return fail<std::vector<ExprPtr>>(poly_res.error());
+
+    auto roots_res = algebra::solve_polynomial(poly_res.value(), lambda, ctx);
+    if (roots_res.is_error()) return fail<std::vector<ExprPtr>>(roots_res.error());
+
+    return roots_res;
 }
 
-Result<std::vector<ExprPtr>> eigenvalues(
-    const MatrixExpr& matrix, symbolic::CASContext& ctx) {
-    if (matrix.rows() != matrix.cols()) {
-        return fail<std::vector<ExprPtr>>(make_error(CASErrorKind::InvalidArgument,
-            "Eigenvalues require a square matrix"));
-    }
-
-    const Symbol lambda_var("_lambda_");
-    auto char_poly = characteristic_polynomial(matrix, lambda_var, ctx);
-    if (char_poly.is_error()) {
-        return fail<std::vector<ExprPtr>>(char_poly.error());
-    }
-
-    return algebra::solve_polynomial(char_poly.value(), lambda_var, ctx);
-}
-
-Result<std::vector<Eigenpair>> eigenvectors(
-    const MatrixExpr& matrix, symbolic::CASContext& ctx) {
-    if (matrix.rows() != matrix.cols()) {
-        return fail<std::vector<Eigenpair>>(make_error(CASErrorKind::InvalidArgument,
-            "Eigenvectors require a square matrix"));
-    }
-
-    const std::size_t n = matrix.rows();
-    auto eigenvals = eigenvalues(matrix, ctx);
-    if (eigenvals.is_error()) {
-        return fail<std::vector<Eigenpair>>(eigenvals.error());
-    }
-
-    // Group eigenvalues by structural equality to avoid redundant work
-    std::vector<ExprPtr> unique_eigenvals;
-    for (ExprPtr val : eigenvals.value()) {
+Result<std::vector<Eigenpair>> eigenvectors(const MatrixExpr& matrix, symbolic::CASContext& ctx) {
+    auto ev_res = eigenvalues(matrix, ctx);
+    if (ev_res.is_error()) return fail<std::vector<Eigenpair>>(ev_res.error());
+    auto evs = std::move(ev_res.value());
+    
+    // Unique-ify eigenvalues (using expr_is_equal would be better, but pointer equality usually enough for simplified)
+    // Actually, solve_polynomial returns all roots including multiplicity.
+    // For eigenvectors, we want distinct roots.
+    std::vector<ExprPtr> distinct_evs;
+    for (ExprPtr e : evs) {
         bool found = false;
-        for (ExprPtr uval : unique_eigenvals) {
-            if (structural_equal(val, uval)) {
-                found = true;
-                break;
-            }
+        for (ExprPtr d : distinct_evs) {
+            if (e == d) { found = true; break; }
         }
-        if (!found) {
-            unique_eigenvals.push_back(val);
-        }
+        if (!found) distinct_evs.push_back(e);
     }
-
+    
+    const std::size_t n = matrix.rows();
     std::vector<Eigenpair> result;
-    for (ExprPtr eigenval : unique_eigenvals) {
-        MatrixExpr shifted(n, n);
-        bool build_ok = true;
-        for (std::size_t r = 0; r < n && build_ok; ++r) {
-            for (std::size_t c = 0; c < n && build_ok; ++c) {
-                if (r == c) {
-                    auto entry = sub_expr(ctx, matrix(r, c), eigenval);
-                    if (entry.is_error()) { build_ok = false; break; }
-                    shifted(r, c) = entry.value();
+    
+    for (ExprPtr val : distinct_evs) {
+        // Solve (A - val*I)x = 0
+        MatrixExpr mat(n, n);
+        for (std::size_t i = 0; i < n; ++i) {
+            for (std::size_t j = 0; j < n; ++j) {
+                if (i == j) {
+                    auto diff = sub_expr(ctx, matrix(i, j), val);
+                    if (diff.is_error()) return fail<std::vector<Eigenpair>>(diff.error());
+                    mat(i, j) = diff.value();
                 } else {
-                    shifted(r, c) = matrix(r, c);
+                    mat(i, j) = matrix(i, j);
                 }
             }
         }
 
-        if (build_ok) {
-            // Dispatch: if the eigenvalue is a RootOf with rational minimal
-            // polynomial, compute the kernel over the algebraic extension
-            // Q(eigenval); otherwise use the structural null_space.
-            Result<std::vector<std::vector<ExprPtr>>> kernel =
-                expr_is<RootOf>(eigenval)
-                    ? null_space_over_extension(shifted, eigenval, ctx)
-                    : null_space(shifted, ctx);
-            if (kernel.is_ok()) {
-                for (auto& vec : kernel.value()) {
-                    result.push_back(Eigenpair{.eigenvalue = eigenval, .eigenvector = std::move(vec)});
-                }
-            }
+        auto ns_res = null_space(mat, ctx);
+        if (ns_res.is_error()) return fail<std::vector<Eigenpair>>(ns_res.error());
+
+        for (const auto& vec : ns_res.value()) {
+            result.push_back(Eigenpair{.eigenvalue = val, .eigenvector = vec});
         }
     }
 

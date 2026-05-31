@@ -1,104 +1,164 @@
 #include "integrate_engine.hpp"
-
 #include "cas/algebra.hpp"
-
-#include <string>
+#include "cas/symbolic.hpp"
+#include <set>
+#include <optional>
 #include <utility>
 #include <vector>
 
-namespace cas::calculus::integrate_detail {
+namespace cas::calculus {
+
+namespace {
+
+struct ExprLess {
+    bool operator()(ExprPtr lhs, ExprPtr rhs) const noexcept {
+        return symbolic::canonical_compare(lhs, rhs) < 0;
+    }
+};
+
+// Internal helper to collect potential u = g(x) candidates.
+// Candidates are arguments of functions or bases of powers.
+void collect_substitution_candidates(
+    ExprPtr expr,
+    const Symbol& var,
+    std::set<ExprPtr, ExprLess>& candidates) {
+    if (!expr || !integrate_detail::depends_on(expr, var)) {
+        return;
+    }
+
+    if (const auto* call = expr_cast<FuncCall>(expr)) {
+        for (const auto& arg : call->args) {
+            if (integrate_detail::depends_on(arg, var) && !expr_is<Symbol>(arg)) {
+                candidates.insert(arg);
+            }
+            collect_substitution_candidates(arg, var, candidates);
+        }
+    } else if (const auto* bin = expr_cast<Binary>(expr)) {
+        if (bin->op == BinaryOp::Pow) {
+             if (integrate_detail::depends_on(bin->left, var) && !expr_is<Symbol>(bin->left)) {
+                 candidates.insert(bin->left);
+             }
+        }
+        collect_substitution_candidates(bin->left, var, candidates);
+        collect_substitution_candidates(bin->right, var, candidates);
+    } else if (const auto* p = expr_cast<Product>(expr)) {
+        for (const auto& f : p->factors) {
+            collect_substitution_candidates(f, var, candidates);
+        }
+    } else if (const auto* s = expr_cast<Sum>(expr)) {
+        for (const auto& t : s->terms) {
+            collect_substitution_candidates(t, var, candidates);
+        }
+    } else if (const auto* u = expr_cast<Unary>(expr)) {
+        collect_substitution_candidates(u->operand, var, candidates);
+    }
+}
+
+// General expression substituter: replaces occurrences of 'pattern' with 'replacement'.
+ExprPtr replace_expr(ExprPtr expr, ExprPtr pattern, ExprPtr replacement, AstArena& arena) {
+    if (structural_equal(expr, pattern)) {
+        return replacement;
+    }
+
+    if (const auto* call = expr_cast<FuncCall>(expr)) {
+        std::vector<ExprPtr> args;
+        args.reserve(call->args.size());
+        for (auto arg : call->args) args.push_back(replace_expr(arg, pattern, replacement, arena));
+        return arena.make<FuncCall>(call->name, std::move(args));
+    }
+    if (const auto* bin = expr_cast<Binary>(expr)) {
+        return arena.make<Binary>(bin->op, 
+            replace_expr(bin->left, pattern, replacement, arena),
+            replace_expr(bin->right, pattern, replacement, arena));
+    }
+    if (const auto* p = expr_cast<Product>(expr)) {
+        std::vector<ExprPtr> factors;
+        factors.reserve(p->factors.size());
+        for (auto f : p->factors) factors.push_back(replace_expr(f, pattern, replacement, arena));
+        return arena.make<Product>(std::move(factors));
+    }
+    if (const auto* s = expr_cast<Sum>(expr)) {
+        std::vector<ExprPtr> terms;
+        terms.reserve(s->terms.size());
+        for (auto t : s->terms) terms.push_back(replace_expr(t, pattern, replacement, arena));
+        return arena.make<Sum>(std::move(terms));
+    }
+    if (const auto* u = expr_cast<Unary>(expr)) {
+        return arena.make<Unary>(u->op, replace_expr(u->operand, pattern, replacement, arena));
+    }
+
+    return expr;
+}
+
+} // anonymous namespace
+
+Result<std::optional<ExprPtr>> integrate_by_substitution(
+    const ExprPtr& integrand,
+    const Symbol& var,
+    symbolic::CASContext& ctx) {
+    
+    // CAS-L2-16: Automated Variable Substitution (u-substitution recognition).
+    // Strategy: find g(x) such that integrand = f(g(x)) * g'(x).
+    
+    std::set<ExprPtr, ExprLess> candidates;
+    collect_substitution_candidates(integrand, var, candidates);
+    
+    // HC-004: Fresh symbol for u to avoid collisions in the symbolic workspace.
+    const Symbol u_sym = ctx.make_fresh_symbol("u");
+    const ExprPtr u_expr = ctx.arena().make<Symbol>(u_sym);
+    
+    for (const auto& g : candidates) {
+        // 1. Compute du/dx = g'(x)
+        auto dg_res = diff(g, var, 1U, ctx);
+        if (dg_res.is_error()) continue;
+        ExprPtr dg = dg_res.value();
+        
+        // Skip constants (handled by linearity/integrate_once)
+        if (integrate_detail::is_rational_value(dg, 0, 1)) continue;
+        
+        // 2. Candidate integrand in terms of u: f(u) = integrand / g'(x)
+        auto ratio = ctx.simplify(integrate_detail::make_binary(ctx.arena(), BinaryOp::Div, integrand, dg));
+        if (ratio.is_error()) continue;
+        
+        // 3. Check if f(u) depends on x ONLY through g(x).
+        ExprPtr f_u_raw = replace_expr(ratio.value(), g, u_expr, ctx.arena());
+        auto f_u = ctx.simplify(f_u_raw);
+        if (f_u.is_error()) continue;
+        
+        // If f_u no longer depends on x, then integrand = f(g(x)) * g'(x).
+        if (!integrate_detail::depends_on(f_u.value(), var)) {
+            // Success! Integrate f(u) du.
+            auto primitive_u = integrate(f_u.value(), u_sym, ctx);
+            if (primitive_u.is_ok()) {
+                // Back-substitute u -> g(x) to get the result in terms of x.
+                auto result = replace_expr(primitive_u.value(), u_expr, g, ctx.arena());
+                
+                // Mandatory Verification: diff(∫f dx, x) == f
+                auto verification = diff(result, var, 1U, ctx);
+                if (verification.is_ok()) {
+                     auto s_diff = ctx.simplify(verification.value());
+                     auto s_integrand = ctx.simplify(integrand);
+                     if (s_diff.is_ok() && s_integrand.is_ok() && 
+                         structural_equal(s_diff.value(), s_integrand.value())) {
+                         return ok(std::make_optional(result));
+                     }
+                }
+            }
+        }
+    }
+    
+    return ok(std::optional<ExprPtr>{std::nullopt});
+}
+
+namespace integrate_detail {
 
 Result<ExprPtr> Integrator::try_u_substitution_for_product(const Product& product, const Symbol& var) {
-    if (product.factors.size() < 2U) {
-        return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "u-substitution needs at least two factors"));
+    // Attempt general u-substitution for products.
+    auto res = integrate_by_substitution(context_.arena().make<Product>(product), var, context_);
+    if (res.is_ok() && res.value().has_value()) {
+        return ok(res.value().value());
     }
-
-    for (std::size_t index = 0; index < product.factors.size(); ++index) {
-        const auto* call = expr_cast<FuncCall>(product.factors[index]);
-        if (call == nullptr || call->args.size() != 1U) {
-            continue;
-        }
-
-        std::vector<ExprPtr> derivative_factors;
-        derivative_factors.reserve(product.factors.size() - 1U);
-        for (std::size_t factor_index = 0; factor_index < product.factors.size(); ++factor_index) {
-            if (factor_index != index) {
-                derivative_factors.push_back(product.factors[factor_index]);
-            }
-        }
-
-        const ExprPtr derivative_candidate = make_product(arena_, std::move(derivative_factors));
-        auto inner_derivative = diff(call->args.front(), var, 1U, context_);
-        if (inner_derivative.is_error()) {
-            continue;
-        }
-
-        auto matches = expressions_match_after_simplify(derivative_candidate, inner_derivative.value());
-        if (matches.is_error()) {
-            return fail<ExprPtr>(matches.error());
-        }
-        if (matches.value()) {
-            return integrate_function_direct(canonical_function_name(call->name), call->args.front());
-        }
-
-        // Scaled u-sub: derivative_candidate = k * inner_derivative where k is constant
-        auto ratio_expr = context_.simplify(arena_.make<Binary>(
-            BinaryOp::Div, derivative_candidate, inner_derivative.value()));
-        if (ratio_expr.is_ok() && !depends_on(ratio_expr.value(), var)) {
-            auto primitive = integrate_function_direct(canonical_function_name(call->name), call->args.front());
-            if (primitive.is_ok()) {
-                auto scaled = context_.simplify(arena_.make<Product>(
-                    std::vector<ExprPtr>{ratio_expr.value(), primitive.value()}));
-                if (scaled.is_ok()) {
-                    return scaled;
-                }
-            }
-        }
-    }
-
-    for (std::size_t index = 0; index < product.factors.size(); ++index) {
-        const auto* power = expr_cast<Binary>(product.factors[index]);
-        if (power == nullptr || power->op != BinaryOp::Pow) {
-            continue;
-        }
-
-        std::vector<ExprPtr> derivative_factors;
-        derivative_factors.reserve(product.factors.size() - 1U);
-        for (std::size_t factor_index = 0; factor_index < product.factors.size(); ++factor_index) {
-            if (factor_index != index) {
-                derivative_factors.push_back(product.factors[factor_index]);
-            }
-        }
-
-        const ExprPtr derivative_candidate = make_product(arena_, std::move(derivative_factors));
-        auto inner_derivative = diff(power->left, var, 1U, context_);
-        if (inner_derivative.is_error()) {
-            continue;
-        }
-
-        auto matches = expressions_match_after_simplify(derivative_candidate, inner_derivative.value());
-        if (matches.is_error()) {
-            return fail<ExprPtr>(matches.error());
-        }
-        if (matches.value()) {
-            return integrate_power_direct(power->left, power->right, var);
-        }
-
-        // Scaled u-sub: derivative_candidate = k * inner_derivative where k is constant
-        auto ratio_expr = context_.simplify(arena_.make<Binary>(
-            BinaryOp::Div, derivative_candidate, inner_derivative.value()));
-        if (ratio_expr.is_ok() && !depends_on(ratio_expr.value(), var)) {
-            auto primitive = integrate_power_direct(power->left, power->right, var);
-            if (primitive.is_ok()) {
-                auto scaled = context_.simplify(arena_.make<Product>(
-                    std::vector<ExprPtr>{ratio_expr.value(), primitive.value()}));
-                if (scaled.is_ok()) {
-                    return scaled;
-                }
-            }
-        }
-    }
-
+    
     return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "No supported u-substitution pattern found"));
 }
 
@@ -112,8 +172,6 @@ Result<ExprPtr> Integrator::integrate_via_partial_fractions(ExprPtr expr, const 
         return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Partial fraction decomposition produced no terms"));
     }
 
-    // Safety: If only one term is returned, it means no decomposition happened.
-    // Proceeding would lead to infinite recursion if integrate_once calls this again.
     if (terms.value().size() <= 1U) {
          return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Partial fractions did not decompose the expression"));
     }
@@ -122,19 +180,15 @@ Result<ExprPtr> Integrator::integrate_via_partial_fractions(ExprPtr expr, const 
     primitives.reserve(terms.value().size());
     for (ExprPtr term : terms.value()) {
         auto simplified_term = context_.simplify(term);
-        if (simplified_term.is_error()) {
-            return fail<ExprPtr>(simplified_term.error());
-        }
-        if (structural_equal(simplified_term.value(), expr)) {
-            return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Partial fractions simplified back to the original integrand"));
-        }
+        if (simplified_term.is_error()) return fail<ExprPtr>(simplified_term.error());
+        
         auto primitive = integrate_once(simplified_term.value(), var);
-        if (primitive.is_error()) {
-            return primitive;
-        }
+        if (primitive.is_error()) return primitive;
         primitives.push_back(primitive.value());
     }
     return ok(make_sum(arena_, std::move(primitives)));
 }
 
-}  // namespace cas::calculus::integrate_detail
+}  // namespace integrate_detail
+
+}  // namespace cas::calculus

@@ -13,6 +13,7 @@
 
 #include "cas/algebraic_number_bridge.hpp"
 #include "cas/linalg/Matrix.hpp"
+#include "cas/linalg/matrix_expr_helpers.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -21,6 +22,7 @@
 #include <vector>
 
 namespace cas::linalg {
+
 namespace {
 
 using cas::algebra::AlgebraicNumber;
@@ -48,63 +50,21 @@ struct AlgMatrix {
 
 [[nodiscard]] Result<std::optional<AlgMatrix>> build_alg_matrix(
     const MatrixExpr& matrix,
-    ExprPtr alpha_expr,
-    const MinPoly& mp,
+    ExprPtr generator,
+    const MinPoly& min_poly,
     symbolic::CASContext& ctx) {
-    AlgMatrix out(matrix.rows(), matrix.cols(), make_alg_zero(mp));
-    for (std::size_t r = 0; r < matrix.rows(); ++r) {
-        for (std::size_t c = 0; c < matrix.cols(); ++c) {
-            auto opt = cas::algebra::try_express_in_q_alpha(matrix(r, c), alpha_expr, mp, ctx);
-            if (opt.is_error()) {
-                return fail<std::optional<AlgMatrix>>(opt.error());
-            }
-            if (!opt.value().has_value()) {
-                return ok(std::optional<AlgMatrix>{});
-            }
-            out.at(r, c) = std::move(opt.value().value());
-        }
-    }
-    return ok(std::optional<AlgMatrix>(std::move(out)));
-}
+    const std::size_t r = matrix.rows();
+    const std::size_t c = matrix.cols();
+    AlgMatrix result(r, c, make_alg_zero(min_poly));
 
-// Reduced row echelon form, in place, over Q(alpha).
-// Returns an error if a pivot inversion fails (which indicates the supplied
-// minimal polynomial is reducible: alpha generates a ring with zero divisors,
-// not a field).
-[[nodiscard]] Result<void> rref_alg(AlgMatrix& m) {
-    std::size_t pivot_row = 0U;
-    for (std::size_t lead = 0U; pivot_row < m.rows && lead < m.cols; ++lead) {
-        std::size_t candidate = pivot_row;
-        while (candidate < m.rows && m.at(candidate, lead).is_zero()) {
-            ++candidate;
+    for (std::size_t i = 0; i < r; ++i) {
+        for (std::size_t j = 0; j < c; ++j) {
+            auto conv = cas::algebra::try_express_in_q_alpha(matrix(i, j), generator, min_poly, ctx);
+            if (conv.is_error() || !conv.value().has_value()) return ok(std::optional<AlgMatrix>{}); // Fallback
+            result.at(i, j) = std::move(conv.value().value());
         }
-        if (candidate == m.rows) continue;
-        if (candidate != pivot_row) {
-            for (std::size_t k = 0; k < m.cols; ++k) {
-                std::swap(m.at(pivot_row, k), m.at(candidate, k));
-            }
-        }
-        auto inv_pivot = m.at(pivot_row, lead).inverse();
-        if (inv_pivot.is_error()) {
-            return Result<void>(inv_pivot.error());
-        }
-        // Scale row.
-        for (std::size_t k = 0; k < m.cols; ++k) {
-            m.at(pivot_row, k) = m.at(pivot_row, k) * inv_pivot.value();
-        }
-        // Eliminate other rows.
-        for (std::size_t r2 = 0; r2 < m.rows; ++r2) {
-            if (r2 == pivot_row) continue;
-            AlgebraicNumber factor = m.at(r2, lead);
-            if (factor.is_zero()) continue;
-            for (std::size_t k = 0; k < m.cols; ++k) {
-                AlgebraicNumber product = factor * m.at(pivot_row, k);
-                m.at(r2, k) = m.at(r2, k) - product;
-            }
-        }
-        ++pivot_row;
     }
-    return ok();
+    return ok(std::optional<AlgMatrix>{std::move(result)});
 }
 
 }  // namespace
@@ -113,80 +73,77 @@ Result<std::vector<std::vector<ExprPtr>>> null_space_over_extension(
     const MatrixExpr& matrix,
     ExprPtr alpha_expr,
     symbolic::CASContext& ctx) {
-    if (!alpha_expr) {
-        return null_space(matrix, ctx);
-    }
-    // Canonicalize alpha_expr through the simplifier so its structural form
-    // matches whatever appears inside matrix entries that themselves passed
-    // through ctx.simplify().  Without this normalization a fresh RootOf node
-    // built ad-hoc by the caller can fail structural_equal against the
-    // simplifier-canonical RootOf that ends up inside matrix entries.
-    {
-        auto canon = ctx.simplify(alpha_expr);
-        if (canon.is_ok()) alpha_expr = canon.value();
-    }
-    const auto* root = expr_cast<RootOf>(alpha_expr);
-    if (!root) {
-        return null_space(matrix, ctx);
+    // 1. Estrai polinomio minimo dal generator (deve essere un RootOf).
+    const auto* root_of = expr_cast<RootOf>(alpha_expr);
+    if (!root_of) {
+        return null_space(matrix, ctx); // Fallback
     }
 
-    auto mp_res = cas::algebra::rootof_min_poly(*root, ctx);
-    if (mp_res.is_error()) {
+    auto mp_res = cas::algebra::rootof_min_poly(*root_of, ctx);
+    if (mp_res.is_error()) return null_space(matrix, ctx);
+    const MinPoly min_poly = std::move(mp_res.value());
+
+    // 2. Tenta conversione a matrice algebrica.
+    auto alg_res = build_alg_matrix(matrix, alpha_expr, min_poly, ctx);
+    if (alg_res.is_error() || !alg_res.value().has_value()) {
         return null_space(matrix, ctx);
     }
-    const auto& mp = mp_res.value();
+    AlgMatrix mat = std::move(*alg_res.value());
 
-    auto am_res = build_alg_matrix(matrix, alpha_expr, mp, ctx);
-    if (am_res.is_error()) {
-        return fail<std::vector<std::vector<ExprPtr>>>(am_res.error());
-    }
-    if (!am_res.value().has_value()) {
-        return null_space(matrix, ctx);
-    }
-    AlgMatrix m = std::move(am_res.value().value());
+    // 3. RREF in Q(alpha).
+    const std::size_t r = mat.rows;
+    const std::size_t c = mat.cols;
+    std::vector<std::size_t> pivot_cols;
+    std::size_t curr_row = 0U;
 
-    auto rref_res = rref_alg(m);
-    if (rref_res.is_error()) {
-        // Minimal polynomial likely reducible.  Fall back to structural path.
-        return null_space(matrix, ctx);
-    }
-
-    // Identify pivot columns.
-    std::vector<std::optional<std::size_t>> pivot_row_for_col(m.cols, std::nullopt);
-    std::vector<bool> is_pivot(m.cols, false);
-    std::size_t current_row = 0U;
-    for (std::size_t c = 0; c < m.cols && current_row < m.rows; ++c) {
-        if (!m.at(current_row, c).is_zero()) {
-            is_pivot[c] = true;
-            pivot_row_for_col[c] = current_row;
-            ++current_row;
+    for (std::size_t j = 0; j < c && curr_row < r; ++j) {
+        std::size_t sel = r;
+        for (std::size_t i = curr_row; i < r; ++i) {
+            if (!mat.at(i, j).is_zero()) { sel = i; break; }
         }
+        if (sel == r) continue;
+
+        if (sel != curr_row) {
+            for (std::size_t k = j; k < c; ++k) std::swap(mat.at(curr_row, k), mat.at(sel, k));
+        }
+
+        auto pivot_inv = mat.at(curr_row, j).inverse();
+        if (pivot_inv.is_error()) return null_space(matrix, ctx); // Reducible min-poly fallback
+
+        for (std::size_t k = j; k < c; ++k) mat.at(curr_row, k) = mat.at(curr_row, k) * pivot_inv.value();
+        
+        for (std::size_t i = 0; i < r; ++i) {
+            if (i == curr_row || mat.at(i, j).is_zero()) continue;
+            auto factor = mat.at(i, j);
+            for (std::size_t k = j; k < c; ++k) {
+                mat.at(i, k) = mat.at(i, k) - (factor * mat.at(curr_row, k));
+            }
+        }
+        pivot_cols.push_back(j);
+        curr_row++;
     }
 
-    AstArena& arena = ctx.arena();
+    // 4. Kernel basis.
+    std::vector<bool> is_pivot(c, false);
+    for (auto pc : pivot_cols) is_pivot[pc] = true;
+
     std::vector<std::vector<ExprPtr>> basis;
-    for (std::size_t free_col = 0; free_col < m.cols; ++free_col) {
-        if (is_pivot[free_col]) continue;
+    for (std::size_t j = 0; j < c; ++j) {
+        if (is_pivot[j]) continue;
 
-        std::vector<ExprPtr> vec(m.cols);
-        for (auto& slot : vec) slot = arena.make<IntegerLit>(BigInt(0));
-        vec[free_col] = arena.make<IntegerLit>(BigInt(1));
+        std::vector<ExprPtr> vec(c);
+        for (std::size_t k = 0; k < c; ++k) vec[k] = integer(ctx, 0);
+        vec[j] = integer(ctx, 1);
 
-        for (std::size_t pivot_c = 0; pivot_c < m.cols; ++pivot_c) {
-            if (!is_pivot[pivot_c] || !pivot_row_for_col[pivot_c].has_value()) continue;
-            const std::size_t pr = *pivot_row_for_col[pivot_c];
-            const AlgebraicNumber& coeff = m.at(pr, free_col);
-            if (coeff.is_zero()) continue;
-            AlgebraicNumber neg = -coeff;
-            ExprPtr raw = cas::algebra::algebraic_number_to_expr_raw(neg, alpha_expr, arena);
-            auto simp = ctx.simplify(raw);
-            if (simp.is_error()) {
-                return fail<std::vector<std::vector<ExprPtr>>>(simp.error());
-            }
-            vec[pivot_c] = simp.value();
+        for (std::size_t i = 0; i < pivot_cols.size(); ++i) {
+            auto comp = -mat.at(i, j);
+            auto expr = cas::algebra::algebraic_number_to_expr(comp, alpha_expr, ctx);
+            if (expr.is_error()) return fail<std::vector<std::vector<ExprPtr>>>(expr.error());
+            vec[pivot_cols[i]] = expr.value();
         }
         basis.push_back(std::move(vec));
     }
+
     return ok(std::move(basis));
 }
 
