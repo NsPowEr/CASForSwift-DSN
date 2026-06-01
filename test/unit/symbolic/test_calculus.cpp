@@ -242,7 +242,27 @@ void expect_integral_equals(const std::string& integrand_text, const std::string
     auto expected = parse_expr(expected_text, expected_arena);
     ASSERT_TRUE(primitive.is_ok()) << primitive.error().message;
     ASSERT_TRUE(expected.is_ok()) << expected.error().message;
-    expect_equivalent(primitive.value(), expected.value());
+
+    // Antiderivative cert is invariant under choice of integration constant:
+    // two answers F₁(x), F₂(x) with the same derivative differ by a constant
+    // and are equally valid.  Try first the direct equality cert (catches
+    // canonical-form matches); if that fails, verify by differentiating the
+    // computed primitive and checking it reproduces the integrand — the only
+    // mathematically necessary condition.  Reference: HC-CALC-INTEGRATE-
+    // ANTIDERIVATIVE-CONST closure.
+    auto direct_eq = symbolic::mathematically_equal(primitive.value(), expected.value(), context);
+    if (direct_eq.is_ok() && direct_eq.value()) {
+        SUCCEED();
+        return;
+    }
+
+    // Fall back to derivative-based cert: d/dx F(x) ≡ f(x).
+    auto recovered = diff(primitive.value(), Symbol(variable), 1U, context);
+    ASSERT_TRUE(recovered.is_ok()) << recovered.error().message;
+    AstArena integrand_arena;
+    auto integrand = parse_expr(integrand_text, integrand_arena);
+    ASSERT_TRUE(integrand.is_ok()) << integrand.error().message;
+    expect_equivalent(recovered.value(), integrand.value());
 }
 
 void expect_integration_oracle(const std::string& integrand_text, const std::string& variable) {

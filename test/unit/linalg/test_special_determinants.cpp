@@ -71,6 +71,43 @@ TEST_F(SpecialDetTest, Circulant_4x4) {
     EXPECT_TRUE(entries_equal(d.value(), lit(-160)));
 }
 
+// Circulant n=5: det via Res(x^5−1, P(x)).  P(x) = 1 + 2x + 3x² + 4x³ + 5x⁴.
+// Reference: directly via x^5 = 1, eigenvalues = P(ω^k), det = ∏ P(ω^k).
+// Equivalente: Res_x(x^5 - 1, P(x)) = 1875.  Verified independently via SymPy:
+//   from sympy import Matrix, Rational
+//   C = Matrix(5, 5, lambda i, j: [1, 2, 3, 4, 5][(j - i) % 5])
+//   C.det()  # → 1875
+TEST_F(SpecialDetTest, Circulant_5x5_ViaResultant) {
+    auto C = from_rows({
+        {1, 2, 3, 4, 5},
+        {5, 1, 2, 3, 4},
+        {4, 5, 1, 2, 3},
+        {3, 4, 5, 1, 2},
+        {2, 3, 4, 5, 1},
+    });
+    auto d = determinant(C, ctx);
+    ASSERT_TRUE(d.is_ok()) << d.error().message;
+    EXPECT_TRUE(entries_equal(d.value(), lit(1875)));
+}
+
+// Circulant n=6: first row = (1, 0, 0, 0, 0, -1).  P(x) = 1 - x^5.  Eigenvalues
+// 1 - ω^(5k) for k = 0..5.  det = ∏_{k=0}^5 (1 - ω^(5k)).  Computed directly:
+// ω^5 = ω^(-1), so 1 - ω^(5k) = 1 - ω^(-k).  ∏(1 - ω^(-k)) for k=0..5 = 0
+// (k=0 → 1-1 = 0), so det = 0.  Singular as expected (P has root x = 1).
+TEST_F(SpecialDetTest, Circulant_6x6_SingularViaResultant) {
+    auto C = from_rows({
+        { 1,  0,  0,  0,  0, -1},
+        {-1,  1,  0,  0,  0,  0},
+        { 0, -1,  1,  0,  0,  0},
+        { 0,  0, -1,  1,  0,  0},
+        { 0,  0,  0, -1,  1,  0},
+        { 0,  0,  0,  0, -1,  1},
+    });
+    auto d = determinant(C, ctx);
+    ASSERT_TRUE(d.is_ok()) << d.error().message;
+    EXPECT_TRUE(entries_equal(d.value(), lit(0)));
+}
+
 // Toeplitz 3×3: M = [[2,3,5],[1,2,3],[4,1,2]]. Toeplitz (diag costanti).
 // Bareiss applicato → det = computed directly.
 TEST_F(SpecialDetTest, Toeplitz_3x3_DetectedAndCorrect) {

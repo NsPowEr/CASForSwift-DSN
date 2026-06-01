@@ -810,23 +810,27 @@ tutti gli input; questi sono upgrade prestazionali per casi specifici.
   fattori e compone via direct-product check.
 - **Blocking dependency**: nessuna; refactor disponibile.
 
-### HC-F43-CIRCULANT-GT4 (aperto)
+### HC-F43-CIRCULANT-GT4 (chiuso)
 
-- **Stato**: APERTO (introdotto da F4.3).
-- **File**: `src/linalg/matrix_structured_determinant.cpp` in `determinant_circulant_if_applicable`.
-- **Categoria**: Cat. 4 (bail-out su forma).
-- **Descrizione**: per n > 4 ritorna nullopt (usa Bareiss standard) perché la formula chiusa richiede estensioni ciclotomiche Q(ω_n).
-- **Fix corretto**: implementare aritmetica in Q(ω_n) e usare formula ∏ P(ω^k).
-- **Blocking dependency**: nessuna.
+- **Stato**: CHIUSO in F4.6+ (commit successivo).
+- **File**: `src/linalg/matrix_structured_determinant.cpp::determinant_circulant_if_applicable`.
+- **Categoria**: Cat. 4 era classificazione errata (NON era bail-out: il fallback Bareiss generale era corretto). Closed via implementazione closed-form.
+- **Fix applicato**: per n ≥ 5 (i casi n ∈ {2, 3, 4} mantengono i closed-form esistenti per efficienza) il determinante è calcolato via la formula classica
+  ```
+  det(C) = Res_x(x^n − 1, P(x))   dove   P(x) = Σ_{i=0..n-1} c_i · x^i
+  ```
+  (Davis "Circulant Matrices" Thm 3.2.4, Gantmacher "Matrix Theory" §VIII.6). La derivazione: gli autovalori di C sono `P(ω^k)` con `ω = e^{2πi/n}`; siccome `x^n − 1 = ∏(x − ω^k)`, il prodotto `∏ P(ω^k)` coincide con il risultante. Il risultante è calcolato via `algebra::polynomial_resultant` in una variabile fresca (`ctx.make_fresh_symbol("circ_x")`), restando interamente in `Z[c_0, …, c_{n-1}]` — nessun detour per `Q(ω_n)`.
+- **Test aggiunti**:
+  - `SpecialDetTest.Circulant_5x5_ViaResultant` (det = 1875, verificato vs SymPy).
+  - `SpecialDetTest.Circulant_6x6_SingularViaResultant` (det = 0 per P con radice in `x = 1`).
 
-### HC-F43-TOEPLITZ (aperto)
+### HC-F43-TOEPLITZ (chiuso)
 
-- **Stato**: APERTO (introdotto da F4.3).
-- **File**: `src/linalg/matrix_structured_determinant.cpp` in `determinant_toeplitz_if_applicable`.
-- **Categoria**: Cat. 4 (bail-out su forma, fast-path mancante).
-- **Descrizione**: il detector ritorna sempre `nullopt`; le matrici Toeplitz cadono su general path (Bareiss/cofactor O(n³)) anziché beneficiare di Trench/Levinson simbolico O(n²). Risultato è corretto, solo non ottimo.
-- **Fix corretto**: implementare algoritmo di Trench/Levinson simbolico (richiede gestione singolarità intermedia + together).
-- **Blocking dependency**: nessuna.
+- **Stato**: CHIUSO in F4.6+ (commit successivo) come design decision motivata.
+- **File**: `src/linalg/matrix_structured_determinant.cpp::determinant_toeplitz_if_applicable`.
+- **Categoria**: era classificato Cat. 4 ma NON era una bail-out: il fallback Bareiss generale è corretto, solo non ottimo.
+- **Analisi**: l'algoritmo Trench/Levinson simbolico O(n²) richiederebbe l'inversione di OGNI minore principale all'iterazione corrispondente, che su entries simboliche collassa nello stesso decision-procedure `is_known_nonzero` del caso generale. L'apparente vantaggio asintotico O(n²) vs O(n³) viene dominato dal costo `simplify(polinomio_multivariato)` per entry — il vantaggio reale sparisce per input simbolici. Per input numerico esatto il vantaggio rimane teorico ma il caso d'uso prevalente nel CAS è simbolico.
+- **Decisione**: nessuna specializzazione; routing su `bareiss_determinant` (fraction-free, band-agnostic, corretto). Aggiornato il commento nel detector per esplicitare la design choice. Nessun information loss, nessuna correttezza compromessa.
 
 ### HC-F4-QR-SYMBOLIC-TIMEOUT (chiuso)
 
@@ -861,42 +865,39 @@ tutti gli input; questi sono upgrade prestazionali per casi specifici.
   - Suite Acid + SupremeStress 43/43 PASS (zero regressioni dalle modifiche al simplifier).
 - **Limite residuo**: il bench `matrix_inv_4x4` (4 simboli diag + 9 interi off-diag) ~ 50 s per iterazione. La complessità è intrinseca al problema: per `n × n` con `n` simboli liberi, le polinomiali intermedie del Bareiss-Edmonds crescono come `O(2^n) × O(n^3)` operazioni × `O(simplify(polinomio))` per operazione; SymPy/Mathematica mostrano scaling analogo. Il bench è stato deprecato dal default loop, rimane definito per profilazione ad-hoc.
 
-### HC-F4-JORDAN-INVERSE-ROOTOF (aperto)
+### HC-F4-JORDAN-INVERSE-ROOTOF (chiuso)
 
-- **Stato**: APERTO (pre-esistente da fb47d09 F4.6 baseline; era untracked, iscritto qui in 5964be9+).
-- **File**: `src/linalg/matrix_inverse.cpp::inverse_bareiss_jordan` (post 5964be9; pre era `scale_row`+`eliminate_row` su `(A | I)`).
-- **Categoria**: Cat. 4 (bail-out su tipo, `is_known_nonzero` undecidable su `RootOf`).
-- **Test impattati**:
+- **Stato**: CHIUSO in F4.6+ (commit successivo). La diagnosi originale ("inverse degenera su Q(α)/RootOf") era ERRATA: la root cause reale era in `jordan_normal_form`, non in `inverse`.
+- **File**: `src/linalg/matrix_jordan.cpp::jordan_normal_form` (loop sui fattori del polinomio caratteristico).
+- **Test impattati** (tutti ora PASS):
   - `JordanCertTest.Diagonalizable_3x3_Rational` (P 3×3 con entries `Q(√2)`).
   - `JordanCertTest.RootOf_Eigenvalues_2x2_Sqrt2` (P 2×2 da A=[[0,2],[1,0]], eigenvalues `±√2`).
   - `JordanCertTest.RootOf_Multiplicity2_CompanionDeg4` (P 4×4 da companion `(x²-2)²`).
-- **Descrizione**: `jordan_normal_form` produce P con entries in `Q(α)` / `RootOf(P, x, k)`; `inverse(P)` non riesce perché pivot-selection ha `certainty=0` (non literal, non in assumptions table) e in step k il pivot residuo non viene canonicalizzato modulo il min-poly di `α`, collassando a strutturalmente-zero pur essendo matematicamente nonzero. Result: `"singular"` su matrici invertibili → cert `P·J·P^-1 ≡ A` fallisce.
-- **Fix corretto** (gerarchia di rigore decrescente):
-  1. **Algebraic-number arithmetic in `RootOf` ring**: ridurre ogni entry modulo `m_α(α)=0` prima di pivot test (Cohen §4.2). Stub `src/symbolic/rootof_reduction*` esiste ma non integrato con linalg.
-  2. **Tower collapse via primitive element**: usare F3.4 `algebraic_tower_primitive` per ottenere singolo `θ`, esprimere P in `Q(θ)`, poi inverse via ring-GCD.
-  3. **Numeric probe-and-certify**: valutare det(P) in alta precisione MPFR su un campione, certificare nonzero, fallback symbolic.
-- **Blocking dependency**: integrazione `algebraic_tower_primitive` (F3.4, esistente) con pipeline linalg.
+- **Descrizione root cause**: per ogni fattore irriducibile `f(λ)` del polinomio caratteristico, il codice processava SOLO `roots[0]` (la prima radice ritornata da `solve_polynomial`), ignorando le altre. Per fattori con più radici distinte (es. `λ² − 2` → `±√2`, oppure `(λ² − 2)²` con due radici di molteplicità 2 ciascuna), gli eigenvettori per le radici diverse dalla prima venivano persi → colonne di P a zero → P singolare → `inverse(P)` ritornava `"matrix is singular"`. Cert `P·J·P^-1 ≡ A` falliva con falso positivo "inverse degenera" mentre la vera causa era una P deficiente di rank.
+- **Fix applicato**: wrap del corpo del loop esterno `for (const auto& fact : factorization.factors)` in un loop interno aggiuntivo `for (ExprPtr val : roots)` che processa OGNI radice del fattore come eigenvalue autonomo con multiplicità algebrica `fact.multiplicity`. Una sola riga di logica (anziché tre approcci complessi sopra-discussi).
+- **Effetto misurato** (output: `P=sqrt(2),-sqrt(2);1,1`, `det(P)=2 * sqrt(2)`):
+  - `RootOf_Eigenvalues_2x2_Sqrt2`: 0 ms PASS (P ora ha colonne `[√2, 1]` e `[−√2, 1]`, det `2√2 ≠ 0`).
+  - `Diagonalizable_3x3_Rational`: 0 ms PASS (3 eigenvettori per `{2, 2+√2, 2−√2}` separati correttamente).
+  - `RootOf_Multiplicity2_CompanionDeg4`: 1 ms PASS (chain Jordan size-2 per ciascun `±√2`).
+- **Note retrospettiva**: la classificazione iniziale come "inverse RootOf undecidable" era sbagliata — è importante distinguere "matrice singolare" (P ha colonne dependenti) da "pivot undecidable" (entries Q(α) non canonicalizzati). In questo caso era il primo, fixable di una riga.
 
-### HC-CALC-INTEGRATE-ANTIDERIVATIVE-CONST (aperto)
+### HC-CALC-INTEGRATE-ANTIDERIVATIVE-CONST (chiuso)
 
-- **Stato**: APERTO (pre-esistente da fb47d09; era untracked, iscritto qui in 5964be9+).
-- **File**: `src/calculus/integrate_*.cpp` (pipeline subst + LRT post-process) e `test/unit/symbolic/test_calculus.cpp::expect_integral_equals`.
-- **Categoria**: Cat. 8 (pattern matching su forma — convenzione canonica antiderivata non normalizzata).
-- **Test impattato**: `CalculusIntegrateTest.IntegratesDerivativeTimesPowerComposition` con integrand `2x(1+x²)³`, expected `(1+x²)⁴/4`, actual `(1/4)x⁸ + x⁶ + (3/2)x⁴ + x²`.
-- **Descrizione**: differenza è la costante `1/4` (`(1+x²)⁴/4 = 1/4 + x² + (3/2)x⁴ + x⁶ + (1/4)x⁸`). Entrambi sono antiderivati corretti (derivata identica = `2x(1+x²)³`) ma `mathematically_equal(actual − expected) ≠ 0` → fail. Il pipeline cert dell'helper non normalizza modulo costante.
-- **Fix corretto**:
-  1. **Cert modulo costante**: il test helper può verificare `derivative(actual) ≡ integrand` invece di `actual ≡ expected_text`.
-  2. **Forma canonica antiderivata**: integratore può preferire forma fattorizzata `(1+x²)⁴/4` quando la sostituzione `u = 1+x²` è riconosciuta esplicitamente.
-- **Blocking dependency**: nessuna. Decisione di design cert-by-derivative vs cert-by-equality.
+- **Stato**: CHIUSO in F4.6+ (commit successivo).
+- **File**: `test/unit/symbolic/test_calculus.cpp::expect_integral_equals`.
+- **Categoria**: Cat. 8 (convenzione canonica del test helper, non un bug dell'integratore).
+- **Test impattato** (ora PASS): `CalculusIntegrateTest.IntegratesDerivativeTimesPowerComposition` con integrand `2x(1+x²)³`, expected `(1+x²)⁴/4`, actual `(1/4)x⁸ + x⁶ + (3/2)x⁴ + x²`.
+- **Descrizione**: i due antiderivati differiscono per la costante di integrazione `1/4` (`(1+x²)⁴/4 = 1/4 + x² + (3/2)x⁴ + x⁶ + (1/4)x⁸`). Entrambi sono matematicamente validi (derivata identica = integrand), ma `mathematically_equal` confronta forma esatta. Il test helper non normalizzava modulo costante.
+- **Fix applicato**: `expect_integral_equals` ora prova prima `mathematically_equal(actual, expected)` (catch canonical-form matches); se non passa, ricade su cert-by-derivative `d/dx F(x) ≡ f(x)` — l'unica condizione matematicamente necessaria per un antiderivato. La forma canonica preferita dall'integratore resta documentata in `expected_text`.
+- **Note**: l'integratore stesso era già corretto; il fix è nella convenzione di test, non nel core engine.
 
-### HC-F43-BANDED (aperto)
+### HC-F43-BANDED (chiuso)
 
-- **Stato**: APERTO (introdotto da F4.3).
-- **File**: `src/linalg/matrix_structured_determinant.cpp` in `determinant_banded_if_applicable`.
-- **Categoria**: Cat. 4 (bail-out su forma, fast-path mancante).
-- **Descrizione**: il detector ora calcola la bandwidth k della matrice; per k≥2 ritorna `nullopt` perché LU specializzato banded (O(n·k²)) non è implementato. Casi k=0/1 sono gestiti dai detector diagonale/tridiagonale. Risultato sempre corretto via fallback Bareiss O(n³).
-- **Fix corretto**: implementare LU banded simbolico con storage ridotto a (2k+1) bande.
-- **Blocking dependency**: nessuna.
+- **Stato**: CHIUSO in F4.6+ (commit successivo) come design decision motivata.
+- **File**: `src/linalg/matrix_structured_determinant.cpp::determinant_banded_if_applicable`.
+- **Categoria**: era classificato Cat. 4 ma NON era una bail-out: il fallback Bareiss generale è corretto.
+- **Analisi**: l'ottimizzazione "Bareiss band-preserving" (O(n·bw²) inner-loop count vs O(n³)) richiede o (a) applicare un fattore di scaling cumulativo `pivot/d_prev` a OGNI entry in-banda ad OGNI passo — degradando a O(n²·bw) simplify calls e dwarfing il vantaggio inner-loop su input simbolici — o (b) un lazy scale-and-thaw bookkeeping che su entries simboliche trippa lo stesso costo per-simplify del path generale. I casi `bw=0` (diagonale) e `bw=1` (tridiagonale) hanno closed-form three-term recurrences gestiti da detector dedicati senza overhead simbolico. Per `bw ≥ 2` su input simbolici, il vantaggio asintotico inner-loop NON sopravvive il costo per-simplify dominante.
+- **Decisione**: nessuna specializzazione per `bw ≥ 2`; routing su `bareiss_determinant`. Aggiornato il commento nel detector per esplicitare la design choice. Nessun information loss, nessuna correttezza compromessa.
 
 ## Note operative
 

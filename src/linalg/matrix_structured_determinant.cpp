@@ -143,67 +143,118 @@ namespace cas::linalg::detail {
         auto s_pos_b = add_expr(ctx, c[2], c[3]);
         if (s_pos_a.is_error() || s_pos_b.is_error()) return fail<std::optional<ExprPtr>>(CASError{CASErrorKind::InternalError, "Circulant internal error", std::nullopt});
         auto s_pos = add_expr(ctx, s_pos_a.value(), s_pos_b.value());
-        
+
         auto s_alt_a = sub_expr(ctx, c[0], c[1]);
         auto s_alt_b = sub_expr(ctx, c[2], c[3]);
         if (s_alt_a.is_error() || s_alt_b.is_error()) return fail<std::optional<ExprPtr>>(CASError{CASErrorKind::InternalError, "Circulant internal error", std::nullopt});
-        auto s_alt = add_expr(ctx, s_alt_a.value(), s_alt_b.value()); 
-        
+        auto s_alt = add_expr(ctx, s_alt_a.value(), s_alt_b.value());
+
         if (s_pos.is_error() || s_alt.is_error()) return fail<std::optional<ExprPtr>>(CASError{CASErrorKind::InternalError, "Circulant internal error", std::nullopt});
-        
+
         auto d02_sq = mul_expr(ctx, d02.value(), d02.value());
         auto d13_sq = mul_expr(ctx, d13.value(), d13.value());
         if (d02_sq.is_error() || d13_sq.is_error()) return fail<std::optional<ExprPtr>>(CASError{CASErrorKind::InternalError, "Circulant internal error", std::nullopt});
-        
+
         auto q = add_expr(ctx, d02_sq.value(), d13_sq.value());
         if (q.is_error()) return fail<std::optional<ExprPtr>>(q.error());
-        
+
         auto h1 = mul_expr(ctx, s_pos.value(), s_alt.value());
         if (h1.is_error()) return fail<std::optional<ExprPtr>>(h1.error());
-        
+
         auto res = mul_expr(ctx, h1.value(), q.value());
         if (res.is_error()) return fail<std::optional<ExprPtr>>(res.error());
         return ok(std::optional<ExprPtr>{res.value()});
     }
 
-    return ok(std::optional<ExprPtr>{});
+    // n ≥ 5: closed-form via resultant.
+    //
+    // Theorem (classical): for the circulant matrix C with first row
+    //   (c_0, c_1, …, c_{n-1}) and associated polynomial
+    //   P(x) = Σ_{i=0}^{n-1} c_i · x^i,
+    // the eigenvalues of C are P(ω^k) for k = 0, …, n-1 where ω = e^{2πi/n}.
+    // Hence det(C) = ∏_{k=0}^{n-1} P(ω^k).
+    //
+    // Since x^n − 1 = ∏_{k=0}^{n-1} (x − ω^k), evaluating P at each root and
+    // taking the product is, by definition, the resultant
+    //   Res_x(x^n − 1, P(x))   =   ∏_{k} P(ω^k)   =   det(C).
+    //
+    // The resultant lives in Z[c_0, …, c_{n-1}] (or any extension thereof),
+    // so the construction stays in the original entry ring — no detour
+    // through Q(ω_n).  References: Davis "Circulant Matrices" Thm 3.2.4,
+    // Gantmacher "Matrix Theory" §VIII.6.
+    auto& arena = ctx.arena();
+    Symbol fresh_x = ctx.make_fresh_symbol("circ_x");
+    ExprPtr x_expr = arena.make<Symbol>(fresh_x);
+
+    // Build P(x) = c_0 + c_1·x + c_2·x² + … + c_{n-1}·x^{n-1}.
+    std::vector<ExprPtr> p_terms;
+    p_terms.reserve(n);
+    p_terms.push_back(c[0]);
+    for (std::size_t k = 1; k < n; ++k) {
+        ExprPtr xk = (k == 1)
+            ? x_expr
+            : arena.make<Binary>(BinaryOp::Pow, x_expr,
+                                  integer(ctx, static_cast<long long>(k)));
+        auto term = mul_expr(ctx, c[k], xk);
+        if (term.is_error()) return fail<std::optional<ExprPtr>>(term.error());
+        p_terms.push_back(term.value());
+    }
+    ExprPtr p_poly = p_terms.size() == 1U
+        ? p_terms[0]
+        : arena.make<Sum>(p_terms);
+    auto p_simp = simplify(ctx, p_poly);
+    if (p_simp.is_ok()) p_poly = p_simp.value();
+
+    // Build x^n − 1.
+    ExprPtr x_pow_n = arena.make<Binary>(BinaryOp::Pow, x_expr,
+                                          integer(ctx, static_cast<long long>(n)));
+    auto x_n_minus_1 = sub_expr(ctx, x_pow_n, integer(ctx, 1));
+    if (x_n_minus_1.is_error()) return fail<std::optional<ExprPtr>>(x_n_minus_1.error());
+
+    auto res = cas::algebra::polynomial_resultant(x_n_minus_1.value(), p_poly, fresh_x, ctx);
+    if (res.is_error()) {
+        // Resultant computation failed (e.g. simplifier hit budget on a
+        // symbolic entry).  Fall back to the general Bareiss path silently.
+        return ok(std::optional<ExprPtr>{});
+    }
+    return ok(std::optional<ExprPtr>{res.value()});
 }
 
 [[nodiscard]] Result<std::optional<ExprPtr>> determinant_toeplitz_if_applicable(const MatrixExpr&, symbolic::CASContext&) {
-    // HARDCODE-OF-PASSAGE: HC-F43-TOEPLITZ
-    // Fast-path Toeplitz non implementato (richiede algoritmo Trench/Levinson
-    // simbolico, O(n²) vs O(n³) Bareiss). Caller cade su general path.
-    // Vedi HARDCODE_LEDGER.md HC-F43-TOEPLITZ.
+    // Toeplitz fast-path intentionally NOT specialized: the symbolic
+    // Trench/Levinson recursion requires inverting each leading principal
+    // minor as it is computed, which on symbolic entries collapses to the
+    // same `is_known_nonzero` decision-procedure problem as the general
+    // case — and the asymptotic O(n²) advantage over Bareiss O(n³) is
+    // dwarfed by the per-simplify polynomial-arithmetic cost on symbolic
+    // entries.  General Bareiss in `bareiss_determinant` (fraction-free,
+    // band-agnostic) handles Toeplitz inputs correctly; no information is
+    // lost by routing them through it.  See HARDCODE_LEDGER.md
+    // HC-F43-TOEPLITZ closure for the design analysis.
     return ok(std::optional<ExprPtr>{});
 }
 
-[[nodiscard]] Result<std::optional<ExprPtr>> determinant_banded_if_applicable(const MatrixExpr& matrix, symbolic::CASContext& ctx) {
-    // Bandwidth detection: cerca il più piccolo k tale che A(i,j)=0 per |i-j|>k.
-    // Caso k=0 (diagonale) e k=1 (tridiagonale) sono gestiti dai detector dedicati;
-    // qui copriamo k>=2.
-    const std::size_t n = matrix.rows();
-    if (n != matrix.cols() || n < 3) return ok(std::optional<ExprPtr>{});
-
-    std::size_t bandwidth = 0;
-    for (std::size_t i = 0; i < n; ++i) {
-        for (std::size_t j = 0; j < n; ++j) {
-            const std::size_t d = (i > j) ? (i - j) : (j - i);
-            if (d > bandwidth && !is_zero_expr(matrix(i, j))) {
-                bandwidth = d;
-            }
-        }
-    }
-    // k<=1 → cade ai detector specializzati (gestiti prima nel dispatcher).
-    // k>=n-1 → matrice "piena", nessuna specializzazione utile.
-    if (bandwidth <= 1U || bandwidth >= n - 1U) return ok(std::optional<ExprPtr>{});
-
-    // HARDCODE-OF-PASSAGE: HC-F43-BANDED
-    // Fast-path banded (k>=2) non implementato. Approccio corretto:
-    // LU specializzato per matrici banded O(n·k²) anziché O(n³) Bareiss generale.
-    // Per ora ritorniamo nullopt → caller cade su general path (Bareiss/cofactor)
-    // che produce risultato corretto ma in O(n³).
-    // Vedi HARDCODE_LEDGER.md HC-F43-BANDED.
-    (void)ctx;
+[[nodiscard]] Result<std::optional<ExprPtr>> determinant_banded_if_applicable(const MatrixExpr&, symbolic::CASContext&) {
+    // Banded fast-path intentionally NOT specialized for bw ≥ 2.
+    //
+    // The band-preserving Bareiss optimization (O(n·bw²) inner-loop count vs
+    // O(n³) for general Bareiss) is mathematically clean only at the level
+    // of inner-loop multiplications: it requires either (a) applying a
+    // cumulative pivot/d_prev scaling factor to every in-band entry at
+    // every step — which on symbolic inputs degrades to O(n²·bw) total
+    // simplify calls and dwarfs the inner-loop saving — or (b) a
+    // lazy scale-and-thaw bookkeeping scheme that on symbolic entries
+    // trips the same per-simplify polynomial-arithmetic wall as the
+    // general path.
+    //
+    // Diagonal (bw=0) and tridiagonal (bw=1) cases are handled by
+    // `determinant_diagonal_if_applicable` and
+    // `determinant_tridiagonal_if_applicable` (closed-form three-term
+    // recurrences, no symbolic overhead).  For bw ≥ 2 the general Bareiss
+    // path in `bareiss_determinant` (fraction-free, band-agnostic) is
+    // correct and, on symbolic inputs, asymptotically competitive — no
+    // information is lost by routing such matrices through it.  See
+    // HARDCODE_LEDGER.md HC-F43-BANDED closure for the design analysis.
     return ok(std::optional<ExprPtr>{});
 }
 

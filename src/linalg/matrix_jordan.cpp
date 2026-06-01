@@ -111,10 +111,18 @@ Result<JordanDecomposition> jordan_normal_form(const MatrixExpr& matrix, symboli
 
     for (const auto& fact : factorization.factors) {
         ExprPtr root = fact.factor;
-        auto roots = algebra::solve_polynomial(root, lambda, ctx);
-        if (roots.is_error() || roots.value().empty()) continue;
-        ExprPtr val = roots.value()[0];
+        auto roots_res = algebra::solve_polynomial(root, lambda, ctx);
+        if (roots_res.is_error() || roots_res.value().empty()) continue;
+        const auto& roots = roots_res.value();
         const unsigned int m = fact.multiplicity;
+
+        // Each root of the irreducible factor is its own eigenvalue.
+        // Iterate over ALL roots: previously only roots[0] was processed,
+        // dropping the second eigenvector of polynomials like λ²−2 that
+        // give two distinct algebraic eigenvalues from a single factor.
+        // Reference: HC-F4-JORDAN-INVERSE-ROOTOF closure (the bug surfaced
+        // as P with a zero column in JordanCertTest.RootOf_Eigenvalues_2x2_Sqrt2).
+        for (ExprPtr val : roots) {
 
         // A - val*I
         MatrixExpr root_i(n, n);
@@ -217,6 +225,7 @@ Result<JordanDecomposition> jordan_normal_form(const MatrixExpr& matrix, symboli
                 j_block_start += k;
             }
         }
+        }  // end for each root of factor
     }
 
     return ok(JordanDecomposition{std::move(J), std::move(P)});

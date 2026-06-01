@@ -37,6 +37,61 @@ namespace {
     return CASError{.kind = kind, .message = std::move(message), .hint = std::nullopt};
 }
 
+// Cofactor adjugate inverse: A⁻¹[i][j] = (-1)^(i+j) · det(M_{j,i}) / det(A)
+// where M_{j,i} is the (j,i)-minor (matrix obtained by deleting row j and
+// column i of A).  Costs n² calls to `determinant` on (n-1)×(n-1) sub-
+// matrices, hence O(n²·T_det(n-1)).  Used as fallback when Bareiss-Jordan
+// cannot decide a pivot on symbolic/RootOf inputs (the per-call
+// `bareiss_determinant` handles small-n RootOf arithmetic via the
+// Sylvester identity without requiring pivot certification at every
+// elimination step).  Reference: HC-F4-JORDAN-INVERSE-ROOTOF closure.
+[[nodiscard]] Result<MatrixExpr> inverse_via_cofactor(
+    const MatrixExpr& matrix, symbolic::CASContext& ctx) {
+    const std::size_t n = matrix.rows();
+
+    auto det_res = determinant(matrix, ctx);
+    if (det_res.is_error()) return fail<MatrixExpr>(det_res.error());
+    ExprPtr det = det_res.value();
+    if (is_zero_expr(det)) {
+        return fail<MatrixExpr>(make_error(CASErrorKind::Undefined,
+            "inverse: matrix is singular"));
+    }
+
+    MatrixExpr inv(n, n);
+    for (std::size_t i = 0; i < n; ++i) {
+        for (std::size_t j = 0; j < n; ++j) {
+            // Build minor M_{j,i}: delete row j and column i.
+            MatrixExpr minor(n - 1U, n - 1U);
+            std::size_t rr = 0;
+            for (std::size_t r = 0; r < n; ++r) {
+                if (r == j) continue;
+                std::size_t cc = 0;
+                for (std::size_t c = 0; c < n; ++c) {
+                    if (c == i) continue;
+                    minor(rr, cc) = matrix(r, c);
+                    ++cc;
+                }
+                ++rr;
+            }
+            auto m_det = determinant(minor, ctx);
+            if (m_det.is_error()) return fail<MatrixExpr>(m_det.error());
+            ExprPtr cof = m_det.value();
+            if ((i + j) % 2U != 0U) {
+                auto neg = negate_expr(ctx, cof);
+                if (neg.is_error()) return fail<MatrixExpr>(neg.error());
+                cof = neg.value();
+            }
+            auto q = div_expr(ctx, cof, det);
+            if (q.is_error()) return fail<MatrixExpr>(q.error());
+            auto t = algebra::together(q.value(), ctx);
+            ExprPtr val = t.is_ok() ? t.value() : q.value();
+            auto s = simplify(ctx, val);
+            inv(i, j) = s.is_ok() ? s.value() : val;
+        }
+    }
+    return ok(std::move(inv));
+}
+
 [[nodiscard]] Result<MatrixExpr> inverse_bareiss_jordan(
     const MatrixExpr& matrix, symbolic::CASContext& ctx) {
     const std::size_t n = matrix.rows();
@@ -68,8 +123,20 @@ namespace {
             }
         }
         if (pivot_row == n || best.certainty < 0) {
-            return fail<MatrixExpr>(make_error(CASErrorKind::Undefined,
-                "inverse: matrix is singular (or pivot cannot be decided nonzero)"));
+            // No pivot certified nonzero in column k. For matrices with
+            // RootOf-extension entries this is typically NOT true
+            // singularity: the residual M(i, k) is a polynomial in the
+            // algebraic generators that needs reduction modulo their
+            // minimal polynomials to decide nonzero. Signal Unimplemented
+            // with the standard reason code so the outer `inverse` can
+            // fall back to the cofactor-adjugate path on small matrices.
+            return make_unimplemented<MatrixExpr>(
+                "linalg", "inverse",
+                "pivot expression cannot be decided nonzero",
+                error::reason_codes::LINALG_RREF_UNDECIDABLE_PIVOT,
+                "Add assumptions about pivot variables or use the cofactor "
+                "fallback (n <= 5)",
+                "F4.6");
         }
 
         if (pivot_row != k) {
@@ -183,7 +250,27 @@ Result<MatrixExpr> inverse(const MatrixExpr& matrix, symbolic::CASContext& ctx) 
         return ok(std::move(res));
     }
 
-    return inverse_bareiss_jordan(matrix, ctx);
+    // Bareiss-Edmonds Gauss-Jordan: optimal for matrices with structurally-
+    // certifiable pivots (rational/symbolic entries with `is_known_nonzero`
+    // decidable).  Returns Unimplemented(LINALG_RREF_UNDECIDABLE_PIVOT) when
+    // a residual pivot cannot be decided non-zero — typical for matrices
+    // with RootOf-extension entries whose nonzero status requires reduction
+    // modulo the minimal polynomial.  In that case fall back to the
+    // cofactor-adjugate algorithm, which routes every minor through
+    // `bareiss_determinant` (Sylvester identity) and tolerates undecidable
+    // intermediates because the final determinant is computed in one shot.
+    //
+    // For small n (≤ 5) the cofactor fallback is asymptotically cheap
+    // (≤ 25 calls to bareiss(4×4)); for larger n the BJ failure is more
+    // likely structural (true singularity) than RootOf-undecidability, so
+    // the cofactor pass is skipped to avoid O(n²·n³) = O(n^5) cost on
+    // expensive symbolic inputs.
+    auto bj_res = inverse_bareiss_jordan(matrix, ctx);
+    if (bj_res.is_ok()) return bj_res;
+    if (n <= 5U && bj_res.error().kind == CASErrorKind::Unimplemented) {
+        return inverse_via_cofactor(matrix, ctx);
+    }
+    return bj_res;
 }
 
 } // namespace cas::linalg
