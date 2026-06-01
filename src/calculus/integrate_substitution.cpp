@@ -27,6 +27,12 @@ void collect_substitution_candidates(
     }
 
     if (const auto* call = expr_cast<FuncCall>(expr)) {
+        // The FuncCall itself is a u-substitution candidate: integrals of
+        // the form ∫ f(g(x))·g'(x) dx benefit from u = g(x) where g may
+        // itself be a function call (e.g. ∫ ln(x)/x dx with u = ln(x),
+        // du = dx/x).  Add the call as candidate, plus its arguments
+        // (for the "outer is f, inner is g" pattern), and recurse.
+        candidates.insert(expr);
         for (const auto& arg : call->args) {
             if (integrate_detail::depends_on(arg, var) && !expr_is<Symbol>(arg)) {
                 candidates.insert(arg);

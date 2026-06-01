@@ -57,12 +57,12 @@ TEST_F(SubstitutionTest, ExponentialTrig) {
     verify_integral("cos(x)*exp(sin(x))");
 }
 
-TEST_F(SubstitutionTest, DISABLED_Logarithmic) {
+TEST_F(SubstitutionTest, Logarithmic) {
     // ∫ ln(x)/x dx = 1/2 * ln(x)^2
     verify_integral("ln(x)/x");
 }
 
-TEST_F(SubstitutionTest, DISABLED_SineOfSquare) {
+TEST_F(SubstitutionTest, SineOfSquare) {
     // ∫ 2*x*sin(x^2) dx = -cos(x^2)
     verify_integral("2*x*sin(x^2)");
 }
