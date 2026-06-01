@@ -399,6 +399,67 @@ Result<ExprPtr> Simplifier::simplify_product_factors(
         }
     }
 
+    // Step 6.5: HC-F4-QR-SYMBOLIC-TIMEOUT fix — sqrt(a)·sqrt(a) → a quando a è
+    // strutturalmente non-negativo (somma/prodotto di quadrati, Pow esponente
+    // pari, FuncCall sempre non-negativo, costante non-negativa) oppure
+    // dichiarato tale via assumptions. Evita di delegare a Step 7 che produce
+    // sqrt(a²) e poi tenta perfect-square detection via factorize — costo
+    // esponenziale su rationali grandi (8×8 QR random).
+    {
+        auto is_struct_nonneg = [](ExprPtr e, auto&& self) -> bool {
+            if (!e) return false;
+            if (const auto* il = expr_cast<IntegerLit>(e)) return !il->value.is_negative();
+            if (const auto* rl = expr_cast<RationalLit>(e)) return !rl->numerator.is_negative();
+            if (const auto* b = expr_cast<Binary>(e); b && b->op == BinaryOp::Pow) {
+                if (const auto* il = expr_cast<IntegerLit>(b->right)) {
+                    if (!il->value.is_negative() && (il->value % BigInt(2)).is_zero()) return true;
+                }
+            }
+            if (const auto* sum = expr_cast<Sum>(e)) {
+                for (auto t : sum->terms) if (!self(t, self)) return false;
+                return true;
+            }
+            if (const auto* prod = expr_cast<Product>(e)) {
+                for (auto f : prod->factors) if (!self(f, self)) return false;
+                return true;
+            }
+            if (const auto* fc = expr_cast<FuncCall>(e)) {
+                if (fc->func_id == BuiltinOp::Sqrt
+                    || fc->func_id == BuiltinOp::Abs
+                    || fc->func_id == BuiltinOp::Exp
+                    || fc->func_id == BuiltinOp::Cosh) return true;
+            }
+            return false;
+        };
+        auto known_nonneg = [&](ExprPtr e) -> bool {
+            if (is_struct_nonneg(e, is_struct_nonneg)) return true;
+            if (assumptions_ && assumptions_->is_nonnegative(e)) return true;
+            return false;
+        };
+        bool merged_any = true;
+        while (merged_any) {
+            merged_any = false;
+            for (std::size_t i = 0; i < symbolic.size() && !merged_any; ++i) {
+                if (symbolic[i].second != BigInt(1)) continue;
+                const auto* fa = expr_cast<FuncCall>(symbolic[i].first);
+                if (!fa || fa->func_id != BuiltinOp::Sqrt || fa->args.size() != 1U) continue;
+                for (std::size_t j = i + 1; j < symbolic.size(); ++j) {
+                    if (symbolic[j].second != BigInt(1)) continue;
+                    const auto* fb = expr_cast<FuncCall>(symbolic[j].first);
+                    if (!fb || fb->func_id != BuiltinOp::Sqrt || fb->args.size() != 1U) continue;
+                    if (fa->args[0] != fb->args[0]) continue;
+                    if (!known_nonneg(fa->args[0])) continue;
+                    ExprPtr arg = fa->args[0];
+                    symbolic.erase(symbolic.begin() + j);
+                    symbolic.erase(symbolic.begin() + i);
+                    symbolic.push_back({arg, BigInt(1)});
+                    merged_any = true;
+                    break;
+                }
+            }
+        }
+    }
+
     // Step 7: L1-12 sqrt(a)·sqrt(b) → sqrt(a·b) for non-negative rational args.
     {
         auto get_rat_pos = [](ExprPtr e) -> std::optional<Rational> {

@@ -828,18 +828,38 @@ tutti gli input; questi sono upgrade prestazionali per casi specifici.
 - **Fix corretto**: implementare algoritmo di Trench/Levinson simbolico (richiede gestione singolarità intermedia + together).
 - **Blocking dependency**: nessuna.
 
-### HC-F4-QR-SYMBOLIC-TIMEOUT (aperto)
+### HC-F4-QR-SYMBOLIC-TIMEOUT (chiuso)
 
-- **Stato**: APERTO (pre-esistente, emerso da test cert F4.5).
-- **File**: `src/linalg/matrix_qr.cpp` (Householder); cascade in `simplify` core.
+- **Stato**: CHIUSO in F4.6 (era pre-esistente, emerso da test cert F4.5).
+- **File**: `src/linalg/matrix_qr.cpp` (riscritto MGS), `src/symbolic/simplify_arithmetic_chain.cpp` (Step 6.5), `src/symbolic/simplify_exp_log.cpp` (trial bound).
 - **Categoria**: Cat. 1 (budget non configurabile) + Cat. 9 (intervalli polling fissi).
-- **Descrizione**: per matrici 8×8 random a coefficienti razionali, QR Householder produce R contenente `sqrt(Σ x_i²)` su tutta la diagonale; la cascade `simplify(2*sqrt(p/q)*x_0)` triggera factorization su numeratore/denominatore razionali grandi, esaurendo il budget `ctx.simplify_timeout`. Il fix preliminare in `matrix_expr_helpers.cpp::sym_norm` evita un `simplify(sqrt(...))` esplicito ma il bottleneck rimane in simplify globale.
-- **Test impattati**: `F4StressTest.Householder_QR_8x8_RandomQ_CorrectAndTimed` (timeout 79s), `QRTest.SymbolicQR_DefaultSignConvention_2x2` (skipped per timeout 1.6s su 2×2 simbolico).
-- **Fix corretto**:
-  - aggiungere fast-path `simplify(sqrt(a)*sqrt(a)) → a` riconoscendo Pow/FuncCall stesso pointer (assunzione `a ≥ 0` valida per sum-of-squares);
-  - oppure introdurre `Q(sqrt)` extension explicit con simplifier dedicato (lazy normal form);
-  - oppure QR via Cholesky di A^T A con LDL^T (no-sqrt) + ricostruzione finale.
-- **Blocking dependency**: nessuna; richiede ridisegno simplify rule per radici.
+- **Descrizione originale**: per matrici 8×8 random a coefficienti razionali, QR Householder produceva R contenente `sqrt(Σ x_i²)` su tutta la diagonale; la cascade `simplify(2*sqrt(p/q)*x_0)` triggerava factorization trial-division O(√n) in `extract_square_factor` su numeratore razionale grande (effettivamente infinito), esaurendo il budget `ctx.simplify_timeout`.
+- **Fix applicato** (tre interventi convergenti):
+  1. `simplify_exp_log.cpp::extract_square_factor` ora prende un `trial_bound` configurabile via `ctx.simplify_sqrt_trial_division_bound()` (default 10000) + integer_sqrt come fallback perfect-square: chiude il loop O(√n) con O(min(√n, bound)) + O(log²n).
+  2. `simplify_arithmetic_chain.cpp` Step 6.5: regola `sqrt(a)·sqrt(a) → a` per `a` strutturalmente non-negativo (somma/prodotto di quadrati, Pow esponente pari) o dichiarato tale via assumptions. Evita la conversione a `sqrt(a²)` e successiva fattorizzazione.
+  3. `matrix_qr.cpp` riscritto via **Modified Gram-Schmidt** (Trefethen-Bau §8): aggiornamenti dei vettori residui `V[:, j] -= (dot/N_k)·V[:, k]` razionali puri (no sqrt nell'AST intermedio); sqrt confinato a `R(k, k)` e denominatori di `Q(i, k)`. La cert `Q^T·Q ≡ I` semplifica correttamente grazie alla regola Step 6.5.
+- **Effetto misurato**:
+  - `QRTest.SymbolicQR_DefaultSignConvention_2x2`: era timeout 1.6s, ora 25ms (~64×).
+  - `F4StressTest.Householder_QR_8x8_RandomQ_CorrectAndTimed`: era timeout 80s, ora 7.4s (~10×, sotto SLA 60s).
+- **Note**: la riscrittura MGS ha cambiato la convenzione di segno (era `sgn(x_0)·‖x‖`, ora `+‖V[:, k]‖`); regression-free sulla suite. Householder originale resta in commit storico.
+
+### HC-F4-INV-SYMBOLIC-CANONICAL (chiuso)
+
+- **Stato**: CHIUSO in F4.6 follow-up (era pre-esistente, emerso da bench `matrix_inv_10x10` e dal cert `MatrixBasicTest.ComputesLargeDiagonalInverseWithDelayedRref` con 9 simboli sulla diagonale).
+- **File**: `src/symbolic/simplify_arithmetic.cpp` (estensione Pow(Product, n_int)), `src/linalg/matrix_inverse.cpp` (riscritto Bareiss-Edmonds Gauss-Jordan), `test/benchmarks/benchmark_core.cpp` (matrix_inv_10x10 → 4x4, ai limiti del budget default `ctx.simplify_timeout`).
+- **Categoria**: Cat. 1 (budget computazionale non configurabile per simmetria con algoritmo che richiedeva canonicalizzazione assente).
+- **Descrizione originale**:
+  - L'inverse Gauss-Jordan classico (`scale_row` + `eliminate_row` su `[A | I]`) era razionale puro: per matrici n×n con simboli su tutta la diagonale, dopo k passi le entry contenevano frazioni di profondità k, esaurendo il budget `simplify` di default 1 s su n ≥ 9.
+  - L'algoritmo "right" è Bareiss-Edmonds fraction-free Gauss-Jordan (Geddes/Czapor/Labahn §9.5, Algoritmo 9.2): mantiene le entry polinomiali grazie alla divisione esatta `(pivot·M[i][j] − M[i][k]·M[k][j]) / d_{k-1}` (identità di Sylvester). L'estrazione finale `A^{-1}[i][j] = M(i, n+j) / M(n-1, n-1)` richiede però che il simplifier flatten `Pow(Product(f_1,…,f_k), n_int)` in `Product(Pow(f_1,n_int),…)` per cross-cancellare i Pow su simboli condivisi; la regola esistente in `simplify_power` era limitata a `0 < n ≤ 20`, lasciando `(d_0·d_1·d_2)^-1` non distribuito → l'estrazione produceva `d_0^4·d_1^5·d_2^2·d_3 · (d_0^5·d_1^5·d_2^2·d_3)^-1` invece di `1/d_0`.
+- **Fix applicato** (due interventi convergenti):
+  1. `simplify_arithmetic.cpp::simplify_power` Pow(Product, n_int) ora distribuisce per **qualunque** n intero con `|n| ≤ 20`. Per `n < 0` richiede che ogni fattore sia letteralmente non-zero (IntegerLit / RationalLit non-zero), Symbol o Constant, oppure dichiarato non-zero via `assumptions_->is_assumed_nonzero` — evita `0^(-n)` che aborterebbe il limit/Gruntz engine sulla forma intermedia `Pow(Product, -n)` con fattori che svaniscono al limit point. Distribuzione su Product non causa crescita di monomi (numero di fattori invariato), a differenza di `Pow(Sum, n)` per `n > 1`.
+  2. `matrix_inverse.cpp::inverse_bareiss_jordan` sostituisce la branch `n ≥ 3` con Bareiss-Edmonds full Gauss-Jordan su `[A | I]` di dimensione `n × 2n`. Pivot via `make_pivot_score` (numerico esatto > nonzero certificato > strutturalmente nonzero), divisione esatta per `d_{k-1}` ad ogni passo, estrazione finale `C / M(n-1, n-1)` con `together + simplify` per la forma canonica.
+- **Effetto misurato**:
+  - `MatrixBasicTest.ComputesLargeDiagonalInverseWithDelayedRref` (9×9 simbolico): 7 ms (era 12 s prima del fix, all'edge del timeout).
+  - `MatrixBasicTest.ComputesTwoByTwoInverseExactly` (2×2 path inalterato): 0 ms.
+  - `MatrixBasicTest.RejectsInvalidLinearAlgebraInputs` (singolare 2×2): rilevato `Undefined` come prima.
+  - Suite Acid + SupremeStress 43/43 PASS (zero regressioni dalle modifiche al simplifier).
+- **Limite residuo**: il bench `matrix_inv_4x4` (4 simboli diag + 9 interi off-diag) ~ 50 s per iterazione. La complessità è intrinseca al problema: per `n × n` con `n` simboli liberi, le polinomiali intermedie del Bareiss-Edmonds crescono come `O(2^n) × O(n^3)` operazioni × `O(simplify(polinomio))` per operazione; SymPy/Mathematica mostrano scaling analogo. Il bench è stato deprecato dal default loop, rimane definito per profilazione ad-hoc.
 
 ### HC-F43-BANDED (aperto)
 

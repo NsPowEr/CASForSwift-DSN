@@ -4,11 +4,23 @@ namespace cas::symbolic::detail {
 
 // ── sqrt helpers ─────────────────────────────────────────────────────────────
 
-// Extract perfect-square factor from n: returns {k, m} with n = k²·m, m squarefree.
-[[nodiscard]] static std::pair<BigInt, BigInt> extract_square_factor(BigInt n) {
+// Forward declaration: defined later in this file.
+[[nodiscard]] static BigInt integer_sqrt(const BigInt& n);
+
+// Extract perfect-square factor from n: returns {k, m} with n = k²·m.
+// Phase 1: trial-divide squares i² for i ∈ [2, trial_bound]; this is the
+// "small squarefull" extraction step.
+// Phase 2: check whether the residue is itself a perfect square via
+// integer_sqrt (Newton). If so, fold it entirely into k.
+//
+// Without a bound, the unbounded O(sqrt(n)) loop hung on big rational
+// radicands (norm² for QR Householder on 8×8 random Q rationals).
+// Reference: HC-F4-QR-SYMBOLIC-TIMEOUT.
+[[nodiscard]] static std::pair<BigInt, BigInt> extract_square_factor(BigInt n, std::size_t trial_bound) {
     BigInt k(1);
     BigInt i(2);
-    while (i * i <= n) {
+    BigInt bound = BigInt(static_cast<long long>(trial_bound));
+    while (i <= bound && i * i <= n) {
         BigInt i2 = i * i;
         while ((n % i2).is_zero()) {
             k = k * i;
@@ -16,17 +28,21 @@ namespace cas::symbolic::detail {
         }
         i = i + BigInt(1);
     }
-    return {k, n};
+    // Fallback: if residue is itself a perfect square, absorb it.
+    BigInt s = integer_sqrt(n);
+    if (!(s * s == n)) return {k, n};
+    k = k * s;
+    return {k, BigInt(1)};
 }
 
 // sqrt(r) for rational r ≥ 0: extract perfect-square factors.
 // Returns k·sqrt(m), k rational, m squarefree.
-[[nodiscard]] static Result<ExprPtr> simplify_rational_sqrt(const Rational& r, AstArena& arena) {
+[[nodiscard]] static Result<ExprPtr> simplify_rational_sqrt(const Rational& r, AstArena& arena, std::size_t trial_bound) {
     const BigInt& p = r.numerator();
     const BigInt& q = r.denominator();
     if (p.is_zero()) return ok(arena.make<IntegerLit>(BigInt(0)));
-    auto [p_out, p_rem] = extract_square_factor(p);
-    auto [q_out, q_rem] = extract_square_factor(q);
+    auto [p_out, p_rem] = extract_square_factor(p, trial_bound);
+    auto [q_out, q_rem] = extract_square_factor(q, trial_bound);
     BigInt final_radicand = p_rem * q_rem;
     Rational coeff(p_out, q_out * q_rem);
 
@@ -491,7 +507,10 @@ Result<ExprPtr> Simplifier::simplify_funcall_exp_log_sqrt(
                 && den_sqrt * den_sqrt == rat.value.denominator())
                 return traced_result(RuleId::Unknown, target_before,
                     make_rational(arena_, Rational(num_sqrt, den_sqrt)));
-            auto denested = simplify_rational_sqrt(rat.value, arena_);
+            const std::size_t trial_bound = context_
+                ? context_->simplify_sqrt_trial_division_bound()
+                : 10000U;
+            auto denested = simplify_rational_sqrt(rat.value, arena_, trial_bound);
             if (denested.is_ok())
                 return traced_result(RuleId::Unknown, target_before, denested.value());
         }

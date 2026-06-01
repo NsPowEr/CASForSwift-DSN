@@ -300,6 +300,19 @@ struct CASContextParams {
         return smith_stabilization_multiplier_;
     }
 
+    // ── sqrt rational simplification ────────────────────────────────────────
+    // Trial-division upper bound for perfect-square factor extraction in
+    // simplify(sqrt(rational)). Without a bound the O(sqrt(n)) loop is
+    // effectively infinite for big numerators (>10²⁰).
+    // After trial-division, integer_sqrt provides the perfect-square fallback.
+    // Default 10000 (covers all squarefull factors ≤ 10⁸).
+    void set_simplify_sqrt_trial_division_bound(std::size_t n) noexcept {
+        simplify_sqrt_trial_division_bound_ = n;
+    }
+    [[nodiscard]] std::size_t simplify_sqrt_trial_division_bound() const noexcept {
+        return simplify_sqrt_trial_division_bound_;
+    }
+
 protected:
     // All fields with their mathematically-derived or documented defaults.
     // Setters with clamping are CASContext out-of-line methods (context_core.cpp).
@@ -337,6 +350,7 @@ protected:
     std::uint64_t timeout_check_interval_{1024U};
     std::size_t   max_galois_frobenius_primes_{30U};
     std::size_t   smith_stabilization_multiplier_{64U};
+    std::size_t   simplify_sqrt_trial_division_bound_{10000U};
     bool          enable_f5_signature_pruning_{false};  // F3.3-F5-WIRE
 };
 

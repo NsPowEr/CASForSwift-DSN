@@ -20,6 +20,14 @@
         "arena_alloc_ms": {
           "max_regression_pct": 15.0,
           "description": "Costo medio di allocazione e chaining AST nell'arena."
+        },
+        "poly_expand_complex_ms": {
+          "max_regression_pct": 15.0,
+          "description": "Espansione polinomiale (x+y+z+1)^4."
+        },
+        "poly_gcd_subresultant_ms": {
+          "max_regression_pct": 15.0,
+          "description": "GCD polinomiale via algoritmo subresultant."
         }
       }
     }

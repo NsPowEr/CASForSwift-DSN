@@ -500,17 +500,57 @@ Result<ExprPtr> Simplifier::simplify_power(ExprPtr base, ExprPtr exponent, ExprP
         }
     }
 
+    // (a · b · c · ...)^n  →  a^n · b^n · c^n · ...   for any integer n ≠ 0.
+    // Distribution over Product is always valid for integer n: no branch-cut
+    // issues, and the number of factors is preserved (no monomial blow-up as
+    // with Pow of a Sum).  Negative exponents are essential for canonical
+    // cancellation: without distribution, `(d_0·d_1·d_2)^-1` stays as
+    // Pow(Product, -1) and downstream Product-flattening cannot combine it
+    // with positive Pows on the same symbols (Bareiss-Edmonds inverse
+    // extraction depends on this).  Reference: HC-F4-INV-SYMBOLIC-CANONICAL.
+    //
+    // Guards:
+    //   * |n| ≤ 20 to prevent BigInt explosion on numeric factors.
+    //   * For n < 0, require all factors known-nonzero: otherwise
+    //     simplify_power on a zero factor returns "rational division by
+    //     zero" (legitimate for 0^-1) and aborts the caller — limit/Gruntz
+    //     relies on the unsimplified Pow(Product, -1) form to manipulate
+    //     intermediates that vanish at the limit point.
     if (const auto* product = expr_cast<Product>(base); product != nullptr) {
         if (auto maybe_n = try_get_integer_exponent(exponent); maybe_n.has_value()) {
             const BigInt n = *maybe_n;
-            if (!n.is_zero() && !n.is_negative() && n <= BigInt(20)) {
-                std::vector<ExprPtr> factors;
-                for (ExprPtr factor : product->factors) {
-                    auto p = simplify_power(factor, exponent);
-                    if (p.is_error()) return p;
-                    factors.push_back(p.value());
+            if (!n.is_zero()) {
+                BigInt abs_n = n.is_negative() ? -n : n;
+                if (abs_n <= BigInt(20)) {
+                    bool safe = !n.is_negative();
+                    if (!safe) {
+                        // Negative exponent: require every factor to be
+                        // structurally non-zero (literal nonzero, Symbol,
+                        // Constant) or assumed nonzero.  Symbolic factors
+                        // that could vanish (e.g. Sum) stay un-distributed
+                        // so limit/Gruntz can manipulate the Pow(Product, n)
+                        // form without triggering 0^(-n).
+                        safe = true;
+                        for (ExprPtr factor : product->factors) {
+                            bool nz = false;
+                            if (const auto* il = expr_cast<IntegerLit>(factor)) nz = !il->value.is_zero();
+                            else if (const auto* rl = expr_cast<RationalLit>(factor)) nz = !rl->numerator.is_zero();
+                            else if (expr_is<Symbol>(factor) || expr_is<Constant>(factor)) nz = true;
+                            else if (is_assumed_nonzero(factor)) nz = true;
+                            if (!nz) { safe = false; break; }
+                        }
+                    }
+                    if (safe) {
+                        std::vector<ExprPtr> factors;
+                        factors.reserve(product->factors.size());
+                        for (ExprPtr factor : product->factors) {
+                            auto p = simplify_power(factor, exponent);
+                            if (p.is_error()) return p;
+                            factors.push_back(p.value());
+                        }
+                        return simplify_product_factors(factors);
+                    }
                 }
-                return simplify_product_factors(factors);
             }
         }
     }

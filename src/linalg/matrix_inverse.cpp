@@ -1,3 +1,25 @@
+// CAS-F4.6 — Symbolic matrix inverse via fraction-free Gauss-Jordan
+// (Bareiss-Edmonds; Geddes/Czapor/Labahn "Algorithms for Computer Algebra"
+// §9.5, Algorithm 9.2). For n ≥ 3 the augmented matrix [A | I] is reduced in
+// place with the Bareiss step
+//
+//   M[i][j] ← (M[k][k] · M[i][j] − M[i][k] · M[k][j]) / d_{k-1}
+//
+// applied to all rows i ≠ k (full Gauss-Jordan), with d_{-1} = 1.  By the
+// Sylvester identity the division is exact in the integral closure of the
+// original entries, so intermediate expressions stay polynomial — no
+// rational blow-up.  At termination the bottom-right pivot M(n-1, n-1)
+// equals det(A) (up to row-swap sign) and the right block C is the
+// adjugate up to the same sign; hence A^{-1} = C / det(A) is extracted
+// with a single division.  The 2×2 fast path is preserved for brevity
+// and to avoid the overhead of the augmented sweep on the trivial case.
+//
+// Canonical extraction requires the simplifier to flatten
+// Pow(Product, n_int) into Product(Pow(factor_i, n_int)) so the final
+// `C[i][j] / det(A)` cross-cancels Pow terms on shared symbols.  This
+// rule is enabled in simplify_arithmetic.cpp::simplify_power for any
+// integer n with |n| ≤ 20.  Reference: HC-F4-INV-SYMBOLIC-CANONICAL.
+
 #include "cas/linalg/Matrix.hpp"
 #include "cas/linalg/matrix_expr_helpers.hpp"
 #include "cas/algebra.hpp"
@@ -15,55 +37,106 @@ namespace {
     return CASError{.kind = kind, .message = std::move(message), .hint = std::nullopt};
 }
 
-void swap_rows(MatrixExpr& matrix, MatrixExpr& identity, std::size_t r1, std::size_t r2) {
-    if (r1 == r2) return;
-    for (std::size_t c = 0; c < matrix.cols(); ++c) std::swap(matrix(r1, c), matrix(r2, c));
-    for (std::size_t c = 0; c < identity.cols(); ++c) std::swap(identity(r1, c), identity(r2, c));
-}
+[[nodiscard]] Result<MatrixExpr> inverse_bareiss_jordan(
+    const MatrixExpr& matrix, symbolic::CASContext& ctx) {
+    const std::size_t n = matrix.rows();
+    const std::size_t total_cols = 2U * n;
 
-[[nodiscard]] Result<void> scale_row(MatrixExpr& matrix, MatrixExpr& identity, std::size_t row, ExprPtr divisor, symbolic::CASContext& ctx) {
-    if (is_one_expr(divisor)) return ok();
-    if (!is_known_nonzero(divisor, ctx)) {
-        return make_unimplemented<void>(
-            "linalg", "inverse",
-            "pivot expression cannot be decided nonzero",
-            error::reason_codes::LINALG_RREF_UNDECIDABLE_PIVOT,
-            "Add assumptions about pivot variables", "L3-13");
+    // Augmented matrix M = [A | I] of size n × 2n.
+    MatrixExpr M(n, total_cols);
+    for (std::size_t i = 0; i < n; ++i) {
+        for (std::size_t j = 0; j < n; ++j) M(i, j) = matrix(i, j);
+        for (std::size_t j = 0; j < n; ++j) {
+            M(i, n + j) = (i == j) ? integer(ctx, 1) : integer(ctx, 0);
+        }
     }
-    for (std::size_t c = 0; c < matrix.cols(); ++c) {
-        auto res = div_expr(ctx, matrix(row, c), divisor);
-        if (res.is_error()) return fail<void>(res.error());
-        matrix(row, c) = res.value();
-    }
-    for (std::size_t c = 0; c < identity.cols(); ++c) {
-        auto res = div_expr(ctx, identity(row, c), divisor);
-        if (res.is_error()) return fail<void>(res.error());
-        identity(row, c) = res.value();
-    }
-    return ok();
-}
 
-[[nodiscard]] Result<void> eliminate_row(MatrixExpr& matrix, MatrixExpr& identity, std::size_t target, std::size_t pivot_row, std::size_t col, symbolic::CASContext& ctx) {
-    ExprPtr factor = matrix(target, col);
-    if (is_zero_expr(factor)) return ok();
+    ExprPtr d_prev = integer(ctx, 1);
 
-    for (std::size_t c = 0; c < matrix.cols(); ++c) {
-        auto prod = mul_expr(ctx, factor, matrix(pivot_row, c));
-        if (prod.is_error()) return fail<void>(prod.error());
-        auto diff = sub_expr(ctx, matrix(target, c), prod.value());
-        if (diff.is_error()) return fail<void>(diff.error());
-        auto simp = simplify(ctx, diff.value());
-        matrix(target, c) = simp.is_ok() ? simp.value() : diff.value();
+    for (std::size_t k = 0; k < n; ++k) {
+        // Pivot selection via PivotScore: literal-nonzero beats
+        // structurally-nonzero, lower degree/complexity preferred.
+        std::size_t pivot_row = n;
+        PivotScore best{-1, 0, 0};
+        for (std::size_t i = k; i < n; ++i) {
+            if (is_zero_expr(M(i, k))) continue;
+            PivotScore s = make_pivot_score(M(i, k), ctx);
+            if (pivot_row == n || s > best) {
+                best = s;
+                pivot_row = i;
+                if (s.certainty == 3) break;
+            }
+        }
+        if (pivot_row == n || best.certainty < 0) {
+            return fail<MatrixExpr>(make_error(CASErrorKind::Undefined,
+                "inverse: matrix is singular (or pivot cannot be decided nonzero)"));
+        }
+
+        if (pivot_row != k) {
+            for (std::size_t j = 0; j < total_cols; ++j) {
+                std::swap(M(k, j), M(pivot_row, j));
+            }
+            // Row swap negates det(A) and permutes the right block in a
+            // matching way, so the relation C · A = M(n-1, n-1) · I (carrying
+            // the same sign) is preserved and A^{-1} = C / M(n-1, n-1)
+            // remains correct without explicit sign correction.
+        }
+
+        ExprPtr pivot = M(k, k);
+
+        // Bareiss step: for rows i ≠ k, columns j > k, update via
+        //   M[i][j] = (pivot · M[i][j] − M[i][k] · M[k][j]) / d_prev
+        // and zero column k.
+        for (std::size_t i = 0; i < n; ++i) {
+            if (i == k) continue;
+            ExprPtr m_ik = M(i, k);
+            const bool m_ik_zero = is_zero_expr(m_ik);
+            for (std::size_t j = k + 1U; j < total_cols; ++j) {
+                ExprPtr new_val;
+                if (m_ik_zero) {
+                    auto lhs = mul_expr(ctx, pivot, M(i, j));
+                    if (lhs.is_error()) return fail<MatrixExpr>(lhs.error());
+                    auto val = div_expr(ctx, lhs.value(), d_prev);
+                    if (val.is_error()) return fail<MatrixExpr>(val.error());
+                    new_val = val.value();
+                } else {
+                    auto lhs = mul_expr(ctx, pivot, M(i, j));
+                    if (lhs.is_error()) return fail<MatrixExpr>(lhs.error());
+                    auto rhs = mul_expr(ctx, m_ik, M(k, j));
+                    if (rhs.is_error()) return fail<MatrixExpr>(rhs.error());
+                    auto diff = sub_expr(ctx, lhs.value(), rhs.value());
+                    if (diff.is_error()) return fail<MatrixExpr>(diff.error());
+                    auto val = div_expr(ctx, diff.value(), d_prev);
+                    if (val.is_error()) return fail<MatrixExpr>(val.error());
+                    new_val = val.value();
+                }
+                M(i, j) = new_val;
+            }
+            M(i, k) = integer(ctx, 0);
+        }
+
+        d_prev = pivot;
     }
-    for (std::size_t c = 0; c < identity.cols(); ++c) {
-        auto prod = mul_expr(ctx, factor, identity(pivot_row, c));
-        if (prod.is_error()) return fail<void>(prod.error());
-        auto diff = sub_expr(ctx, identity(target, c), prod.value());
-        if (diff.is_error()) return fail<void>(diff.error());
-        auto simp = simplify(ctx, diff.value());
-        identity(target, c) = simp.is_ok() ? simp.value() : diff.value();
+
+    // A^{-1}[i][j] = M(i, n+j) / det where det = M(n-1, n-1).
+    ExprPtr det = M(n - 1U, n - 1U);
+    if (is_zero_expr(det)) {
+        return fail<MatrixExpr>(make_error(CASErrorKind::Undefined,
+            "inverse: matrix is singular"));
     }
-    return ok();
+
+    MatrixExpr inv(n, n);
+    for (std::size_t i = 0; i < n; ++i) {
+        for (std::size_t j = 0; j < n; ++j) {
+            auto q = div_expr(ctx, M(i, n + j), det);
+            if (q.is_error()) return fail<MatrixExpr>(q.error());
+            auto t = algebra::together(q.value(), ctx);
+            ExprPtr val = t.is_ok() ? t.value() : q.value();
+            auto s = simplify(ctx, val);
+            inv(i, j) = s.is_ok() ? s.value() : val;
+        }
+    }
+    return ok(std::move(inv));
 }
 
 } // namespace
@@ -110,58 +183,7 @@ Result<MatrixExpr> inverse(const MatrixExpr& matrix, symbolic::CASContext& ctx) 
         return ok(std::move(res));
     }
 
-    MatrixExpr a(n, n, matrix.elements());
-    auto id_res = identity(n, ctx);
-    if (id_res.is_error()) return id_res;
-    MatrixExpr inv = std::move(id_res.value());
-
-    for (std::size_t i = 0; i < n; ++i) {
-        // Find pivot
-        std::size_t sel = n;
-        PivotScore best{-1, 0, 0};
-        for (std::size_t r = i; r < n; ++r) {
-            if (is_zero_expr(a(r, i))) continue;
-            PivotScore s = make_pivot_score(a(r, i), ctx);
-            if (sel == n || s > best) {
-                best = s;
-                sel = r;
-                if (s.certainty == 3) break;
-            }
-        }
-
-        if (sel == n || best.certainty < 0) {
-            return fail<MatrixExpr>(make_error(CASErrorKind::Undefined, "Matrix is singular (or pivot cannot be decided nonzero)"));
-        }
-
-        swap_rows(a, inv, i, sel);
-
-        auto scale_res = scale_row(a, inv, i, a(i, i), ctx);
-        if (scale_res.is_error()) return fail<MatrixExpr>(scale_res.error());
-
-        for (std::size_t r = 0; r < n; ++r) {
-            if (r != i) {
-                auto elim_res = eliminate_row(a, inv, r, i, i, ctx);
-                if (elim_res.is_error()) return fail<MatrixExpr>(elim_res.error());
-            }
-        }
-    }
-
-    for (std::size_t i = 0; i < n; ++i) {
-        for (std::size_t j = 0; j < n; ++j) {
-            auto s = simplify(ctx, inv(i, j));
-            if (s.is_ok()) {
-                auto exp = algebra::expand(s.value(), ctx);
-                auto val = exp.is_ok() ? exp.value() : s.value();
-                auto tg = algebra::together(val, ctx);
-                inv(i, j) = tg.is_ok() ? tg.value() : val;
-            }
-        }
-    }
-    
-    // DEBUG
-    // if (n == 2) std::cout << "INV(0,0): " << formatter::format(inv(0,0)) << std::endl;
-
-    return ok(std::move(inv));
+    return inverse_bareiss_jordan(matrix, ctx);
 }
 
 } // namespace cas::linalg
