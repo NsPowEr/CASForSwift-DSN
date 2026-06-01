@@ -861,6 +861,34 @@ tutti gli input; questi sono upgrade prestazionali per casi specifici.
   - Suite Acid + SupremeStress 43/43 PASS (zero regressioni dalle modifiche al simplifier).
 - **Limite residuo**: il bench `matrix_inv_4x4` (4 simboli diag + 9 interi off-diag) ~ 50 s per iterazione. La complessità è intrinseca al problema: per `n × n` con `n` simboli liberi, le polinomiali intermedie del Bareiss-Edmonds crescono come `O(2^n) × O(n^3)` operazioni × `O(simplify(polinomio))` per operazione; SymPy/Mathematica mostrano scaling analogo. Il bench è stato deprecato dal default loop, rimane definito per profilazione ad-hoc.
 
+### HC-F4-JORDAN-INVERSE-ROOTOF (aperto)
+
+- **Stato**: APERTO (pre-esistente da fb47d09 F4.6 baseline; era untracked, iscritto qui in 5964be9+).
+- **File**: `src/linalg/matrix_inverse.cpp::inverse_bareiss_jordan` (post 5964be9; pre era `scale_row`+`eliminate_row` su `(A | I)`).
+- **Categoria**: Cat. 4 (bail-out su tipo, `is_known_nonzero` undecidable su `RootOf`).
+- **Test impattati**:
+  - `JordanCertTest.Diagonalizable_3x3_Rational` (P 3×3 con entries `Q(√2)`).
+  - `JordanCertTest.RootOf_Eigenvalues_2x2_Sqrt2` (P 2×2 da A=[[0,2],[1,0]], eigenvalues `±√2`).
+  - `JordanCertTest.RootOf_Multiplicity2_CompanionDeg4` (P 4×4 da companion `(x²-2)²`).
+- **Descrizione**: `jordan_normal_form` produce P con entries in `Q(α)` / `RootOf(P, x, k)`; `inverse(P)` non riesce perché pivot-selection ha `certainty=0` (non literal, non in assumptions table) e in step k il pivot residuo non viene canonicalizzato modulo il min-poly di `α`, collassando a strutturalmente-zero pur essendo matematicamente nonzero. Result: `"singular"` su matrici invertibili → cert `P·J·P^-1 ≡ A` fallisce.
+- **Fix corretto** (gerarchia di rigore decrescente):
+  1. **Algebraic-number arithmetic in `RootOf` ring**: ridurre ogni entry modulo `m_α(α)=0` prima di pivot test (Cohen §4.2). Stub `src/symbolic/rootof_reduction*` esiste ma non integrato con linalg.
+  2. **Tower collapse via primitive element**: usare F3.4 `algebraic_tower_primitive` per ottenere singolo `θ`, esprimere P in `Q(θ)`, poi inverse via ring-GCD.
+  3. **Numeric probe-and-certify**: valutare det(P) in alta precisione MPFR su un campione, certificare nonzero, fallback symbolic.
+- **Blocking dependency**: integrazione `algebraic_tower_primitive` (F3.4, esistente) con pipeline linalg.
+
+### HC-CALC-INTEGRATE-ANTIDERIVATIVE-CONST (aperto)
+
+- **Stato**: APERTO (pre-esistente da fb47d09; era untracked, iscritto qui in 5964be9+).
+- **File**: `src/calculus/integrate_*.cpp` (pipeline subst + LRT post-process) e `test/unit/symbolic/test_calculus.cpp::expect_integral_equals`.
+- **Categoria**: Cat. 8 (pattern matching su forma — convenzione canonica antiderivata non normalizzata).
+- **Test impattato**: `CalculusIntegrateTest.IntegratesDerivativeTimesPowerComposition` con integrand `2x(1+x²)³`, expected `(1+x²)⁴/4`, actual `(1/4)x⁸ + x⁶ + (3/2)x⁴ + x²`.
+- **Descrizione**: differenza è la costante `1/4` (`(1+x²)⁴/4 = 1/4 + x² + (3/2)x⁴ + x⁶ + (1/4)x⁸`). Entrambi sono antiderivati corretti (derivata identica = `2x(1+x²)³`) ma `mathematically_equal(actual − expected) ≠ 0` → fail. Il pipeline cert dell'helper non normalizza modulo costante.
+- **Fix corretto**:
+  1. **Cert modulo costante**: il test helper può verificare `derivative(actual) ≡ integrand` invece di `actual ≡ expected_text`.
+  2. **Forma canonica antiderivata**: integratore può preferire forma fattorizzata `(1+x²)⁴/4` quando la sostituzione `u = 1+x²` è riconosciuta esplicitamente.
+- **Blocking dependency**: nessuna. Decisione di design cert-by-derivative vs cert-by-equality.
+
 ### HC-F43-BANDED (aperto)
 
 - **Stato**: APERTO (introdotto da F4.3).
