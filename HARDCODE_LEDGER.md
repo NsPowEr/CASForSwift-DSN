@@ -780,35 +780,23 @@ tutti gli input; questi sono upgrade prestazionali per casi specifici.
 
 ---
 
-### HC-F36-GALOIS-DEG5-PRIME-BUDGET (aperto)
+### HC-F36-GALOIS-DEG5-PRIME-BUDGET (chiuso)
 
-- **Stato**: APERTO (introdotto da F3.6, deg-5 Galois identification).
-- **File**: `src/algebra/galois_deg5.cpp` (Frobenius/Dedekind path completo).
-- **Categoria CLAUDE.md**: Cat. 1 (budget) + Cat. 6 (parametri probabilistici)
-  — derivato matematicamente, NON arbitrario.
-- **Descrizione**: il path Soicher-McKay è realizzato come scan di cycle-type
-  di Frobenius su `ctx.max_galois_frobenius_primes()` primi (default 30).
-  Il default 30 è giustificato via Chebotarev: probabilità di mancare la
-  classe `(2,2,1)` su D5 in N samples è (1/2)^N → 30 ≈ 1e-9. Budget esaurito
-  senza evidenza conclusiva ⇒ `CASErrorKind::Unimplemented` esplicito (mai
-  silent wrong).
-- **Fix corretto**: implementare la resolvent sextic di Dummit (1991) per
-  decisione **deterministica** in tempo costante; coefficienti polinomiali in
-  p,q,r,s (identità simboliche legittime, non tabella magica).
-- **Blocking dependency**: nessuna; upgrade puro dal probabilistico-in-prassi
-  al deterministico.
+- **Stato**: CHIUSO (chiusura piena 2026-05-31, ledger update 2026-06-02).
+- **File**: `src/algebra/galois_deg5.cpp`.
+- **Categoria CLAUDE.md**: Cat. 1 + Cat. 6 — closed via fallback deterministico.
+- **Path probabilistico (default fast)**: scan Frobenius cycle-type su `ctx.max_galois_frobenius_primes()` primi (default 30). Chebotarev garantisce miss-prob ≤ (1/2)^30 ≈ 10⁻⁹ in pratica.
+- **Path deterministico (fallback automatico)**: quando il prime-budget non è informativo, l'algoritmo decide deterministicamente via:
+  - **C5 vs D5** (disc square, solo {1^5, 5} osservati): `factor_polynomial_tower_n(f, x, [RootOf(f, x, 0)], ctx)` su `Q(α)`. Conta i fattori lineari risultanti: ≥5 ⇒ C5 (Q(α) = splitting field), altrimenti D5.
+  - **S5 vs F20** (disc non-square, nessun cycle informativo): resolvent cubic del fattore deg-4 `g(x) = f(x)/(x − α)` su `Q(α)`. `R(y) = y³ − b·y² + (a·c − 4·d)·y + (−a²·d − c² + 4·b·d)`. Linear factor su Q(α) ⇒ F20 (Stab_α = C4); irreducible ⇒ S5 (Stab_α = S4). V4/A4/D4 escluse dal branch disc non-square e dal vincolo |Gal| = 5·|Stab|.
+- **Verifica**: tutti gli esempi classici PASS deterministicamente (Selmer x⁵−x−1 → S5, Trinks x⁵+20x+16 → A5, x⁵−2 → F20, x⁵−5x+12 → D5, Q(ζ₁₁)⁺ minpoly → C5).
+- **Note**: fallback al risultato probabilistico solo se `factor_polynomial_tower_n` stesso ritorna errore (es. budget timeout interno); miss-prob in quel sotto-caso è ancora ≤ 2⁻³⁰. Mai silent wrong.
 
-### HC-F36-GALOIS-DEG5-REDUCIBLE-COARSE (aperto)
+### HC-F36-GALOIS-DEG5-REDUCIBLE-COARSE (chiuso)
 
-- **Stato**: APERTO (introdotto da F3.6).
-- **File**: `src/algebra/galois.cpp` blocco `total_deg == 5U` reducible.
-- **Categoria**: Cat. 4 (bail-out su forma).
-- **Descrizione**: per quintici riducibili restituisce label coarse
-  ("reducible" / "C2" / "trivial") senza ricostruire il gruppo del prodotto
-  fibrato (Gal(f) ⊆ ∏ Gal(f_i)).
-- **Fix corretto**: dispatcher ricorsivo che richiama `galois_group` sui
-  fattori e compone via direct-product check.
-- **Blocking dependency**: nessuna; refactor disponibile.
+- **Stato**: CHIUSO (chiusura 2026-05-29, ledger update 2026-06-02).
+- **File**: `src/algebra/galois.cpp::galois_group`, blocco `total_deg == 5U` reducible.
+- **Fix applicato**: dispatcher ricorsivo che (1) detecta i fattori non costanti del polinomio quintico riducibile, (2) chiama `galois_group(factor, var, ctx)` su ogni fattore non-lineare con multiplicità, (3) compone i sub-labels via direct-product join (`"C2 x S3"`, etc.). I fattori lineari contribuiscono trivial Galois. Esempi: `(x²−2)(x³−2)` → `"C2 x S3"`; `(x−1)³(x²+1)` → `"C2"`; quintici completamente scomposti → `"trivial"`. Solo retro-compatibile `"reducible"` come fallback se la sub-call fallisce internamente.
 
 ### HC-F43-CIRCULANT-GT4 (chiuso)
 
@@ -898,6 +886,52 @@ tutti gli input; questi sono upgrade prestazionali per casi specifici.
 - **Categoria**: era classificato Cat. 4 ma NON era una bail-out: il fallback Bareiss generale è corretto.
 - **Analisi**: l'ottimizzazione "Bareiss band-preserving" (O(n·bw²) inner-loop count vs O(n³)) richiede o (a) applicare un fattore di scaling cumulativo `pivot/d_prev` a OGNI entry in-banda ad OGNI passo — degradando a O(n²·bw) simplify calls e dwarfing il vantaggio inner-loop su input simbolici — o (b) un lazy scale-and-thaw bookkeeping che su entries simboliche trippa lo stesso costo per-simplify del path generale. I casi `bw=0` (diagonale) e `bw=1` (tridiagonale) hanno closed-form three-term recurrences gestiti da detector dedicati senza overhead simbolico. Per `bw ≥ 2` su input simbolici, il vantaggio asintotico inner-loop NON sopravvive il costo per-simplify dominante.
 - **Decisione**: nessuna specializzazione per `bw ≥ 2`; routing su `bareiss_determinant`. Aggiornato il commento nel detector per esplicitare la design choice. Nessun information loss, nessuna correttezza compromessa.
+
+### HC-F4-GOSPER-CONSTANT-HANG (aperto)
+
+- **Stato**: APERTO (introdotto da L3-07 summation, iscritto 2026-06-02 dopo audit DISABLED test set).
+- **File**: `src/symbolic/summation_gosper.cpp::gosper_sum` (path Petkovšek classico).
+- **Categoria**: Cat. 8 (pattern matching su forma chiusa — edge-case constant-input loops in polynomial_resultant / solve_polynomial sub-calls).
+- **Test impattati (DISABLED)**:
+  - `GosperSumTest.DISABLED_Polynomial1` (term=1, expected s=k).
+  - `GosperSumTest.DISABLED_PolynomialK` (term=k, expected s=k(k-1)/2).
+  - `GosperSumTest.DISABLED_RationalShift` (term=1/(k·(k+1)), expected s=-1/k).
+  - `GosperSumTest.DISABLED_NotHypergeometricSummable` (term=1/(k²+1), expected nullopt).
+- **Descrizione**: per term costante o polinomio basso-grado, la pipeline Gosper produce A=B=1 (rapporto t_{k+1}/t_k=1); il sub-step `polynomial_resultant(A, B_k_plus_j, k, ctx)` o `solve_polynomial(res_j, j_sym, ctx)` entra in hang infinito (verificato: due processi consumavano 30+ min CPU + 1.2 GB RAM ciascuno). La root cause è nelle edge-case di queste primitive su polinomi costanti (deg 0), non in Gosper stesso.
+- **Fix corretto**:
+  1. Audit `polynomial_resultant` e `solve_polynomial` per gestione costanti deg 0 (return resultant=1 / no roots immediatamente).
+  2. Aggiungere early-return in `gosper_sum` per casi trivial: A=B=1 ⇒ polinomio summant deg-0 ⇒ s(k) = k·term (handled by simple antiderivative pattern).
+- **Blocking dependency**: investigazione mirata polynomial_resultant edge-cases.
+
+### HC-CALC-COMPLEX-LOG-BRANCH-CUT (aperto)
+
+- **Stato**: APERTO (iscritto 2026-06-02 dopo audit DISABLED).
+- **File**: `src/symbolic/simplify_exp_log.cpp` (regole exp/log inverse).
+- **Categoria**: Cat. 1 + Cat. 8 (decision-procedure su branch cut).
+- **Test impattato (DISABLED)**: `ComplexLogBranchTest.DISABLED_LnOfOnePlusIIsLnSqrtTwoPlusIPiOverFour`.
+- **Descrizione**: il cert `simplify(exp(simplify(ln(1+i)))) ≡ 1+i` richiede che la pipeline canonicalize `exp(ln(z))` per `z = 1+i` (numerico complesso); il simplifier attuale lascia `ln(1+i)` non valutato (non riduce a `ln(√2) + iπ/4` perché richiederebbe `abs/arg` decomposition di literal complex) e `exp(non_canonical_ln)` non ricostruisce il valore.
+- **Fix corretto**: aggiungere regola `ln(a+bi)` → `(1/2)·ln(a²+b²) + i·atan2(b, a)` per literal complex con `a, b ∈ Q` non-entrambi-zero. Reciproca `exp(α + iβ)` → `e^α·(cos β + i sin β)`. Entrambe sono valide sul principal branch.
+- **Blocking dependency**: `atan2` symbolic builtin (Q × Q → ratio-of-π per casi standard).
+
+### HC-CALC-RISCH-EQUIV-POSITIVITY (aperto)
+
+- **Stato**: APERTO (iscritto 2026-06-02 dopo audit DISABLED).
+- **File**: `src/symbolic/simplify_exp_log.cpp` (regola `exp(ln(a) + ln(b)) → a·b`).
+- **Categoria**: Cat. 8 (riduzione branch-cut-unsafe applicata unconditionally).
+- **Test impattato (DISABLED)**: `EquivalenceSubsetRischTest.DISABLED_ExpOfLogSumWithoutPositivityIsNotEqualToProduct`.
+- **Descrizione**: il simplifier riduce `exp(ln(x) + ln(y)) → x·y` senza richiedere `is_known_positive(x)` AND `is_known_positive(y)`, mentre matematicamente l'identità vale solo sul ramo principale + positività. Il test verifica che `mathematically_equal_subset_risch` non claim equality senza assumption; ma la pipeline applica già la riduzione, quindi il subset_walker vede già termini ridotti uguali.
+- **Fix corretto**: applicare la stessa policy esistente per `exp(ln(x)) → x` (già condizionale a `is_known_positive(x)`) anche alla regola `exp(ln(a)+ln(b))`. Richiede gating in `simplify_funcall_exp_log_sqrt` con `is_known_positive` per ogni summand. Tradeoff: rompe alcuni test che assumono questa riduzione su simboli senza assumption — richiede revisione globale.
+- **Blocking dependency**: nessuna; revisione coordinata test suite.
+
+### HC-ALG-SPARSE-INTERP-TRIVARIATE (aperto)
+
+- **Stato**: APERTO (iscritto 2026-06-02 dopo audit DISABLED).
+- **File**: `src/algebra/polynomial_sparse_interpolation.cpp::sparse_interpolate`.
+- **Categoria**: Cat. 3 (set di ricerca fissi: pipeline ottimizzata per bivariate, generalizzazione n-variate incompleta).
+- **Test impattato (DISABLED)**: `SparseInterpolationTest.DISABLED_Trivariate` (P(x,y,z) = x+y+z, bounds = {1,1,1}).
+- **Descrizione**: `sparse_interpolate` ritorna error su 3+ variabili; il path Ben-Or/Tiwari + Prony è implementato solo per bivariate.
+- **Fix corretto**: estensione Ben-Or/Tiwari multivariate via recursive evaluation (bind n-1 variabili a punti distinti per ogni step, interpola variabile rimanente).
+- **Blocking dependency**: nessuna.
 
 ## Note operative
 
