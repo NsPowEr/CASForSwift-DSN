@@ -214,6 +214,202 @@ namespace {
     return ok(c);
 }
 
+// Detect r1 - r2 = N with N a strictly positive integer.  Returns N on
+// success; nullopt otherwise (non-integer gap, zero gap, negative gap, or
+// an unsimplifiable expression).
+[[nodiscard]] std::optional<unsigned int> integer_gap(
+    ExprPtr r1, ExprPtr r2, symbolic::CASContext& ctx) {
+    AstArena& arena = ctx.arena();
+    auto diff_res = ctx.simplify(arena.make<Binary>(BinaryOp::Sub, r1, r2));
+    if (diff_res.is_error()) return std::nullopt;
+    const auto* il = expr_cast<IntegerLit>(diff_res.value());
+    if (il == nullptr) return std::nullopt;
+    if (il->value.is_negative() || il->value.is_zero()) return std::nullopt;
+    // Bound to a sane range (boundary cast, not symbolic arithmetic).
+    std::uint64_t v = il->value.to_u64();
+    if (v == 0U || v > 1000U) return std::nullopt;
+    return static_cast<unsigned int>(v);
+}
+
+// Logarithmic Frobenius branch — Coddington-Levinson §4.8.
+//
+// Setup.  Indicial roots r_1 > r_2 with N = r_1 - r_2 ∈ Z_{>0}.  The first
+// solution y_1 = x^{r_1}·Σ a_n x^n is already computed (`a_coeffs`).
+// The second independent solution has the form
+//   y_2(x) = c·ln(x)·y_1(x) + x^{r_2}·Σ b_n x^n
+// with c possibly zero.  Substituting into  L[y] = x²y'' + xP(x)y' + Q(x)y
+// (P = p_tilde, Q = q_tilde) and using L[y_1] = 0 yields
+//   L[v] = -c·(2x·y_1' + (P-1)·y_1),   v = x^{r_2}·Σ b_n x^n.
+// Equating x^{r_2+n} coefficients gives the recurrence
+//   I(r_2 + n)·b_n + S_n  =  - c · h_{n-N}    (with h_m = 0 for m < 0)
+// where
+//   S_n   = Σ_{k=1}^n  ((r_2 + n - k)·p_k + q_k) · b_{n-k}
+//   h_m   = (2(r_1 + m) + p_0 - 1)·a_m + Σ_{k=1}^m p_k · a_{m-k}.
+// Note h_0 = I'(r_1) = r_1 - r_2 = N ≠ 0.
+//
+// Algorithm:
+//   * n = 0           : b_0 = 1.
+//   * 1 ≤ n < N       : b_n = -S_n / I(r_2 + n).  (denominator non-zero.)
+//   * n = N           : I(r_2 + N) = I(r_1) = 0.  Solve c·h_0 = -S_N for c,
+//                       i.e. c = -S_N / N.  Then b_N is a free parameter
+//                       which we fix to 0 by convention.
+//   * n > N           : b_n = -(S_n + c·h_{n-N}) / I(r_2 + n).
+//
+// If c happens to evaluate to zero the second solution is logarithm-free;
+// this is the historical "free parameter" case that the standard recurrence
+// already accepted with a zero RHS.
+[[nodiscard]] Result<ExprPtr> build_log_branch(
+    ExprPtr r1,
+    ExprPtr r2,
+    unsigned int N,
+    const std::vector<ExprPtr>& a_coeffs,  // y_1 series coefficients
+    const std::vector<ExprPtr>& p_coeffs,
+    const std::vector<ExprPtr>& q_coeffs,
+    ExprPtr p0,
+    ExprPtr q0,
+    unsigned int num_terms,
+    ExprPtr y_1_series,
+    const Symbol& x,
+    symbolic::CASContext& ctx) {
+    AstArena& arena = ctx.arena();
+    if (num_terms < N) {
+        return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
+            "Frobenius log branch: num_terms (" + std::to_string(num_terms) +
+            ") smaller than the integer resonance gap N=" + std::to_string(N) +
+            "; cannot resolve the c·ln(x) coupling.  Increase the series order."));
+    }
+
+    auto coef_term = [&](ExprPtr root_r, unsigned int n, unsigned int k,
+                          ExprPtr b_n_minus_k) -> ExprPtr {
+        ExprPtr p_k = p_coeffs[k];
+        ExprPtr q_k = q_coeffs[k];
+        ExprPtr r_plus_nk = arena.make<Sum>(std::vector<ExprPtr>{
+            make_int(arena, static_cast<long long>(n - k)),
+            root_r});
+        ExprPtr bracket = arena.make<Sum>(std::vector<ExprPtr>{
+            arena.make<Binary>(BinaryOp::Mul, r_plus_nk, p_k),
+            q_k});
+        return arena.make<Binary>(BinaryOp::Mul, bracket, b_n_minus_k);
+    };
+
+    // Pre-compute h_m for m = 0 .. num_terms - N.
+    std::vector<ExprPtr> h(num_terms - N + 1U);
+    for (unsigned int m = 0U; m + N <= num_terms && m < a_coeffs.size(); ++m) {
+        // (2(r_1 + m) + p_0 - 1) · a_m
+        ExprPtr two_r1_m = arena.make<Binary>(BinaryOp::Mul, make_int(arena, 2),
+            arena.make<Sum>(std::vector<ExprPtr>{r1, make_int(arena, static_cast<long long>(m))}));
+        ExprPtr lead_factor = arena.make<Sum>(std::vector<ExprPtr>{
+            two_r1_m, p0, make_int(arena, -1)});
+        ExprPtr lead = arena.make<Binary>(BinaryOp::Mul, lead_factor, a_coeffs[m]);
+        // Σ_{k=1}^m p_k · a_{m-k}
+        std::vector<ExprPtr> cross_terms;
+        cross_terms.push_back(lead);
+        for (unsigned int k = 1U; k <= m && k < p_coeffs.size(); ++k) {
+            cross_terms.push_back(arena.make<Binary>(BinaryOp::Mul,
+                p_coeffs[k], a_coeffs[m - k]));
+        }
+        ExprPtr h_m = (cross_terms.size() == 1U) ? cross_terms[0]
+            : arena.make<Sum>(std::move(cross_terms));
+        auto hs = ctx.simplify(h_m);
+        if (hs.is_error()) return hs;
+        h[m] = hs.value();
+    }
+
+    // Recurrence for b_n with c determined at n = N.
+    std::vector<ExprPtr> b(num_terms + 1U);
+    b[0] = make_int(arena, 1);
+    ExprPtr c_log = make_int(arena, 0);  // updated at n = N
+    bool c_log_resolved = false;
+
+    auto build_S_n = [&](unsigned int n) -> Result<ExprPtr> {
+        std::vector<ExprPtr> terms;
+        for (unsigned int k = 1U; k <= n; ++k) {
+            if (k >= p_coeffs.size() || k >= q_coeffs.size()) break;
+            terms.push_back(coef_term(r2, n, k, b[n - k]));
+        }
+        ExprPtr S = terms.empty() ? make_int(arena, 0)
+            : (terms.size() == 1U ? terms[0]
+               : arena.make<Sum>(std::move(terms)));
+        return ctx.simplify(S);
+    };
+
+    for (unsigned int n = 1U; n <= num_terms; ++n) {
+        auto S_res = build_S_n(n);
+        if (S_res.is_error()) return S_res;
+        ExprPtr S_n = S_res.value();
+
+        if (n == N) {
+            // c · h_0 = -S_N  →  c = -S_N / h_0,  h_0 = N (≠ 0).
+            ExprPtr c_raw = arena.make<Binary>(BinaryOp::Div,
+                arena.make<Unary>(UnaryOp::Neg, S_n), h[0]);
+            auto cs = ctx.simplify(c_raw);
+            if (cs.is_error()) return cs;
+            c_log = cs.value();
+            c_log_resolved = true;
+            b[n] = make_int(arena, 0);  // free parameter
+            continue;
+        }
+
+        // RHS contribution from c·h_{n-N} when n > N.
+        ExprPtr rhs_correction = make_int(arena, 0);
+        if (c_log_resolved && n > N) {
+            unsigned int m = n - N;
+            if (m < h.size()) {
+                rhs_correction = arena.make<Binary>(BinaryOp::Mul, c_log, h[m]);
+            }
+        }
+
+        ExprPtr S_plus_corr = arena.make<Binary>(BinaryOp::Add, S_n, rhs_correction);
+        auto S_total = ctx.simplify(S_plus_corr);
+        if (S_total.is_error()) return S_total;
+
+        ExprPtr n_plus_r2 = arena.make<Sum>(std::vector<ExprPtr>{
+            make_int(arena, static_cast<long long>(n)), r2});
+        auto denom_res = indicial_value(p0, q0, n_plus_r2, ctx);
+        if (denom_res.is_error()) return denom_res;
+        ExprPtr denom = denom_res.value();
+        if (is_literal_zero(denom)) {
+            // Secondary resonance at a different gap — beyond this branch.
+            return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
+                "Frobenius log branch: secondary resonance at n=" +
+                std::to_string(n) +
+                " encountered while building the b_n series.  Multiple "
+                "resonance levels require an extended log-power construction "
+                "(not yet implemented)."));
+        }
+        ExprPtr b_n_raw = arena.make<Binary>(BinaryOp::Div,
+            arena.make<Unary>(UnaryOp::Neg, S_total.value()), denom);
+        auto b_n_simp = ctx.simplify(b_n_raw);
+        if (b_n_simp.is_error()) return b_n_simp;
+        b[n] = b_n_simp.value();
+    }
+
+    // Assemble y_2 = c · ln(x) · y_1  +  x^{r_2} · Σ b_n x^n.
+    ExprPtr x_sym = arena.make<Symbol>(x.name);
+    std::vector<ExprPtr> series_terms;
+    series_terms.push_back(b[0]);
+    for (unsigned int n = 1U; n <= num_terms; ++n) {
+        if (is_literal_zero(b[n])) continue;
+        ExprPtr xn = (n == 1U) ? x_sym
+            : arena.make<Binary>(BinaryOp::Pow, x_sym,
+                make_int(arena, static_cast<long long>(n)));
+        series_terms.push_back(arena.make<Binary>(BinaryOp::Mul, b[n], xn));
+    }
+    ExprPtr inner = (series_terms.size() == 1U) ? series_terms[0]
+        : arena.make<Sum>(std::move(series_terms));
+    auto inner_simp = ctx.simplify(inner);
+    if (inner_simp.is_error()) return inner_simp;
+    ExprPtr power_part = arena.make<Binary>(BinaryOp::Mul,
+        make_x_to_r(r2, x, arena), inner_simp.value());
+
+    ExprPtr ln_x = arena.make<FuncCall>(BuiltinOp::Ln,
+        std::vector<ExprPtr>{x_sym});
+    ExprPtr log_part = arena.make<Binary>(BinaryOp::Mul, c_log,
+        arena.make<Binary>(BinaryOp::Mul, ln_x, y_1_series));
+    ExprPtr y_2 = arena.make<Binary>(BinaryOp::Add, log_part, power_part);
+    return ctx.simplify(y_2);
+}
+
 // Build the Frobenius series y_r(x) = x^r * (1 + c_1 x + c_2 x^2 + ... )
 [[nodiscard]] Result<ExprPtr> build_series(
     ExprPtr root_r,
@@ -371,13 +567,57 @@ Result<ExprPtr> solve_ode_frobenius_at_zero(
         if (!dup) unique_roots.push_back(r);
     }
 
+    // Resonance detection: if exactly two roots and their difference is a
+    // strictly positive integer, route the smaller-root branch through the
+    // logarithmic Frobenius construction (Coddington-Levinson §4.8).  This
+    // closes B2c — previously the resonant case returned Unimplemented at
+    // the indicial zero.
+    std::optional<unsigned int> N_gap;
+    ExprPtr r_large, r_small;
+    if (unique_roots.size() == 2U) {
+        auto try_gap = integer_gap(unique_roots[0], unique_roots[1], ctx);
+        if (try_gap.has_value()) {
+            N_gap = try_gap;
+            r_large = unique_roots[0];
+            r_small = unique_roots[1];
+        } else {
+            try_gap = integer_gap(unique_roots[1], unique_roots[0], ctx);
+            if (try_gap.has_value()) {
+                N_gap = try_gap;
+                r_large = unique_roots[1];
+                r_small = unique_roots[0];
+            }
+        }
+    }
+
     std::vector<ExprPtr> series_solutions;
-    for (auto r : unique_roots) {
-        auto coeffs_res = compute_recurrence(r, p_coeffs, q_coeffs, p0, q0, num_terms, ctx);
-        if (coeffs_res.is_error()) return fail<ExprPtr>(coeffs_res.error());
-        auto y_res = build_series(r, coeffs_res.value(), x, ctx);
-        if (y_res.is_error()) return fail<ExprPtr>(y_res.error());
-        series_solutions.push_back(y_res.value());
+    // Engage log branch only when the requested series order reaches the
+    // resonance step; otherwise the standard recurrence at the smaller root
+    // terminates before n = N and yields a valid truncated series.
+    bool use_log_branch = N_gap.has_value() && *N_gap <= num_terms;
+    if (use_log_branch) {
+        // y_1 at the larger root via standard recurrence (always works).
+        auto a_coeffs_res = compute_recurrence(r_large, p_coeffs, q_coeffs,
+                                               p0, q0, num_terms, ctx);
+        if (a_coeffs_res.is_error()) return fail<ExprPtr>(a_coeffs_res.error());
+        auto y1_res = build_series(r_large, a_coeffs_res.value(), x, ctx);
+        if (y1_res.is_error()) return fail<ExprPtr>(y1_res.error());
+        series_solutions.push_back(y1_res.value());
+        // y_2 via log-branch construction at the smaller root.
+        auto y2_res = build_log_branch(r_large, r_small, *N_gap,
+                                       a_coeffs_res.value(),
+                                       p_coeffs, q_coeffs, p0, q0,
+                                       num_terms, y1_res.value(), x, ctx);
+        if (y2_res.is_error()) return fail<ExprPtr>(y2_res.error());
+        series_solutions.push_back(y2_res.value());
+    } else {
+        for (auto r : unique_roots) {
+            auto coeffs_res = compute_recurrence(r, p_coeffs, q_coeffs, p0, q0, num_terms, ctx);
+            if (coeffs_res.is_error()) return fail<ExprPtr>(coeffs_res.error());
+            auto y_res = build_series(r, coeffs_res.value(), x, ctx);
+            if (y_res.is_error()) return fail<ExprPtr>(y_res.error());
+            series_solutions.push_back(y_res.value());
+        }
     }
 
     // General solution: C_1 * y_1 + C_2 * y_2  (or single y_1 with C_1 if

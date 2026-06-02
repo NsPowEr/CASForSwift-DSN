@@ -155,4 +155,65 @@ TEST_F(FrobeniusTest, IndicialPlusMinusOne) {
         << "expected x^(-1) term in: " << debug_print(y);
 }
 
+// ── F5.3 / B2c — Logarithmic Frobenius branch (resonant integer gap) ────────
+//
+// Helper: detect a `Ln(x)` subexpression in the result, which is the
+// hallmark of the second-solution log term  y_2 = c·ln(x)·y_1 + x^{r_2}·Σ b_n x^n.
+bool contains_ln_x(ExprPtr e, const std::string& var) {
+    if (!e) return false;
+    if (const auto* fc = expr_cast<FuncCall>(e)) {
+        if (fc->name == "ln" || fc->func_id == BuiltinOp::Ln) {
+            if (!fc->args.empty()) {
+                if (const auto* s = expr_cast<Symbol>(fc->args[0]);
+                    s && s->name == var) return true;
+            }
+        }
+    }
+    switch (e->kind) {
+    case ExprKind::Unary:
+        return contains_ln_x(expr_ref<Unary>(e).operand, var);
+    case ExprKind::Binary: {
+        const auto& b = expr_ref<Binary>(e);
+        return contains_ln_x(b.left, var) || contains_ln_x(b.right, var);
+    }
+    case ExprKind::Sum:
+        for (auto t : expr_ref<Sum>(e).terms) if (contains_ln_x(t, var)) return true;
+        return false;
+    case ExprKind::Product:
+        for (auto f : expr_ref<Product>(e).factors) if (contains_ln_x(f, var)) return true;
+        return false;
+    case ExprKind::FuncCall:
+        for (auto a : expr_ref<FuncCall>(e).args) if (contains_ln_x(a, var)) return true;
+        return false;
+    default:
+        return false;
+    }
+}
+
+// Bessel of order 1:  x² y'' + x y' + (x² − 1) y = 0.
+// Indicial: r² − 1 = 0,  roots r = 1, r = −1,  gap N = 2.
+// At r = −1 the recurrence hits I(1) = 0 with non-zero RHS (q_2 = 1 carries
+// over from q_tilde = x² − 1).  The second solution must include a log term:
+//     y_2 = c·ln(x)·y_1 + x^{−1}·Σ b_n x^n,    c = −1/2  (Coddington-Levinson §4.8).
+TEST_F(FrobeniusTest, BesselOrder1_ResonantLogBranch) {
+    ExprPtr a2 = E("x^2");
+    ExprPtr a1 = E("x");
+    ExprPtr a0 = E("x^2 - 1");
+    Symbol x("x");
+
+    auto result = calculus::solve_ode_frobenius_at_zero(a2, a1, a0, x, 4U, *ctx);
+    ASSERT_TRUE(result.is_ok()) << "err=" << (result.is_error() ? result.error().message : std::string{});
+
+    ExprPtr y = result.value();
+    EXPECT_TRUE(contains_ln_x(y, "x"))
+        << "expected ln(x) (log-branch) in: " << debug_print(y);
+
+    ExprPtr exp_pos = ctx->arena().make<IntegerLit>(BigInt(1));
+    ExprPtr exp_neg = ctx->arena().make<IntegerLit>(BigInt(-1));
+    EXPECT_TRUE(contains_x_power(y, "x", exp_pos, *ctx))
+        << "expected x^1 (y_1) in: " << debug_print(y);
+    EXPECT_TRUE(contains_x_power(y, "x", exp_neg, *ctx))
+        << "expected x^(-1) (y_2 leading) in: " << debug_print(y);
+}
+
 }  // namespace cas::test
