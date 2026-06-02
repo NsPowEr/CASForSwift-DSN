@@ -111,7 +111,18 @@ enum class FiniteDiffOrder {
     ExprPtr expr,
     const Symbol& var,
     ExprPtr point,
-    AstArena& arena);
+    symbolic::CASContext& ctx);
+
+// Gruntz §3.5 asymptotic-growth comparison.  Returns +1 if `a` dominates `b`
+// as var → +∞, −1 if `b` dominates, 0 when both grow at the same rate or the
+// ordering cannot be decided structurally.  Recursive: handles arbitrarily
+// nested exp / ln towers and falls back on polynomial degree for the same
+// rank class.
+[[nodiscard]] int compare_growth(
+    ExprPtr a,
+    ExprPtr b,
+    const Symbol& var,
+    symbolic::CASContext& ctx);
 
 [[nodiscard]] bool depends_on(ExprPtr expr, const Symbol& var);
 [[nodiscard]] bool is_bounded(ExprPtr expr, const Symbol& var);

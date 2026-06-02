@@ -110,6 +110,9 @@ std::optional<int> poly_degree_wrt(ExprPtr e, const Symbol& var) {
     return std::nullopt;  // FuncCall or unrecognized — not polynomial
 }
 
+}  // namespace (anonymous) — re-opened below; compare_growth must have
+// external linkage so limit_infinite.cpp can share the same comparison.
+
 // Growth comparison for x -> +infinity.
 // Returns: +1 if a grows faster, -1 if b grows faster, 0 if same rate or undecidable.
 // This is deliberately structural and recursive: exp(exp(x)) must dominate exp(x^n)
@@ -150,7 +153,7 @@ int compare_growth(ExprPtr a, ExprPtr b, const Symbol& var, symbolic::CASContext
                     call->args.front(),
                     var,
                     ctx.arena().make<Constant>(MathConstant::Infinity),
-                    ctx.arena());
+                    ctx);
                 // exp of an arg that goes to -infinity decays to 0: rank 0.
                 if (arg_limit.is_ok() && limit_is_infinity(arg_limit.value())
                     && expr_is<Unary>(arg_limit.value())) {
@@ -231,6 +234,8 @@ int compare_growth(ExprPtr a, ExprPtr b, const Symbol& var, symbolic::CASContext
 
     return 0;
 }
+
+namespace {  // re-open the anonymous namespace closed above for compare_growth
 
 struct LeadingPower {
     long long power{};

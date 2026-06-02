@@ -63,12 +63,12 @@ namespace {
         is_logarithmic_in_var(power->left, var);
 }
 
-[[nodiscard]] bool is_exponential_limit(ExprPtr expr, const Symbol& var, ExprPtr point, AstArena& arena, bool to_infinity) {
+[[nodiscard]] bool is_exponential_limit(ExprPtr expr, const Symbol& var, ExprPtr point, symbolic::CASContext& ctx, bool to_infinity) {
     const auto* call = expr_cast<FuncCall>(expr);
     if (call == nullptr || call->func_id != BuiltinOp::Exp || call->args.size() != 1U) {
         return false;
     }
-    auto inner = try_infinite_limit(call->args.front(), var, point, arena);
+    auto inner = try_infinite_limit(call->args.front(), var, point, ctx);
     if (!inner.is_ok() || !limit_is_infinity(inner.value())) {
         return false;
     }
@@ -95,7 +95,8 @@ void collect_multiplicative_factors(ExprPtr expr, std::vector<ExprPtr>& factors)
     const std::vector<ExprPtr>& factors,
     const Symbol& var,
     ExprPtr point,
-    AstArena& arena) {
+    symbolic::CASContext& ctx) {
+    AstArena& arena = ctx.arena();
     const bool at_positive_infinity = !expr_is<Unary>(point);
     bool has_log = false;
     bool has_exp_to_infinity = false;
@@ -110,11 +111,11 @@ void collect_multiplicative_factors(ExprPtr expr, std::vector<ExprPtr>& factors)
             has_log = true;
             continue;
         }
-        if (is_exponential_limit(factor, var, point, arena, true)) {
+        if (is_exponential_limit(factor, var, point, ctx, true)) {
             has_exp_to_infinity = true;
             continue;
         }
-        if (is_exponential_limit(factor, var, point, arena, false)) {
+        if (is_exponential_limit(factor, var, point, ctx, false)) {
             has_exp_to_zero = true;
             continue;
         }
@@ -151,90 +152,20 @@ void collect_multiplicative_factors(ExprPtr expr, std::vector<ExprPtr>& factors)
     return std::nullopt;
 }
 
-struct GrowthRank {
-    int level; // 0: bounded, 1: log of poly, 2: poly, 3+: nested exponential tower
-};
-
-// Dynamic asymptotic-growth rank for x -> +infinity.
-//   bounded            ->  level 0
-//   log(arg) [arg→∞]   ->  max(rank(arg).level - 1, 0)
-//   polynomial in var  ->  level 2 (matches the prior static convention)
-//   exp(arg) [arg→∞]   ->  rank(arg).level + 1   <-- key fix for Cat 10
-// This is the original Gruntz idea: exp(exp(x)) lives strictly above
-// exp(x^N) because the rank of x^N is the same as rank of x (poly = 2),
-// while rank of exp(x) is 3, so exp(exp(x)) has level 4 > 3.
-GrowthRank get_growth_rank(ExprPtr expr, const Symbol& var, AstArena& /*arena*/) {
-    auto compute_rank = [&](ExprPtr e, auto& self) -> GrowthRank {
-        if (!depends_on(e, var)) return {0};
-
-        if (const auto* unary = expr_cast<Unary>(e)) {
-            if (unary->op == UnaryOp::Neg) return self(unary->operand, self);
-        }
-
-        if (const auto* call = expr_cast<FuncCall>(e); call != nullptr && call->args.size() == 1U) {
-            if (call->func_id == BuiltinOp::Exp) {
-                GrowthRank inner = self(call->args.front(), self);
-                return {inner.level + 1};
-            }
-            if (call->func_id == BuiltinOp::Ln || call->func_id == BuiltinOp::Log) {
-                GrowthRank inner = self(call->args.front(), self);
-                return {inner.level > 1 ? inner.level - 1 : 0};
-            }
-        }
-
-        if (is_logarithmic_in_var(e, var)) return {1};
-        if (is_positive_power_growth(e, var)) return {2};
-
-        if (const auto* prod = expr_cast<Product>(e)) {
-             int max_rank = 0;
-             for (auto f : prod->factors) {
-                 max_rank = std::max(max_rank, self(f, self).level);
-             }
-             return {max_rank};
-        }
-
-        if (const auto* sum = expr_cast<Sum>(e)) {
-             int max_rank = 0;
-             for (auto t : sum->terms) {
-                 max_rank = std::max(max_rank, self(t, self).level);
-             }
-             return {max_rank};
-        }
-
-        // Pow: rank carried by the base when the exponent is constant in var;
-        // otherwise treat as exp(exponent * ln(base)).
-        if (const auto* bin = expr_cast<Binary>(e); bin != nullptr && bin->op == BinaryOp::Pow) {
-            const bool exp_dep = depends_on(bin->right, var);
-            const bool base_dep = depends_on(bin->left, var);
-            if (!exp_dep) {
-                return self(bin->left, self);
-            }
-            if (!base_dep) {
-                // c^f(x): treat like exp(f(x) * ln(c)).
-                GrowthRank e_rank = self(bin->right, self);
-                return {e_rank.level + 1};
-            }
-            // Both depend on var: f(x)^g(x) = exp(g(x) * ln(f(x))).
-            GrowthRank g_rank = self(bin->right, self);
-            GrowthRank ln_f_rank = self(bin->left, self);
-            int eff = std::max(g_rank.level + (ln_f_rank.level > 1 ? ln_f_rank.level - 1 : 0), 0) + 1;
-            return {eff};
-        }
-
-        return {2};
-    };
-
-    return compute_rank(expr, compute_rank);
-}
+// The legacy static `GrowthRank`/`get_growth_rank` table has been removed.
+// The Sum / Binary dominance decisions now use `compare_growth` from
+// `limit_mrv.cpp`, which is the single dynamic Gruntz §3.5 comparison shared
+// with the MRV solver (CLAUDE.md Cat 10 closure for F5.2 / B3).
 
 } // namespace
 
-Result<ExprPtr> try_infinite_limit(ExprPtr expr, const Symbol& var, ExprPtr point, AstArena& arena) {
+Result<ExprPtr> try_infinite_limit(ExprPtr expr, const Symbol& var, ExprPtr point, symbolic::CASContext& ctx) {
+    AstArena& arena = ctx.arena();
     if (!depends_on(expr, var)) return ok(expr);
     
     if (const auto* call = expr_cast<FuncCall>(expr)) {
         if (call->func_id == BuiltinOp::Exp) {
-            auto inner = try_infinite_limit(call->args[0], var, point, arena);
+            auto inner = try_infinite_limit(call->args[0], var, point, ctx);
             if (inner.is_ok() && limit_is_infinity(inner.value())) {
                 if (expr_is<Unary>(inner.value())) {
                     return ok(limit_make_integer(arena, 0));
@@ -243,7 +174,7 @@ Result<ExprPtr> try_infinite_limit(ExprPtr expr, const Symbol& var, ExprPtr poin
             }
         }
         if (call->func_id == BuiltinOp::Ln) {
-            auto inner = try_infinite_limit(call->args[0], var, point, arena);
+            auto inner = try_infinite_limit(call->args[0], var, point, ctx);
             if (inner.is_ok() && limit_is_infinity(inner.value())) {
                 if (expr_is<Unary>(inner.value())) {
                     return fail<ExprPtr>(make_error(CASErrorKind::Undefined, "ln(-inf) is undefined"));
@@ -255,7 +186,7 @@ Result<ExprPtr> try_infinite_limit(ExprPtr expr, const Symbol& var, ExprPtr poin
 
     if (const auto* unary = expr_cast<Unary>(expr)) {
         if (unary->op == UnaryOp::Neg) {
-            auto inner = try_infinite_limit(unary->operand, var, point, arena);
+            auto inner = try_infinite_limit(unary->operand, var, point, ctx);
             if (inner.is_ok() && limit_is_infinity(inner.value())) {
                 if (expr_is<Unary>(inner.value())) return ok(arena.make<Constant>(MathConstant::Infinity));
                 return ok(arena.make<Unary>(UnaryOp::Neg, arena.make<Constant>(MathConstant::Infinity)));
@@ -266,7 +197,7 @@ Result<ExprPtr> try_infinite_limit(ExprPtr expr, const Symbol& var, ExprPtr poin
     std::vector<ExprPtr> multiplicative_factors;
     collect_multiplicative_factors(expr, multiplicative_factors);
     if (multiplicative_factors.size() > 1U) {
-        auto growth_limit = try_multiplicative_growth_limit(multiplicative_factors, var, point, arena);
+        auto growth_limit = try_multiplicative_growth_limit(multiplicative_factors, var, point, ctx);
         if (growth_limit.has_value()) {
             return growth_limit.value();
         }
@@ -278,7 +209,7 @@ Result<ExprPtr> try_infinite_limit(ExprPtr expr, const Symbol& var, ExprPtr poin
         bool has_zero = false;
         int sign = 1;
         for (auto f : prod->factors) {
-            auto lim_f = try_infinite_limit(f, var, point, arena);
+            auto lim_f = try_infinite_limit(f, var, point, ctx);
             if (lim_f.is_error()) return lim_f;
             
             if (limit_is_infinity(lim_f.value())) {
@@ -304,21 +235,31 @@ Result<ExprPtr> try_infinite_limit(ExprPtr expr, const Symbol& var, ExprPtr poin
     }
 
     if (const auto* sum = expr_cast<Sum>(expr)) {
-        int max_level = -1;
+        // Gruntz §3.5: pick the term whose growth rank dominates the others.
+        // `compare_growth` is the dynamic recursive comparison shared with the
+        // MRV solver, so nested exp/log towers are handled at arbitrary depth
+        // without a static enum table (CLAUDE.md Cat 10).
+        ExprPtr max_term = nullptr;
         ExprPtr max_lim = nullptr;
         bool indeterminate = false;
 
         for (auto t : sum->terms) {
-            auto lim_t = try_infinite_limit(t, var, point, arena);
+            auto lim_t = try_infinite_limit(t, var, point, ctx);
             if (lim_t.is_error()) return lim_t;
-            
+
             if (limit_is_infinity(lim_t.value())) {
-                int level = get_growth_rank(t, var, arena).level;
-                if (level > max_level) {
-                    max_level = level;
+                if (max_term == nullptr) {
+                    max_term = t;
                     max_lim = lim_t.value();
                     indeterminate = false;
-                } else if (level == max_level) {
+                    continue;
+                }
+                int cmp = compare_growth(t, max_term, var, ctx);
+                if (cmp > 0) {
+                    max_term = t;
+                    max_lim = lim_t.value();
+                    indeterminate = false;
+                } else if (cmp == 0) {
                     if (expr_is<Unary>(lim_t.value()) != expr_is<Unary>(max_lim)) {
                         indeterminate = true;
                     }
@@ -337,8 +278,8 @@ Result<ExprPtr> try_infinite_limit(ExprPtr expr, const Symbol& var, ExprPtr poin
 
     if (const auto* bin = expr_cast<Binary>(expr)) {
         if (bin->op == BinaryOp::Add || bin->op == BinaryOp::Sub) {
-            auto left_limit = try_infinite_limit(bin->left, var, point, arena);
-            auto right_limit = try_infinite_limit(bin->right, var, point, arena);
+            auto left_limit = try_infinite_limit(bin->left, var, point, ctx);
+            auto right_limit = try_infinite_limit(bin->right, var, point, ctx);
             
             if (left_limit.is_ok() && limit_is_infinity(left_limit.value())) {
                 if (right_limit.is_ok() && limit_is_infinity(right_limit.value())) {
@@ -347,11 +288,11 @@ Result<ExprPtr> try_infinite_limit(ExprPtr expr, const Symbol& var, ExprPtr poin
                     const bool is_sub = (bin->op == BinaryOp::Sub);
                     const bool right_effectively_neg = (right_neg ^ is_sub);
 
-                    int left_level = get_growth_rank(bin->left, var, arena).level;
-                    int right_level = get_growth_rank(bin->right, var, arena).level;
-
-                    if (left_level > right_level) return left_limit;
-                    if (right_level > left_level) {
+                    // Use the dynamic Gruntz comparison (shared with the MRV
+                    // engine) instead of the legacy static rank levels.
+                    int cmp = compare_growth(bin->left, bin->right, var, ctx);
+                    if (cmp > 0) return left_limit;
+                    if (cmp < 0) {
                         if (right_effectively_neg) return ok(arena.make<Unary>(UnaryOp::Neg, arena.make<Constant>(MathConstant::Infinity)));
                         return ok(arena.make<Constant>(MathConstant::Infinity));
                     }
@@ -373,8 +314,8 @@ Result<ExprPtr> try_infinite_limit(ExprPtr expr, const Symbol& var, ExprPtr poin
         }
 
         if (bin->op == BinaryOp::Mul) {
-            auto left_limit = try_infinite_limit(bin->left, var, point, arena);
-            auto right_limit = try_infinite_limit(bin->right, var, point, arena);
+            auto left_limit = try_infinite_limit(bin->left, var, point, ctx);
+            auto right_limit = try_infinite_limit(bin->right, var, point, ctx);
             if (left_limit.is_ok() && right_limit.is_ok()) {
                 const bool left_zero = limit_is_zero(left_limit.value());
                 const bool right_zero = limit_is_zero(right_limit.value());
@@ -400,26 +341,26 @@ Result<ExprPtr> try_infinite_limit(ExprPtr expr, const Symbol& var, ExprPtr poin
             const auto* den_call = expr_cast<FuncCall>(bin->right);
             if (num_call && den_call && num_call->func_id == BuiltinOp::Exp && den_call->func_id == BuiltinOp::Exp) {
                 ExprPtr diff = arena.make<Binary>(BinaryOp::Sub, num_call->args[0], den_call->args[0]);
-                auto diff_limit = try_infinite_limit(diff, var, point, arena);
+                auto diff_limit = try_infinite_limit(diff, var, point, ctx);
                 if (diff_limit.is_ok() && limit_is_infinity(diff_limit.value())) {
                     if (expr_is<Unary>(diff_limit.value())) return ok(limit_make_integer(arena, 0));
                     return ok(arena.make<Constant>(MathConstant::Infinity));
                 }
             }
 
-            auto numerator_limit = try_infinite_limit(bin->left, var, point, arena);
-            auto denominator_limit = try_infinite_limit(bin->right, var, point, arena);
+            auto numerator_limit = try_infinite_limit(bin->left, var, point, ctx);
+            auto denominator_limit = try_infinite_limit(bin->right, var, point, ctx);
             if (denominator_limit.is_ok() && limit_is_infinity(denominator_limit.value())) {
                 if (numerator_limit.is_ok() &&
                     limit_is_infinity(numerator_limit.value()) &&
-                    is_exponential_limit(bin->left, var, point, arena, true) &&
+                    is_exponential_limit(bin->left, var, point, ctx, true) &&
                     is_positive_power_growth(bin->right, var)) {
                     return ok(arena.make<Constant>(MathConstant::Infinity));
                 }
                 if (numerator_limit.is_ok() &&
                     limit_is_infinity(numerator_limit.value()) &&
                     is_positive_power_growth(bin->left, var) &&
-                    is_exponential_limit(bin->right, var, point, arena, true)) {
+                    is_exponential_limit(bin->right, var, point, ctx, true)) {
                     return ok(limit_make_integer(arena, 0));
                 }
                 if (numerator_limit.is_ok() && !limit_is_infinity(numerator_limit.value())) {
@@ -433,7 +374,7 @@ Result<ExprPtr> try_infinite_limit(ExprPtr expr, const Symbol& var, ExprPtr poin
                 }
             }
             if (denominator_limit.is_ok() && limit_is_zero(denominator_limit.value()) &&
-                is_exponential_limit(bin->right, var, point, arena, false) &&
+                is_exponential_limit(bin->right, var, point, ctx, false) &&
                 numerator_limit.is_ok() && limit_is_infinity(numerator_limit.value())) {
                 if (expr_is<Unary>(numerator_limit.value())) {
                     return ok(arena.make<Unary>(UnaryOp::Neg, arena.make<Constant>(MathConstant::Infinity)));
@@ -442,8 +383,8 @@ Result<ExprPtr> try_infinite_limit(ExprPtr expr, const Symbol& var, ExprPtr poin
             }
         }
         if (bin->op == BinaryOp::Pow) {
-            auto base_lim = try_infinite_limit(bin->left, var, point, arena);
-            auto exp_lim = try_infinite_limit(bin->right, var, point, arena);
+            auto base_lim = try_infinite_limit(bin->left, var, point, ctx);
+            auto exp_lim = try_infinite_limit(bin->right, var, point, ctx);
             if (base_lim.is_ok() && limit_is_zero(base_lim.value())) {
                 auto rat = exp_lim.is_ok() ? rational_from_expr(exp_lim.value()) : std::optional<Rational>{};
                 if (rat.has_value() && rat->is_integer()) {

@@ -55,7 +55,7 @@ public:
                                       expr_is<Unary>(simplified_point.value());
 
         if (point_is_pos_inf || point_is_neg_inf) {
-            auto infinite_limit = try_infinite_limit(simplified_expr.value(), var, simplified_point.value(), arena_);
+            auto infinite_limit = try_infinite_limit(simplified_expr.value(), var, simplified_point.value(), context_);
             if (infinite_limit.is_ok() || infinite_limit.error().kind != CASErrorKind::Unimplemented) {
                 return infinite_limit;
             }
@@ -149,7 +149,7 @@ private:
         }
 
         if (limit_is_infinity(point)) {
-            auto infinite_limit = try_infinite_limit(expr, var, point, arena_);
+            auto infinite_limit = try_infinite_limit(expr, var, point, context_);
             if (infinite_limit.is_ok() || infinite_limit.error().kind != CASErrorKind::Unimplemented) {
                 return infinite_limit;
             }
