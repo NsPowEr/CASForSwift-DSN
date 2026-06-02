@@ -33,19 +33,43 @@ Nota: `AcidTest.Test5_ExpansionStress` (986ms vs 500ms soglia) era già rosso pr
 
 ---
 
-### 🟡 B2 — F5.3 ODE Riccati/Clairaut/d'Alembert + Frobenius log-term (DA INIZIARE)
+### 🟢/🟡 B2 — F5.3 ODE nonlinear 1st-order + Frobenius log-term
 
-**Scope**:
-- Estendere `ode_classifier.cpp` con detection di Riccati, Clairaut, d'Alembert.
-- Solver Riccati: richiede soluzione particolare → riduzione a Bernoulli linearizzato → Risch.
-- Solver Clairaut: famiglia parametrica + soluzione singolare via envelope (dy/dp = 0).
-- Solver d'Alembert (Lagrange): differenziazione + sostituzione + soluzione ODE risultante.
-- Frobenius log-term: in `ode_solver_frobenius.cpp:201-205`, caso radici differenti per intero → secondo Frobenius con termine log.
+**B2a Riccati**: ✅ CHIUSO 2026-06-02 (commit B2a).
+- Classifier detection via Lagrange three-point fit + shielded substitution.
+- Solver: Bernoulli reduction (q_0=0) + closed-form for constant coefficients (Δ>0/=0/<0 branches via tanh/rational/tan).
+- Variable Riccati senza particolare → Unimplemented diagnostico (no HC).
+- 4/4 test, 18/18 regression PASS.
 
-**Effort stimato**: ~700 LOC. Sonnet-thinking utilizzabile per ogni solver in parallelo. Audit Opus finale.
+**B2b Clairaut/d'Alembert**: DA FARE.
+- Detection: in `ode_classifier.cpp`, dopo `try_riccati` ritorna nullopt e n==1, prova `try_lagrange`:
+  - Verifica E ≡ -y + x·F(p) + G(p) dove p = y'.
+  - Estrai coefficiente di y: deve essere -1 (o costante non-zero, normalizzato).
+  - Resto = x·F(p) + G(p). Differenzia rispetto a x → F(p). Verifica F dipende solo da p.
+  - G(p) = resto - x·F(p). Verifica G dipende solo da p.
+  - Se F(p) ≡ p → Clairaut, components=[G(p)].
+  - Else → d'Alembert, components=[F(p), G(p)].
+  - Parameter p = ctx.make_fresh_symbol("p"), salvato in classification.parameter.
+- Solver Clairaut in `ode_solver_nonlinear.cpp`:
+  - Famiglia generale: `y = C·x + G(C)` con C arbitrario.
+  - Singolare: parametrica `x = -G'(p), y = -p·G'(p) + G(p)`. Se eliminabile p → forma esplicita.
+- Solver d'Alembert: trasforma in ODE lineare per `x(p)`:
+  - `dx/dp = (x·F'(p) + G'(p))/(p - F(p))`.
+  - Solve via `solve_ode_1st_order(Linear1stOrder)` per `x(p)`.
+  - Return parametric `(x(p), y(p) = x·F(p) + G(p))` o implicita.
+
+**B2c Frobenius log-term**: DA FARE.
+- In `ode_solver_frobenius.cpp:201-205` (caso `r_1 - r_2 ∈ Z_{>0}`):
+  - Seconda soluzione di Frobenius con termine log:
+    - `y_2(x) = c·y_1(x)·ln(x) + x^{r_2}·Σ b_n·x^n`
+    - Coefficiente `c` determinato dalla recurrence con resonance handling.
+  - Reference: Coddington-Levinson, *Theory of Ordinary Differential Equations* (McGraw-Hill 1955) §4.8.
+
+**Effort residuo B2b+B2c**: ~500 LOC. Sonnet-thinking utilizzabile.
 
 **Riferimenti**:
 - Ince, *Ordinary Differential Equations* (1926) §§4.4, 4.6, 5.3
+- Coddington-Levinson 1955 §4.8 (Frobenius II)
 - Bronstein-Schiermayer 1998 ODE classification
 
 ---
