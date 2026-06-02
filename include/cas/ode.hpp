@@ -3,6 +3,7 @@
 #include "cas/ast.hpp"
 #include "cas/result.hpp"
 #include "cas/symbolic.hpp"
+#include <optional>
 #include <vector>
 
 namespace cas::calculus {
@@ -13,6 +14,16 @@ enum class OdeType {
     Linear1stOrder,
     Bernoulli,
     Exact,
+    // F5.3 nonlinear 1st-order families.
+    // Riccati:    y' = q_0(x) + q_1(x)·y + q_2(x)·y²,  q_2 ≢ 0.
+    //   components: [q_0, q_1, q_2].
+    // Clairaut:   y = x·y' + g(y'),  Lagrange w/ f(p) = p.
+    //   components: [g(p)] with p a fresh symbol stored in `parameter`.
+    // d'Alembert: y = x·f(y') + g(y'),  Lagrange w/ f(p) ≢ p.
+    //   components: [f(p), g(p)] with p a fresh symbol stored in `parameter`.
+    Riccati,
+    Clairaut,
+    DAlembert,
     Linear2ndOrderConstantCoeff,
     Linear2ndOrderRationalCoeff,
     LinearNthOrderConstantCoeff
@@ -24,6 +35,10 @@ struct OdeClassification {
     Symbol y;
     Symbol x;
     std::vector<ExprPtr> components; // P(x), Q(x), etc.
+    // For Clairaut/d'Alembert the components are functions of a fresh
+    // parameter symbol p that abstracts y'.  `parameter` carries that
+    // symbol so the solver can later substitute back.
+    std::optional<Symbol> parameter;
 
     OdeClassification(OdeType t, ExprPtr eq, Symbol sy, Symbol sx)
         : type(t), equation(eq), y(std::move(sy)), x(std::move(sx)) {}
@@ -32,6 +47,7 @@ struct OdeClassification {
 [[nodiscard]] Result<OdeClassification> classify_ode(ExprPtr equation, const Symbol& y, const Symbol& x, symbolic::CASContext& ctx);
 [[nodiscard]] Result<ExprPtr> solve_ode_1st_order(const OdeClassification& classification, symbolic::CASContext& ctx);
 [[nodiscard]] Result<ExprPtr> solve_ode_advanced(const OdeClassification& classification, symbolic::CASContext& ctx);
+[[nodiscard]] Result<ExprPtr> solve_ode_nonlinear(const OdeClassification& classification, symbolic::CASContext& ctx);
 [[nodiscard]] Result<ExprPtr> solve_ode(ExprPtr equation, const Symbol& y, const Symbol& x, symbolic::CASContext& ctx);
 
 // Frobenius series solution for a homogeneous linear 2nd-order ODE

@@ -176,6 +176,7 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/ode_solver_1st_order.cpp
     src/calculus/ode_solver_advanced.cpp
     src/calculus/ode_solver_frobenius.cpp
+    src/calculus/ode_solver_nonlinear.cpp
     src/calculus/asymptotes.cpp
     src/calculus/numeric_diff.cpp
     src/calculus/laplace_transform.cpp

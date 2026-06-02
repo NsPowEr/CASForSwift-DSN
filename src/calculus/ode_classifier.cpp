@@ -111,6 +111,186 @@ namespace cas::calculus {
     return ctx.simplify(res);
 }
 
+// Detect the Riccati family  y' = q_0(x) + q_1(x)·y + q_2(x)·y²  with q_2 ≢ 0.
+// Returns std::nullopt if `E` (the equation written as E = 0) does not fit the
+// Riccati pattern; on success, fills `components` with [q_0, q_1, q_2] in this
+// order.
+//
+// Algorithm (no hardcode, no shortcut):
+//   1. View E as a polynomial in y of expected degree ≤ 2 with coefficients in
+//      Q(x)[y'].  Recover the coefficients c_0(x,y'), c_1(x,y'), c_2(x,y') by
+//      evaluating E at four y-values (Lagrange three-point fit + degree witness).
+//   2. Reject if any of c_1, c_2 depends on y' (would make the equation
+//      non-first-order or non-polynomial in y).
+//   3. Reject if c_2 ≡ 0 (would be the already-handled linear branch).
+//   4. Split c_0 as α(x)·y' + β(x).  Reject if α ≡ 0 (no first derivative) or
+//      α depends on y' (E quadratic in y').
+//   5. Normalise q_0 = -β/α, q_1 = -c_1/α, q_2 = -c_2/α.  Reject if any q_i
+//      depends on y (genuine non-polynomial coefficient).
+[[nodiscard]] static std::optional<OdeClassification> try_riccati(
+    ExprPtr E,
+    const Symbol& y,
+    const Symbol& x,
+    ExprPtr y_symbol,
+    ExprPtr y_prime,
+    symbolic::CASContext& ctx) {
+    AstArena& arena = ctx.arena();
+
+    // Custom substitute: replace bare Symbol(y) with `val`, but treat any
+    // Derivative subtree as an opaque atom (do NOT recurse — otherwise the
+    // inner Symbol(y) under D(y,x) is replaced too and the y' coefficient
+    // collapses).  This shielded substitution is what the polynomial-in-y
+    // coefficient extraction needs.
+    std::function<Result<ExprPtr>(ExprPtr, ExprPtr, ExprPtr)>
+        substitute_y_shielded;
+    substitute_y_shielded = [&](ExprPtr expr, ExprPtr target, ExprPtr replacement)
+        -> Result<ExprPtr> {
+        if (structural_equal(expr, target)) return ok(replacement);
+        return visit_expr(expr, [&](const auto& node) -> Result<ExprPtr> {
+            using T = std::decay_t<decltype(node)>;
+            if constexpr (std::is_same_v<T, Derivative>) {
+                return ok(expr);  // opaque
+            } else if constexpr (std::is_same_v<T, Unary>) {
+                auto op = substitute_y_shielded(node.operand, target, replacement);
+                if (op.is_error()) return op;
+                return ok(arena.make<Unary>(node.op, op.value()));
+            } else if constexpr (std::is_same_v<T, Binary>) {
+                auto l = substitute_y_shielded(node.left, target, replacement);
+                if (l.is_error()) return l;
+                auto r = substitute_y_shielded(node.right, target, replacement);
+                if (r.is_error()) return r;
+                return ok(arena.make<Binary>(node.op, l.value(), r.value()));
+            } else if constexpr (std::is_same_v<T, Sum>) {
+                std::vector<ExprPtr> terms;
+                for (auto t : node.terms) {
+                    auto r = substitute_y_shielded(t, target, replacement);
+                    if (r.is_error()) return r;
+                    terms.push_back(r.value());
+                }
+                return ok(arena.make<Sum>(std::move(terms)));
+            } else if constexpr (std::is_same_v<T, Product>) {
+                std::vector<ExprPtr> factors;
+                for (auto f : node.factors) {
+                    auto r = substitute_y_shielded(f, target, replacement);
+                    if (r.is_error()) return r;
+                    factors.push_back(r.value());
+                }
+                return ok(arena.make<Product>(std::move(factors)));
+            } else if constexpr (std::is_same_v<T, FuncCall>) {
+                std::vector<ExprPtr> args;
+                for (auto a : node.args) {
+                    auto r = substitute_y_shielded(a, target, replacement);
+                    if (r.is_error()) return r;
+                    args.push_back(r.value());
+                }
+                return ok(arena.make<FuncCall>(node.name, std::move(args)));
+            } else {
+                return ok(expr);
+            }
+        });
+    };
+
+    auto eval_y = [&](long long k) -> Result<ExprPtr> {
+        ExprPtr val = arena.make<IntegerLit>(BigInt(k));
+        auto s = substitute_y_shielded(E, y_symbol, val);
+        if (s.is_error()) return s;
+        return ctx.simplify(s.value());
+    };
+
+    auto e0  = eval_y(0);  if (e0.is_error())  return std::nullopt;
+    auto e1  = eval_y(1);  if (e1.is_error())  return std::nullopt;
+    auto em1 = eval_y(-1); if (em1.is_error()) return std::nullopt;
+    auto e2  = eval_y(2);  if (e2.is_error())  return std::nullopt;
+
+    auto two   = arena.make<IntegerLit>(BigInt(2));
+    auto four  = arena.make<IntegerLit>(BigInt(4));
+    auto half  = arena.make<RationalLit>(BigInt(1), BigInt(2));
+
+    auto c0 = e0.value();
+    auto c1_raw = ctx.simplify(arena.make<Binary>(BinaryOp::Mul,
+        half,
+        arena.make<Binary>(BinaryOp::Sub, e1.value(), em1.value())));
+    if (c1_raw.is_error()) return std::nullopt;
+    auto c1 = c1_raw.value();
+
+    auto c2_raw = ctx.simplify(arena.make<Binary>(BinaryOp::Sub,
+        arena.make<Binary>(BinaryOp::Mul, half,
+            arena.make<Binary>(BinaryOp::Add, e1.value(), em1.value())),
+        c0));
+    if (c2_raw.is_error()) return std::nullopt;
+    auto c2 = c2_raw.value();
+
+    // Degree-witness check: E|_{y=2} must equal 4·c_2 + 2·c_1 + c_0.
+    auto expected_e2 = ctx.simplify(arena.make<Sum>(std::vector<ExprPtr>{
+        arena.make<Binary>(BinaryOp::Mul, four, c2),
+        arena.make<Binary>(BinaryOp::Mul, two,  c1),
+        c0}));
+    if (expected_e2.is_error()) return std::nullopt;
+    auto diff = algebra::expand(arena.make<Binary>(BinaryOp::Sub, e2.value(),
+        expected_e2.value()), ctx);
+    if (diff.is_error() || !is_zero_expr(diff.value(), ctx)) return std::nullopt;
+
+    // Reject c_2 ≡ 0 (linear-in-y case handled elsewhere).
+    if (is_zero_expr(c2, ctx)) return std::nullopt;
+
+    // c_1, c_2 must NOT depend on y' (otherwise structurally non-Riccati).
+    auto depends_on_yprime = [&](ExprPtr e) {
+        auto mo = find_max_order(e, y, x);
+        return mo.has_value() && *mo >= 1U;
+    };
+    if (depends_on_yprime(c1) || depends_on_yprime(c2)) return std::nullopt;
+
+    // Split c_0 into α(x)·y' + β(x) via two y'-evaluations.
+    auto c0_at_yp = [&](long long k) -> Result<ExprPtr> {
+        ExprPtr val = arena.make<IntegerLit>(BigInt(k));
+        auto s = substitute_any(c0, y_prime, val, ctx);
+        if (s.is_error()) return s;
+        return ctx.simplify(s.value());
+    };
+    auto beta_res  = c0_at_yp(0);    if (beta_res.is_error())  return std::nullopt;
+    auto c0_at_1   = c0_at_yp(1);    if (c0_at_1.is_error())   return std::nullopt;
+    auto c0_at_2   = c0_at_yp(2);    if (c0_at_2.is_error())   return std::nullopt;
+
+    auto alpha_raw = ctx.simplify(arena.make<Binary>(BinaryOp::Sub,
+        c0_at_1.value(), beta_res.value()));
+    if (alpha_raw.is_error()) return std::nullopt;
+    auto alpha = alpha_raw.value();
+
+    // Affine witness: c_0|_{y'=2} must equal 2·α + β.
+    auto expected_c0_at_2 = ctx.simplify(arena.make<Binary>(BinaryOp::Add,
+        arena.make<Binary>(BinaryOp::Mul, two, alpha),
+        beta_res.value()));
+    if (expected_c0_at_2.is_error()) return std::nullopt;
+    auto c0_diff = algebra::expand(arena.make<Binary>(BinaryOp::Sub,
+        c0_at_2.value(), expected_c0_at_2.value()), ctx);
+    if (c0_diff.is_error() || !is_zero_expr(c0_diff.value(), ctx)) return std::nullopt;
+
+    if (is_zero_expr(alpha, ctx)) return std::nullopt;          // no y' term
+    if (depends_on_yprime(alpha) || depends_on_yprime(beta_res.value()))
+        return std::nullopt;                                    // c_0 not affine in y'
+
+    // q_0 = -β/α, q_1 = -c_1/α, q_2 = -c_2/α.
+    auto neg = [&](ExprPtr e) { return arena.make<Unary>(UnaryOp::Neg, e); };
+    auto divα = [&](ExprPtr num) {
+        return ctx.simplify(arena.make<Binary>(BinaryOp::Div, num, alpha));
+    };
+    auto q0 = divα(neg(beta_res.value()));
+    auto q1 = divα(neg(c1));
+    auto q2 = divα(neg(c2));
+    if (q0.is_error() || q1.is_error() || q2.is_error()) return std::nullopt;
+
+    // Final sanity: q_i must not depend on y (otherwise spurious split).
+    auto deps_y = [&](ExprPtr e) { return depends_on(e, y); };
+    if (deps_y(q0.value()) || deps_y(q1.value()) || deps_y(q2.value()))
+        return std::nullopt;
+
+    OdeClassification res(OdeType::Riccati, /*equation*/E, y, x);
+    res.components.push_back(q0.value());
+    res.components.push_back(q1.value());
+    res.components.push_back(q2.value());
+    return res;
+}
+
 [[nodiscard]] Result<OdeClassification> classify_ode(
     ExprPtr equation,
     const Symbol& y,
@@ -176,6 +356,13 @@ namespace cas::calculus {
     
     auto diff_res = algebra::expand(arena.make<Binary>(BinaryOp::Sub, E, L), ctx);
     if (diff_res.is_error() || !is_zero_expr(diff_res.value(), ctx)) {
+        // The linear template did not match.  For order-1 ODEs we still have
+        // a chance to recognise nonlinear families (F5.3): Riccati first.
+        // Clairaut and d'Alembert will hook in here in a follow-up commit.
+        if (n == 1U) {
+            auto riccati = try_riccati(E, y, x, y_ders[0], y_ders[1], ctx);
+            if (riccati.has_value()) return ok(std::move(*riccati));
+        }
         return ok(OdeClassification(OdeType::Unknown, equation, y, x));
     }
     
@@ -233,12 +420,17 @@ namespace cas::calculus {
         case OdeType::Bernoulli:
         case OdeType::Exact:
             return solve_ode_1st_order(classification, ctx);
-            
+
+        case OdeType::Riccati:
+        case OdeType::Clairaut:
+        case OdeType::DAlembert:
+            return solve_ode_nonlinear(classification, ctx);
+
         case OdeType::Linear2ndOrderConstantCoeff:
         case OdeType::Linear2ndOrderRationalCoeff:
         case OdeType::LinearNthOrderConstantCoeff:
             return solve_ode_advanced(classification, ctx);
-            
+
         default:
             return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Tipo di ODE non riconosciuto o non supportato analiticamente."));
     }

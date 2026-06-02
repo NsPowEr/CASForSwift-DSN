@@ -17,6 +17,27 @@
 
 ## Voci aperte
 
+### F5.3-RICCATI-B2A — Riccati family classifier + closed-form solver — RISOLTA 2026-06-02
+- **File**: `include/cas/ode.hpp` (OdeType + OdeClassification + solve_ode_nonlinear API); `src/calculus/ode_classifier.cpp` (try_riccati + dispatcher + shielded substitution); `src/calculus/ode_solver_nonlinear.cpp` (NEW, ~260 LOC); `CMakeLists.txt` (sorgente registrato); `test/unit/test_ode.cpp` (4 nuovi test).
+- **Categoria CLAUDE.md**: Cat 8 (pattern matching previously missing → algorithmic detection); F5.3 sub-block B2a.
+- **Algoritmo**:
+  - **Detection** (`try_riccati`): vista come polinomio in `y` di grado ≤ 2 a coefficienti in Q(x)[y']. Recupero coefficienti `c_0(x,y')`, `c_1(x,y')`, `c_2(x,y')` via Lagrange three-point fit (eval y=0, ±1) + degree witness (eval y=2). Rifiuto se `c_1` o `c_2` dipendono da y'; rifiuto se `c_2 ≡ 0` (caso lineare). Split `c_0 = α(x)·y' + β(x)` con affine-in-y' witness via eval a y'=0,1,2. Normalizzazione `q_0 = -β/α`, `q_1 = -c_1/α`, `q_2 = -c_2/α`.
+  - **Shielded substitution**: helper inline `substitute_y_shielded` che NON ricorre dentro nodi Derivative. Risolve il bug nella sostituzione "y → val" che altrimenti ucciderebbe i termini y' (D(y,x) diventava D(val,x) = 0).
+  - **Solver — sub-famiglia 1** (`q_0 ≡ 0`): riduzione Bernoulli via `v = 1/y` → ODE lineare 1° ordine `v' + q_1·v = -q_2`, risolta da `solve_ode_1st_order(Linear1stOrder)`. Risultato `y = 1/v`.
+  - **Solver — sub-famiglia 2** (coefficienti costanti): partial-fraction integration `∫dy/(c·y² + b·y + a) = x − C`.
+    - Δ > 0: `y = (1/(2c))·(−b + √Δ·tanh(√Δ·(x−C)/2))`.
+    - Δ = 0: `y = −1/(c·(x−C)) − b/(2c)`.
+    - Δ < 0: `y = (1/(2c))·(−b + √(−Δ)·tan(√(−Δ)·(x−C)/2))`.
+  - **Sub-famiglia 3** (Riccati variabile senza particolare): Unimplemented esplicito con diagnostica che cita le due rotte alternative (2nd-order linear variable-coefficient solver, o Risch-DE particular-solution oracle Bronstein ch.8). NO hardcode-of-passage.
+- **Costante magica → derivazione**: nessuna costante magica introdotta; i razionali 1/2, -1, 2, 4 sono coefficienti aritmetici esatti del fit di Lagrange degree 2.
+- **Verifica** (2026-06-02):
+  - `Riccati_QzeroNull_BernoulliReduction` (y' = y + y²) → `y = 1/(C·exp(-x) - 1)` PASS in 47ms.
+  - `Riccati_ConstantCoeff_NegativeDisc` (y' = 1 + y²) → `y = tan(x - C)` PASS in 17ms.
+  - `Riccati_ConstantCoeff_PositiveDisc` (y' = -1 + y²) → `y = tanh(x - C)` PASS in 13ms.
+  - `Riccati_VariableCoeffNoParticular_Diagnostic` (y' = x + y²) → Unimplemented con messaggio "Riccati with variable coefficients..." PASS in 17ms.
+- **Regression**: 18/18 PASS su suite `*Ode*:*ODE*` (StressTest esclusi). Build pulito `-Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined`.
+- **STATO**: ✅ RISOLTA 2026-06-02. Clairaut/d'Alembert detection+solver + Frobenius log-term restano in B2b/B2c (tracked in SESSION_HANDOFF.md), non hardcode-of-passage: la firma `solve_ode_nonlinear` espone già il path; i tipi OdeType::Clairaut/DAlembert sono dichiarati ma non ancora generati dal classifier.
+
 ### F3.2-WANG-LC-CORRECTION — Wang LC distribution per fattori multipli con lc_x non-costante interagente — RISOLTA 2026-05-29
 - **File**: `src/algebra/factor_multivariate_lc.cpp` (390 LOC, rewrite completo del `wang_distribute_leading_coeff`); `src/algebra/factor_multivariate_wang.cpp` (453 LOC, driver ora itera su tutti i good-point candidates fino a successo, mirroring SymPy `dmp_zz_wang` outer loop).
 - **Categoria CLAUDE.md**: Categoria 8 — algoritmo ora completo.
