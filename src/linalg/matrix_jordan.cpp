@@ -147,7 +147,7 @@ Result<JordanDecomposition> jordan_normal_form(const MatrixExpr& matrix, symboli
         for (unsigned int k = 1; k <= m; ++k) {
             auto pow_res = matrix_power(root_i, k, ctx);
             if (pow_res.is_error()) return fail<JordanDecomposition>(pow_res.error());
-            auto ns_res = null_space(pow_res.value(), ctx);
+            auto ns_res = expr_is<RootOf>(val) ? null_space_over_extension(pow_res.value(), val, ctx) : null_space(pow_res.value(), ctx);
             if (ns_res.is_error()) return fail<JordanDecomposition>(ns_res.error());
             kernels[k] = ns_res.value();
         }

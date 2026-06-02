@@ -235,7 +235,7 @@ Result<std::vector<Eigenpair>> eigenvectors(const MatrixExpr& matrix, symbolic::
             }
         }
 
-        auto ns_res = null_space(mat, ctx);
+        auto ns_res = expr_is<RootOf>(val) ? null_space_over_extension(mat, val, ctx) : null_space(mat, ctx);
         if (ns_res.is_error()) return fail<std::vector<Eigenpair>>(ns_res.error());
 
         for (const auto& vec : ns_res.value()) {
