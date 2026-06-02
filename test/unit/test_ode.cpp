@@ -165,6 +165,73 @@ TEST_F(OdeTest, Riccati_ConstantCoeff_PositiveDisc) {
     std::cout << "Riccati Δ>0 Solution: " << debug_print(sol.value()) << std::endl;
 }
 
+// ── F5.3 / B2b — Clairaut & d'Alembert (Lagrange) ───────────────────────────
+
+TEST_F(OdeTest, Clairaut_QuadraticG_GeneralAndSingular) {
+    // y = x·y' + (y')²  →  Clairaut with F(p) = p, G(p) = p².
+    // General  : y = C·x + C².
+    // Singular : x = -2p, y = -p²  ⇒  y = -x²/4.
+    Symbol y("y");
+    Symbol x("x");
+    AstArena& arena = ctx.arena();
+
+    ExprPtr y_p = arena.make<Derivative>(arena.make<Symbol>("y"), Symbol("x"), 1);
+    ExprPtr y_s = arena.make<Symbol>("y");
+    ExprPtr xs  = arena.make<Symbol>("x");
+    ExprPtr rhs = arena.make<Binary>(BinaryOp::Add,
+        arena.make<Binary>(BinaryOp::Mul, xs, y_p),
+        arena.make<Binary>(BinaryOp::Pow, y_p, arena.make<IntegerLit>(BigInt(2))));
+    ExprPtr eq = arena.make<Binary>(BinaryOp::Equal, y_s, rhs);
+
+    auto cls = classify_ode(eq, y, x, ctx);
+    ASSERT_TRUE(cls.is_ok());
+    EXPECT_EQ(cls.value().type, OdeType::Clairaut);
+    ASSERT_TRUE(cls.value().parameter.has_value());
+    ASSERT_EQ(cls.value().components.size(), 1U);
+
+    auto sol = solve_ode(eq, y, x, ctx);
+    ASSERT_TRUE(sol.is_ok()) << sol.error().message;
+    std::cout << "Clairaut Solution: " << debug_print(sol.value()) << std::endl;
+
+    const auto* fc = expr_cast<FuncCall>(sol.value());
+    ASSERT_NE(fc, nullptr);
+    EXPECT_EQ(fc->name, "GeneralAndSingular");
+    ASSERT_EQ(fc->args.size(), 2U);
+}
+
+TEST_F(OdeTest, DAlembert_LinearF_QuadraticG_Parametric) {
+    // y = 2x·y' + (y')²  →  d'Alembert with F(p) = 2p, G(p) = p².
+    // Reduction: dx/dp + (2/p)·x + 2 = 0  (linear in x(p)).
+    Symbol y("y");
+    Symbol x("x");
+    AstArena& arena = ctx.arena();
+
+    ExprPtr y_p = arena.make<Derivative>(arena.make<Symbol>("y"), Symbol("x"), 1);
+    ExprPtr y_s = arena.make<Symbol>("y");
+    ExprPtr xs  = arena.make<Symbol>("x");
+    ExprPtr two = arena.make<IntegerLit>(BigInt(2));
+    ExprPtr rhs = arena.make<Binary>(BinaryOp::Add,
+        arena.make<Binary>(BinaryOp::Mul, two,
+            arena.make<Binary>(BinaryOp::Mul, xs, y_p)),
+        arena.make<Binary>(BinaryOp::Pow, y_p, arena.make<IntegerLit>(BigInt(2))));
+    ExprPtr eq = arena.make<Binary>(BinaryOp::Equal, y_s, rhs);
+
+    auto cls = classify_ode(eq, y, x, ctx);
+    ASSERT_TRUE(cls.is_ok());
+    EXPECT_EQ(cls.value().type, OdeType::DAlembert);
+    ASSERT_TRUE(cls.value().parameter.has_value());
+    ASSERT_EQ(cls.value().components.size(), 2U);
+
+    auto sol = solve_ode(eq, y, x, ctx);
+    ASSERT_TRUE(sol.is_ok()) << sol.error().message;
+    std::cout << "d'Alembert Solution: " << debug_print(sol.value()) << std::endl;
+
+    const auto* fc = expr_cast<FuncCall>(sol.value());
+    ASSERT_NE(fc, nullptr);
+    EXPECT_EQ(fc->name, "ParametricSolution");
+    ASSERT_EQ(fc->args.size(), 2U);
+}
+
 TEST_F(OdeTest, Riccati_VariableCoeffNoParticular_Diagnostic) {
     // y' = x + y²  →  Riccati, variable a(x) = x, no particular solution known.
     // Expect explicit Unimplemented with F5.3 / B2 continuation diagnostic.

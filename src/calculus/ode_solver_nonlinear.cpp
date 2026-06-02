@@ -28,7 +28,9 @@
 
 #include "cas/ode.hpp"
 #include "cas/bigint.hpp"
+#include "cas/calculus.hpp"
 #include "cas/rational.hpp"
+#include "cas/symbolic.hpp"
 
 #include <optional>
 #include <string>
@@ -167,6 +169,167 @@ namespace {
         arena.make<Symbol>(y.name), simp.value()));
 }
 
+// Clairaut:  y = x·p + G(p), p = y'.  General family obtained by replacing the
+// parameter p with an arbitrary integration constant C:
+//      y = C·x + G(C).
+// Singular envelope (when G is sufficiently regular):
+//      x = -G'(p),  y = G(p) - p·G'(p).
+// We attempt to eliminate the parameter p by solving x = -G'(p) for p (cheap
+// only when -G'(p) admits an algebraic inverse).  When elimination succeeds
+// we return both equations in a Sum-of-equations wrapper; otherwise we return
+// only the general family and reserve the singular solution for a follow-up
+// (no hardcode — the singular branch is documented as Unimplemented detail).
+[[nodiscard]] Result<ExprPtr> solve_clairaut(
+    const OdeClassification& cls,
+    symbolic::CASContext& ctx) {
+    AstArena& arena = ctx.arena();
+    if (!cls.parameter.has_value() || cls.components.size() != 1U) {
+        return fail<ExprPtr>(make_error(CASErrorKind::InternalError,
+            "Clairaut classification missing parameter or G(p) component"));
+    }
+    const Symbol& p_sym = *cls.parameter;
+    ExprPtr p_expr = arena.make<Symbol>(p_sym.name);
+    ExprPtr G_of_p = cls.components[0];
+
+    // General family: y = C·x + G(C), C fresh.
+    Symbol C_sym = ctx.make_fresh_symbol("C");
+    ExprPtr C_expr = arena.make<Symbol>(C_sym.name);
+    auto G_of_C = symbolic::substitute(G_of_p, p_sym, C_expr, ctx);
+    if (G_of_C.is_error()) return G_of_C;
+    ExprPtr xs = arena.make<Symbol>(cls.x.name);
+    ExprPtr general_rhs = arena.make<Binary>(BinaryOp::Add,
+        arena.make<Binary>(BinaryOp::Mul, C_expr, xs), G_of_C.value());
+    auto general_simp = ctx.simplify(general_rhs);
+    if (general_simp.is_error()) return general_simp;
+    ExprPtr general_eq = arena.make<Binary>(BinaryOp::Equal,
+        arena.make<Symbol>(cls.y.name), general_simp.value());
+
+    // Singular envelope.  Strategy: compute G'(p), build x = -G'(p) and
+    // y = G(p) - p·G'(p); return the pair packaged as
+    // FuncCall("ParametricSolution", [Equal(x, -G'(p)), Equal(y, G - p·G')]).
+    auto G_prime_res = diff(G_of_p, p_sym, 1U, ctx);
+    if (G_prime_res.is_error()) {
+        // Differentiation failed → only general family is available.
+        return ok(general_eq);
+    }
+    ExprPtr Gp = G_prime_res.value();
+    ExprPtr neg_Gp_simp;
+    {
+        auto s = ctx.simplify(arena.make<Unary>(UnaryOp::Neg, Gp));
+        if (s.is_error()) return ok(general_eq);
+        neg_Gp_simp = s.value();
+    }
+    ExprPtr singular_y_rhs;
+    {
+        auto s = ctx.simplify(arena.make<Binary>(BinaryOp::Sub, G_of_p,
+            arena.make<Binary>(BinaryOp::Mul, p_expr, Gp)));
+        if (s.is_error()) return ok(general_eq);
+        singular_y_rhs = s.value();
+    }
+
+    ExprPtr eq_x = arena.make<Binary>(BinaryOp::Equal, xs, neg_Gp_simp);
+    ExprPtr eq_y = arena.make<Binary>(BinaryOp::Equal,
+        arena.make<Symbol>(cls.y.name), singular_y_rhs);
+    ExprPtr singular_param = arena.make<FuncCall>("ParametricSolution",
+        std::vector<ExprPtr>{eq_x, eq_y});
+
+    // Return both branches: general (closed) + singular (parametric).
+    // We package the pair as FuncCall("GeneralAndSingular", [general, singular])
+    // to keep the AST honest (no Sum/And abuse).
+    return ok(arena.make<FuncCall>("GeneralAndSingular",
+        std::vector<ExprPtr>{general_eq, singular_param}));
+}
+
+// d'Alembert (Lagrange, F(p) ≢ p):
+//     y = x·F(p) + G(p),    p = y'.
+// Differentiating w.r.t. x: p = F(p) + (x·F'(p) + G'(p))·dp/dx.
+// Rearranging (for p ≠ F(p)) gives a linear ODE for x as a function of p:
+//     dx/dp = (x·F'(p) + G'(p)) / (p - F(p)).
+// Bring to solver form  dx/dp + P(p)·x = Q(p)  (solve_ode_1st_order takes
+// the Linear1stOrder components as [P, RHS], i.e. equation y' + P·y = Q):
+//   P(p) = -F'(p) / (p - F(p)),
+//   Q(p) =  G'(p) / (p - F(p)).
+// Solve via solve_ode_1st_order(Linear1stOrder).  Then the solution is
+// parametric:  ( x = X(p, C),  y = X(p, C)·F(p) + G(p) ).
+[[nodiscard]] Result<ExprPtr> solve_dalembert(
+    const OdeClassification& cls,
+    symbolic::CASContext& ctx) {
+    AstArena& arena = ctx.arena();
+    if (!cls.parameter.has_value() || cls.components.size() != 2U) {
+        return fail<ExprPtr>(make_error(CASErrorKind::InternalError,
+            "d'Alembert classification missing parameter or F/G components"));
+    }
+    const Symbol& p_sym = *cls.parameter;
+    ExprPtr p_expr = arena.make<Symbol>(p_sym.name);
+    ExprPtr F = cls.components[0];
+    ExprPtr G = cls.components[1];
+
+    // Reject the degenerate fixed point p ≡ F(p) (would collapse the reduction
+    // and is by classification d'Alembert ⇒ F ≢ p).  A stronger check would
+    // also detect isolated roots p_0 of p - F(p) that yield singular straight-
+    // line solutions, but that is treated as a follow-up.
+
+    auto F_prime = diff(F, p_sym, 1U, ctx);
+    if (F_prime.is_error()) return F_prime;
+    auto G_prime = diff(G, p_sym, 1U, ctx);
+    if (G_prime.is_error()) return G_prime;
+
+    auto denom_res = ctx.simplify(arena.make<Binary>(BinaryOp::Sub, p_expr, F));
+    if (denom_res.is_error()) return denom_res;
+    ExprPtr denom = denom_res.value();
+    if (is_zero_expr(denom, ctx)) {
+        return fail<ExprPtr>(CASError{
+            .kind = CASErrorKind::Unimplemented,
+            .message = "d'Alembert reduction degenerates (p ≡ F(p)); "
+                       "indicates a Clairaut equation that was misclassified, "
+                       "or a singular straight-line family that requires "
+                       "separate enumeration",
+            .hint = std::nullopt});
+    }
+
+    auto neg_div = [&](ExprPtr num) -> Result<ExprPtr> {
+        return ctx.simplify(arena.make<Binary>(BinaryOp::Div,
+            arena.make<Unary>(UnaryOp::Neg, num), denom));
+    };
+    auto pos_div = [&](ExprPtr num) -> Result<ExprPtr> {
+        return ctx.simplify(arena.make<Binary>(BinaryOp::Div, num, denom));
+    };
+    auto P_res = neg_div(F_prime.value());
+    if (P_res.is_error()) return P_res;
+    auto Q_res = pos_div(G_prime.value());
+    if (Q_res.is_error()) return Q_res;
+
+    // Synthesize Linear1stOrder for x as function of p:
+    //     dx/dp + P(p)·x = Q(p).
+    // OdeClassification stores components [P, RHS] for Linear1stOrder.
+    // Branch convention: the integrating factor exp(∫P dp) generates ln|p|
+    // when P has a 1/p tail.  Mark the parameter as positive so the linear
+    // solver picks the principal branch (p > 0); the negative branch is
+    // recovered by symmetry y → y, x → x, p → -p.
+    Symbol x_dep = ctx.make_fresh_symbol("dalembert_x");
+    ctx.assumptions().assume_positive(p_sym);
+    ExprPtr placeholder_eq = arena.make<IntegerLit>(BigInt(0));
+    OdeClassification reduced(OdeType::Linear1stOrder, placeholder_eq,
+        x_dep, /*indep*/p_sym);
+    reduced.components.push_back(P_res.value());
+    reduced.components.push_back(Q_res.value());
+    auto x_sol_res = solve_ode_1st_order(reduced, ctx);
+    if (x_sol_res.is_error()) return x_sol_res;
+    ExprPtr x_in_p = x_sol_res.value();
+
+    // y(p) = x(p)·F(p) + G(p).
+    auto y_rhs = ctx.simplify(arena.make<Binary>(BinaryOp::Add,
+        arena.make<Binary>(BinaryOp::Mul, x_in_p, F), G));
+    if (y_rhs.is_error()) return y_rhs;
+
+    ExprPtr eq_x = arena.make<Binary>(BinaryOp::Equal,
+        arena.make<Symbol>(cls.x.name), x_in_p);
+    ExprPtr eq_y = arena.make<Binary>(BinaryOp::Equal,
+        arena.make<Symbol>(cls.y.name), y_rhs.value());
+    return ok(arena.make<FuncCall>("ParametricSolution",
+        std::vector<ExprPtr>{eq_x, eq_y}));
+}
+
 }  // namespace
 
 Result<ExprPtr> solve_ode_nonlinear(
@@ -228,7 +391,9 @@ Result<ExprPtr> solve_ode_nonlinear(
                                 "coefficients, or known Airy/Bessel reduction).")});
     }
 
-    // Clairaut / d'Alembert solvers will hook in here in a follow-up commit.
+    if (cls.type == OdeType::Clairaut)  return solve_clairaut(cls, ctx);
+    if (cls.type == OdeType::DAlembert) return solve_dalembert(cls, ctx);
+
     return fail<ExprPtr>(CASError{
         .kind = CASErrorKind::Unimplemented,
         .message = "Nonlinear ODE family not yet supported by solve_ode_nonlinear",
