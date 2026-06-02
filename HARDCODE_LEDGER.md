@@ -923,15 +923,22 @@ tutti gli input; questi sono upgrade prestazionali per casi specifici.
 - **Fix corretto**: applicare la stessa policy esistente per `exp(ln(x)) → x` (già condizionale a `is_known_positive(x)`) anche alla regola `exp(ln(a)+ln(b))`. Richiede gating in `simplify_funcall_exp_log_sqrt` con `is_known_positive` per ogni summand. Tradeoff: rompe alcuni test che assumono questa riduzione su simboli senza assumption — richiede revisione globale.
 - **Blocking dependency**: nessuna; revisione coordinata test suite.
 
-### HC-ALG-SPARSE-INTERP-TRIVARIATE (aperto)
+### HC-ALG-SPARSE-INTERP-TRIVARIATE (chiuso)
 
-- **Stato**: APERTO (iscritto 2026-06-02 dopo audit DISABLED).
+- **Stato**: CHIUSO in S1/A1 (2026-06-02).
 - **File**: `src/algebra/polynomial_sparse_interpolation.cpp::sparse_interpolate`.
-- **Categoria**: Cat. 3 (set di ricerca fissi: pipeline ottimizzata per bivariate, generalizzazione n-variate incompleta).
-- **Test impattato (DISABLED)**: `SparseInterpolationTest.DISABLED_Trivariate` (P(x,y,z) = x+y+z, bounds = {1,1,1}).
-- **Descrizione**: `sparse_interpolate` ritorna error su 3+ variabili; il path Ben-Or/Tiwari + Prony è implementato solo per bivariate.
-- **Fix corretto**: estensione Ben-Or/Tiwari multivariate via recursive evaluation (bind n-1 variabili a punti distinti per ogni step, interpola variabile rimanente).
-- **Blocking dependency**: nessuna.
+- **Categoria**: era classificato Cat. 3 (set di ricerca fissi).
+- **Root cause reale**: l'algoritmo Zippel-recursive era già strutturalmente n-variate; il bug era nella generazione dei punti di valutazione. `next_prime(BigInt(100 + i*n_vars + j))` su valori consecutivi (100, 101, 102, ...) collassava su stesso prime (next_prime ritorna ≥ input, quindi next_prime(100)=101 e next_prime(101)=101). Per `n_vars≥3` questo causava colonne identiche nella matrice candidate-skeleton → singolare.
+- **Fix applicato**:
+  1. Helper `generate_distinct_primes(count, start)` produce `count` primi strettamente distinti via `next_prime(prev+1)` (ascendente, no duplicati).
+  2. Pre-generazione di `T*(k+1)` primi distinti per il passo ricorsivo k (variable parts) + stream separato `[1000, ...)` per gli anchor j>k.
+  3. Retry loop su singolarità: shift offset deterministico per attempt → matrici candidate disgiunte. Max retries esposto come `ctx.sparse_interp_max_retries` (default 5, configurabile via CASContextParams). Esaurimento → `CASErrorKind::Unimplemented` diagnostico esplicito.
+- **Test riabilitati / aggiunti**:
+  - `SparseInterpolationTest.Trivariate` (era DISABLED) — PASS.
+  - `SparseInterpolationTest.Quadrivariate` (nuovo, w²+xy+z²+7) — PASS.
+  - `SparseInterpolationTest.PentaSparseLinear` (nuovo, 5-variate lineare) — PASS.
+- **Bivariate path**: invariato algoritmicamente; gli stessi prime distinti sostituiscono il vecchio `next_prime(100+...)` ma con guarantee di distinctness, quindi bivariate non degrada (verificato: `BivariateSparse`, `BivariateProduct`, `UnivariateX2` tutti PASS).
+- **Regola Zero compliance**: `sparse_interp_max_retries` configurabile via CASContext, no hardcode magico, no silent failure (Unimplemented diagnostico se max retry esaurito).
 
 ## Note operative
 

@@ -300,6 +300,19 @@ struct CASContextParams {
         return smith_stabilization_multiplier_;
     }
 
+    // ── Sparse interpolation (Zippel) retry budget ──────────────────────────
+    // Maximum number of distinct prime-offset retries when the candidate
+    // skeleton evaluation matrix is singular. Each retry shifts the prime
+    // stream by a deterministic offset (no randomness). Exceeded → explicit
+    // Unimplemented diagnostic (NOT silent wrong polynomial).
+    // Default 5: empirical safe bound for skeletons of moderate size (T ≤ 64).
+    void set_sparse_interp_max_retries(std::size_t n) noexcept {
+        sparse_interp_max_retries_ = n;
+    }
+    [[nodiscard]] std::size_t sparse_interp_max_retries() const noexcept {
+        return sparse_interp_max_retries_;
+    }
+
     // ── sqrt rational simplification ────────────────────────────────────────
     // Trial-division upper bound for perfect-square factor extraction in
     // simplify(sqrt(rational)). Without a bound the O(sqrt(n)) loop is
@@ -351,6 +364,7 @@ protected:
     std::size_t   max_galois_frobenius_primes_{30U};
     std::size_t   smith_stabilization_multiplier_{64U};
     std::size_t   simplify_sqrt_trial_division_bound_{10000U};
+    std::size_t   sparse_interp_max_retries_{5U};
     bool          enable_f5_signature_pruning_{false};  // F3.3-F5-WIRE
 };
 

@@ -87,7 +87,7 @@ TEST_F(SparseInterpolationTest, BivariateProduct) {
     ASSERT_TRUE(result.is_ok()) << result.error().message;
 }
 
-TEST_F(SparseInterpolationTest, DISABLED_Trivariate) {
+TEST_F(SparseInterpolationTest, Trivariate) {
     Symbol x("x"), y("y"), z("z");
     std::vector<Symbol> vars = {x, y, z};
     std::vector<std::size_t> bounds = {1, 1, 1};
@@ -99,6 +99,48 @@ TEST_F(SparseInterpolationTest, DISABLED_Trivariate) {
         auto vz = expr_to_integer_coefficient(point[2]).value();
         
         BigInt res = vx + vy + vz;
+        return ok(ctx->arena().make<IntegerLit>(res));
+    };
+
+    auto result = sparse_interpolate(oracle, vars, bounds, *ctx);
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+}
+
+TEST_F(SparseInterpolationTest, Quadrivariate) {
+    Symbol w("w"), x("x"), y("y"), z("z");
+    std::vector<Symbol> vars = {w, x, y, z};
+    std::vector<std::size_t> bounds = {2, 2, 2, 2};
+
+    // P(w, x, y, z) = w^2 + x*y + z^2 + 7
+    auto oracle = [&](const std::vector<ExprPtr>& point) -> Result<ExprPtr> {
+        auto vw = expr_to_integer_coefficient(point[0]).value();
+        auto vx = expr_to_integer_coefficient(point[1]).value();
+        auto vy = expr_to_integer_coefficient(point[2]).value();
+        auto vz = expr_to_integer_coefficient(point[3]).value();
+
+        BigInt res = vw * vw + vx * vy + vz * vz + BigInt(7);
+        return ok(ctx->arena().make<IntegerLit>(res));
+    };
+
+    auto result = sparse_interpolate(oracle, vars, bounds, *ctx);
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+}
+
+TEST_F(SparseInterpolationTest, PentaSparseLinear) {
+    Symbol v1("v1"), v2("v2"), v3("v3"), v4("v4"), v5("v5");
+    std::vector<Symbol> vars = {v1, v2, v3, v4, v5};
+    std::vector<std::size_t> bounds = {1, 1, 1, 1, 1};
+
+    // P(v1..v5) = v1 + 2*v2 + 3*v3 + 4*v4 + 5*v5
+    auto oracle = [&](const std::vector<ExprPtr>& point) -> Result<ExprPtr> {
+        auto v1v = expr_to_integer_coefficient(point[0]).value();
+        auto v2v = expr_to_integer_coefficient(point[1]).value();
+        auto v3v = expr_to_integer_coefficient(point[2]).value();
+        auto v4v = expr_to_integer_coefficient(point[3]).value();
+        auto v5v = expr_to_integer_coefficient(point[4]).value();
+
+        BigInt res = v1v + BigInt(2) * v2v + BigInt(3) * v3v
+                   + BigInt(4) * v4v + BigInt(5) * v5v;
         return ok(ctx->arena().make<IntegerLit>(res));
     };
 

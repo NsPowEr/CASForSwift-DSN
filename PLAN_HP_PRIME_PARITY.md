@@ -290,7 +290,7 @@ I numeri complessi sottostanno polynomi su C, eigenvalues, branch cuts, residue.
 
 ### F3.1 — GCD multivariato production (priorità #1)
 - **Brown's modular GCD** (sostituisce stub `polynomial_gcd_modular.cpp:44`)
-- **Zippel's sparse interpolation** per polinomi sparsi multivariati
+- **Zippel's sparse interpolation** per polinomi sparsi multivariati (IMPLEMENTATO 2026-06-02 S1/A1 in `src/algebra/polynomial_sparse_interpolation.cpp`; n-variate generale con distinct-prime guarantee + retry-on-singular configurable via `ctx.sparse_interp_max_retries()`)
 - **EZ-GCD** (Wang) per cofactors
 - Bound Mignotte multivariato
 
