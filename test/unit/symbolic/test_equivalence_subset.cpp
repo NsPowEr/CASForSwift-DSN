@@ -102,7 +102,7 @@ TEST_F(EquivalenceSubsetRischTest, LogProductMinusLogsZeroesUnderPositiveAssumpt
 // global simplifier still reduces exp(ln(x)) -> x unconditionally; this is
 // outside the scope of the L2-19 subset walker (which only adds reductions,
 // never restricts them).  See CAS_TASKS L2-19 note on the branch-cut gap.
-TEST_F(EquivalenceSubsetRischTest, DISABLED_ExpOfLogSumWithoutPositivityIsNotEqualToProduct) {
+TEST_F(EquivalenceSubsetRischTest, ExpOfLogSumWithoutPositivityIsNotEqualToProduct) {
     auto lhs = parse_ok("exp(ln(x) + ln(y))");
     auto rhs = parse_ok("x * y");
     auto eq = symbolic::mathematically_equal_subset_risch(lhs, rhs, *ctx);

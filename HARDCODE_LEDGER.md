@@ -934,15 +934,24 @@ tutti gli input; questi sono upgrade prestazionali per casi specifici.
 - **Decisione su Atan2 builtin**: NON aggiunto come BuiltinOp separato. L'analisi del path completo ha mostrato che `Arg(a+bI)` con `a,b` letterali razionali GIÀ dispatcha correttamente a `Atan(b/a)` (in `simplify_complex.cpp:142-145`), e `Atan(±1)` GIÀ riduce a `±π/4` (in `simplify_trig_inverse.cpp:60-68`). Aggiungere BuiltinOp::Atan2 sarebbe stato refactor di superficie senza beneficio matematico (single source of truth già in Atan). Estensione di Atan a valori esatti aggiuntivi (`±√3`, `±1/√3`) resta task incrementale separato.
 - **Regola Zero compliance**: regole derivate da identità matematiche standard (Euler, Bronstein §3.3); gating positivity esplicito per branch-cut; nessun pattern matching su forma chiusa, solo strutturale (Product con fattori specifici); nessun hardcode di angoli specifici (Atan rule preesistente gestisce gli angoli standard).
 
-### HC-CALC-RISCH-EQUIV-POSITIVITY (aperto)
+### HC-CALC-RISCH-EQUIV-POSITIVITY (chiuso)
 
-- **Stato**: APERTO (iscritto 2026-06-02 dopo audit DISABLED).
-- **File**: `src/symbolic/simplify_exp_log.cpp` (regola `exp(ln(a) + ln(b)) → a·b`).
-- **Categoria**: Cat. 8 (riduzione branch-cut-unsafe applicata unconditionally).
-- **Test impattato (DISABLED)**: `EquivalenceSubsetRischTest.DISABLED_ExpOfLogSumWithoutPositivityIsNotEqualToProduct`.
-- **Descrizione**: il simplifier riduce `exp(ln(x) + ln(y)) → x·y` senza richiedere `is_known_positive(x)` AND `is_known_positive(y)`, mentre matematicamente l'identità vale solo sul ramo principale + positività. Il test verifica che `mathematically_equal_subset_risch` non claim equality senza assumption; ma la pipeline applica già la riduzione, quindi il subset_walker vede già termini ridotti uguali.
-- **Fix corretto**: applicare la stessa policy esistente per `exp(ln(x)) → x` (già condizionale a `is_known_positive(x)`) anche alla regola `exp(ln(a)+ln(b))`. Richiede gating in `simplify_funcall_exp_log_sqrt` con `is_known_positive` per ogni summand. Tradeoff: rompe alcuni test che assumono questa riduzione su simboli senza assumption — richiede revisione globale.
-- **Blocking dependency**: nessuna; revisione coordinata test suite.
+- **Stato**: CHIUSO in S4/C (2026-06-02), gating completato già in S3/B come effetto collaterale.
+- **File**: `src/symbolic/simplify_exp_log.cpp` (regola `exp(c · ln(x)) → x^c`).
+- **Categoria**: era classificata Cat. 8 (riduzione branch-cut-unsafe applicata unconditionally).
+- **Root cause reale** (dopo audit del path simplifier completo):
+  1. La regola `exp(ln(x)) → x` ERA GIÀ gated da `is_known_positive(x)` in `simplify_exp_log.cpp:244` (commit precedente, L2-19 Bronstein §3.3).
+  2. La regola `exp(sum) → prod(exp)` (`simplify_exp_log.cpp:255-265`) è universalmente valida e applicata. Per `exp(ln(x) + ln(y))` produce `exp(ln(x)) · exp(ln(y))` che, senza positivity, NON viene ridotta per ciascun fattore.
+  3. **Path mancante per il test**: la nuova regola `exp(c · ln(x))` aggiunta in S3/B per chiudere HC-CALC-COMPLEX-LOG-BRANCH-CUT è anch'essa gated da `is_known_positive(x)`. Quindi tutte le riduzioni `exp(...·ln(x))` → `x^c` rispettano uniformemente la branch-cut policy.
+  4. Il walker `mathematically_equal_subset_risch` in `src/algebra/algebraic_equal.cpp::expand_exp_walker` era già correttamente gated (L2-19 step B4/B5 documented in CAS_TASKS).
+- **Fix applicato**: nessuna modifica ulteriore richiesta. La policy positivity-gated uniforme tra exp(ln(x)), exp(c·ln(x)), e il walker era già completa dopo S3/B. Il test verifica solo la propagation lato simplifier+walker, che ora si comporta correttamente:
+  - `simplify(exp(ln(x) + ln(y)))` su `x,y` senza positivity → `exp(ln(x))·exp(ln(y))` (entrambi unevaluated).
+  - `mathematically_equal_subset_risch(exp(ln(x)+ln(y)), x*y)` → false (no equivalence claim senza assumption).
+- **Test riabilitato**:
+  - `EquivalenceSubsetRischTest.ExpOfLogSumWithoutPositivityIsNotEqualToProduct` (era DISABLED) — PASS.
+- **Test suite completa** `EquivalenceSubsetRischTest`: 13/13 PASS (incluso il nuovo).
+- **Audit upfront non più necessario**: la chiusura di HC-CALC-COMPLEX-LOG-BRANCH-CUT in S3/B ha implicitamente esteso il gating positivity a tutte le riduzioni exp(scalar·ln). Nessun test legacy assume riduzione unconditional (verificato: full suite 1094 PASS, solo Chebyshev pre-esistente fail).
+- **Regola Zero compliance**: gating uniforme `is_known_positive` esteso a tutte le rule exp(...·ln); nessun pattern matching su forma chiusa; nessuna eccezione hardcoded.
 
 ### HC-ALG-SPARSE-INTERP-TRIVARIATE (chiuso)
 
