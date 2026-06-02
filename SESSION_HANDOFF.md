@@ -1,7 +1,7 @@
 # SESSION HANDOFF — F5 Closure Multi-Session
 
-> **Data ultimo aggiornamento**: 2026-06-02
-> **Sessione**: B1 completata, B2-B9 da eseguire
+> **Data ultimo aggiornamento**: 2026-06-03
+> **Sessione**: B1 + B2 (a,b,c) completate; pre-B2b cleanup chiuso (Regola1 simplify_exp_log + restore QR 8x8 verification + RootOf dispatch eigen/jordan); B3-B9 da eseguire
 > **Orchestrator**: Opus 4.7
 > **Modalità utente**: caveman ultra (interno) + no shortcut + no hardcode
 
@@ -33,39 +33,35 @@ Nota: `AcidTest.Test5_ExpansionStress` (986ms vs 500ms soglia) era già rosso pr
 
 ---
 
-### 🟢/🟡 B2 — F5.3 ODE nonlinear 1st-order + Frobenius log-term
+### ✅ B2 — F5.3 ODE nonlinear 1st-order + Frobenius log-term (CHIUSO 2026-06-03)
 
-**B2a Riccati**: ✅ CHIUSO 2026-06-02 (commit B2a).
-- Classifier detection via Lagrange three-point fit + shielded substitution.
-- Solver: Bernoulli reduction (q_0=0) + closed-form for constant coefficients (Δ>0/=0/<0 branches via tanh/rational/tan).
+**B2a Riccati** (commit `12e6982`):
+- Classifier via Lagrange three-point fit + shielded substitution.
+- Solver: Bernoulli reduction (q_0=0) + closed-form for constant coefficients
+  (Δ>0/=0/<0 → tanh / rational / tan branches).
 - Variable Riccati senza particolare → Unimplemented diagnostico (no HC).
-- 4/4 test, 18/18 regression PASS.
 
-**B2b Clairaut/d'Alembert**: DA FARE.
-- Detection: in `ode_classifier.cpp`, dopo `try_riccati` ritorna nullopt e n==1, prova `try_lagrange`:
-  - Verifica E ≡ -y + x·F(p) + G(p) dove p = y'.
-  - Estrai coefficiente di y: deve essere -1 (o costante non-zero, normalizzato).
-  - Resto = x·F(p) + G(p). Differenzia rispetto a x → F(p). Verifica F dipende solo da p.
-  - G(p) = resto - x·F(p). Verifica G dipende solo da p.
-  - Se F(p) ≡ p → Clairaut, components=[G(p)].
-  - Else → d'Alembert, components=[F(p), G(p)].
-  - Parameter p = ctx.make_fresh_symbol("p"), salvato in classification.parameter.
-- Solver Clairaut in `ode_solver_nonlinear.cpp`:
-  - Famiglia generale: `y = C·x + G(C)` con C arbitrario.
-  - Singolare: parametrica `x = -G'(p), y = -p·G'(p) + G(p)`. Se eliminabile p → forma esplicita.
-- Solver d'Alembert: trasforma in ODE lineare per `x(p)`:
-  - `dx/dp = (x·F'(p) + G'(p))/(p - F(p))`.
-  - Solve via `solve_ode_1st_order(Linear1stOrder)` per `x(p)`.
-  - Return parametric `(x(p), y(p) = x·F(p) + G(p))` o implicita.
+**B2b Clairaut / d'Alembert** (commit `b535bab`):
+- `try_lagrange` in `ode_classifier.cpp`: estrae c_1 (y-coeff) e c_0 = α(y')·x + β(y'),
+  normalizza F(p) = -α/c_1, G(p) = -β/c_1 con p fresh symbol.
+- Clairaut (F ≡ p): `Equal(y, C·x + G(C))` + parametrica singolare
+  `x = -G'(p), y = G(p) - p·G'(p)` → output `FuncCall("GeneralAndSingular", [...])`.
+- d'Alembert (F ≢ p): riduzione a `dx/dp + P·x = Q`, solve via `solve_ode_1st_order`,
+  output `FuncCall("ParametricSolution", [Equal(x,X(p,C)), Equal(y,X·F+G)])`.
+- Branch convention: parameter p marcato positivo in assumptions per ramo principale.
 
-**B2c Frobenius log-term**: DA FARE.
-- In `ode_solver_frobenius.cpp:201-205` (caso `r_1 - r_2 ∈ Z_{>0}`):
-  - Seconda soluzione di Frobenius con termine log:
-    - `y_2(x) = c·y_1(x)·ln(x) + x^{r_2}·Σ b_n·x^n`
-    - Coefficiente `c` determinato dalla recurrence con resonance handling.
-  - Reference: Coddington-Levinson, *Theory of Ordinary Differential Equations* (McGraw-Hill 1955) §4.8.
+**B2c Frobenius log-term** (commit `d9fa86b`):
+- `integer_gap(r_1, r_2, ctx)`: detect r_1 - r_2 ∈ Z_{>0}.
+- `build_log_branch`: recurrence completa con risoluzione del coefficiente c
+  alla resonance step (n = N). h_m precomputato per coupling c·y_1.
+- y_2 = c·ln(x)·y_1 + x^{r_2}·Σ b_n x^n, con c = -S_N / h_0 e h_0 = I'(r_1) = N.
+- Skip se num_terms < N (resonance non raggiunta nella troncatura).
+- Secondary resonance al n > N → Unimplemented diagnostico.
 
-**Effort residuo B2b+B2c**: ~500 LOC. Sonnet-thinking utilizzabile.
+**Output test**:
+- 4/4 OdeTest Riccati (B2a) + 2/2 OdeTest Clairaut/d'Alembert (B2b)
+- 4/4 FrobeniusTest (Euler, rational, ±1, **BesselOrder1_ResonantLogBranch**)
+- 1950/1950 non-stress + 24/24 AcidTest + 3/3 SupremeStressTest + QR 8x8 6.6s
 
 **Riferimenti**:
 - Ince, *Ordinary Differential Equations* (1926) §§4.4, 4.6, 5.3
