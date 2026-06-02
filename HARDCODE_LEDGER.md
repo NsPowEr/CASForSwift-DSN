@@ -912,15 +912,27 @@ tutti gli input; questi sono upgrade prestazionali per casi specifici.
 - **Bug residuo (out of scope di questo HC)**: `simplify(Binary(Div, polynomial_with_rational_coeffs, polynomial))` drop coefficienti razionali. Workaround in Gosper sufficiente; fix sistematico nel simplifier rimandato a future Phase F2.5 cleanup.
 - **Regola Zero compliance**: csolve linear path è algoritmo generale (Gauss-Jordan rettangolare) non pattern matching; ritorna sempre Matrix esplicita (no silent hang); F4 path conservato per sistemi non lineari.
 
-### HC-CALC-COMPLEX-LOG-BRANCH-CUT (aperto)
+### HC-CALC-COMPLEX-LOG-BRANCH-CUT (chiuso)
 
-- **Stato**: APERTO (iscritto 2026-06-02 dopo audit DISABLED).
+- **Stato**: CHIUSO in S3/B (2026-06-02).
 - **File**: `src/symbolic/simplify_exp_log.cpp` (regole exp/log inverse).
-- **Categoria**: Cat. 1 + Cat. 8 (decision-procedure su branch cut).
-- **Test impattato (DISABLED)**: `ComplexLogBranchTest.DISABLED_LnOfOnePlusIIsLnSqrtTwoPlusIPiOverFour`.
-- **Descrizione**: il cert `simplify(exp(simplify(ln(1+i)))) ≡ 1+i` richiede che la pipeline canonicalize `exp(ln(z))` per `z = 1+i` (numerico complesso); il simplifier attuale lascia `ln(1+i)` non valutato (non riduce a `ln(√2) + iπ/4` perché richiederebbe `abs/arg` decomposition di literal complex) e `exp(non_canonical_ln)` non ricostruisce il valore.
-- **Fix corretto**: aggiungere regola `ln(a+bi)` → `(1/2)·ln(a²+b²) + i·atan2(b, a)` per literal complex con `a, b ∈ Q` non-entrambi-zero. Reciproca `exp(α + iβ)` → `e^α·(cos β + i sin β)`. Entrambe sono valide sul principal branch.
-- **Blocking dependency**: `atan2` symbolic builtin (Q × Q → ratio-of-π per casi standard).
+- **Categoria**: era classificata Cat. 1 + Cat. 8.
+- **Root cause reale** (dopo audit del path completo `simplify(exp(simplify(ln(1+i))))`):
+  1. `simplify(ln(1+i))` GIÀ produceva forma canonica corretta `(1/2)·ln(2) + (π/4)·I` (regola L370-413 in simplify_exp_log.cpp che dispatcha a Abs e Arg, combinato con Atan(1)→π/4 in simplify_trig_inverse.cpp).
+  2. Mancavano DUE regole nel simplifier di `exp`:
+     - `exp(c · ln(x)) → x^c` per `x > 0` (per ricostruire `exp((1/2)·ln(2)) → √2`).
+     - `exp(I · θ) → cos(θ) + I·sin(θ)` (formula di Eulero, per ricostruire `exp((π/4)·I) → √2/2 + I·√2/2`).
+  3. Senza queste regole, l'output finale rimaneva `exp((1/2)·ln(2)) · exp((π/4)·I)` invece di `1+I`.
+- **Fix applicati** in `simplify_exp_log.cpp::simplify_funcall_exp_log_sqrt`:
+  1. **Regola exp(c · ln(x))**: detect Product con esattamente un fattore `FuncCall(Ln, x)` e altri fattori `c`; se `is_known_positive(x)` → simplify(Pow(x, c)). L2-19 positivity gating uniforme con la regola scalar `exp(ln(x))`.
+  2. **Regola exp(I · θ)**: detect Product con esattamente un fattore `Constant(I)`; altri fattori compongono `θ`. Produce `cos(θ) + I·sin(θ)` (Eulero). Composabile via `exp(sum) → prod-exp` per gestire `exp(α + I·β) = exp(α)·(cos β + I·sin β)`.
+- **Test riabilitati / aggiunti**:
+  - `ComplexLogBranchTest.LnOfOnePlusIIsLnSqrtTwoPlusIPiOverFour` (era DISABLED) — roundtrip `exp(ln(1+I)) = 1+I` PASS.
+  - `ComplexLogBranchTest.ExpOfImaginaryPiOverFourGoldenRoundtrip` (nuovo) — `exp(I·π/4) · exp(-I·π/4) = 1` PASS.
+  - `ComplexLogBranchTest.ExpOfHalfLnTwoIsSqrtTwo` (nuovo) — verifica `exp((1/2)·ln(2))² = 2` PASS.
+  - `ComplexLogBranchTest.LnOfThreePlusFourIRoundtripsViaExp` (nuovo) — roundtrip per literal complex `3+4I`.
+- **Decisione su Atan2 builtin**: NON aggiunto come BuiltinOp separato. L'analisi del path completo ha mostrato che `Arg(a+bI)` con `a,b` letterali razionali GIÀ dispatcha correttamente a `Atan(b/a)` (in `simplify_complex.cpp:142-145`), e `Atan(±1)` GIÀ riduce a `±π/4` (in `simplify_trig_inverse.cpp:60-68`). Aggiungere BuiltinOp::Atan2 sarebbe stato refactor di superficie senza beneficio matematico (single source of truth già in Atan). Estensione di Atan a valori esatti aggiuntivi (`±√3`, `±1/√3`) resta task incrementale separato.
+- **Regola Zero compliance**: regole derivate da identità matematiche standard (Euler, Bronstein §3.3); gating positivity esplicito per branch-cut; nessun pattern matching su forma chiusa, solo strutturale (Product con fattori specifici); nessun hardcode di angoli specifici (Atan rule preesistente gestisce gli angoli standard).
 
 ### HC-CALC-RISCH-EQUIV-POSITIVITY (aperto)
 

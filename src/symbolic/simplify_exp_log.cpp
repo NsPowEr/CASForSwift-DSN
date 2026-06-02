@@ -246,6 +246,63 @@ Result<ExprPtr> Simplifier::simplify_funcall_exp_log_sqrt(
             }
             // Otherwise keep symbolic exp(ln(arg)).
         }
+        // exp(c · ln(x)) → x^c when x > 0 (principal branch).
+        // L2-19 (positivity gating) extended to scaled-log form. The Product
+        // argument must contain exactly one FuncCall(Ln, x) with x > 0; the
+        // remaining factors form the exponent c. Verified by re-exponentiation
+        // identity exp(c·ln(x)) = x^c on the principal branch (Bronstein §3.3).
+        if (const auto* prod_arg = expr_cast<Product>(args.front())) {
+            ExprPtr ln_arg_inner = nullptr;
+            std::vector<ExprPtr> c_factors;
+            int ln_count = 0;
+            for (ExprPtr f : prod_arg->factors) {
+                if (const auto* lc = expr_cast<FuncCall>(f);
+                    lc && lc->func_id == BuiltinOp::Ln && lc->args.size() == 1U) {
+                    ln_arg_inner = lc->args[0];
+                    ++ln_count;
+                } else {
+                    c_factors.push_back(f);
+                }
+            }
+            if (ln_count == 1 && ln_arg_inner && is_known_positive(ln_arg_inner)) {
+                ExprPtr c_expr;
+                if (c_factors.empty()) c_expr = make_integer(arena_, BigInt(1));
+                else if (c_factors.size() == 1U) c_expr = c_factors[0];
+                else c_expr = arena_.make<Product>(std::move(c_factors));
+                return simplify_expr(arena_.make<Binary>(BinaryOp::Pow, ln_arg_inner, c_expr));
+            }
+        }
+        // exp(I · θ) → cos(θ) + I·sin(θ) (Euler's formula, principal branch).
+        // Detected when argument is a Product containing exactly one factor
+        // equal to MathConstant::I; the remaining factors compose θ. Safe on
+        // the principal branch for any θ ∈ R; if θ has a complex part it
+        // further splits via exp(α+iβ) = exp(α)(cos β + i sin β).
+        if (const auto* prod_arg = expr_cast<Product>(args.front())) {
+            int i_count = 0;
+            std::vector<ExprPtr> theta_factors;
+            for (ExprPtr f : prod_arg->factors) {
+                if (const auto* cc = expr_cast<Constant>(f);
+                    cc && cc->value == MathConstant::I) {
+                    ++i_count;
+                } else {
+                    theta_factors.push_back(f);
+                }
+            }
+            if (i_count == 1) {
+                ExprPtr theta;
+                if (theta_factors.empty()) theta = make_integer(arena_, BigInt(1));
+                else if (theta_factors.size() == 1U) theta = theta_factors[0];
+                else theta = arena_.make<Product>(std::move(theta_factors));
+                ExprPtr cos_theta = arena_.make<FuncCall>(BuiltinOp::Cos,
+                    std::vector<ExprPtr>{theta});
+                ExprPtr sin_theta = arena_.make<FuncCall>(BuiltinOp::Sin,
+                    std::vector<ExprPtr>{theta});
+                ExprPtr i_sin = arena_.make<Product>(std::vector<ExprPtr>{
+                    arena_.make<Constant>(MathConstant::I), sin_theta});
+                return simplify_expr(arena_.make<Sum>(std::vector<ExprPtr>{
+                    cos_theta, i_sin}));
+            }
+        }
         if (is_constant_expr(args.front(), MathConstant::Infinity))
             return traced_result(RuleId::Unknown, target_before, make_constant(arena_, MathConstant::Infinity));
         if (expr_is<Unary>(args.front())
