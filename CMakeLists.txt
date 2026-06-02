@@ -484,6 +484,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/calculus/test_integrate_risch_smoke.cpp
         test/unit/calculus/test_integrate_substitution.cpp
         test/unit/algebra/test_polynomial_sparse_interpolation.cpp
+        test/unit/algebra/test_csolve_linear.cpp
         test/unit/symbolic/test_summation_gosper.cpp
         test/unit/algebra/test_factorization_polynomials_smoke.cpp
         test/unit/algebra/test_polynomial_gcd_multivariate_smoke.cpp

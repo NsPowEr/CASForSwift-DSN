@@ -1,6 +1,5 @@
 #include "summation_gosper.hpp"
 #include "cas/algebra.hpp"
-#include "cas/error_helpers.hpp"
 #include "cas/ast.hpp"
 #include "cas/symbolic.hpp"
 #include "cas/linalg/matrix_expr_helpers.hpp"
@@ -94,13 +93,16 @@ Result<std::optional<ExprPtr>> gosper_sum(
         if (r_div_res.is_error()) return fail<std::optional<ExprPtr>>(r_div_res.error());
         r = r_div_res.value();
 
-        for (int i = 0; i <= j; ++i) {
+        // Petkovšek polynomial-part update: p(k) *= ∏_{i=1..j} g(k-i).
+        // (Bug fix: loop was 0..j inclusive, producing one extra factor and
+        // mis-decomposing t_{k+1}/t_k. Verified against t_k=k → s=k(k-1)/2.)
+        for (int i = 1; i <= j; ++i) {
             auto k_minus_i = linalg::sub_expr(ctx, arena.make<Symbol>(k.name), linalg::integer(ctx, i)).value();
-            
+
             auto g_i_res = substitute(g, k, k_minus_i, ctx);
             if (g_i_res.is_error()) return fail<std::optional<ExprPtr>>(g_i_res.error());
             auto g_i = g_i_res.value();
-            
+
             p = linalg::mul_expr(ctx, p, g_i).value();
         }
         
@@ -239,13 +241,36 @@ Result<std::optional<ExprPtr>> gosper_sum(
     if (x_sol_simp_res.is_error()) return fail<std::optional<ExprPtr>>(x_sol_simp_res.error());
     x_sol = x_sol_simp_res.value();
 
-    auto s_term1 = linalg::mul_expr(ctx, r_k_minus_1, x_sol).value();
-    auto s_term2 = linalg::mul_expr(ctx, s_term1, term).value();
-    auto s = linalg::div_expr(ctx, s_term2, p).value();
-    
+    // Petkovšek closing formula: s(k) = r(k-1)·x(k)·t(k)/p(k).
+    // Divide x(k) by p(k) FIRST as exact polynomial division (Gosper's theorem
+    // guarantees p | x): the Binary(Div) simplifier currently drops rational
+    // coefficients on Div of rational-coeff polynomial by polynomial. Routing
+    // through polynomial_exact_divide preserves Q[k] coefficient field.
+    auto x_div_p_res = algebra::polynomial_exact_divide(x_sol, p, k, ctx);
+    ExprPtr x_div_p;
+    if (x_div_p_res.is_ok()) {
+        x_div_p = x_div_p_res.value();
+    } else {
+        // Fallback: residual rational expression (still subject to upstream
+        // Binary(Div) limitation). Use linalg::div_expr as last resort.
+        auto fallback = linalg::div_expr(ctx, x_sol, p);
+        if (fallback.is_error()) return fail<std::optional<ExprPtr>>(fallback.error());
+        x_div_p = fallback.value();
+    }
+    auto s_term1 = linalg::mul_expr(ctx, r_k_minus_1, x_div_p).value();
+    auto s = linalg::mul_expr(ctx, s_term1, term).value();
     auto s_simp_res = simplify(s, ctx);
     if (s_simp_res.is_error()) return fail<std::optional<ExprPtr>>(s_simp_res.error());
-    return ok(std::optional<ExprPtr>{s_simp_res.value()});
+    ExprPtr s_final = s_simp_res.value();
+    // Canonicalize as single rational fraction: cancels structural sharing
+    // duplicates and reduces common factors that Binary(Div) simplifier
+    // misses (notably `(k+1)^2 / (k+1)` and Sum-of-rationals forms).
+    auto s_tog = algebra::together(s_final, ctx);
+    if (s_tog.is_ok()) {
+        auto s_tog_simp = simplify(s_tog.value(), ctx);
+        if (s_tog_simp.is_ok()) s_final = s_tog_simp.value();
+    }
+    return ok(std::optional<ExprPtr>{s_final});
 }
 
 } // namespace cas::symbolic

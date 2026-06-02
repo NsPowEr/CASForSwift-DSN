@@ -887,21 +887,30 @@ tutti gli input; questi sono upgrade prestazionali per casi specifici.
 - **Analisi**: l'ottimizzazione "Bareiss band-preserving" (O(n·bw²) inner-loop count vs O(n³)) richiede o (a) applicare un fattore di scaling cumulativo `pivot/d_prev` a OGNI entry in-banda ad OGNI passo — degradando a O(n²·bw) simplify calls e dwarfing il vantaggio inner-loop su input simbolici — o (b) un lazy scale-and-thaw bookkeeping che su entries simboliche trippa lo stesso costo per-simplify del path generale. I casi `bw=0` (diagonale) e `bw=1` (tridiagonale) hanno closed-form three-term recurrences gestiti da detector dedicati senza overhead simbolico. Per `bw ≥ 2` su input simbolici, il vantaggio asintotico inner-loop NON sopravvive il costo per-simplify dominante.
 - **Decisione**: nessuna specializzazione per `bw ≥ 2`; routing su `bareiss_determinant`. Aggiornato il commento nel detector per esplicitare la design choice. Nessun information loss, nessuna correttezza compromessa.
 
-### HC-F4-GOSPER-CONSTANT-HANG (aperto)
+### HC-F4-GOSPER-CONSTANT-HANG (chiuso)
 
-- **Stato**: APERTO (introdotto da L3-07 summation, iscritto 2026-06-02 dopo audit DISABLED test set).
-- **File**: `src/symbolic/summation_gosper.cpp::gosper_sum` (path Petkovšek classico).
-- **Categoria**: Cat. 8 (pattern matching su forma chiusa — edge-case constant-input loops in polynomial_resultant / solve_polynomial sub-calls).
-- **Test impattati (DISABLED)**:
-  - `GosperSumTest.DISABLED_Polynomial1` (term=1, expected s=k).
-  - `GosperSumTest.DISABLED_PolynomialK` (term=k, expected s=k(k-1)/2).
-  - `GosperSumTest.DISABLED_RationalShift` (term=1/(k·(k+1)), expected s=-1/k).
-  - `GosperSumTest.DISABLED_NotHypergeometricSummable` (term=1/(k²+1), expected nullopt).
-- **Descrizione**: per term costante o polinomio basso-grado, la pipeline Gosper produce A=B=1 (rapporto t_{k+1}/t_k=1); il sub-step `polynomial_resultant(A, B_k_plus_j, k, ctx)` o `solve_polynomial(res_j, j_sym, ctx)` entra in hang infinito (verificato: due processi consumavano 30+ min CPU + 1.2 GB RAM ciascuno). La root cause è nelle edge-case di queste primitive su polinomi costanti (deg 0), non in Gosper stesso.
-- **Fix corretto**:
-  1. Audit `polynomial_resultant` e `solve_polynomial` per gestione costanti deg 0 (return resultant=1 / no roots immediatamente).
-  2. Aggiungere early-return in `gosper_sum` per casi trivial: A=B=1 ⇒ polinomio summant deg-0 ⇒ s(k) = k·term (handled by simple antiderivative pattern).
-- **Blocking dependency**: investigazione mirata polynomial_resultant edge-cases.
+- **Stato**: CHIUSO in S2/A2 (2026-06-02).
+- **File**: `src/symbolic/summation_gosper.cpp::gosper_sum`, `src/algebra/csolve.cpp`.
+- **Categoria**: era classificata Cat. 8 + Cat. 1.
+- **Root cause reale** (dopo audit con repro mirato):
+  1. **Off-by-one nell'inner loop di decomposizione Petkovšek** (`summation_gosper.cpp:97`): il loop su `i = 0..j` invece di `i = 1..j` produceva un fattore in più nella `p(k)` di Gosper, mis-decomposendo `t_{k+1}/t_k = A·c(k+1)/(B·c(k))` (verificato per t_k=k: produceva c(k)=k+1 invece del corretto c(k)=k).
+  2. **Hang in csolve su sistemi underdetermined**: `csolve` dispatchava ogni sistema a `solve_nonlinear_system_f4`. Su sistemi lineari sotto-determinati (rank deficit) il path Buchberger non terminava entro budget temporale ragionevole. La Gosper polynomial ansatz produce esattamente tale sistema (un grado di libertà additivo costante).
+  3. **Binary(Div) simplifier drop coefficienti razionali**: `simplify(((1/2)k³ + (-1/2)k²) / k) → k² - k` invece di `(1/2)k² - (1/2)k`. Bug separato del simplifier ma colpiva la formula di chiusura `s = r(k-1)·x(k)·t(k)/p(k)` quando `p | x`.
+- **Fix applicati**:
+  1. **Loop bound fix** (`summation_gosper.cpp`): `for (int i = 1; i <= j; ++i)` con commento di derivazione e test di regressione (`PolynomialK` come oracolo).
+  2. **csolve linear fast-path** (`csolve.cpp`): `is_linear_in_vars()` detection + `solve_linear_rect()` con Gauss-Jordan + esplicito pivot tracking. Particular solution con free vars = 0. Consistency check su rank deficit (Matrix(0,n) per inconsistente). Routes a F4 solo su sistemi genuinamente nonlineari.
+  3. **Petkovšek closing workaround** (`summation_gosper.cpp`): `polynomial_exact_divide(x_sol, p, k)` prima della formula di chiusura quando `p | x` (sempre il caso per teorema di Petkovšek); fallback su `linalg::div_expr` se la divisione esatta fallisce (es. p costante e x non polinomiale in k).
+  4. **Canonicalizzazione finale via `algebra::together`**: l'espressione restituita da Gosper può avere forma rationale non canonica; `together` la riduce a `num/den` singolo, recuperando cancellazioni che `simplify(Binary(Div))` non vede.
+- **Test riabilitati / aggiunti**:
+  - `GosperSumTest.Polynomial1` (era DISABLED) — t=1, s=k. PASS.
+  - `GosperSumTest.PolynomialK` (era DISABLED) — t=k, s=k(k-1)/2. PASS.
+  - `GosperSumTest.RationalShift` (era DISABLED) — t=1/(k(k+1)), s=-1/k. PASS.
+  - `GosperSumTest.NotHypergeometricSummable` (era DISABLED) — t=1/(k²+1) non hypergeometric-summable, expected nullopt. PASS.
+  - `CsolveLinearTest.UnderdeterminedReturnsParametricParticular` (nuovo) — verifica particular solution con free=0 su sistema 2×3.
+  - `CsolveLinearTest.InconsistentLinearReturnsEmptyMatrix` (nuovo) — verifica Matrix(0,n) su sistema inconsistente.
+  - `CsolveLinearTest.SquareDeterminedLinearSolvedExactly` (nuovo) — verifica caso quadrato determinato.
+- **Bug residuo (out of scope di questo HC)**: `simplify(Binary(Div, polynomial_with_rational_coeffs, polynomial))` drop coefficienti razionali. Workaround in Gosper sufficiente; fix sistematico nel simplifier rimandato a future Phase F2.5 cleanup.
+- **Regola Zero compliance**: csolve linear path è algoritmo generale (Gauss-Jordan rettangolare) non pattern matching; ritorna sempre Matrix esplicita (no silent hang); F4 path conservato per sistemi non lineari.
 
 ### HC-CALC-COMPLEX-LOG-BRANCH-CUT (aperto)
 

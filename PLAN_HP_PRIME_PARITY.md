@@ -431,7 +431,7 @@ I numeri complessi sottostanno polynomi su C, eigenvalues, branch cuts, residue.
 - Mellin transform via contour
 
 ### F5.7 — Summation simbolica
-- **Gosper's algorithm** per hypergeometric closed form
+- **Gosper's algorithm** per hypergeometric closed form (IMPLEMENTATO 2026-06-02 S2/A2 in `src/symbolic/summation_gosper.cpp`; chiusura Petkovšek pulita su term=1, term=k, term=1/(k(k+1)), term=1/(k²+1)→nullopt. Closes HC-F4-GOSPER-CONSTANT-HANG)
 - **Zeilberger's algorithm** (creative telescoping)
 - **WZ pair method** (Petkovsek-Wilf-Zeilberger)
 - **Abramov's algorithm** per rational function summation
