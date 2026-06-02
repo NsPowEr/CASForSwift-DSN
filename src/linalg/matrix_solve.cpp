@@ -134,11 +134,14 @@ Result<std::vector<ExprPtr>> linsolve(const MatrixExpr& a, const std::vector<Exp
         pivot_found[col] = true;
     }
 
-    // 2. Assign symbols to free variables
+    // 2. Assign fresh symbols to free variables.
+    // HPP-010 closure: `ctx.make_fresh_symbol("c")` guarantees uniqueness
+    // against any user-defined `c`, `c1`, ... already in scope (which would
+    // otherwise silently collide with the produced parametric solution).
     for (std::size_t j = 0; j < m; ++j) {
         if (!pivot_found[j]) {
-            std::string name = "c" + std::to_string(j + 1);
-            solution[j] = ctx.arena().make<Symbol>(name);
+            Symbol fresh = ctx.make_fresh_symbol("c");
+            solution[j] = ctx.arena().make<Symbol>(fresh.name);
         }
     }
 

@@ -107,16 +107,18 @@ Result<ExprPtr> Simplifier::simplify_funcall_special(
             return arena_.make<Unary>(UnaryOp::Neg,
                 arena_.make<Constant>(MathConstant::EulerGamma));
         };
+        const unsigned int special_fn_bits = (context_ != nullptr)
+            ? context_->max_special_fn_integer_arg_bits() : 16U;
         if (const auto* il = expr_cast<IntegerLit>(args.front())) {
             if (il->value > BigInt(0)) {
-                if (il->value.bit_length() > 16)
-                    // F0.8-MIGRATED
+                if (il->value.bit_length() > special_fn_bits)
+                    // HPP-015 closure: configurable via ctx.set_max_special_fn_integer_arg_bits.
                     return make_unimplemented<ExprPtr>(
                         "symbolic", "simplify_funcall_special",
-                        "Digamma ψ(n) with positive integer n > 2^16",
+                        "Digamma ψ(n): n exceeds ctx.max_special_fn_integer_arg_bits()",
                         error::reason_codes::SYMBOLIC_DEGREE_TOO_LARGE,
-                        "Reduce n or use the asymptotic expansion ψ(n) ≈ ln(n) - 1/(2n) - ...",
-                        "F1.x");
+                        "Increase via ctx.set_max_special_fn_integer_arg_bits(b) or use asymptotic ψ(n) ≈ ln(n) - 1/(2n) - ...",
+                        "F5.9");
                 const std::uint64_t n = il->value.to_u64();
                 std::vector<ExprPtr> terms;
                 terms.push_back(build_euler_gamma());
@@ -156,7 +158,7 @@ Result<ExprPtr> Simplifier::simplify_funcall_special(
                 }
             }
             if (idx >= 0 && !shift.is_zero() && !shift.is_negative()
-                && shift.bit_length() <= 16) {
+                && shift.bit_length() <= special_fn_bits) {
                 std::vector<ExprPtr> rest;
                 rest.reserve(sum->terms.size() - 1U);
                 for (std::size_t i = 0; i < sum->terms.size(); ++i) {
@@ -182,8 +184,11 @@ Result<ExprPtr> Simplifier::simplify_funcall_special(
 
     // Polygamma ψ^(n)(z)
     if (op == BuiltinOp::Polygamma && args.size() == 2U) {
+        const unsigned int polygamma_bits = (context_ != nullptr)
+            ? context_->max_special_fn_integer_arg_bits() : 16U;
         const auto* il_n = expr_cast<IntegerLit>(args[0]);
-        if (il_n != nullptr && !il_n->value.is_negative() && il_n->value.bit_length() <= 16) {
+        if (il_n != nullptr && !il_n->value.is_negative()
+            && il_n->value.bit_length() <= polygamma_bits) {
             const std::uint64_t n = il_n->value.to_u64();
             if (n == 0U)
                 return simplify_expr(arena_.make<FuncCall>(BuiltinOp::Digamma,
@@ -219,15 +224,17 @@ Result<ExprPtr> Simplifier::simplify_funcall_special(
     // Pochhammer (rising factorial) (x)_n
     if (op == BuiltinOp::Pochhammer && args.size() == 2U) {
         ExprPtr x_arg = args[0];
+        const unsigned int pochhammer_bits = (context_ != nullptr)
+            ? context_->max_special_fn_integer_arg_bits() : 16U;
         if (const auto* il = expr_cast<IntegerLit>(args[1])) {
-            if (il->value.bit_length() > 16)
-                // F0.8-MIGRATED
+            if (il->value.bit_length() > pochhammer_bits)
+                // HPP-015 closure: configurable via ctx.set_max_special_fn_integer_arg_bits.
                 return make_unimplemented<ExprPtr>(
                     "symbolic", "simplify_funcall_special",
-                    "Pochhammer (x)_n with n > 2^16",
+                    "Pochhammer (x)_n: n exceeds ctx.max_special_fn_integer_arg_bits()",
                     error::reason_codes::SYMBOLIC_DEGREE_TOO_LARGE,
-                    "Cap n via ctx.max_polynomial_degree or use Gamma(x+n)/Gamma(x) identity",
-                    "F1.x");
+                    "Increase via ctx.set_max_special_fn_integer_arg_bits(b) or use Gamma(x+n)/Gamma(x) identity",
+                    "F5.9");
             if (il->value.is_zero()) return ok(make_integer(arena_, BigInt(1)));
             if (!il->value.is_negative()) {
                 const std::uint64_t n = il->value.to_u64();
@@ -279,15 +286,17 @@ Result<ExprPtr> Simplifier::simplify_funcall_special(
             const BigInt& n = il->value;
             if (n.is_zero())
                 return ok(arena_.make<RationalLit>(BigInt(-1), BigInt(2)));
+            const unsigned int bernoulli_bits = (context_ != nullptr)
+                ? context_->max_bernoulli_index_bits() : 30U;
             if (n.is_negative()) {
-                if (n.bit_length() > 30)
-                    // F0.8-MIGRATED
+                if (n.bit_length() > bernoulli_bits)
+                    // HPP-015 closure: configurable via ctx.set_max_bernoulli_index_bits.
                     return make_unimplemented<ExprPtr>(
                         "symbolic", "simplify_funcall_special",
-                        "Zeta(n) with negative integer n, |n| > 2^30",
+                        "Zeta(n): |n| exceeds ctx.max_bernoulli_index_bits()",
                         error::reason_codes::SYMBOLIC_ZETA_OVERFLOW,
-                        "Bernoulli number computation requires |n| ≤ 2^30; use ctx.max_bernoulli_index",
-                        "F1.x");
+                        "Increase via ctx.set_max_bernoulli_index_bits(b); Bernoulli numerator grows Θ(n log n) bits",
+                        "F5.9");
                 const std::uint64_t magu = (-n).to_u64();
                 if (magu % 2U == 0U) return ok(make_integer(arena_, BigInt(0)));
                 const unsigned int two_k = static_cast<unsigned int>(magu + 1U);
@@ -298,14 +307,14 @@ Result<ExprPtr> Simplifier::simplify_funcall_special(
                 return ok(arena_.make<RationalLit>(result.numerator(), result.denominator()));
             }
             if (n > BigInt(0)) {
-                if (n.bit_length() > 30)
-                    // F0.8-MIGRATED
+                if (n.bit_length() > bernoulli_bits)
+                    // HPP-015 closure: configurable via ctx.set_max_bernoulli_index_bits.
                     return make_unimplemented<ExprPtr>(
                         "symbolic", "simplify_funcall_special",
-                        "Zeta(n) with positive even integer n > 2^30",
+                        "Zeta(n): n exceeds ctx.max_bernoulli_index_bits()",
                         error::reason_codes::SYMBOLIC_ZETA_OVERFLOW,
-                        "Bernoulli number computation requires n ≤ 2^30; use ctx.max_bernoulli_index",
-                        "F1.x");
+                        "Increase via ctx.set_max_bernoulli_index_bits(b); Bernoulli numerator grows Θ(n log n) bits",
+                        "F5.9");
                 const std::uint64_t nu = n.to_u64();
                 if (nu % 2U != 0U) return ok(target_before);
                 const unsigned int two_k = static_cast<unsigned int>(nu);

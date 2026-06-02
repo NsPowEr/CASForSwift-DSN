@@ -225,7 +225,9 @@ namespace cas::calculus {
 
     std::vector<ExprPtr> total_terms;
     for (size_t i = 0; i < n; ++i) {
-        ExprPtr Ci = arena.make<Symbol>("C" + std::to_string(i + 1));
+        // HPP-008 closure: fresh symbol generation guarantees uniqueness vs
+        // any user-defined "C", "C1", ... already in scope.
+        ExprPtr Ci = arena.make<Symbol>(ctx.make_fresh_symbol("C"));
         total_terms.push_back(arena.make<Binary>(BinaryOp::Mul, Ci, y_funcs[i]));
     }
     if (yp) total_terms.push_back(yp);

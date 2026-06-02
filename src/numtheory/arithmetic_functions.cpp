@@ -49,7 +49,7 @@ namespace {
     return positive_mod(x * x + c, modulus);
 }
 
-[[nodiscard]] Result<void> collect_factor(const Integer& n, std::vector<Integer>& factors);
+[[nodiscard]] Result<void> collect_factor(const Integer& n, std::vector<Integer>& factors, std::size_t pollard_max_iter);
 
 [[nodiscard]] Result<void> factor_with_trial_division(Integer& n, std::vector<Integer>& factors) {
     static const std::array<std::int64_t, 25> small_primes = {
@@ -68,7 +68,7 @@ namespace {
     return ok();
 }
 
-[[nodiscard]] Result<void> collect_factor(const Integer& n, std::vector<Integer>& factors) {
+[[nodiscard]] Result<void> collect_factor(const Integer& n, std::vector<Integer>& factors, std::size_t pollard_max_iter) {
     if (n == Integer(1)) {
         return ok();
     }
@@ -82,16 +82,16 @@ namespace {
         return ok();
     }
 
-    auto factor = pollards_rho_factor(n);
+    auto factor = pollards_rho_factor(n, pollard_max_iter);
     if (factor.is_error()) {
         return fail<void>(factor.error());
     }
 
-    auto left = collect_factor(factor.value(), factors);
+    auto left = collect_factor(factor.value(), factors, pollard_max_iter);
     if (left.is_error()) {
         return left;
     }
-    return collect_factor(n / factor.value(), factors);
+    return collect_factor(n / factor.value(), factors, pollard_max_iter);
 }
 
 [[nodiscard]] std::vector<std::pair<Integer, unsigned int>> compress_factors(std::vector<Integer> factors) {
@@ -110,7 +110,7 @@ namespace {
 
 }  // namespace
 
-Result<Integer> pollards_rho_factor(const Integer& n) {
+Result<Integer> pollards_rho_factor(const Integer& n, std::size_t max_iter) {
     static const Integer zero(0);
     static const Integer one(1);
     static const Integer two(2);
@@ -136,14 +136,9 @@ Result<Integer> pollards_rho_factor(const Integer& n) {
 
     static const std::array<std::int64_t, 8> seeds = {2, 3, 5, 7, 11, 13, 17, 19};
     static const std::array<std::int64_t, 8> constants = {1, 3, 5, 7, 11, 13, 17, 19};
-    // HARDCODE-OF-PASSAGE HPP-021: max_iterations=4096 in Pollard Rho.
-    // BigInt arithmetic functions have no CASContext parameter; this limit cannot
-    // currently be exposed via ctx.* without architectural change.
-    // 4096 is a hardware-safety limit: at this bound the loop terminates with
-    // Unimplemented (outer caller retries with different seed/constant) rather
-    // than looping forever. For n with very large factors, rho may require
-    // O(n^{1/4}) steps >> 4096. See HARDCODE_LEDGER.md HPP-021.
-    constexpr std::size_t max_iterations = 4096U;
+    // HPP-021 CLOSED: max_iter exposed via overload param (default 4096).
+    // Caller con CASContext: pollards_rho_factor(n, ctx.pollard_rho_max_iter()).
+    const std::size_t max_iterations = max_iter;
 
     for (std::int64_t seed_value : seeds) {
         for (std::int64_t constant_value : constants) {
@@ -183,7 +178,7 @@ Result<Integer> pollards_rho_factor(const Integer& n) {
         "Pollard Rho non ha trovato un fattore con i parametri deterministici correnti"));
 }
 
-Result<IntegerFactorization> factor_integer(const Integer& n) {
+Result<IntegerFactorization> factor_integer(const Integer& n, std::size_t pollard_max_iter) {
     if (n.is_zero()) {
         return fail<IntegerFactorization>(make_error(
             CASErrorKind::InvalidArgument,
@@ -208,7 +203,7 @@ Result<IntegerFactorization> factor_integer(const Integer& n) {
     }
 
     if (remaining != Integer(1)) {
-        auto recursive = collect_factor(remaining, factors);
+        auto recursive = collect_factor(remaining, factors, pollard_max_iter);
         if (recursive.is_error()) {
             return fail<IntegerFactorization>(recursive.error());
         }

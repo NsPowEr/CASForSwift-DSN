@@ -326,6 +326,58 @@ struct CASContextParams {
         return simplify_sqrt_trial_division_bound_;
     }
 
+    // ── limit log/log fast-path recursion depth (HPP-022 closure) ──────────
+    // Maximum recursion depth for try_log_log_limit (ln(a)/ln(b) fast-path).
+    // Bound: max depth ≈ log_2(nesting depth of nested logs in input).
+    // Default 3 (sufficient for all known ln/ln cases; never silent wrong
+    // answer — exceeding returns nullopt → caller tries other strategies).
+    void set_max_log_log_limit_depth(unsigned int d) noexcept {
+        max_log_log_limit_depth_ = d;
+    }
+    [[nodiscard]] unsigned int max_log_log_limit_depth() const noexcept {
+        return max_log_log_limit_depth_;
+    }
+
+    // ── Pollard Rho iteration budget (HPP-021 closure) ─────────────────────
+    // Maximum iterations per (seed, constant) pair in Pollard Rho.
+    // Hardware-safety limit: bound terminates loop with Unimplemented (outer
+    // retries with next seed/constant) rather than looping forever.
+    // For n with very large factors, rho may need O(n^{1/4}) >> default.
+    // Default 4096; configurable in CASContext-aware callers via overload.
+    void set_pollard_rho_max_iter(std::size_t n) noexcept {
+        pollard_rho_max_iter_ = n;
+    }
+    [[nodiscard]] std::size_t pollard_rho_max_iter() const noexcept {
+        return pollard_rho_max_iter_;
+    }
+
+    // ── Special-function integer-argument bit budget (HPP-015 closure) ─────
+    // Maximum bit_length of a positive integer argument n accepted by closed-
+    // form expansions of Gamma/Digamma/Polygamma/Pochhammer that materialize
+    // O(n) AST nodes. Exceeded → explicit Unimplemented diagnostic citing
+    // ctx.set_max_special_fn_integer_arg_bits(b). Default 16 (n ≤ 65535).
+    // Hardware-safety limit: prevents OOM via runaway AST construction.
+    // Increasing past ~24 risks multi-GB allocations on Digamma(2^25).
+    void set_max_special_fn_integer_arg_bits(unsigned int b) noexcept {
+        max_special_fn_integer_arg_bits_ = b;
+    }
+    [[nodiscard]] unsigned int max_special_fn_integer_arg_bits() const noexcept {
+        return max_special_fn_integer_arg_bits_;
+    }
+
+    // ── Bernoulli/Zeta integer-index bit budget (HPP-015 family) ───────────
+    // Maximum bit_length of |n| accepted by Zeta(n) closed-form via Bernoulli
+    // numbers (positive even or negative odd). Exceeded → explicit Unimplemented
+    // diagnostic. Default 30 (|n| ≤ 2^30 ≈ 10^9). Limit: Bernoulli numerator
+    // has Θ(n log n) bits, so n ≈ 2^30 gives ~30 GB rationals at upper bound.
+    // Increasing risks BigInt OOM in numtheory::bernoulli_number(n).
+    void set_max_bernoulli_index_bits(unsigned int b) noexcept {
+        max_bernoulli_index_bits_ = b;
+    }
+    [[nodiscard]] unsigned int max_bernoulli_index_bits() const noexcept {
+        return max_bernoulli_index_bits_;
+    }
+
 protected:
     // All fields with their mathematically-derived or documented defaults.
     // Setters with clamping are CASContext out-of-line methods (context_core.cpp).
@@ -366,6 +418,10 @@ protected:
     std::size_t   simplify_sqrt_trial_division_bound_{10000U};
     std::size_t   sparse_interp_max_retries_{5U};
     bool          enable_f5_signature_pruning_{false};  // F3.3-F5-WIRE
+    unsigned int  max_log_log_limit_depth_{3U};          // HPP-022 closure
+    std::size_t   pollard_rho_max_iter_{4096U};          // HPP-021 closure
+    unsigned int  max_special_fn_integer_arg_bits_{16U}; // HPP-015 closure
+    unsigned int  max_bernoulli_index_bits_{30U};        // HPP-015 closure (Zeta)
 };
 
 }  // namespace cas::symbolic

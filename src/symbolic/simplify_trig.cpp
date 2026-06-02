@@ -155,6 +155,18 @@ constexpr int kTrigCombinationMaxDepth = 3;
         // p=1 case not reachable by half-angle: try angle combination (e.g. cos(π/15)),
         // then RootOf fallback for non-constructible denominators.
         if (p == BigInt(1) && q > BigInt(1)) {
+            // HPP-014c: per Fermat primes "non-banali" (17, 257, 65537) la formula
+            // chiusa Gauss-period non è ancora implementata. try_angle_combination
+            // produrrebbe un'espressione strutturalmente corretta ma esponenzialmente
+            // larga (Chebyshev T_p su RootOf annidato) che fa timeout il simplifier.
+            // Bypass: usa direttamente la rappresentazione RootOf canonica.
+            if (q.bit_length() <= 16U) {
+                const auto q_u64 = q.to_u64();
+                if (q_u64 == 17U || q_u64 == 257U || q_u64 == 65537U) {
+                    if (q_u64 <= static_cast<std::uint64_t>(kCosPolyMaxQ))
+                        return build_rootof_cos_pi_q(static_cast<int>(q_u64), arena);
+                }
+            }
             if (ExprPtr combo = try_angle_combination(ref, BuiltinOp::Cos, arena))
                 return combo;
             // F1.4b: non-constructible cos(π/q) → RootOf(Ψ_{2q}(t), t, 0) / 2.

@@ -461,6 +461,62 @@ TEST_F(SpecialFunctionsTest, PochhammerNegativeIndex) {
     expect_simplify_equiv("Pochhammer(x, -2)", "1/((x-1)*(x-2))");
 }
 
+// HPP-015 closure: configurable bit budget for closed-form expansions of
+// special functions taking a positive integer argument.
+TEST_F(SpecialFunctionsTest, HPP015_DigammaBitBudgetConfigurable) {
+    // Default budget = 16 bits.  bit_length(70000) = 17 → Unimplemented.
+    auto e = parse_expr("Digamma(70000)", ctx->arena());
+    ASSERT_TRUE(e.is_ok());
+    auto s = ctx->simplify(e.value());
+    ASSERT_TRUE(s.is_error());
+    EXPECT_EQ(s.error().kind, CASErrorKind::Unimplemented);
+
+    // Raise budget to 24 bits → expansion succeeds (heavy but finite).
+    ctx->set_max_special_fn_integer_arg_bits(24U);
+    auto e2 = parse_expr("Digamma(3)", ctx->arena());  // cheap sanity check
+    ASSERT_TRUE(e2.is_ok());
+    auto s2 = ctx->simplify(e2.value());
+    ASSERT_TRUE(s2.is_ok());
+
+    // Reduce budget below default → previously-OK input rejected.
+    ctx->set_max_special_fn_integer_arg_bits(2U);
+    auto e3 = parse_expr("Digamma(8)", ctx->arena());  // bit_length(8) = 4 > 2
+    ASSERT_TRUE(e3.is_ok());
+    auto s3 = ctx->simplify(e3.value());
+    ASSERT_TRUE(s3.is_error());
+    EXPECT_EQ(s3.error().kind, CASErrorKind::Unimplemented);
+}
+
+TEST_F(SpecialFunctionsTest, HPP015_PochhammerBitBudgetConfigurable) {
+    auto e = parse_expr("Pochhammer(x, 70000)", ctx->arena());
+    ASSERT_TRUE(e.is_ok());
+    auto s = ctx->simplify(e.value());
+    ASSERT_TRUE(s.is_error());
+    EXPECT_EQ(s.error().kind, CASErrorKind::Unimplemented);
+
+    ctx->set_max_special_fn_integer_arg_bits(20U);
+    // Pochhammer(x, 5) still works after raise; just sanity.
+    auto e2 = parse_expr("Pochhammer(x, 5)", ctx->arena());
+    auto s2 = ctx->simplify(e2.value());
+    ASSERT_TRUE(s2.is_ok());
+}
+
+TEST_F(SpecialFunctionsTest, HPP015_ZetaBernoulliBudgetConfigurable) {
+    // Reduce budget so Zeta(8) → Unimplemented (bit_length(8)=4 > 3).
+    ctx->set_max_bernoulli_index_bits(3U);
+    auto e2 = parse_expr("zeta(8)", ctx->arena());
+    auto s2 = ctx->simplify(e2.value());
+    ASSERT_TRUE(s2.is_error())
+        << "got value: " << debug_print(s2.value());
+    EXPECT_EQ(s2.error().kind, CASErrorKind::Unimplemented);
+
+    // Restore default; Zeta(8) closed form must work.
+    ctx->set_max_bernoulli_index_bits(30U);
+    auto e3 = parse_expr("zeta(8)", ctx->arena());
+    auto s3 = ctx->simplify(e3.value());
+    ASSERT_TRUE(s3.is_ok());
+}
+
 TEST_F(SpecialFunctionsTest, MakeFreshSymbol_UniqueAndAvoidsUserScope) {
     // Pre-populate context with user-defined variables that look like
     // fresh-symbol candidates.

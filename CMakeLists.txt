@@ -318,10 +318,23 @@ target_include_directories(cas_symbolic PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/inclu
 target_link_libraries(cas_symbolic PUBLIC cas_ast cas_foundation)
 target_compile_features(cas_symbolic PUBLIC cxx_std_20)
 
+# HPP-005 closure: cas_calculus uses BigFloat (MPFR) for boundary
+# singularity checks in integrate.cpp.  Locate MPFR/GMP headers before
+# the cas_calculus target so its compile flags can reference them.
+find_path(MPFR_INCLUDE_DIR_EARLY mpfr.h
+    HINTS /opt/homebrew/opt/mpfr/include
+    REQUIRED)
+find_path(GMP_INCLUDE_DIR_EARLY gmp.h
+    HINTS /opt/homebrew/opt/gmp/include
+    REQUIRED)
+
 add_library(cas_calculus STATIC ${CAS_CALCULUS_SOURCES})
 target_include_directories(cas_calculus PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(cas_calculus PUBLIC cas_symbolic cas_parser cas_ast cas_foundation)
 target_compile_features(cas_calculus PUBLIC cxx_std_20)
+target_include_directories(cas_calculus PRIVATE
+    ${MPFR_INCLUDE_DIR_EARLY}
+    ${GMP_INCLUDE_DIR_EARLY})
 
 add_library(cas_numtheory STATIC ${CAS_NUMTHEORY_SOURCES})
 target_include_directories(cas_numtheory PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

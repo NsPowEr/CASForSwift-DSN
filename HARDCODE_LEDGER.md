@@ -210,12 +210,18 @@
 - **Validation 2026-05-30**: 14 test in `test_gcd_brown_f3.cpp`, **13 PASS / 1 DISABLED** (`BrownModularPolyLc.DISABLED_FourVarChainedLc` pre-disabled subagent, edge-case 4-var chained — non bloccante). Suite 1875→**1883** (+8). 0 regressioni. Coverage: scalar lc, poly lc, costanti, multi-var sparse, cofactor, certify.
 - **STATO**: ✅ RISOLTA 2026-05-30 — Brown's modular GCD multivariate con lc-poly funziona end-to-end.
 
-### HPP-005 — integrate.cpp double + to_u64() nel core simbolico (integrate.cpp:40-44)
-- **File**: `src/calculus/integrate.cpp:40-44` (funzione `approx_bound`) + `:255-268` (lambda `rat_to_double`)
-- **Categoria CLAUDE.md**: Cat 4 (bail-out su tipo) + Regola 1 (uso di `double` nel core simbolico).
-- **Descrizione**: `static_cast<double>(r->numerator().to_u64()) / static_cast<double>(r->denominator().to_u64())` e `stod(r.numerator().decimal())` usano aritmetica floating-point per approssimare bound simbolici. Overflow silenzioso per numeratori/denominatori > 2⁶³; perdita di precisione per razionali con denominator non rappresentabile in `double`. Viola REGOLA 1 CLAUDE.md (divieto assoluto di `double` nel core simbolico).
-- **Fix corretto**: Confronto bounds via aritmetica `Rational` esatta: `Rational::compare(a, b)` invece di `double(a) < double(b)`. Per `M_PI` usare approssimazione razionale `355/113` sufficiente per range check. Bound BigInt esatto.
-- **Blocking dependency**: Nessuno — fix chirurgico.
+### HPP-005 — integrate.cpp double + to_u64() — RISOLTA 2026-06-02
+- **File**: `src/calculus/integrate.cpp:38-87` (`approx_bound`), `:244-275` (`cos_zero_in_range`); `CMakeLists.txt` (MPFR include path early-find per cas_calculus).
+- **Categoria CLAUDE.md**: Cat 4 + Regola 1 (divieto `double`/`int64_t` nel core simbolico).
+- **Fix applicato 2026-06-02**:
+  - `approx_bound(ExprPtr) -> std::optional<double>` → `approx_bound(ExprPtr) -> std::optional<BigFloat>` con precisione fissa `kSingularityCheckPrec=256` bit (≈77 decimal digits, ampiamente sopra ±1e-9 tolleranza downstream). MPFR `BigFloat::pi()` / `BigFloat::e()` per Constant; `BigFloat::from_rational_parts(r.numerator().decimal(), r.denominator().decimal(), prec)` per ogni razionale → zero round-trip a `double`, zero `to_u64()`.
+  - `cos_zero_in_range` ora calcola `c`, `d`, `π`, `x_base`, `x_k` interamente in `BigFloat`. Tolleranza `tol = BigFloat::from_double(1e-9, prec)` (epsilon esplicito, semantic-required dal test `IntegrateSingularity` per estremi prossimi a poli `tan`/`cos`).
+  - `BinaryOp::Sub` aggiunto alla ricorsione (era assente nel precedente double-path).
+  - `Constant::Infinity` mappata a `BigFloat::from_double(inf)`; MPFR gestisce ±∞ nativamente.
+  - `CMakeLists.txt`: `find_path(MPFR_INCLUDE_DIR_EARLY mpfr.h HINTS …  REQUIRED)` + sibling GMP, PRIMA di `add_library(cas_calculus)`, e aggiunti come PRIVATE include a `cas_calculus`. Linkage runtime MPFR fluisce già via `cas_numeric` nel binario finale.
+- **Verifica**: 69/69 PASS sui suite `*Integrate*:*Integral*` (esclusi StressTest e Test5_ExpansionStress pre-failing). Build pulito `-Wall -Wextra -Wpedantic -Werror`. Nessuna regressione linalg/ODE/Special.
+- **Eccezione legittima preservata**: `kSingularityCheckPrec=256` è budget hardware MPFR; derivato da `prec ≫ log2(1/1e-9) = 30 bit`. Non configurabile via CASContext perché interno a decisione boolean heuristic; tolleranza `1e-9` è il parametro semantico e resta documentato nel codice.
+- **STATO**: ✅ RISOLTA 2026-06-02.
 
 ### HPP-006 — fsolve kTolerance=1e-10 non configurabile (fsolve.cpp:77)
 - **File**: `src/algebra/fsolve.cpp:77`
@@ -232,40 +238,39 @@
 - **Fix corretto**: Risoluzione formale via equazione del campo residuale (Risch structure theorem step): `c·D(F) = integrand` → `c = integrand / D(F)` con verifica che `c` sia costante rispetto alla variabile di integrazione. Nessun set chiuso richiesto.
 - **Blocking dependency**: L1-02 Risch completo (Bronstein cap. 9).
 
-### HPP-008 — ODE solver C+i literal naming (ode_solver_advanced.cpp:227)
-- **File**: `src/calculus/ode_solver_advanced.cpp:227`
+### HPP-008 — ODE solver C+i literal naming — RISOLTA 2026-06-02
+- **File**: `src/calculus/ode_solver_advanced.cpp:228` (loop generating integration constants for nth-order linear ODE).
 - **Categoria CLAUDE.md**: Cat 7 — nomi di variabili interni hardcoded.
-- **Descrizione**: `ExprPtr Ci = arena.make<Symbol>("C" + std::to_string(i + 1));` genera simboli `C1`, `C2`, ... per costanti di integrazione ODE N-esimo ordine. Se l'utente ha già definito `C1` nell'ambiente, collisione silente produce risultati sbagliati.
-- **Fix corretto**: `ctx.make_fresh_symbol("C")` garantisce unicità rispetto a tutti i simboli definiti. Già implementato per Frobenius (HC-004).
-- **Blocking dependency**: Nessuno (HC-004 infrastruttura già presente).
+- **Fix applicato 2026-06-02**: `arena.make<Symbol>("C" + std::to_string(i+1))` → `arena.make<Symbol>(ctx.make_fresh_symbol("C"))`. Counter monotono in CASContext garantisce unicità anche se utente ha già `C`, `C1`, ... in scope.
+- **Verifica**: 14/14 PASS sui suite `OdeCriticalTest`/`OdeTest`. Output traccia simboli `C_37`, `C_38` (counter globale, no collisione).
+- **STATO**: ✅ RISOLTA 2026-06-02.
 
-### HPP-009 — ODE 1st order C1 literal (ode_solver_1st_order.cpp:37)
-- **File**: `src/calculus/ode_solver_1st_order.cpp:37` (e `:58`)
+### HPP-009 — ODE 1st order C1 literal — RISOLTA 2026-06-02
+- **File**: `src/calculus/ode_solver_1st_order.cpp:37-38` (Linear1stOrder), `:59-60` (Separable).
 - **Categoria CLAUDE.md**: Cat 7 — nomi di variabili interni hardcoded.
-- **Descrizione**: `ExprPtr C1 = arena.make<Symbol>("C1");` a riga 37 e 58. Costante di integrazione ODE 1° ordine con nome fisso `C1`. Stesso problema di collisione di HPP-008.
-- **Fix corretto**: `ctx.make_fresh_symbol("C")` (HC-004 già presente).
-- **Blocking dependency**: Nessuno.
+- **Stato pre-fix verificato 2026-06-02**: già migrato a `ctx.make_fresh_symbol("C")` in entrambi i siti (lavoro F1.x). Audit confermato via `grep -E '"C[0-9_]+"' src/calculus/ode_solver_*.cpp` → 0 match.
+- **STATO**: ✅ RISOLTA 2026-06-02 (verifica retroattiva). Ledger aggiornato per coerenza.
 
-### HPP-010 — matrix_solve free parameter "t"+i naming (matrix_solve.cpp:192)
-- **File**: `src/linalg/matrix_solve.cpp:192`
+### HPP-010 — matrix_solve free parameter naming — RISOLTA 2026-06-02
+- **File**: `src/linalg/matrix_solve.cpp:141` (free variable assignment in `solve_linear_system`).
 - **Categoria CLAUDE.md**: Cat 7 — nomi di variabili interni hardcoded.
-- **Descrizione**: `ctx.arena().make<Symbol>("t" + std::to_string(parameter_index++))` genera parametri liberi `t0`, `t1`, `t2`, ... per soluzioni di sistemi con kernel non banale. Collisione con variabili utente `t`, `t0`, ecc. in sistemi fisici (tempo).
-- **Fix corretto**: `ctx.make_fresh_symbol("t")` → `t_0`, `t_1`, ... garantiti unici.
-- **Blocking dependency**: Nessuno.
+- **Fix applicato 2026-06-02**: `"c" + std::to_string(j+1)` → `ctx.make_fresh_symbol("c")`. Audit notato che il sito reale usava prefisso `c` (non `t` come stimato nel ledger originale).
+- **Verifica**: 65/65 PASS sui suite linalg (esclusi StressTest per CLAUDE.md policy).
+- **STATO**: ✅ RISOLTA 2026-06-02.
 
-### HPP-011 — matrix_eigenvalues "_lambda_" literal (matrix_eigenvalues.cpp:263)
-- **File**: `src/linalg/matrix_eigenvalues.cpp:263`
+### HPP-011 — matrix_eigenvalues "lambda" literal — RISOLTA 2026-06-02
+- **File**: `src/linalg/matrix_eigenvalues.cpp:191` (eigenvalues entry point).
 - **Categoria CLAUDE.md**: Cat 7 — nomi di variabili interni hardcoded.
-- **Descrizione**: `const Symbol lambda_var("_lambda_");` a riga 263. Simbolo interno per polinomio caratteristico fisso. Se utente ha definito `_lambda_` nell'ambiente (es. parametro di regolarizzazione), il polinomio caratteristico collide silenziosamente.
-- **Fix corretto**: `ctx.make_fresh_symbol("lambda")` → `lambda_0`, `lambda_1`, ... garantiti unici.
-- **Blocking dependency**: Nessuno.
+- **Fix applicato 2026-06-02**: `Symbol lambda{"lambda"}` → `Symbol lambda = ctx.make_fresh_symbol("lambda")`.
+- **Verifica**: 65/65 PASS sui suite linalg.
+- **STATO**: ✅ RISOLTA 2026-06-02.
 
-### HPP-012 — matrix_jordan "_lambda_" literal (matrix_jordan.cpp:123)
-- **File**: `src/linalg/matrix_jordan.cpp:123`
+### HPP-012 — matrix_jordan "lambda" literal — RISOLTA 2026-06-02
+- **File**: `src/linalg/matrix_jordan.cpp:96` (jordan_normal_form).
 - **Categoria CLAUDE.md**: Cat 7 — nomi di variabili interni hardcoded.
-- **Descrizione**: `const Symbol lambda_var("_lambda_");` a riga 123. Stesso pattern di HPP-011 nel Jordan form solver. I due moduli usano lo stesso nome fisso: se chiamati in sequenza sullo stesso `CASContext`, interferenza in cache/assumptions.
-- **Fix corretto**: `ctx.make_fresh_symbol("lambda")`.
-- **Blocking dependency**: Nessuno.
+- **Fix applicato 2026-06-02**: `Symbol lambda{"lambda"}` → `Symbol lambda = ctx.make_fresh_symbol("lambda")`. Risolve anche il collision risk tra eigenvalues/jordan sullo stesso CASContext.
+- **Verifica**: 65/65 PASS sui suite linalg.
+- **STATO**: ✅ RISOLTA 2026-06-02.
 
 ### A5-LARGECYCLO — cyclotomic detection limitata a deg ≤ 724 (polynomial_cyclotomic.cpp:141, :202-210)
 - **File**: `src/algebra/polynomial_cyclotomic.cpp:141` (cap OOM in `compute_cyclotomic`), `:202-210` (proactive nullopt return in `is_cyclotomic` per deg > 724).
@@ -283,12 +288,22 @@
 - **Blocking dependency**: `src/numeric/sturm.cpp` già presente (HC-012).
 
 
-### HPP-015 — simplify_special_fn bit_length>16 bail-out (simplify_special_fn.cpp:111)
-- **File**: `src/symbolic/simplify_special_fn.cpp:111`
-- **Categoria CLAUDE.md**: Cat 1 (budget non configurabile) + Cat 4 (bail-out su valore intero invece che dominio matematico).
-- **Descrizione**: `if (il->value.bit_length() > 16)` a riga 111 rifiuta argomenti interi con più di 16 bit (>65535). `Gamma(70000)` è matematicamente definita (= 69999!) ma viene rifiutata. Il bail-out non è su impossibilità matematica ma su costo computazionale non configurabile. Produce Unimplemented senza messaggio diagnostico sul limite.
-- **Fix corretto**: (a) Esporre `ctx.max_special_fn_integer_arg_bits()` (default 16, configurabile); (b) se argomento supera soglia e risultato non è chiuso (es. Gamma non intera/semi-intera), emettere `Unimplemented` con messaggio diagnostico esplicito: `"Gamma(n): n>65535, set ctx.max_special_fn_integer_arg_bits() to increase"`. (c) Per funzioni con formula closed-form scalabile a BigInt (es. Bernoulli, Zeta via formula), estendere algoritmo senza bail-out.
-- **Blocking dependency**: Nessuno — fix configurabilità immediato.
+### HPP-015 — simplify_special_fn bit_length>16 bail-out — RISOLTA 2026-06-02
+- **File**: `src/symbolic/simplify_special_fn.cpp` (Digamma:112, Digamma-sum:159, Polygamma:188, Pochhammer:225, Zeta-neg:292, Zeta-pos:310).
+- **Categoria CLAUDE.md**: Cat 1 (budget non configurabile) + Cat 4 (bail-out su valore intero).
+- **Fix applicato 2026-06-02**:
+  - Aggiunti due param in `include/cas/cas_context_params.hpp`:
+    - `max_special_fn_integer_arg_bits_` (default 16, getter/setter inline). Governa Digamma/Polygamma/Pochhammer.
+    - `max_bernoulli_index_bits_` (default 30, getter/setter inline). Governa Zeta closed-form via Bernoulli.
+  - Tutti i bail-out riportati ora leggono il bound dal contesto: `(context_ != nullptr) ? context_->max_special_fn_integer_arg_bits() : 16U` (analogo per Bernoulli).
+  - Diagnostico Unimplemented aggiornato per citare la rispettiva chiave di config: `"…exceeds ctx.max_special_fn_integer_arg_bits()"` / `"…exceeds ctx.max_bernoulli_index_bits()"` con stage `F5.9`.
+  - Tre test in `test/unit/symbolic/test_special_functions.cpp`:
+    - `HPP015_DigammaBitBudgetConfigurable` (default reject 70000, raise → OK, reduce → reject).
+    - `HPP015_PochhammerBitBudgetConfigurable` (default reject, raise → OK).
+    - `HPP015_ZetaBernoulliBudgetConfigurable` (budget=3 reject zeta(8), default OK).
+- **Verifica**: 74/74 PASS `SpecialFunctionsTest.*`. Diagnostico esplicito; budget pienamente configurabile via ctx.set_*().
+- **Eccezione legittima preservata**: i default sono safety-cap hardware (Digamma(2^25) materializzerebbe ~33M nodi AST; Bernoulli(2^31) → ~30 GB rationals). Bound `unsigned int` (bit_length API) intenzionale per evitare wraparound silenzioso.
+- **STATO**: ✅ RISOLTA 2026-06-02.
 
 ### HPP-016 — N_INTERN_SHARDS = 16 (include/cas/ast.hpp)
 - **File**: `include/cas/ast.hpp` — `static constexpr std::size_t N_INTERN_SHARDS = 16U`
@@ -346,21 +361,19 @@
 - **Fix corretto**: Thread CASContext into BigInt GCD path (major architectural change, deferred post-F1.1). Alternatively expose as compile-time tuning parameter with `static_assert` documentation.
 - **Blocking dependency**: BigInt context-free architecture.
 
-### HPP-021 — Pollard Rho max_iterations=4096 not configurable — APERTA
+### HPP-021 — Pollard Rho max_iterations=4096 not configurable — CHIUSA (2026-06-02)
 
-- **File**: `src/numtheory/arithmetic_functions.cpp:139` — `constexpr std::size_t max_iterations = 4096U`.
+- **File**: `src/numtheory/arithmetic_functions.cpp:146` — era `constexpr std::size_t max_iterations = 4096U`.
 - **Categoria CLAUDE.md**: Cat 1 (budget computazionale non configurabile).
-- **Descrizione**: Pollard Rho inner loop limited to 4096 iterations per (seed, constant) pair. For semiprimes n=p*q with p~n^{1/4}, expected cycle length ~p^{1/2} > 4096 when p > 2^{24}. In practice the outer loop tries 64 (seed, constant) combinations, so total iterations = 64*4096 = 262144 before giving up. For n~10^{20}, p~10^{10}: expected ~3*10^5 steps → borderline. Not immediately exposed via CASContext because numtheory functions do not receive CASContext.
-- **Fix corretto**: (a) Thread CASContext into `pollards_rho_factor`; (b) expose `ctx.pollard_rho_max_iterations()` with default 4096; (c) document that timeout is per-combination, not global. Emits Unimplemented with diagnostic "Pollard Rho exhausted" when all combinations fail — already implemented (never silent).
-- **Blocking dependency**: numtheory API change (adds ctx parameter).
+- **Risoluzione**: Overload `pollards_rho_factor(const Integer& n, std::size_t max_iter = 4096U)` + `factor_integer(const Integer& n, std::size_t pollard_max_iter = 4096U)` esposti in `include/cas/numtheory.hpp`. Caller con CASContext: `pollards_rho_factor(n, ctx.pollard_rho_max_iter())`. Default 4096 preserva il comportamento previgente; getter/setter in `CASContextParams` (`pollard_rho_max_iter_`).
+- **Verifica**: Build OK, 18/18 test pertinenti PASS.
 
-### HPP-022 — limit.cpp try_log_log_limit depth>3U not configurable — APERTA
+### HPP-022 — limit.cpp try_log_log_limit depth>3U not configurable — CHIUSA (2026-06-02)
 
-- **File**: `src/calculus/limit.cpp:339` — `if (depth > 3U) return std::nullopt`.
+- **File**: `src/calculus/limit.cpp:349` — era `if (depth > 3U) return std::nullopt`.
 - **Categoria CLAUDE.md**: Cat 1 (budget computazionale non configurabile).
-- **Descrizione**: `try_log_log_limit` is a fast-path for `ln(a)/ln(b)` limits. Depth guard prevents infinite mutual recursion between limit rules. Depth 3 is an empirical constant with no mathematical derivation; correct bound is `max_nesting_depth(input_expr)`. Not currently configurable via `CASContext`. Consequence: limits like `lim_{x→∞} ln(ln(ln(x)))/ln(ln(x))` may fail to compute if depth exceeds 3. Returns `std::nullopt` (not wrong answer) — caller tries other rules.
-- **Fix corretto**: Expose `ctx.max_log_log_limit_depth()` (default 3); thread depth limit through the call chain. Alternatively compute nesting depth of log towers in input and use it as bound.
-- **Blocking dependency**: Nessuno — chirurgico.
+- **Risoluzione**: Esposto `ctx.max_log_log_limit_depth()` in `CASContextParams` (default 3). Guard ora `if (depth > context_.max_log_log_limit_depth()) return std::nullopt`. `LimitEngine` ha già `context_` field — wiring chirurgico.
+- **Verifica**: Build OK, regression OK.
 
 ### HPP-023 — Burnikel-Ziegler divide-and-conquer not implemented — APERTA PERMANENTE
 

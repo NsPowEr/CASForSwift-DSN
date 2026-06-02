@@ -336,17 +336,10 @@ private:
     [[nodiscard]] std::optional<Result<ExprPtr>> try_log_log_limit(
         const QuotientView& quotient, const Symbol& var, ExprPtr point,
         LimitDirection dir, unsigned int depth) {
-        // HARDCODE-OF-PASSAGE HPP-022: depth > 3U hard limit in try_log_log_limit.
-        // Rationale: try_log_log_limit is a specialised fast-path for ln(a)/ln(b);
-        // it calls compute_recursive which can recurse back into limit rules.
-        // Depth 3 has never been insufficient for any known ln/ln test case,
-        // but the correct bound is: max depth = log_2(nesting depth of nested logs
-        // in the input expression).  Exposing ctx.max_log_log_limit_depth() would
-        // allow configuration but requires threading depth guard into CASContext.
-        // Current behaviour: return nullptr (no result for this rule), which causes
-        // the caller to try other limit strategies — never silent wrong answer.
-        // See HARDCODE_LEDGER.md HPP-022.
-        if (depth > 3U) return std::nullopt; // evita ricorsione eccessiva
+        // HPP-022 CLOSED: depth bound configurabile via ctx.max_log_log_limit_depth()
+        // (default 3, see CASContextParams). Exceeding returns nullopt → caller
+        // tries other strategies (never silent wrong answer).
+        if (depth > context_.max_log_log_limit_depth()) return std::nullopt;
 
         const auto* num_call = expr_cast<FuncCall>(quotient.numerator);
         if (!num_call || num_call->func_id != BuiltinOp::Ln || num_call->args.size() != 1U)

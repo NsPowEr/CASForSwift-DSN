@@ -1,5 +1,7 @@
 #include "cas/calculus.hpp"
 #include "cas/algebra.hpp"
+#include "cas/bigfloat.hpp"
+#include "cas/rational.hpp"
 #include "integrate_definite_patterns.hpp"
 #include "integrate_engine.hpp"
 
@@ -35,18 +37,37 @@ namespace {
     return std::nullopt;
 }
 
-// Approximate a bound expression as a double for singularity range checks.
-// Returns nullopt only if the expression is genuinely symbolic (e.g. contains free variables).
-[[nodiscard]] std::optional<double> approx_bound(ExprPtr expr) {
+// Precision (in bits) used for numerical bound + singularity checks in
+// integrate.cpp.  256 bits ≈ 77 decimal digits — far above the ±1e-9 tolerance
+// applied downstream in cos_zero_in_range.  HPP-005 closure: all numerical
+// reasoning at integration boundaries now flows through MPFR BigFloat rather
+// than IEEE double, eliminating silent overflow on numerator/denominator
+// values that exceed 2^53 and the to_u64() truncation that violated
+// CLAUDE.md REGOLA 1.
+inline constexpr mpfr_prec_t kSingularityCheckPrec = 256;
+
+[[nodiscard]] BigFloat bigfloat_from_rational(const Rational& r) {
+    return BigFloat::from_rational_parts(
+        r.numerator().decimal(),
+        r.denominator().decimal(),
+        kSingularityCheckPrec);
+}
+
+// Approximate a bound expression as a BigFloat for singularity range checks.
+// Returns nullopt only if the expression is genuinely symbolic (free variables).
+// Uses exact-rational + MPFR arithmetic throughout — no double round-trips.
+[[nodiscard]] std::optional<BigFloat> approx_bound(ExprPtr expr) {
     if (auto r = exact_rational_from_expr(expr)) {
-        return static_cast<double>(r->numerator().to_u64())
-             / static_cast<double>(r->denominator().to_u64())
-             * (r->numerator().is_negative() ? -1.0 : 1.0);
+        return bigfloat_from_rational(*r);
     }
     if (const auto* c = expr_cast<Constant>(expr)) {
-        if (c->value == MathConstant::Pi)       return M_PI;
-        if (c->value == MathConstant::E)        return M_E;
-        if (c->value == MathConstant::Infinity) return std::numeric_limits<double>::infinity();
+        if (c->value == MathConstant::Pi) return BigFloat::pi(kSingularityCheckPrec);
+        if (c->value == MathConstant::E)  return BigFloat::e(kSingularityCheckPrec);
+        if (c->value == MathConstant::Infinity) {
+            // +∞ via MPFR (set_inf semantics): build from "inf" literal.
+            return BigFloat::from_double(
+                std::numeric_limits<double>::infinity(), kSingularityCheckPrec);
+        }
     }
     if (const auto* u = expr_cast<Unary>(expr); u && u->op == UnaryOp::Neg) {
         auto v = approx_bound(u->operand);
@@ -57,9 +78,10 @@ namespace {
         auto rv = approx_bound(b->right);
         if (!lv || !rv) return std::nullopt;
         if (b->op == BinaryOp::Add) return *lv + *rv;
+        if (b->op == BinaryOp::Sub) return *lv - *rv;
         if (b->op == BinaryOp::Mul) return *lv * *rv;
         if (b->op == BinaryOp::Div) {
-            if (*rv == 0.0) return std::nullopt;
+            if (rv->is_zero()) return std::nullopt;
             return *lv / *rv;
         }
     }
@@ -244,29 +266,32 @@ try_extract_linear(ExprPtr expr, const Symbol& var) {
     auto approx_lo = approx_bound(lower);
     auto approx_hi = approx_bound(upper);
     if (approx_lo && approx_hi) {
-        double dlo = std::min(*approx_lo, *approx_hi);
-        double dhi = std::max(*approx_lo, *approx_hi);
+        const BigFloat& blo_raw = *approx_lo;
+        const BigFloat& bhi_raw = *approx_hi;
+        const BigFloat& blo = (blo_raw <= bhi_raw) ? blo_raw : bhi_raw;
+        const BigFloat& bhi = (blo_raw <= bhi_raw) ? bhi_raw : blo_raw;
 
-        // Check whether cos(arg) = 0 has a solution in [dlo,dhi] for linear arg.
+        // Check whether cos(arg) = 0 has a solution in [blo,bhi] for linear arg.
+        // All arithmetic in BigFloat (MPFR) at kSingularityCheckPrec — no double
+        // round-trips, no silent overflow on numerator/denominator > 2^53.
         auto cos_zero_in_range = [&](ExprPtr arg) -> bool {
             auto linear = try_extract_linear(arg, var);
             if (!linear || linear->first == Rational{BigInt{0}}) return false;
-            // Use Rational::to_double() equivalent via stod on decimal()
-            auto rat_to_double = [](const Rational& r) -> double {
-                double n = std::stod(r.numerator().decimal());
-                double d = std::stod(r.denominator().decimal());
-                double v = n / d;
-                // decimal() may include sign in numerator already; denominator is always positive
-                return v;
-            };
-            double c = rat_to_double(linear->first);
-            double d = rat_to_double(linear->second);
-            if (std::abs(c) < 1e-15) return false;
-            // cos(c*x+d)=0 → x = (π/2 + k*π - d) / c
-            double x_base = (M_PI / 2.0 - d) / c;
+            BigFloat c = bigfloat_from_rational(linear->first);
+            BigFloat d = bigfloat_from_rational(linear->second);
+            // Reject c = 0 (no x-dependence → cos(d) constant, no roots in x).
+            if (c.is_zero()) return false;
+            BigFloat pi = BigFloat::pi(kSingularityCheckPrec);
+            BigFloat half = BigFloat::from_double(0.5, kSingularityCheckPrec);
+            BigFloat tol = BigFloat::from_double(1e-9, kSingularityCheckPrec);
+            // cos(c*x + d) = 0 → x = (π/2 + k·π − d) / c
+            BigFloat x_base = (pi * half - d) / c;
+            BigFloat pi_over_c = pi / c;
             for (int k = -20; k <= 20; ++k) {
-                double x_k = x_base + k * M_PI / c;
-                if (x_k >= dlo - 1e-9 && x_k <= dhi + 1e-9) return true;
+                BigFloat km = BigFloat::from_double(static_cast<double>(k),
+                    kSingularityCheckPrec);
+                BigFloat x_k = x_base + km * pi_over_c;
+                if (x_k >= (blo - tol) && x_k <= (bhi + tol)) return true;
             }
             return false;
         };

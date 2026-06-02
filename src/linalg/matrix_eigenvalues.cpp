@@ -188,7 +188,9 @@ Result<std::vector<ExprPtr>> eigenvalues(const MatrixExpr& matrix, symbolic::CAS
     const std::size_t n = matrix.rows();
     if (n == 0) return ok(std::vector<ExprPtr>{});
 
-    Symbol lambda{"lambda"};
+    // HPP-011 closure: fresh eigenvalue symbol avoids collisions with
+    // any user-defined `lambda` (e.g. a regularisation parameter) in scope.
+    Symbol lambda = ctx.make_fresh_symbol("lambda");
     auto poly_res = characteristic_polynomial(matrix, lambda, ctx);
     if (poly_res.is_error()) return fail<std::vector<ExprPtr>>(poly_res.error());
 

@@ -29,8 +29,10 @@ struct IntegerFactorization {
 [[nodiscard]] Result<Integer> next_prime(const Integer& n);
 [[nodiscard]] Result<Integer> nth_prime(const Integer& n);
 
-[[nodiscard]] Result<Integer> pollards_rho_factor(const Integer& n);
-[[nodiscard]] Result<IntegerFactorization> factor_integer(const Integer& n);
+// HPP-021 closure: max_iter configurable per (seed, constant) pair.
+// Default 4096 preserves prior behaviour.
+[[nodiscard]] Result<Integer> pollards_rho_factor(const Integer& n, std::size_t max_iter = 4096U);
+[[nodiscard]] Result<IntegerFactorization> factor_integer(const Integer& n, std::size_t pollard_max_iter = 4096U);
 
 [[nodiscard]] Result<Integer> euler_phi(const Integer& n);
 [[nodiscard]] Result<int> moebius_mu(const Integer& n);

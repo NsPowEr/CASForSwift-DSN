@@ -93,7 +93,9 @@ Result<JordanDecomposition> jordan_normal_form(const MatrixExpr& matrix, symboli
         return fail<JordanDecomposition>(make_error(CASErrorKind::InvalidArgument, "Jordan form requires a square matrix"));
     }
 
-    Symbol lambda{"lambda"};
+    // HPP-012 closure: fresh eigenvalue symbol avoids collisions in shared
+    // CASContext between eigenvalues() and jordan_normal_form() callers.
+    Symbol lambda = ctx.make_fresh_symbol("lambda");
     auto char_poly_res = characteristic_polynomial(matrix, lambda, ctx);
     if (char_poly_res.is_error()) return fail<JordanDecomposition>(char_poly_res.error());
     ExprPtr char_poly = char_poly_res.value();
