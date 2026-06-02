@@ -17,11 +17,15 @@ namespace cas::symbolic::detail {
 // radicands (norm² for QR Householder on 8×8 random Q rationals).
 // Reference: HC-F4-QR-SYMBOLIC-TIMEOUT.
 [[nodiscard]] static std::pair<BigInt, BigInt> extract_square_factor(BigInt n, std::size_t trial_bound) {
+    // Regola 1: no int64_t/double arithmetic in symbolic core; loop counter is
+    // BigInt.  trial_bound is a CASContext-configurable budget (boundary
+    // conversion to BigInt is permitted; arithmetic on the value is BigInt).
     BigInt k(1);
+    BigInt bound(static_cast<std::int64_t>(trial_bound));
     BigInt i(2);
-    BigInt bound = BigInt(static_cast<long long>(trial_bound));
-    while (i <= bound && i * i <= n) {
+    while (i <= bound) {
         BigInt i2 = i * i;
+        if (i2 > n) break;
         while ((n % i2).is_zero()) {
             k = k * i;
             n = n / i2;
