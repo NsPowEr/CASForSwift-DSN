@@ -97,4 +97,77 @@ TEST_F(DefiniteSummationTest, TelescopingRational) {
     EXPECT_TRUE(simplifies_to_zero(res_tog.value(), exp_tog.value(), ctx));
 }
 
+// ── F5.7 sub-block 1 — Abramov polygamma rational summation ─────────────────
+
+namespace {
+bool is_digamma_call(ExprPtr e) {
+    const auto* fc = expr_cast<FuncCall>(e);
+    return fc && fc->func_id == BuiltinOp::Digamma;
+}
+bool is_polygamma_call(ExprPtr e) {
+    const auto* fc = expr_cast<FuncCall>(e);
+    return fc && fc->func_id == BuiltinOp::Polygamma;
+}
+}  // namespace
+
+// Σ_{k=1}^{n} 1/k = ψ(n+1) − ψ(1) = ψ(n+1) + γ.  The polygamma path closes
+// this where Gosper returns nullopt (no rational antidifference exists).
+TEST_F(DefiniteSummationTest, HarmonicSum_ViaDigamma) {
+    auto term = parse_expr("1/k", ctx.arena());
+    auto lo = parse_expr("1", ctx.arena());
+    auto hi = parse_expr("n", ctx.arena());
+    auto res = calculus::sum(term, k, lo, hi, ctx);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+    // Result must mention digamma (the only closed form).  Searching the
+    // expression tree for a Digamma FuncCall confirms the polygamma path
+    // produced the antidifference.
+    bool found = false;
+    auto walk = [&](auto self, ExprPtr e) -> void {
+        if (!e) return;
+        if (is_digamma_call(e)) { found = true; return; }
+        if (const auto* bin = expr_cast<Binary>(e)) {
+            self(self, bin->left); self(self, bin->right); return;
+        }
+        if (const auto* un = expr_cast<Unary>(e)) { self(self, un->operand); return; }
+        if (const auto* sum = expr_cast<Sum>(e)) {
+            for (ExprPtr t : sum->terms) self(self, t);
+            return;
+        }
+        if (const auto* prod = expr_cast<Product>(e)) {
+            for (ExprPtr t : prod->factors) self(self, t);
+            return;
+        }
+    };
+    walk(walk, res.value());
+    EXPECT_TRUE(found) << "expected digamma antidifference in harmonic sum";
+}
+
+// Σ_{k=1}^{n} 1/k² closes via polygamma ψ⁽¹⁾ (trigamma).
+TEST_F(DefiniteSummationTest, BaselSumDefinite_ViaPolygamma) {
+    auto term = parse_expr("1/k^2", ctx.arena());
+    auto lo = parse_expr("1", ctx.arena());
+    auto hi = parse_expr("n", ctx.arena());
+    auto res = calculus::sum(term, k, lo, hi, ctx);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+    bool found = false;
+    auto walk = [&](auto self, ExprPtr e) -> void {
+        if (!e) return;
+        if (is_polygamma_call(e)) { found = true; return; }
+        if (const auto* bin = expr_cast<Binary>(e)) {
+            self(self, bin->left); self(self, bin->right); return;
+        }
+        if (const auto* un = expr_cast<Unary>(e)) { self(self, un->operand); return; }
+        if (const auto* sum = expr_cast<Sum>(e)) {
+            for (ExprPtr t : sum->terms) self(self, t);
+            return;
+        }
+        if (const auto* prod = expr_cast<Product>(e)) {
+            for (ExprPtr t : prod->factors) self(self, t);
+            return;
+        }
+    };
+    walk(walk, res.value());
+    EXPECT_TRUE(found) << "expected polygamma antidifference in 1/k² sum";
+}
+
 }  // namespace cas::test

@@ -17,6 +17,34 @@
 
 ## Voci aperte
 
+### F5.7-ABRAMOV-POLYGAMMA — Rational summation via digamma/polygamma antidifference — RISOLTA 2026-06-03
+- **File**: `src/calculus/summation.cpp` (helper `try_polygamma_definite` + `try_polygamma_antidiff` + early-exit `has_rational_dependency`); `test/unit/calculus/test_definite_summation.cpp` (+2 test).
+- **Categoria CLAUDE.md**: nuova capability F5.7 sub-block 1 (Abramov rational summation, scope: A/(linear(k))^m atoms); zero hardcode introdotti.
+- **Algoritmo (Abramowitz-Stegun 6.4.6)**:
+  ψ^(n)(k+1) − ψ^(n)(k) = (−1)^n · n! / k^(n+1).
+  Per term = A/(k+a)^m:
+    S(k) = A · (−1)^(m−1) / (m−1)! · ψ^(m−1)(k+a),
+    Σ_{k=lo}^{hi} term = S(hi+1) − S(lo).
+- **Pipeline implementativa**:
+  1. Early-exit: `has_rational_dependency(term, k)` — scan structurale per Div/Pow^negative. Se manca, skip immediato (fast path per termini non-rational).
+  2. `algebra::together(term)` + `algebra::apart_num_den` → N, D.
+  3. Verifica N costante in k via `algebra::univariate_coefficients`.
+  4. Verifica D = base^m con base = c0 + c1·k affine in k (parse_affine_in_k).
+  5. Normalizza c1·(k + c0/c1)^m → modifica A_const = A_const/c1^m.
+  6. Costruisce antidifference: `FuncCall(BuiltinOp::Digamma)` (m=1) o `FuncCall(BuiltinOp::Polygamma, [m-1, k+a])` (m≥2).
+  7. Sostituisce upper+1 e lower, simplifica differenza.
+- **Self-check Regola Zero**:
+  - "Input più grande?" → m arbitrario, supporto fino a 2^16 (bit_length check); A, a simbolici qualsiasi.
+  - "Costanti?" → solo i fattoriali (n!) e segni (-1)^n derivati dalla formula esatta.
+  - "Configurabile?" → tutti i parametri sono coefficienti del termine; il limite m < 2^16 è la stessa policy di max_special_fn_integer_arg_bits per le strutture polygamma.
+  - "Silenzio?" → no: ritorna nullopt strutturale, propagato via Unimplemented esplicito nel caller.
+- **Verifica** (2026-06-03, Release):
+  - `HarmonicSum_ViaDigamma`: Σ_{k=1}^n 1/k → contiene FuncCall(Digamma). PASS.
+  - `BaselSumDefinite_ViaPolygamma`: Σ_{k=1}^n 1/k² → contiene FuncCall(Polygamma). PASS.
+  - Regression: 1953/1953 non-stress PASS in 54s Release (1951 baseline + 2 nuovi).
+  - Build pulito `-Wall -Wextra -Wpedantic -Werror`.
+- **STATO**: ✅ RISOLTA 2026-06-03 — Abramov sub-block "single rational atom A/(linear)^m" chiuso. Estensione futuro: partial-fraction decomposition multi-fattore + Q-irreducible quadratic via RootOf (tracciato come B6-bis Abramov-Full).
+
 ### F5.7-GOSPER-WIRING — Gosper-summable closed forms via summation driver — RISOLTA 2026-06-03
 - **File**: `src/calculus/summation.cpp` (wire-up `try_gosper_definite` + integrazione in `symbolic_sum`); `test/unit/calculus/test_definite_summation.cpp` (NEW, 3 test); `CMakeLists.txt` (test registrato).
 - **Categoria CLAUDE.md**: Cat 8 (pattern matching su forma) → ora abbiamo un percorso algorithmico Gosper-summable PRIMA di fallire con Unimplemented per `sum()`. Zero hardcode introdotti.
