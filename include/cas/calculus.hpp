@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cas/ast.hpp"
+#include "cas/rational.hpp"
 #include "cas/result.hpp"
 #include "cas/symbolic.hpp"
 
@@ -154,15 +155,43 @@ struct PadeApproximant {
 // deg(P) ≤ m, deg(Q) ≤ n, Q(0) = 1, so that  P(x)/Q(x) ≡ f(x) mod (x − c)^{m+n+1}.
 // Internally Taylor-expands `expr` to order m+n at the centre and solves
 // the linear Toeplitz system for Q's coefficients (Gauss elimination over
-// Rational), then back-substitutes to recover P.  Returns Unimplemented
-// if the Toeplitz system is singular, which signals a degenerate Pade
-// table entry (defect rank) rather than a silent wrong answer.
+// the symbolic field — supports algebraic / transcendental Taylor coefficients
+// such as √2, π, e, RootOf, …; F5.5-PADE-NONQ).  Returns Unimplemented
+// if the Toeplitz system is singular or the pivot non-vanishing cannot be
+// decided by the simplifier (defect rank or undecidable algebraic relation)
+// rather than a silent wrong answer.
 [[nodiscard]] Result<PadeApproximant> pade_approximant(
     ExprPtr expr,
     const Symbol& var,
     ExprPtr center,
     unsigned int numerator_order,
     unsigned int denominator_order,
+    symbolic::CASContext& ctx);
+
+// F5.5 — Puiseux expansion at x = 0 of an algebraic curve f(x, y) = 0.
+//
+// A branch is described by  y = c · x^(p/q) + (higher-order terms in x^(1/q)).
+// The Newton polygon (Walker, "Algebraic Curves", §4.2) collects every term
+// a_{ij} x^i y^j of f and takes the lower convex hull of {(i, j) : a_{ij} ≠ 0}.
+// Each edge of negative slope -μ = -p/q (gcd(p, q) = 1) supplies one Puiseux
+// exponent p/q.  The associated characteristic polynomial — the restriction of
+// f to the lattice points on that edge, written in the auxiliary variable c —
+// has roots that are the leading coefficients of the branches.
+//
+// `puiseux_leading_terms` returns one PuiseuxBranch per distinct leading
+// term.  When the characteristic polynomial has roots over an extension of
+// Q (most non-trivial curves), the coefficient is returned symbolically via
+// `solve` / RootOf, never numerically.
+struct PuiseuxBranch {
+    Rational leading_exponent;   // p / q (always reduced, q > 0)
+    ExprPtr leading_coefficient; // c, possibly RootOf(...)
+    unsigned int multiplicity;   // root multiplicity in the characteristic
+};
+
+[[nodiscard]] Result<std::vector<PuiseuxBranch>> puiseux_leading_terms(
+    ExprPtr f,
+    const Symbol& x,
+    const Symbol& y,
     symbolic::CASContext& ctx);
 
 struct Asymptote {

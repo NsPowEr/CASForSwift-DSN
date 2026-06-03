@@ -169,6 +169,7 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/residue_theorem.cpp
     src/calculus/laurent_general.cpp
     src/calculus/pade.cpp
+    src/calculus/puiseux.cpp
     src/calculus/multiple_integral.cpp
     src/calculus/diff_rules.cpp
     src/calculus/integrate_parts.cpp
@@ -610,6 +611,7 @@ test/unit/algebra/test_half_gcd.cpp
         test/unit/calculus/test_bessel_recurrence.cpp
         test/unit/calculus/test_orthogonal_polynomials.cpp
         test/unit/calculus/test_pade_approximant.cpp
+        test/unit/calculus/test_puiseux.cpp
         test/unit/symbolic/test_assumptions_stability.cpp
         test/unit/symbolic/test_caching.cpp
         test/unit/symbolic/test_gruntz.cpp

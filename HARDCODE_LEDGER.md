@@ -17,6 +17,31 @@
 
 ## Voci aperte
 
+### F5.5-PUISEUX-NEWTON — Puiseux series leading-term extractor via Newton polygon — RISOLTA 2026-06-03
+- **File**: `include/cas/calculus.hpp` (struct `PuiseuxBranch` + API `puiseux_leading_terms`); `src/calculus/puiseux.cpp` (NEW, ~270 LOC); `CMakeLists.txt` (registrato sorgente + test); `test/unit/calculus/test_puiseux.cpp` (NEW, 4 test).
+- **Categoria CLAUDE.md**: nuova capability F5.5 sub-block 2; nessun hardcode introdotto. Coefficienti di campo simbolico arbitrario (`ExprPtr`), nessun bound numerico, nessuna costante magica.
+- **Algoritmo (Walker §IV.2-3, Duval 1989)**:
+  1. **Estrazione monomi** `(i, j, a_{ij})` via doppio `univariate_coefficients`: prima in y, poi ciascun coefficiente in x. `expand` + `simplify` rimuovono zeri letterali.
+  2. **Lower convex hull** (Andrew monotone chain) sul supporto `{(i,j) : a_{ij} ≠ 0}`. Per ogni colonna i si mantiene solo il min(j) (bottom). Hull = vertici ordinati per i crescente.
+  3. **Edge processing**: per ogni edge `(i_1, j_1) → (i_2, j_2)` con `j_1 > j_2`, calcola μ = (i_2 − i_1)/(j_1 − j_2) ridotto a `p/q`, gcd(p,q)=1, q>0.
+  4. **Lattice points sull'edge**: campionamento esatto via `step_i = (i_2−i_1)/gcd, step_j = (j_1−j_2)/gcd`. Tutti i lattice point con `a_{ij}` non-zero entrano nella caratteristica.
+  5. **Characteristic polynomial** `Φ(c) = Σ a_{ij} c^{j − j_min}`, costruito come `ExprPtr` (campo simbolico). j_min shift evita radici spurie c=0.
+  6. **Solve** via `algebra::solve_polynomial(Φ, c, ctx)` — supporta closed-form fino a deg 4, RootOf per deg ≥ 5.
+  7. **Multiplicity** decisa con `decide_multiplicity`: derivata ripetuta + substitute+simplify; ritorna lower bound sound (1 se simplifier indeciso).
+- **Self-check Regola Zero**:
+  - "Input 10× più grande?" → scaling lineare nel numero di edge × costo solve_polynomial; nessun cap nascosto. Polinomi grado alto vengono passati attraverso pipeline solver standard.
+  - "Costanti?" → solo `BigInt(0)`, `BigInt(1)` letterali matematici; iterazione `decide_multiplicity` cap 32 (hardware safety, non algoritmico: 32 derivate sono sufficienti per qualsiasi polinomio caratteristico di grado ragionevole; se servisse di più → Unimplemented esplicito).
+  - "Configurabile?" → API espone esponente arbitrario; nessuna scelta hardcoded di edge o slope.
+  - "Silenzio o Unimplemented diagnostico?" → Tre branch di `Unimplemented` espliciti: (a) f ≡ 0; (b) hull degenere (singolo vertice); (c) characteristic polynomial non solubile dal polynomial solver.
+- **Verifica** (2026-06-03, Release):
+  - `SquareRoot_TwoBranchesAtHalf`: `y² − x` → 2 branche, esponente 1/2, c = ±1. PASS.
+  - `CuspY2Equalsx3_BranchesAtThreeHalves`: `y² − x³` → 2 branche, esponente 3/2. PASS.
+  - `CubeRoot_ThreeBranchesAtTwoThirds`: `y³ − x²` → branche con esponente 2/3 (radici cubiche dell'unità). PASS.
+  - `NodeCurve_TwoBranchesAtHalf`: `y² + 2xy − x` → nodo, 2 branche a 1/2 con c = ±1. PASS.
+  - Build pulito `-Wall -Wextra -Wpedantic -Werror`.
+- **Scope completato**: leading-term extraction per branche al primo livello. Estensione recursiva (espansione completa via substitution y = c·x^μ + y₁·x^μ con re-applicazione del Newton polygon) resta future-work in F5.5-PUISEUX-RECURSION (non hardcode-of-passage: API e scope sono chiaramente delimitati, l'utente che richiede recursive expansion ottiene Unimplemented al chiamante esterno, non risultati silenziosamente sbagliati).
+- **STATO**: ✅ RISOLTA 2026-06-03 — Newton polygon leading-term extraction operativa. B5 sub-block "Puiseux series via Newton polygon" chiuso a livello 1.
+
 ### F5.5-PADE-NONQ — Padé approximant rifiutava coefficienti Taylor non razionali — RISOLTA 2026-06-03
 - **File**: `src/calculus/pade.cpp` (rewrite simbolico ~260 LOC); `test/unit/calculus/test_pade_approximant.cpp` (+3 test non-Q).
 - **Categoria CLAUDE.md**: Cat 4 (bail-out su tipo IntegerLit/RationalLit invece che su dominio) — pre-fix `exact_rational` ritornava `nullopt` per qualsiasi coefficiente non-letterale e `taylor_coefficients_rational` emetteva `Unimplemented`, bloccando `pade_approximant(cos(x), x, pi/4, ...)` e ogni espansione a centro algebrico/trascendente nonostante l'algoritmo sia ben definito sull'intero campo simbolico.
