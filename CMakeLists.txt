@@ -114,6 +114,8 @@ set(CAS_SYMBOLIC_SOURCES
     src/symbolic/simplify_arithmetic.cpp
     src/symbolic/simplify_arithmetic_chain_liketerm.cpp
     src/symbolic/summation_gosper.cpp
+    src/symbolic/summation_zeilberger.cpp
+    src/symbolic/summation_zeilberger_helpers.cpp
     src/symbolic/simplify_arithmetic_chain_sum.cpp
     src/symbolic/simplify_arithmetic_chain.cpp
     src/symbolic/simplify_functions.cpp
@@ -149,6 +151,7 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/integrate_improper.cpp
     src/calculus/summation.cpp
     src/calculus/summation_abramov.cpp
+    src/calculus/summation_zeilberger_driver.cpp
     src/calculus/integrate_core.cpp
     src/calculus/integrate_elementary.cpp
     src/calculus/integrate_helpers.cpp
@@ -617,6 +620,7 @@ test/unit/algebra/test_half_gcd.cpp
         test/unit/calculus/test_puiseux.cpp
         test/unit/calculus/test_residue_theorem_aberth.cpp
         test/unit/calculus/test_definite_summation.cpp
+        test/unit/calculus/test_zeilberger_summation.cpp
         test/unit/symbolic/test_assumptions_stability.cpp
         test/unit/symbolic/test_caching.cpp
         test/unit/symbolic/test_gruntz.cpp

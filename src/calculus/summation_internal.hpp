@@ -50,4 +50,10 @@ namespace cas::calculus {
     ExprPtr term, const Symbol& var, ExprPtr lower, ExprPtr upper,
     symbolic::CASContext& ctx);
 
+// Implemented in summation_zeilberger_driver.cpp:
+
+[[nodiscard]] Result<ExprPtr> try_zeilberger_definite(
+    ExprPtr term, const Symbol& var, ExprPtr lower, ExprPtr upper,
+    symbolic::CASContext& ctx);
+
 } // namespace cas::calculus

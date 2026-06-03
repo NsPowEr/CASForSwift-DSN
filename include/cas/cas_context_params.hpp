@@ -409,6 +409,37 @@ struct CASContextParams {
         return residue_aberth_max_iterations_;
     }
 
+    // ── Zeilberger creative telescoping (F5.7) ─────────────────────────────
+    // Maximum recurrence order J to try (J=1 covers most single-binomial sums;
+    // J=2 covers Vandermonde/convolution).
+    // Default 2; raising to 3+ enables WZ-provable identities at higher cost.
+    void set_max_zeilberger_order(unsigned int j) noexcept {
+        max_zeilberger_order_ = (j < 1U) ? 1U : j;
+    }
+    [[nodiscard]] unsigned int max_zeilberger_order() const noexcept {
+        return max_zeilberger_order_;
+    }
+
+    // Maximum degree D in n for the operator polynomial coefficients p_i(n).
+    // For most proper hypergeometric sums, D=1 suffices.
+    // Default 2; D=0 handles constant-coefficient recurrences (e.g., Σ 1 = n).
+    void set_max_zeilberger_poly_degree(unsigned int d) noexcept {
+        max_zeilberger_poly_degree_ = d;
+    }
+    [[nodiscard]] unsigned int max_zeilberger_poly_degree() const noexcept {
+        return max_zeilberger_poly_degree_;
+    }
+
+    // Maximum degree of the Zeilberger certificate R(k) numerator in k.
+    // Derivation: deg(R) ≤ J + max(deg(N_r), deg(D_r)) where N_r/D_r = r(k).
+    // Default 4; auto-derived from r(k) when 0.
+    void set_max_zeilberger_cert_degree(unsigned int d) noexcept {
+        max_zeilberger_cert_degree_ = d;
+    }
+    [[nodiscard]] unsigned int max_zeilberger_cert_degree() const noexcept {
+        return max_zeilberger_cert_degree_;
+    }
+
     // ── Bernoulli/Zeta integer-index bit budget (HPP-015 family) ───────────
     // Maximum bit_length of |n| accepted by Zeta(n) closed-form via Bernoulli
     // numbers (positive even or negative odd). Exceeded → explicit Unimplemented
@@ -469,6 +500,9 @@ protected:
     unsigned int  max_puiseux_multiplicity_iterations_{32U};   // F5.5
     unsigned int  residue_aberth_precision_digits_{80U};       // F5.6
     unsigned int  residue_aberth_max_iterations_{500U};        // F5.6
+    unsigned int  max_zeilberger_order_{2U};          // F5.7
+    unsigned int  max_zeilberger_poly_degree_{2U};    // F5.7
+    unsigned int  max_zeilberger_cert_degree_{4U};    // F5.7
 };
 
 }  // namespace cas::symbolic

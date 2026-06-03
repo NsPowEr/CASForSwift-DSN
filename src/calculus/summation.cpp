@@ -112,6 +112,8 @@ namespace cas::calculus {
         if (poly_res.is_ok()) return poly_res;
         auto abramov_res = try_abramov_definite(term, var, lower, upper, ctx);
         if (abramov_res.is_ok()) return abramov_res;
+        auto zeil_res = try_zeilberger_definite(term, var, lower, upper, ctx);
+        if (zeil_res.is_ok()) return zeil_res;
     }
 
     return make_unimplemented<ExprPtr>(
