@@ -17,6 +17,25 @@
 
 ## Voci aperte
 
+### F5.5-PADE-NONQ — Padé approximant rifiutava coefficienti Taylor non razionali — RISOLTA 2026-06-03
+- **File**: `src/calculus/pade.cpp` (rewrite simbolico ~260 LOC); `test/unit/calculus/test_pade_approximant.cpp` (+3 test non-Q).
+- **Categoria CLAUDE.md**: Cat 4 (bail-out su tipo IntegerLit/RationalLit invece che su dominio) — pre-fix `exact_rational` ritornava `nullopt` per qualsiasi coefficiente non-letterale e `taylor_coefficients_rational` emetteva `Unimplemented`, bloccando `pade_approximant(cos(x), x, pi/4, ...)` e ogni espansione a centro algebrico/trascendente nonostante l'algoritmo sia ben definito sull'intero campo simbolico.
+- **Fix applicato**:
+  1. `taylor_coefficients_symbolic` mantiene i coefficienti come `ExprPtr`; `c_k = (1/k!) · d^k f / dx^k |_centre` con normalizzazione via `ctx.simplify` (folda razionali esatti, conserva √2, π, e, RootOf, …).
+  2. `solve_linear_symbolic`: Gauss-Jordan Toeplitz su `ExprPtr`. Decisione pivot non-zero tramite `is_known_zero` → `ctx.simplify` + check letterale. Pivot non decidibile → `Unimplemented` esplicito che indica all'utente di fornire assumptions o ridurre l'ordine (no risultato silenziosamente sbagliato).
+  3. Aritmetica simbolica via helper `simp_mul/simp_sub/simp_div/simp_neg` (Binary + `ctx.simplify`).
+  4. `build_poly_in_shifted_var` ora accetta `vector<ExprPtr>` (rimosso ramo `Rational`).
+- **Self-check Regola Zero**:
+  - "Input 10× più grande?" → ordine [m/n] arbitrario; il solver scala come Gauss-Jordan O(n³) sul Toeplitz; non c'è cap nascosto.
+  - "Nome in letteratura?" → nessuna costante introdotta; algoritmo standard Pade [m/n] Wynn/Baker §1.
+  - "Utente può cambiare senza ricompilare?" → ordini m, n sono già parametri della funzione; non aggiunte nuove costanti.
+  - "Risultato sbagliato silenzioso o Unimplemented diagnostico?" → SOLO Unimplemented diagnostico se pivot non decidibile.
+- **Verifica** (2026-06-03, Release):
+  - 5/5 test pre-esistenti PASS (`ExpZeroOnePade`, `ExpZeroTwoPadeAntiHardcode`, `GeometricSeriesReproducedExactly`, `ConsistencyAgainstTaylorTruncation`, `ShiftedCenterAntiHardcode`).
+  - 3/3 nuovi test PASS: `GeometricSeriesWithAlgebraicCoefficient` (1/(1−√2 x) [0/1] reproduce esatto), `CosineAtAlgebraicCentreAntiHardcode` (cos(x) at π/4 [1/1], Taylor-truncation P−f·Q ≡ 0 mod (x−π/4)³), `ExpAtSymbolicCentreLnTwoAntiHardcode` (exp(x) at ln 2 [1/1], P/Q|_ln2 = 2).
+  - Build pulito `-Wall -Wextra -Wpedantic -Werror`.
+- **STATO**: ✅ RISOLTA 2026-06-03 — Pade ora opera sull'intero campo simbolico. B5 sub-block "Padé non-Q coefficients" chiuso; Puiseux via Newton polygon resta in B5 (work-in-progress).
+
 ### F5.3-RICCATI-B2A — Riccati family classifier + closed-form solver — RISOLTA 2026-06-02
 - **File**: `include/cas/ode.hpp` (OdeType + OdeClassification + solve_ode_nonlinear API); `src/calculus/ode_classifier.cpp` (try_riccati + dispatcher + shielded substitution); `src/calculus/ode_solver_nonlinear.cpp` (NEW, ~260 LOC); `CMakeLists.txt` (sorgente registrato); `test/unit/test_ode.cpp` (4 nuovi test).
 - **Categoria CLAUDE.md**: Cat 8 (pattern matching previously missing → algorithmic detection); F5.3 sub-block B2a.
