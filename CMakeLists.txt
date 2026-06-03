@@ -148,6 +148,7 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/orthogonal_polynomials.cpp
     src/calculus/integrate_improper.cpp
     src/calculus/summation.cpp
+    src/calculus/summation_abramov.cpp
     src/calculus/integrate_core.cpp
     src/calculus/integrate_elementary.cpp
     src/calculus/integrate_helpers.cpp

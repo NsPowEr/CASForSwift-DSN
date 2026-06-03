@@ -17,6 +17,15 @@
 
 ## Voci aperte
 
+### F5.7-B6BIS-QUADRATIC-M-GT-1 — Polygamma ad alto ordine per (B₁k+B₀)/Q(k)^m con m>1
+- **File**: `src/calculus/summation_abramov.cpp` (helper `try_quadratic_atom_antidiff`, linea che ritorna `std::nullopt` per m>1).
+- **Categoria CLAUDE.md**: Cat 4 (bail-out su tipo) — diagnostico esplicito con nullopt propagato a Unimplemented nel caller; nessun silenzio.
+- **Descrizione**: Per atomi di forma `(B₁k+B₀)/Q(k)^m` con `m>1` e `Q` Q-irriducibile quadratica, l'antidifferenza richiede polygamma di ordine `m-1` valutata in punti algebrici α,β. La formula esiste (generalizzazione della residue decomposition su Q(α)) ma richiede infrastruttura per `ψ^(m-1)(algebraic shift)` nel simplifier.
+- **Fix corretto**: Estendere `try_quadratic_atom_antidiff` per m>1: decomposizione di `(B₁k+B₀)/((k-α)^m(k-β)^m)` in somma di `C_j/(k-α)^j + D_j/(k-β)^j` (j=1..m) via derivata dell'equazione di Hermite su Q(α), poi applicare `polygamma_antidiff(..., m, ctx)` per ogni grado.
+- **Blocking dependency**: Simplifier deve supportare `ψ^(n)(RootOf(...))` come forma canonica opaca (attualmente funziona per digamma; polygamma order m-1 con algebraic arg è già ExprPtr-compatibile ma non testato).
+- **Self-check Regola Zero**: "Hardcode silenzioso?" → no, ritorna nullopt esplicito → caller produce Unimplemented con messaggio diagnostico. "Input più grande?" → m>1 è il caso rifiutato, documentato qui. "Costanti?" → nessuna costante hardcoded; il valore m=1 è la condizione di guarda.
+- **STATO**: APERTO — m>1 richiede implementazione futura (frequenza rara in pratica: partial_fractions su denominatori irriducibili tipicamente produce m=1).
+
 ### F5.7-ABRAMOV-FULL — Multi-atom rational summation via partial-fraction + polygamma — RISOLTA 2026-06-03
 - **File**: `src/calculus/summation.cpp` (helper `try_abramov_definite`); `src/symbolic/summation_gosper.cpp` (rescale tail ungated + `together`-based ratio); `test/unit/calculus/test_definite_summation.cpp` (+1 numerical test); `test/unit/symbolic/test_summation_gosper.cpp` (+1 antidifference witness).
 - **Categoria CLAUDE.md**: nuova capability F5.7 sub-block 2; nessun hardcode. Tutti i casi pattern-matched provengono da decomposizione algebrica (partial_fractions) e si chiudono via la formula esatta polygamma.

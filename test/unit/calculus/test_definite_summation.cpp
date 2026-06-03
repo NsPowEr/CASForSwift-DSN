@@ -198,4 +198,63 @@ TEST_F(DefiniteSummationTest, BaselSumDefinite_ViaPolygamma) {
     EXPECT_TRUE(found) << "expected polygamma antidifference in 1/k² sum";
 }
 
+// ── B6-bis — Q-irreducible quadratic atoms via RootOf digamma ────────────────
+
+// Σ_{k=1}^{n} 1/(k²+k+1): disc = 1−4 = −3 (complex roots, irreducible over Q).
+// Antidifference: C·ψ(k−α) + D·ψ(k−β),  α = RootOf(t²+t+1,t,0).
+// Result must contain a Digamma call confirming the quadratic-RootOf path fired.
+TEST_F(DefiniteSummationTest, QuadraticIrreducibleDenom_ViaRootOfDigamma) {
+    auto term = parse_expr("1/(k^2 + k + 1)", ctx.arena());
+    auto lo   = parse_expr("1", ctx.arena());
+    auto hi   = parse_expr("n", ctx.arena());
+    auto res  = calculus::sum(term, k, lo, hi, ctx);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+    bool found = false;
+    auto walk = [&](auto self, ExprPtr e) -> void {
+        if (!e) return;
+        if (is_digamma_call(e)) { found = true; return; }
+        if (const auto* bin = expr_cast<Binary>(e)) {
+            self(self, bin->left); self(self, bin->right); return;
+        }
+        if (const auto* un = expr_cast<Unary>(e)) { self(self, un->operand); return; }
+        if (const auto* s = expr_cast<Sum>(e)) {
+            for (ExprPtr t : s->terms) self(self, t); return;
+        }
+        if (const auto* p = expr_cast<Product>(e)) {
+            for (ExprPtr t : p->factors) self(self, t); return;
+        }
+    };
+    walk(walk, res.value());
+    EXPECT_TRUE(found)
+        << "expected RootOf-shifted digamma antidifference for 1/(k²+k+1)";
+}
+
+// Σ_{k=1}^{n} k/(k²+k+1): linear numerator with irreducible quadratic denominator.
+// Tests the A₁≠0 branch: residues C = α/(α−β), D = β/(β−α).
+TEST_F(DefiniteSummationTest, QuadraticIrreducibleLinearNum_ViaRootOfDigamma) {
+    auto term = parse_expr("k/(k^2 + k + 1)", ctx.arena());
+    auto lo   = parse_expr("1", ctx.arena());
+    auto hi   = parse_expr("n", ctx.arena());
+    auto res  = calculus::sum(term, k, lo, hi, ctx);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+    bool found = false;
+    auto walk = [&](auto self, ExprPtr e) -> void {
+        if (!e) return;
+        if (is_digamma_call(e)) { found = true; return; }
+        if (const auto* bin = expr_cast<Binary>(e)) {
+            self(self, bin->left); self(self, bin->right); return;
+        }
+        if (const auto* un = expr_cast<Unary>(e)) { self(self, un->operand); return; }
+        if (const auto* s = expr_cast<Sum>(e)) {
+            for (ExprPtr t : s->terms) self(self, t); return;
+        }
+        if (const auto* p = expr_cast<Product>(e)) {
+            for (ExprPtr t : p->factors) self(self, t); return;
+        }
+    };
+    walk(walk, res.value());
+    EXPECT_TRUE(found)
+        << "expected RootOf-shifted digamma antidifference for k/(k²+k+1)";
+}
+
 }  // namespace cas::test
