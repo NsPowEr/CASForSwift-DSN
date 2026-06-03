@@ -17,6 +17,32 @@
 
 ## Voci aperte
 
+### F5.6-ABERTH-ROOT-ISOLATOR — Simultaneous complex root isolator for univariate polynomials — RISOLTA 2026-06-03
+- **File**: `include/cas/numeric/complex_root_isolator.hpp` (NEW, ~60 LOC); `src/numeric/aberth_root_isolator.cpp` (NEW, ~250 LOC); `test/unit/numeric/test_aberth_root_isolator.cpp` (NEW, 5 test); `CMakeLists.txt` (sorgente + test registrati).
+- **Categoria CLAUDE.md**: nuova capability F5.6 sub-block 1 (infrastruttura per Residue theorem driver deg≥5); zero hardcode introdotti. Tutte le costanti algoritmiche (max_iter, tol, precision_digits) sono campi configurabili di `AberthOptions`.
+- **Algoritmo (Aberth 1973, Bini 1996)**:
+  1. **Coefficient lift**: `algebra::univariate_coefficients` produce `vector<ExprPtr>`; ogni coeff è risolto a `IntegerLit`/`RationalLit` via `ctx.simplify` e convertito a `BigFloat` alla precisione MPFR richiesta. Coeff non-letterale dopo simplify → `Unimplemented` esplicito (coeff complessi non ancora supportati al numerico).
+  2. **Strip**: zero-coeff trailing rimossi (degree reduction); zero roots emessi una volta sola con residual = 0.
+  3. **Cauchy bound** `R = 1 + max_k |a_k/a_n|` definisce raggio iniziale.
+  4. **Initialisation**: `z_k = R · (cos θ_k + i sin θ_k)`, θ_k = 2πk/n + π/(2n), evita allineamento accidentale all'asse reale (Bini §3).
+  5. **Iterazione Aberth-Ehrlich**: per ogni i, `ratio = p(z_i)/p'(z_i)` via Horner pair compensato; `σ_i = Σ_{j≠i} 1/(z_i − z_j)`; `w_i = ratio/(1 − ratio·σ_i)`; `z_i ← z_i − w_i`. Cubic convergence per radici semplici.
+  6. **Stop**: `max_i |w_i| < tol` (default 1e-30) o `max_iter` raggiunto (default 200). Caps NON algoritmici ma configurabili → Unimplemented diagnostico se max_iter exhausted.
+  7. **Output**: ogni `ComplexRoot` riporta re, im, e `residual = |p(z_final)|` come a-posteriori error proxy.
+- **Self-check Regola Zero**:
+  - "Input 10× più grande?" → precisione configurabile via `AberthOptions::precision_digits` (default 40 cifre decimali ≈ 134 bit MPFR); deg arbitrario, scaling O(n² · iter).
+  - "Costanti?" → tutte derivate dall'algoritmo (Cauchy bound formula esatta) o configurabili (precision, max_iter, tol).
+  - "Configurabile?" → sì, `AberthOptions`.
+  - "Silenzio o Unimplemented diagnostico?" → tre rami `Unimplemented`: coeff non rationale, max_iter exhausted, polinomio zero. Mai risultato silenziosamente sbagliato.
+- **Aritmetica complessa**: struct inline `CBF` (re/im `BigFloat`) — evita dipendenza MPC esterna (build matrix invariata). Add/sub/mul/div/abs implementati con formule standard; division `(a + b·i)/(c + d·i) = ((ac+bd) + (bc−ad)·i)/(c² + d²)`.
+- **Verifica** (2026-06-03, Release):
+  - `ImaginaryUnitRoots`: x²+1 → {i, −i}. PASS (residual ≪ 1e-12).
+  - `CubeRootsOfUnity`: x³−1 → {1, e^(2πi/3), e^(−2πi/3)}. PASS.
+  - `RealPrimesDegreeFive`: (x−2)(x−3)(x−5)(x−7)(x−11) expanded = x⁵−28x⁴+288x³−1358x²+2927x−2310. PASS — esercizia deg≥5 path senza closed form.
+  - `EighthRootsOfUnity`: x⁴+1 → 4 primitive 8th roots. PASS.
+  - `ProductOfQuadraticsResidualOnly`: (x−1)(x²+1)(x²+x+1)(x+4) deg 6, residuals < 1e-20. PASS.
+  - Build pulito `-Wall -Wextra -Wpedantic -Werror`. 1944/1944 non-stress PASS in 53s (1939 baseline + 5 nuovi).
+- **STATO**: ✅ RISOLTA 2026-06-03 — Aberth core operativo. Sub-block 2 "Residue theorem driver deg≥5" (wiring in `residue_theorem.cpp`) tracked separatamente, non hardcode-of-passage: API e diagnostics di Aberth sono complete per essere consumate dal driver.
+
 ### F5.5-PUISEUX-NEWTON — Puiseux series leading-term extractor via Newton polygon — RISOLTA 2026-06-03
 - **File**: `include/cas/calculus.hpp` (struct `PuiseuxBranch` + API `puiseux_leading_terms`); `src/calculus/puiseux.cpp` (NEW, ~270 LOC); `CMakeLists.txt` (registrato sorgente + test); `test/unit/calculus/test_puiseux.cpp` (NEW, 4 test).
 - **Categoria CLAUDE.md**: nuova capability F5.5 sub-block 2; nessun hardcode introdotto. Coefficienti di campo simbolico arbitrario (`ExprPtr`), nessun bound numerico, nessuna costante magica.

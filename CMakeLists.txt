@@ -282,6 +282,7 @@ set(CAS_NUMERIC_SOURCES
     src/numeric/evaluator.cpp
     src/numeric/solvers.cpp
     src/numeric/sturm.cpp
+    src/numeric/aberth_root_isolator.cpp
     src/numeric/lipschitz.cpp
     src/numeric/integration.cpp
     src/numeric/ode.cpp
@@ -520,6 +521,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/symbolic/test_piecewise.cpp
         test/unit/algebra/test_monomial_orders.cpp
         test/unit/numeric/test_interval.cpp
+        test/unit/numeric/test_aberth_root_isolator.cpp
         test/unit/calculus/test_numeric_diff.cpp
         test/unit/symbolic/test_branch_cuts_global.cpp
         test/unit/linalg/test_lu_decomposition.cpp
