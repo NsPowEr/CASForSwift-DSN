@@ -170,6 +170,12 @@ Result<std::vector<ComplexRoot>> aberth_isolate_complex_roots(
     }
 
     const BigFloat tol = BigFloat::from_double(options.convergence_tolerance, prec);
+    // Perturbation magnitude for degenerate inner-loop cases (singular
+    // derivative, coincident guesses).  Standard numerical-analysis choice:
+    // perturbation = √tol — small enough to remain inside the basin of
+    // attraction, large enough to kick z off the singular point so the next
+    // iteration recovers (Numerical Recipes §9.4 / Bini 1996 §5).
+    const BigFloat perturbation = BigFloat::sqrt(tol);
 
     std::vector<CBF> w(deg, CBF::zero(prec));
     bool converged = false;
@@ -178,9 +184,7 @@ Result<std::vector<ComplexRoot>> aberth_isolate_complex_roots(
         for (std::size_t i = 0; i < deg; ++i) {
             auto [p_zi, dp_zi] = horner_pair(coeffs, z[i], prec);
             if (dp_zi.is_zero()) {
-                // Singular derivative — perturb and continue.
-                z[i] = z[i] + CBF{BigFloat::from_double(1e-12, prec),
-                                  BigFloat::from_double(1e-12, prec)};
+                z[i] = z[i] + CBF{perturbation, perturbation};
                 continue;
             }
             CBF ratio = p_zi / dp_zi;
@@ -189,8 +193,7 @@ Result<std::vector<ComplexRoot>> aberth_isolate_complex_roots(
                 if (i == j) continue;
                 CBF diff = z[i] - z[j];
                 if (diff.is_zero()) {
-                    diff = CBF{BigFloat::from_double(1e-12, prec),
-                               BigFloat::from_double(0.0, prec)};
+                    diff = CBF{perturbation, BigFloat::from_double(0.0, prec)};
                 }
                 sigma = sigma + CBF::from_real(BigFloat::from_double(1.0, prec)) / diff;
             }

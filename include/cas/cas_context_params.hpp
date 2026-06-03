@@ -365,6 +365,50 @@ struct CASContextParams {
         return max_special_fn_integer_arg_bits_;
     }
 
+    // ── F5.5 Puiseux multiplicity-decision iteration budget ────────────────
+    // Maximum number of repeated-derivative + substitute + simplify rounds
+    // used by `puiseux_leading_terms` to decide the multiplicity of a root
+    // in the characteristic polynomial.  Exceeded → fall back to the sound
+    // lower bound of 1 (NEVER a silently inflated count).
+    // Default 32 covers any well-conditioned characteristic; pathological
+    // higher orders can be raised here without recompilation.
+    void set_max_puiseux_multiplicity_iterations(unsigned int n) noexcept {
+        max_puiseux_multiplicity_iterations_ = n;
+    }
+    [[nodiscard]] unsigned int max_puiseux_multiplicity_iterations() const noexcept {
+        return max_puiseux_multiplicity_iterations_;
+    }
+
+    // ── F5.6 Residue-theorem numeric driver precision ──────────────────────
+    // Working MPFR precision (in decimal digits) of the Aberth root isolator
+    // when invoked from `integrate_rational_full_real_line` for irreducible
+    // denominator factors of deg ≥ 5 or non-biquadratic quartics.  The
+    // residue formula  Res = N(z)/D'(z)  evaluates a sum of complex
+    // residues whose imaginary direction suffers catastrophic cancellation
+    // when the integrand has real coefficients; the precision must absorb
+    // that loss without polluting the to_double() final emission.
+    // Default 80 decimal digits (≈ 265 MPFR bits) — empirical safe bound
+    // for polynomials of moderate Mahler measure.  Increase for denominators
+    // with large root-magnitude spread.
+    void set_residue_aberth_precision_digits(unsigned int d) noexcept {
+        residue_aberth_precision_digits_ = d;
+    }
+    [[nodiscard]] unsigned int residue_aberth_precision_digits() const noexcept {
+        return residue_aberth_precision_digits_;
+    }
+
+    // ── F5.6 Residue-theorem numeric driver iteration budget ───────────────
+    // Maximum Aberth main-loop iterations used by the residue driver.
+    // Exceeded → explicit Unimplemented diagnostic recommending a precision
+    // bump.  Default 500 (≈ cubic Aberth convergence reaches working
+    // precision in O(log_2 precision_bits) iterations + safety margin).
+    void set_residue_aberth_max_iterations(unsigned int n) noexcept {
+        residue_aberth_max_iterations_ = n;
+    }
+    [[nodiscard]] unsigned int residue_aberth_max_iterations() const noexcept {
+        return residue_aberth_max_iterations_;
+    }
+
     // ── Bernoulli/Zeta integer-index bit budget (HPP-015 family) ───────────
     // Maximum bit_length of |n| accepted by Zeta(n) closed-form via Bernoulli
     // numbers (positive even or negative odd). Exceeded → explicit Unimplemented
@@ -422,6 +466,9 @@ protected:
     std::size_t   pollard_rho_max_iter_{4096U};          // HPP-021 closure
     unsigned int  max_special_fn_integer_arg_bits_{16U}; // HPP-015 closure
     unsigned int  max_bernoulli_index_bits_{30U};        // HPP-015 closure (Zeta)
+    unsigned int  max_puiseux_multiplicity_iterations_{32U};   // F5.5
+    unsigned int  residue_aberth_precision_digits_{80U};       // F5.6
+    unsigned int  residue_aberth_max_iterations_{500U};        // F5.6
 };
 
 }  // namespace cas::symbolic

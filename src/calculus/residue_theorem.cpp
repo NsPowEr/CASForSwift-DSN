@@ -407,12 +407,22 @@ struct QuadraticFactor {
 
     // Higher precision than the Aberth defaults: residue evaluation involves
     // catastrophic cancellation in the imaginary direction (real-coefficient
-    // integrand → sum is purely imaginary), so we ask for ~80 decimal digits
-    // working precision to keep the final to_double() lossless.
+    // integrand → sum is purely imaginary), so we ask for extra working
+    // precision to keep the final to_double() lossless.  Both knobs are
+    // configurable on the CASContext (defaults: 80 decimal digits,
+    // 500 iterations) — see `set_residue_aberth_precision_digits`.
+    //
+    // The convergence tolerance is derived from precision_digits rather than
+    // hardcoded: we ask for 10^{−(precision − 10)} so the iteration stops
+    // when |Δz| sits 10 decimal orders inside working precision.  This keeps
+    // the tolerance coherent under any user-driven precision bump without
+    // requiring a second knob.
+    const unsigned int prec_digits = ctx.residue_aberth_precision_digits();
     const numeric::AberthOptions opts{
-        /* precision_digits = */ 80U,
-        /* max_iterations   = */ 500U,
-        /* convergence_tolerance = */ 1e-60,
+        /* precision_digits = */ prec_digits,
+        /* max_iterations   = */ ctx.residue_aberth_max_iterations(),
+        /* convergence_tolerance = */ std::pow(
+            10.0, -static_cast<double>(prec_digits > 10U ? prec_digits - 10U : 1U)),
     };
     const mpfr_prec_t prec = decimal_digits_to_bits(opts.precision_digits);
 

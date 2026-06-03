@@ -180,7 +180,8 @@ struct Monomial {
 // Decide multiplicity of `root` in the characteristic polynomial by
 // repeated synthetic division — equivalent to evaluating Φ, Φ', Φ'', ... at
 // the root.  Returns 1 unless we can prove a higher multiplicity via the
-// simplifier (so the answer is always a sound lower bound).
+// simplifier (so the answer is always a sound lower bound).  Iteration cap
+// configurable via `ctx.max_puiseux_multiplicity_iterations()` (default 32).
 [[nodiscard]] unsigned int decide_multiplicity(
     ExprPtr char_poly,
     const Symbol& c_var,
@@ -188,7 +189,8 @@ struct Monomial {
     symbolic::CASContext& ctx) {
     unsigned int mult = 0U;
     ExprPtr current = char_poly;
-    for (unsigned int k = 0; k < 32U; ++k) {
+    const unsigned int budget = ctx.max_puiseux_multiplicity_iterations();
+    for (unsigned int k = 0; k < budget; ++k) {
         auto sub = ctx.substitute(current, c_var, root);
         if (sub.is_error()) return std::max(mult, 1U);
         auto val = ctx.simplify(sub.value());
