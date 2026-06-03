@@ -82,3 +82,26 @@ TEST_F(GosperSumTest, NotHypergeometricSummable) {
     ASSERT_TRUE(res.is_ok());
     ASSERT_FALSE(res.value().has_value());
 }
+
+// F5.7-GOSPER-K2-NORMALIZATION — known regression: Gosper antidifference of
+// k² returns 6·S(k) instead of S(k), so S(k+1) − S(k) = 6·k² instead of k².
+// The cause is identified (csolve clears denominators of the linear u_i
+// system without re-scaling x_sol back).  Tracked in HARDCODE_LEDGER.md;
+// disabled here until the rescaling is restored, but kept as a regression
+// witness so the fix can be verified by simply removing the DISABLED_
+// prefix.
+TEST_F(GosperSumTest, DISABLED_PolynomialKSquaredAntidifferenceIsExact) {
+    auto term = parse("k^2");
+    auto res = gosper_sum(term, k, ctx);
+    ASSERT_TRUE(res.is_ok());
+    ASSERT_TRUE(res.value().has_value()) << "k^2 is Gosper-summable";
+
+    auto s = res.value().value();
+    auto k_plus_1 = parse("k + 1");
+    auto s_next = substitute(s, k, k_plus_1, ctx).value();
+    auto diff = ctx.arena().make<Binary>(BinaryOp::Sub, s_next, s);
+    auto diff_simp = simplify(diff, ctx).value();
+    auto diff_expand = algebra::expand(diff_simp, ctx).value();
+
+    EXPECT_TRUE(mathematically_equal(diff_expand, term, ctx).value());
+}

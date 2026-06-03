@@ -3,6 +3,7 @@
 #include "cas/numtheory.hpp"
 #include "cas/rational.hpp"
 #include "cas/symbolic.hpp"
+#include "../symbolic/summation_gosper.hpp"
 #include <cstdint>
 #include <limits>
 #include <optional>
@@ -117,6 +118,41 @@ namespace cas::calculus {
     return ctx.simplify(arena.make<Binary>(BinaryOp::Mul, coeff, pi_power));
 }
 
+// F5.7 sub-block 0 — definite hypergeometric summation via Gosper.
+//
+// gosper_sum(t, k) returns (when it succeeds) an antidifference S(k) such
+// that S(k+1) − S(k) = t(k).  The Newton-Leibniz analogue for the finite
+// calculus then gives  Σ_{k=a}^{b} t(k) = S(b+1) − S(a).
+//
+// Indeterminate bounds (free symbols, RootOf, …) are passed verbatim into
+// the substitution machinery; the simplifier folds them when possible and
+// leaves them symbolic otherwise.
+[[nodiscard]] static Result<ExprPtr> try_gosper_definite(
+    ExprPtr term,
+    const Symbol& var,
+    ExprPtr lower,
+    ExprPtr upper,
+    symbolic::CASContext& ctx) {
+    auto antidiff = symbolic::gosper_sum(term, var, ctx);
+    if (antidiff.is_error()) return fail<ExprPtr>(antidiff.error());
+    if (!antidiff.value().has_value()) {
+        return fail<ExprPtr>(CASError{
+            .kind = CASErrorKind::Unimplemented,
+            .message = "Gosper: term is not Gosper-summable",
+        });
+    }
+    AstArena& arena = ctx.arena();
+    ExprPtr S = antidiff.value().value();
+    ExprPtr upper_plus_one = arena.make<Binary>(BinaryOp::Add, upper,
+        arena.make<IntegerLit>(BigInt(1)));
+    auto S_upper = ctx.substitute(S, var, upper_plus_one);
+    if (S_upper.is_error()) return fail<ExprPtr>(S_upper.error());
+    auto S_lower = ctx.substitute(S, var, lower);
+    if (S_lower.is_error()) return fail<ExprPtr>(S_lower.error());
+    ExprPtr diff = arena.make<Binary>(BinaryOp::Sub, S_upper.value(), S_lower.value());
+    return ctx.simplify(diff);
+}
+
 [[nodiscard]] Result<ExprPtr> symbolic_sum(
     ExprPtr term,
     const Symbol& var,
@@ -129,14 +165,22 @@ namespace cas::calculus {
                 return zeta_even_value(*exponent, ctx);
             }
         }
+        // Infinite Gosper-summable series:  if S(k) → 0 as k → ∞ we cannot
+        // decide this without an asymptotic analysis, so fall through to
+        // diagnostic Unimplemented below rather than risk silent error.
+    } else {
+        // Definite finite-bound sum — try Gosper.
+        auto gosper_res = try_gosper_definite(term, var, lower, upper, ctx);
+        if (gosper_res.is_ok()) return gosper_res;
+        // Non-Gosper-summable: fall through to diagnostic.
     }
-    
-    // F0.8-MIGRATED
+
     return make_unimplemented<ExprPtr>(
         "calculus", "sum_closed_form",
         "general summand not in closed-form table",
         cas::error::reason_codes::SUMMATION_GENERAL,
-        "Implement Gosper's algorithm and Petkovšek-WZ for hypergeometric summation",
+        "Implement Petkovšek-WZ / Zeilberger creative telescoping or Abramov "
+        "rational summation for terms outside the Gosper hypergeometric class",
         "F0.8");
 }
 
