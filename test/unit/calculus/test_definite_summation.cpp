@@ -68,6 +68,18 @@ TEST_F(DefiniteSummationTest, ArithmeticSeriesFirstN) {
     EXPECT_TRUE(simplifies_to_zero(res.value(), ctx.simplify(expected).value(), ctx));
 }
 
+// Σ_{k=1}^{n} k² = n·(n+1)·(2n+1)/6  (closed via Gosper antidifference of k²
+// after the F5.7-GOSPER-K2-NORMALIZATION rescaling).
+TEST_F(DefiniteSummationTest, SumOfSquares) {
+    auto term = parse_expr("k^2", ctx.arena());
+    auto lo = parse_expr("1", ctx.arena());
+    auto hi = parse_expr("n", ctx.arena());
+    auto res = calculus::sum(term, k, lo, hi, ctx);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+    auto expected = parse_expr("n*(n+1)*(2*n+1)/6", ctx.arena());
+    EXPECT_TRUE(simplifies_to_zero(res.value(), ctx.simplify(expected).value(), ctx));
+}
+
 // Σ_{k=1}^{n} 1/(k·(k+1)) = n/(n+1)  (telescoping; Gosper-summable rational).
 TEST_F(DefiniteSummationTest, TelescopingRational) {
     auto term = parse_expr("1/(k*(k+1))", ctx.arena());

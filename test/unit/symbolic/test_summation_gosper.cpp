@@ -83,14 +83,11 @@ TEST_F(GosperSumTest, NotHypergeometricSummable) {
     ASSERT_FALSE(res.value().has_value());
 }
 
-// F5.7-GOSPER-K2-NORMALIZATION — known regression: Gosper antidifference of
-// k² returns 6·S(k) instead of S(k), so S(k+1) − S(k) = 6·k² instead of k².
-// The cause is identified (csolve clears denominators of the linear u_i
-// system without re-scaling x_sol back).  Tracked in HARDCODE_LEDGER.md;
-// disabled here until the rescaling is restored, but kept as a regression
-// witness so the fix can be verified by simply removing the DISABLED_
-// prefix.
-TEST_F(GosperSumTest, DISABLED_PolynomialKSquaredAntidifferenceIsExact) {
+// F5.7-GOSPER-K2-NORMALIZATION — regression witness for the csolve-induced
+// rescaling.  Closed-form fix lives in `gosper_sum`'s tail: it verifies
+// S(k+1) − S(k) symbolically against term, detects a rational-constant
+// drift α, and rescales S by 1/α.
+TEST_F(GosperSumTest, PolynomialKSquaredAntidifferenceIsExact) {
     auto term = parse("k^2");
     auto res = gosper_sum(term, k, ctx);
     ASSERT_TRUE(res.is_ok());

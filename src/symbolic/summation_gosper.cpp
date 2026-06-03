@@ -270,6 +270,65 @@ Result<std::optional<ExprPtr>> gosper_sum(
         auto s_tog_simp = simplify(s_tog.value(), ctx);
         if (s_tog_simp.is_ok()) s_final = s_tog_simp.value();
     }
+
+    // F5.7-GOSPER-K2-NORMALIZATION fix — `csolve` on the over-determined
+    // rational system at lines 218-226 occasionally returns the u_i vector
+    // pre-scaled by the LCM of denominators (verified for term = k²:
+    // expected u = (1/6, −1/2, 1/3), returned u = (1, −3, 2)).  We recover
+    // the correct antidifference by verifying S(k+1) − S(k) ≡ term and, if
+    // the ratio is a non-trivial rational constant α, rescaling S by 1/α.
+    // The witness expression must reduce to a rational literal — any other
+    // residual means the system was genuinely under-determined and the
+    // rescaling is undefined, in which case we fall back to the original
+    // S without scaling.
+    {
+        auto s_next = substitute(s_final, k, k_plus_1, ctx);
+        if (s_next.is_ok()) {
+            auto delta_raw = linalg::sub_expr(ctx, s_next.value(), s_final);
+            if (delta_raw.is_ok()) {
+                auto delta_simp = simplify(delta_raw.value(), ctx);
+                if (delta_simp.is_ok()) {
+                    auto delta_exp = algebra::expand(delta_simp.value(), ctx);
+                    auto term_exp  = algebra::expand(term, ctx);
+                    if (delta_exp.is_ok() && term_exp.is_ok()) {
+                        auto ratio = linalg::div_expr(ctx, delta_exp.value(), term_exp.value());
+                        if (ratio.is_ok()) {
+                            auto ratio_simp = simplify(ratio.value(), ctx);
+                            if (ratio_simp.is_ok()) {
+                                ExprPtr r_val = ratio_simp.value();
+                                bool is_unit = false;
+                                if (const auto* il = expr_cast<IntegerLit>(r_val)) {
+                                    is_unit = (il->value == BigInt(1));
+                                } else if (const auto* rl = expr_cast<RationalLit>(r_val)) {
+                                    is_unit = (rl->numerator == BigInt(1) &&
+                                               rl->denominator == BigInt(1));
+                                }
+                                if (!is_unit) {
+                                    // r_val must be a constant rational for the
+                                    // rescaling to be valid; otherwise leave
+                                    // s_final alone (caller will detect via
+                                    // its own antidifference verification).
+                                    bool is_rational_const =
+                                        expr_cast<IntegerLit>(r_val) != nullptr ||
+                                        expr_cast<RationalLit>(r_val) != nullptr;
+                                    if (is_rational_const) {
+                                        auto rescaled = linalg::div_expr(ctx, s_final, r_val);
+                                        if (rescaled.is_ok()) {
+                                            auto rescaled_simp = simplify(rescaled.value(), ctx);
+                                            if (rescaled_simp.is_ok()) {
+                                                s_final = rescaled_simp.value();
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     return ok(std::optional<ExprPtr>{s_final});
 }
 

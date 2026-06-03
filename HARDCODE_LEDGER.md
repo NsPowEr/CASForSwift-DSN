@@ -37,14 +37,15 @@
 - **Bug pre-esistente identificato durante wire-up**: vedi `F5.7-GOSPER-K2-NORMALIZATION` qui sotto.
 - **STATO**: ✅ RISOLTA 2026-06-03 — wire-up Gosper attivo, restituisce closed form per le classi hypergeometric working. Abramov rational summation (sub-block successivo) tracked come task B6 separato.
 
-### F5.7-GOSPER-K2-NORMALIZATION — Gosper indefinite di `k²` ritorna `6·S(k)` invece di `S(k)` — APERTA
+### F5.7-GOSPER-K2-NORMALIZATION — Gosper indefinite di `k²` ritorna `6·S(k)` invece di `S(k)` — RISOLTA 2026-06-03
 - **File**: `src/symbolic/summation_gosper.cpp` (probabilmente nel substitution della solution di `csolve` su `x_k`, riga 235-242).
 - **Sintomo**: `gosper_sum(k², k, ctx)` ritorna `S(k) = 2k³ − 3k² + k` (corrispondente al passo Newton-Leibniz `S(n+1) − S(1) = 6 · n(n+1)(2n+1)/6 · 6 = 6·Σk²`), invece di `S(k) = (2k³ − 3k² + k)/6 = k(k−1)(2k−1)/6`.
 - **Verifica analitica del rapporto 6:1**: `S(k+1) − S(k)` per `S = 2k³ − 3k² + k` espande a `2(k+1)³ − 3(k+1)² + (k+1) − 2k³ + 3k² − k = 6k² + 6k + 2 − 6k − 3 + 1 = 6k²`. Il corretto sarebbe `k²`.
 - **Causa probabile**: `algebra::csolve` sul sistema linearizzato (di derivazione: `u_1 + u_2 + u_3 = 0`, `2u_2 + 3u_3 = 0`, `3u_3 − 1 = 0`) restituisce `u_3 = 2, u_2 = −3, u_1 = 1` (scaled by 6) invece di `u_3 = 1/3, u_2 = −1/2, u_1 = 1/6`. Equivalentemente: csolve sembra non scalare la riga `3u_3 = 1` correttamente in forma rationale.
-- **Test regressione**: `test/unit/symbolic/test_summation_gosper.cpp::DISABLED_PolynomialKSquaredAntidifferenceIsExact` — riabilitare rimuovendo prefisso `DISABLED_` quando il fix è disponibile.
-- **Impatto**: `Σ_{k=1}^n k² = n(n+1)(2n+1)/6` non chiude via Gosper (ritorna `6·correct`). Workaround per l'utente: usare formule analitiche di Bernoulli per polinomi power-sums.
-- **STATO**: 🔍 APERTA — sub-block separato; richiede investigazione di `csolve` su sistemi sovra-determinati con coefficienti razionali. Tracciato per B6-bis.
+- **Fix applicato** (`src/symbolic/summation_gosper.cpp`, tail dopo `s_final` togetherize): verification + rescaling robusto. Calcoliamo `Δ = S(k+1) − S(k)`, ratio = `Δ / term`. Se `ratio` simplifica a un Rational/Integer ≠ 1 (caso non-unitario), `S ← S / ratio`. Se `ratio` resta simbolico, lasciamo `S` invariato (sistema under-determined originale; il caller potrà verificare antidifference a parte). Il fix è coefficient-field-agnostic: corregge qualsiasi rescaling rationale spurio introdotto da `csolve`.
+- **Test regressione**: `test/unit/symbolic/test_summation_gosper.cpp::PolynomialKSquaredAntidifferenceIsExact` PASS dopo fix; `test/unit/calculus/test_definite_summation.cpp::SumOfSquares` ora chiude Σ_{k=1}^n k² = n(n+1)(2n+1)/6 simbolicamente esatto.
+- **Verifica** (2026-06-03, Release): 1951/1951 non-stress PASS (1949 baseline + 2 nuovi: k² antidifference test + SumOfSquares).
+- **STATO**: ✅ RISOLTA 2026-06-03.
 
 ### F5.6-RESIDUE-DEG5-DRIVER — Residue theorem driver per fattori irriducibili deg≥5 e quartici non-biquadratici — RISOLTA 2026-06-03
 - **File**: `src/calculus/residue_theorem.cpp` (anonymous-namespace helper `numeric_residue_contribution` + wiring nei branch `fdeg == 4 non-biquadratic` e `fdeg > 2U`); `src/numeric/complex_bigfloat_internal.hpp` (NEW, ~55 LOC, CBF estratta da aberth per riuso); `src/numeric/aberth_root_isolator.cpp` (CBF ora via header interno, dedup); `test/unit/calculus/test_residue_theorem_aberth.cpp` (NEW, 2 test); `test/unit/symbolic/test_residue_theorem.cpp` (test pre-esistente `NonBiquadraticQuarticHandledByAberth` aggiornato, era `NonBiquadraticQuarticRejectedDiagnostic`); `CMakeLists.txt` (test registrato).
