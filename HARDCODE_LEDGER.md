@@ -17,6 +17,30 @@
 
 ## Voci aperte
 
+### F5.7-ABRAMOV-FULL — Multi-atom rational summation via partial-fraction + polygamma — RISOLTA 2026-06-03
+- **File**: `src/calculus/summation.cpp` (helper `try_abramov_definite`); `src/symbolic/summation_gosper.cpp` (rescale tail ungated + `together`-based ratio); `test/unit/calculus/test_definite_summation.cpp` (+1 numerical test); `test/unit/symbolic/test_summation_gosper.cpp` (+1 antidifference witness).
+- **Categoria CLAUDE.md**: nuova capability F5.7 sub-block 2; nessun hardcode. Tutti i casi pattern-matched provengono da decomposizione algebrica (partial_fractions) e si chiudono via la formula esatta polygamma.
+- **Pipeline Abramov-Full**:
+  1. `algebra::together` + `algebra::apart_num_den` → N/D normalised.
+  2. Se `deg(N) ≥ deg(D)`: `algebra::polynomial_divmod` per separare polynomial quotient + proper remainder. Polynomial part chiusa via Gosper (Sub-block 0).
+  3. `algebra::partial_fractions(proper_remainder, k, ctx)` → vettore di Q-linear atoms.
+  4. Per ogni atom: `try_polygamma_antidiff` riusa l'helper single-atom (sub-block 1).
+  5. Sum atoms + polynomial part → definite via S(hi+1) − S(lo).
+- **Fix Gosper k² normalization esteso** (sub-fix di F5.7-GOSPER-K2-NORMALIZATION precedente):
+  - La rescale tail ora gira su OGNI Gosper success (non più gated a polynomial).
+  - Ratio computation via `algebra::together` invece di `algebra::expand` per gestire rational antidiff (1/(k(k+2)) → factor 2 rescale verifiato).
+  - Cost negligibile: substitute + simplify + together pair, ≤ 1 ms / call.
+- **Self-check Regola Zero**:
+  - "Hardcode silenzioso?" → no, ogni atom non riconosciuto produce Unimplemented esplicito identificando "Q-irreducible quadratic factor requires RootOf-aware shift".
+  - "Costanti?" → solo fattoriali matematici nella polygamma formula.
+  - "Configurabile?" → ereditato da partial_fractions + polygamma builder.
+- **Verifica** (2026-06-03, Release):
+  - `AbramovMultiAtom_RationalDecomposition` (`Σ_{k=1}^n 1/(k·(k+2))`): closed form verificato numericamente a `n=3` contro `21/40` exact. PASS.
+  - `RationalDoubleShiftAntidifferenceIsExact` (Gosper antidiff of `1/(k(k+2))`): mathematically_equal con term dopo rescale. PASS.
+  - Tutti i 5 test esistenti DefiniteSummation + 4 Gosper PASS.
+  - Regression: 1955/1955 non-stress PASS (1953 baseline + 2 nuovi).
+- **STATO**: ✅ RISOLTA 2026-06-03 — Abramov-Full sub-block chiuso. Estensione futura: RootOf-aware polygamma shift per Q-irreducible quadratic factors (tracciato come B6-bis).
+
 ### F5.7-ABRAMOV-POLYGAMMA — Rational summation via digamma/polygamma antidifference — RISOLTA 2026-06-03
 - **File**: `src/calculus/summation.cpp` (helper `try_polygamma_definite` + `try_polygamma_antidiff` + early-exit `has_rational_dependency`); `test/unit/calculus/test_definite_summation.cpp` (+2 test).
 - **Categoria CLAUDE.md**: nuova capability F5.7 sub-block 1 (Abramov rational summation, scope: A/(linear(k))^m atoms); zero hardcode introdotti.

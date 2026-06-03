@@ -5,6 +5,7 @@
 // turns Gosper antidifferences into definite-sum closed forms.
 
 #include "cas/algebra.hpp"
+#include "cas/ast_debug.hpp"
 #include "cas/calculus.hpp"
 #include "cas/lexer.hpp"
 #include "cas/parser.hpp"
@@ -140,6 +141,33 @@ TEST_F(DefiniteSummationTest, HarmonicSum_ViaDigamma) {
     };
     walk(walk, res.value());
     EXPECT_TRUE(found) << "expected digamma antidifference in harmonic sum";
+}
+
+// F5.7 sub-block 2 — Abramov-Full: multi-atom rational summand.
+// Σ_{k=1}^{n} 1/(k·(k+2)).  Partial fractions:  (1/2)/k − (1/2)/(k+2).
+// Closed form  Σ_{k=1}^{n} 1/(k·(k+2)) = (1/2)·(1 + 1/2 − 1/(n+1) − 1/(n+2)) =
+// (3/4) − (1/(2(n+1))) − (1/(2(n+2))).  Numeric check at n = 3:
+// 1/3 + 1/8 + 1/15 = (40 + 15 + 8)/120 = 63/120 = 21/40 = 0.525.
+TEST_F(DefiniteSummationTest, AbramovMultiAtom_RationalDecomposition) {
+    auto term = parse_expr("1/(k*(k+2))", ctx.arena());
+    auto lo = parse_expr("1", ctx.arena());
+    auto hi = parse_expr("n", ctx.arena());
+    auto res = calculus::sum(term, k, lo, hi, ctx);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+    // Substitute n = 3 and verify numerical match with the hand-computed
+    // value 21/40.
+    auto at_three = ctx.substitute(res.value(), n,
+        ctx.arena().make<IntegerLit>(BigInt(3)));
+    ASSERT_TRUE(at_three.is_ok());
+    auto simp = ctx.simplify(at_three.value());
+    ASSERT_TRUE(simp.is_ok());
+    auto expected = parse_expr("21/40", ctx.arena());
+    auto exp_simp = ctx.simplify(expected);
+    ASSERT_TRUE(exp_simp.is_ok());
+    EXPECT_TRUE(simplifies_to_zero(simp.value(), exp_simp.value(), ctx))
+        << "Abramov closed form does not evaluate to 21/40 at n = 3\n"
+        << "got: " << debug_print(simp.value()) << "\n"
+        << "raw S: " << debug_print(res.value());
 }
 
 // Σ_{k=1}^{n} 1/k² closes via polygamma ψ⁽¹⁾ (trigamma).

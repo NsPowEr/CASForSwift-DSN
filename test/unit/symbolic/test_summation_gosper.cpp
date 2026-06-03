@@ -83,6 +83,23 @@ TEST_F(GosperSumTest, NotHypergeometricSummable) {
     ASSERT_FALSE(res.value().has_value());
 }
 
+// F5.7 debug witness: Gosper antidifference of 1/(k(k+2)) — verify the
+// returned S satisfies S(k+1) − S(k) ≡ 1/(k(k+2)) exactly.
+TEST_F(GosperSumTest, RationalDoubleShiftAntidifferenceIsExact) {
+    auto term = parse("1 / (k*(k+2))");
+    auto res = gosper_sum(term, k, ctx);
+    ASSERT_TRUE(res.is_ok());
+    if (!res.value().has_value()) GTEST_SKIP() << "Gosper returned nullopt for 1/(k(k+2))";
+    auto s = res.value().value();
+    auto k_plus_1 = parse("k + 1");
+    auto s_next = substitute(s, k, k_plus_1, ctx).value();
+    auto sub_val = ctx.arena().make<Binary>(BinaryOp::Sub, s_next, s);
+    auto diff_simp = simplify(sub_val, ctx).value();
+    auto together_diff = algebra::together(diff_simp, ctx).value();
+    auto term_tog = algebra::together(simplify(term, ctx).value(), ctx).value();
+    EXPECT_TRUE(mathematically_equal(together_diff, term_tog, ctx).value());
+}
+
 // F5.7-GOSPER-K2-NORMALIZATION — regression witness for the csolve-induced
 // rescaling.  Closed-form fix lives in `gosper_sum`'s tail: it verifies
 // S(k+1) − S(k) symbolically against term, detects a rational-constant

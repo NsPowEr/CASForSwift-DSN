@@ -380,6 +380,126 @@ namespace cas::calculus {
     return ctx.simplify(diff);
 }
 
+// F5.7 sub-block 2 — Abramov-Full multi-atom rational summation.
+//
+// Generalises the single-atom polygamma path by routing the term through
+// `algebra::partial_fractions`, which decomposes R(k) ∈ Q(k) into a sum of
+// terms of the form A / (irreducible factor)^m, then applies the polygamma
+// antidifference to each Q-linear atom.  Q-irreducible quadratic factors
+// remain Unimplemented at this level (require RootOf-aware polygamma shifts;
+// tracked as a follow-on sub-block).
+//
+// Polynomial part (numerator degree ≥ denominator degree) is summed via the
+// Gosper path before recursion: this is exactly the polynomial-quotient
+// branch of Abramov's universal decomposition (1989 §3).
+[[nodiscard]] static Result<ExprPtr> try_abramov_definite(
+    ExprPtr term, const Symbol& var, ExprPtr lower, ExprPtr upper,
+    symbolic::CASContext& ctx) {
+    if (!has_rational_dependency(term, var.name)) {
+        return fail<ExprPtr>(CASError{
+            .kind = CASErrorKind::Unimplemented,
+            .message = "Abramov: term has no rational dependency on the "
+                       "summation variable",
+        });
+    }
+
+    auto together_res = algebra::together(term, ctx);
+    if (together_res.is_error()) return fail<ExprPtr>(together_res.error());
+    auto parts = algebra::apart_num_den(together_res.value(), ctx);
+    if (parts.is_error()) return fail<ExprPtr>(parts.error());
+    ExprPtr N = parts.value().numerator;
+    ExprPtr D = parts.value().denominator;
+
+    auto deg_N_res = algebra::polynomial_degree(N, var, ctx);
+    auto deg_D_res = algebra::polynomial_degree(D, var, ctx);
+    if (deg_N_res.is_error() || deg_D_res.is_error()) {
+        return fail<ExprPtr>(CASError{
+            .kind = CASErrorKind::Unimplemented,
+            .message = "Abramov: rational term must be polynomial-over-"
+                       "polynomial in the summation variable",
+        });
+    }
+    const std::size_t deg_N = deg_N_res.value();
+    const std::size_t deg_D = deg_D_res.value();
+    AstArena& arena = ctx.arena();
+
+    ExprPtr polynomial_part = arena.make<IntegerLit>(BigInt(0));
+    ExprPtr proper_remainder = term;
+
+    if (deg_N >= deg_D) {
+        // Improper rational — peel off polynomial quotient first.
+        auto divmod = algebra::polynomial_divmod(N, D, var, ctx);
+        if (divmod.is_error()) return fail<ExprPtr>(divmod.error());
+        polynomial_part = divmod.value().quotient;
+        // Build R/D from divmod.value().remainder.
+        proper_remainder = arena.make<Binary>(BinaryOp::Div,
+            divmod.value().remainder, D);
+        auto simp_r = ctx.simplify(proper_remainder);
+        if (simp_r.is_error()) return fail<ExprPtr>(simp_r.error());
+        proper_remainder = simp_r.value();
+    }
+
+    // Decompose proper rational into partial fractions over Q.
+    auto fractions = algebra::partial_fractions(proper_remainder, var, ctx);
+    if (fractions.is_error()) return fail<ExprPtr>(fractions.error());
+
+    // Build the antidifference: polynomial part via Gosper, rational atoms via
+    // polygamma.  Defer summation to S(upper+1) − S(lower) by evaluating each
+    // atom's contribution separately, then summing.
+    ExprPtr upper_plus_one = arena.make<Binary>(BinaryOp::Add, upper,
+        arena.make<IntegerLit>(BigInt(1)));
+
+    std::vector<ExprPtr> total_terms;
+
+    // Polynomial part: Gosper indefinite + endpoint difference.  Skip the
+    // call entirely when the quotient is literally zero — Gosper on a zero
+    // term hits a 0/0 ratio in its first division step.
+    bool poly_part_is_zero = false;
+    if (const auto* il = expr_cast<IntegerLit>(polynomial_part)) {
+        poly_part_is_zero = il->value.is_zero();
+    }
+    if (!poly_part_is_zero) {
+        auto poly_def = try_gosper_definite(polynomial_part, var, lower, upper, ctx);
+        if (poly_def.is_ok()) {
+            total_terms.push_back(poly_def.value());
+        } else {
+            return poly_def;
+        }
+    }
+
+    // Rational atoms.
+    for (ExprPtr atom : fractions.value()) {
+        auto atom_simp = ctx.simplify(atom);
+        if (atom_simp.is_error()) return fail<ExprPtr>(atom_simp.error());
+        auto antidiff_opt = try_polygamma_antidiff(atom_simp.value(), var, ctx);
+        if (!antidiff_opt.has_value()) {
+            return fail<ExprPtr>(CASError{
+                .kind = CASErrorKind::Unimplemented,
+                .message = "Abramov: partial-fraction atom not of the form "
+                           "A/(linear(k))^m; Q-irreducible quadratic factors "
+                           "require a RootOf-aware polygamma shift",
+            });
+        }
+        ExprPtr S = antidiff_opt.value();
+        auto S_upper = ctx.substitute(S, var, upper_plus_one);
+        if (S_upper.is_error()) return fail<ExprPtr>(S_upper.error());
+        auto S_lower = ctx.substitute(S, var, lower);
+        if (S_lower.is_error()) return fail<ExprPtr>(S_lower.error());
+        ExprPtr atom_total = arena.make<Binary>(BinaryOp::Sub,
+            S_upper.value(), S_lower.value());
+        total_terms.push_back(atom_total);
+    }
+
+    if (total_terms.empty()) {
+        return ok(arena.make<IntegerLit>(BigInt(0)));
+    }
+
+    ExprPtr combined = (total_terms.size() == 1U)
+        ? total_terms.front()
+        : arena.make<Sum>(std::move(total_terms));
+    return ctx.simplify(combined);
+}
+
 [[nodiscard]] Result<ExprPtr> symbolic_sum(
     ExprPtr term,
     const Symbol& var,
@@ -405,6 +525,11 @@ namespace cas::calculus {
         if (gosper_res.is_ok()) return gosper_res;
         auto poly_res = try_polygamma_definite(term, var, lower, upper, ctx);
         if (poly_res.is_ok()) return poly_res;
+        // Abramov-Full: multi-atom partial-fraction routing through the same
+        // polygamma builder for every Q-linear atom.  Catches anything that
+        // single-atom polygamma left on the table.
+        auto abramov_res = try_abramov_definite(term, var, lower, upper, ctx);
+        if (abramov_res.is_ok()) return abramov_res;
         // Neither path succeeded: fall through to diagnostic.
     }
 
