@@ -9,10 +9,13 @@
 #include "cas/algebraic_number.hpp"
 #include "cas/algebraic_number_bridge.hpp"
 #include "cas/ast.hpp"
+#include "cas/bigfloat.hpp"
 #include "cas/bigint.hpp"
 #include "cas/calculus.hpp"
+#include "cas/numeric/complex_root_isolator.hpp"
 #include "cas/rational.hpp"
 #include "../algebra/polynomial_internal.hpp"
+#include "../numeric/complex_bigfloat_internal.hpp"
 
 #include <optional>
 #include <string>
@@ -347,6 +350,134 @@ struct QuadraticFactor {
     return simplify_or_fail(full, ctx);
 }
 
+// ── F5.6 sub-block 2: numeric residue contribution via Aberth ───────────────
+//
+// When a denominator factor escapes the symbolic closed-form catalogue
+// (general quartic with a₁ or a₃ ≠ 0, deg ≥ 5 irreducible, …) we still owe
+// the caller a real number, not an Unimplemented.  We invoke the Aberth
+// root isolator, evaluate the standard simple-pole residue formula
+//
+//   Res(N/D, z₀) = N(z₀) / D'(z₀)
+//
+// at each upper-half-plane root of the factor, and apply the residue
+// theorem
+//
+//   ∫_{-∞}^{∞} (N/D) dx = 2πi · Σ_{Im(z_k) > 0} Res(N/D, z_k).
+//
+// For a real-coefficient integrand the sum is purely imaginary, so the
+// final value reduces to  −2π · Σ Im(Res).  The result is emitted as a
+// DecimalLit at the working MPFR precision (40 decimal digits by default,
+// matching the Aberth options).
+[[nodiscard]] numeric::detail::CBF rational_to_cbf(const Rational& q, mpfr_prec_t prec) {
+    BigFloat bf = BigFloat::from_rational_parts(
+        q.numerator().decimal(), q.denominator().decimal(), prec);
+    return numeric::detail::CBF::from_real(std::move(bf));
+}
+
+[[nodiscard]] numeric::detail::CBF horner_eval_cbf(
+    const std::vector<numeric::detail::CBF>& coeffs,
+    const numeric::detail::CBF& z,
+    mpfr_prec_t prec) {
+    if (coeffs.empty()) return numeric::detail::CBF::zero(prec);
+    numeric::detail::CBF acc = coeffs.back();
+    for (std::size_t k = coeffs.size() - 1U; k-- > 0;) {
+        acc = acc * z + coeffs[k];
+    }
+    return acc;
+}
+
+[[nodiscard]] Result<ExprPtr> numeric_residue_contribution(
+    const algebra::PolynomialFactor& pf,
+    ExprPtr N,
+    ExprPtr D,
+    const Symbol& var,
+    std::size_t deg_N,
+    std::size_t deg_D,
+    symbolic::CASContext& ctx) {
+    AstArena& arena = ctx.arena();
+
+    if (pf.multiplicity > 1U) {
+        return fail<ExprPtr>(CASError{
+            .kind = CASErrorKind::Unimplemented,
+            .message = "Residue theorem (numeric): pole multiplicity > 1 "
+                       "requires higher-order residue computation; raise via "
+                       "partial fractions or supply a single-pole denominator",
+        });
+    }
+
+    // Higher precision than the Aberth defaults: residue evaluation involves
+    // catastrophic cancellation in the imaginary direction (real-coefficient
+    // integrand → sum is purely imaginary), so we ask for ~80 decimal digits
+    // working precision to keep the final to_double() lossless.
+    const numeric::AberthOptions opts{
+        /* precision_digits = */ 80U,
+        /* max_iterations   = */ 500U,
+        /* convergence_tolerance = */ 1e-60,
+    };
+    const mpfr_prec_t prec = decimal_digits_to_bits(opts.precision_digits);
+
+    auto roots_res = numeric::aberth_isolate_complex_roots(pf.factor, var.name, ctx, opts);
+    if (roots_res.is_error()) return fail<ExprPtr>(roots_res.error());
+
+    // Numerator coefficients over BigFloat.
+    auto N_coeffs_res = extract_rational_coeffs(N, var, deg_N, ctx);
+    if (N_coeffs_res.is_error()) return fail<ExprPtr>(N_coeffs_res.error());
+    std::vector<numeric::detail::CBF> N_cbf;
+    N_cbf.reserve(N_coeffs_res.value().size());
+    for (const Rational& q : N_coeffs_res.value()) {
+        N_cbf.push_back(rational_to_cbf(q, prec));
+    }
+
+    // Denominator and its formal derivative — D'(z) = Σ k·d_k·z^{k−1}.
+    auto D_coeffs_res = extract_rational_coeffs(D, var, deg_D, ctx);
+    if (D_coeffs_res.is_error()) return fail<ExprPtr>(D_coeffs_res.error());
+    std::vector<numeric::detail::CBF> Dp_cbf;
+    if (deg_D >= 1U) {
+        Dp_cbf.reserve(deg_D);
+        for (std::size_t k = 1U; k <= deg_D; ++k) {
+            const Rational scaled = D_coeffs_res.value()[k] *
+                                    Rational(BigInt(static_cast<std::int64_t>(k)));
+            Dp_cbf.push_back(rational_to_cbf(scaled, prec));
+        }
+    }
+
+    BigFloat imag_sum(prec);
+    bool any_uhp = false;
+    for (const auto& r : roots_res.value()) {
+        // Upper half-plane: imag strictly positive.
+        if (r.imag.is_negative() || r.imag.is_zero()) continue;
+        any_uhp = true;
+        numeric::detail::CBF z{r.real, r.imag};
+        numeric::detail::CBF N_val = horner_eval_cbf(N_cbf, z, prec);
+        numeric::detail::CBF Dp_val = horner_eval_cbf(Dp_cbf, z, prec);
+        if (Dp_val.is_zero()) {
+            return fail<ExprPtr>(CASError{
+                .kind = CASErrorKind::Unimplemented,
+                .message = "Residue theorem (numeric): D'(z₀) vanishes at a "
+                           "root — indicates a non-simple pole or a "
+                           "degenerate factorisation",
+            });
+        }
+        numeric::detail::CBF residue = N_val / Dp_val;
+        imag_sum = imag_sum + residue.im;
+    }
+
+    if (!any_uhp) {
+        return fail<ExprPtr>(CASError{
+            .kind = CASErrorKind::Unimplemented,
+            .message = "Residue theorem (numeric): factor has no upper-half-"
+                       "plane roots; integral contribution is zero only if "
+                       "the symbolic analysis confirms no real poles",
+        });
+    }
+
+    // ∫ = 2πi · Σ Res = −2π · Σ Im(Res).
+    BigFloat two_pi = BigFloat::pi(prec) + BigFloat::pi(prec);
+    BigFloat result = -(two_pi * imag_sum);
+    return ok(arena.make<DecimalLit>(
+        result.to_string(static_cast<int>(opts.precision_digits))));
+}
+
 }  // namespace
 
 Result<ExprPtr> integrate_rational_full_real_line(
@@ -414,9 +545,17 @@ Result<ExprPtr> integrate_rational_full_real_line(
             if (bq_coeffs.is_error()) return fail<ExprPtr>(bq_coeffs.error());
             const auto& q = bq_coeffs.value();
             if (!q[1].numerator().is_zero() || !q[3].numerator().is_zero()) {
-                return fail<ExprPtr>(CASError{
-                    .kind = CASErrorKind::Unimplemented,
-                    .message = "Residue theorem: irreducible quartic factor is not biquadratic"});
+                // General quartic — no biquadratic closed form, but the Aberth
+                // numeric driver isolates the four complex roots and applies
+                // the residue theorem at upper-half-plane simple poles.
+                auto numeric_contrib = numeric_residue_contribution(
+                    pf, N, D, var, deg_N, deg_D, ctx);
+                if (numeric_contrib.is_error()) return fail<ExprPtr>(numeric_contrib.error());
+                ExprPtr added_n = arena.make<Binary>(BinaryOp::Add, total, numeric_contrib.value());
+                auto simp_n = simplify_or_fail(added_n, ctx);
+                if (simp_n.is_error()) return simp_n;
+                total = simp_n.value();
+                continue;
             }
             if (q[4].numerator().is_zero()) {
                 return fail<ExprPtr>(CASError{
@@ -450,9 +589,17 @@ Result<ExprPtr> integrate_rational_full_real_line(
             continue;
         }
         if (fdeg > 2U) {
-            return fail<ExprPtr>(CASError{
-                .kind = CASErrorKind::Unimplemented,
-                .message = "Residue theorem: irreducible factor of degree > 2 not yet supported"});
+            // Aberth numeric driver: irreducible factor of degree ≥ 5 has no
+            // closed-form roots in radicals (generic case), so we fall back to
+            // numerical isolation + simple-pole residue summation.
+            auto numeric_contrib = numeric_residue_contribution(
+                pf, N, D, var, deg_N, deg_D, ctx);
+            if (numeric_contrib.is_error()) return fail<ExprPtr>(numeric_contrib.error());
+            ExprPtr added_n = arena.make<Binary>(BinaryOp::Add, total, numeric_contrib.value());
+            auto simp_n = simplify_or_fail(added_n, ctx);
+            if (simp_n.is_error()) return simp_n;
+            total = simp_n.value();
+            continue;
         }
 
         // Quadratic factor a*x^2 + b'*x + c'.  Normalize to monic.

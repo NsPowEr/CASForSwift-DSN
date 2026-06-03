@@ -17,6 +17,30 @@
 
 ## Voci aperte
 
+### F5.6-RESIDUE-DEG5-DRIVER — Residue theorem driver per fattori irriducibili deg≥5 e quartici non-biquadratici — RISOLTA 2026-06-03
+- **File**: `src/calculus/residue_theorem.cpp` (anonymous-namespace helper `numeric_residue_contribution` + wiring nei branch `fdeg == 4 non-biquadratic` e `fdeg > 2U`); `src/numeric/complex_bigfloat_internal.hpp` (NEW, ~55 LOC, CBF estratta da aberth per riuso); `src/numeric/aberth_root_isolator.cpp` (CBF ora via header interno, dedup); `test/unit/calculus/test_residue_theorem_aberth.cpp` (NEW, 2 test); `test/unit/symbolic/test_residue_theorem.cpp` (test pre-esistente `NonBiquadraticQuarticHandledByAberth` aggiornato, era `NonBiquadraticQuarticRejectedDiagnostic`); `CMakeLists.txt` (test registrato).
+- **Categoria CLAUDE.md**: chiusura algoritmica della Cat 8 (pattern matching su grado) — non più bail-out con Unimplemented per deg≥5 / quartici non-biquadratici; ora delegazione strutturata al driver numerico via Aberth.
+- **Algoritmo**: per ogni fattore irriducibile `pf` di `D` non risolvibile in forma chiusa (general quartic con a₁ o a₃ ≠ 0; deg ≥ 5):
+  1. `aberth_isolate_complex_roots(pf.factor, var, ctx, opts)` con opts custom (precision_digits=80, max_iter=500, tol=1e-60) — più larghezza della precisione di default per assorbire la cancellation catastrofica nella parte immaginaria della somma residui.
+  2. Coefficienti N e D estratti come Rational → CBF via `rational_to_cbf`.
+  3. Derivata D' costruita simbolicamente come vettore `[k · D_coeffs[k] : k=1..deg_D]`.
+  4. Per ogni root z con Im(z) > 0: `residue = N(z) / D'(z)` via Horner sulle CBF.
+  5. `imag_sum += Im(residue)`.
+  6. Risultato `I = −2π · imag_sum` (per integrandi a coefficienti reali la somma residui in UHP è puramente immaginaria, 2πi · (bi) = −2πb).
+  7. Output come `DecimalLit` a 80 cifre decimali.
+- **Multiplicity > 1**: diagnostico `Unimplemented` esplicito (require higher-order residue formula). Non hardcode-of-passage perché è un sub-block algorithmically distinto.
+- **Self-check Regola Zero**:
+  - "Input 10× più grande?" → AberthOptions configurabili; precision_digits scala il working precision.
+  - "Costanti?" → 80/500/1e-60 sono parametri *opt-in* (non magic numbers nascosti) — documentate nel commento del codice come "higher than Aberth defaults to absorb catastrophic cancellation"; non bound nascosti.
+  - "Silenzio?" → no: ogni failure mode (multiplicity>1, no UHP roots, Aberth non-converge) ritorna Unimplemented esplicito.
+  - "Risultato sbagliato silenzioso?" → no, valutato contro closed form (cyclotomic test): match 1e-6 in double precision (limite della rappresentazione finale, non dell'algoritmo che opera a 80 digit MPFR).
+- **Verifica** (2026-06-03, Release):
+  - `IrreducibleSexticCyclotomic9` (`1/(x⁶+x³+1)` — Φ₉ irriducibile deg 6): match closed form `(2π/(3√3))·(cos(π/9)+cos(2π/9)+cos(4π/9))` ≈ 2.272555… entro 1e-6. PASS.
+  - `IrreducibleQuarticNonBiquadratic` (`1/(x⁴+x+1)` — quartic non-biquadratic): result ∈ (1.5, 4.0), deterministic re-invoke. PASS.
+  - `NonBiquadraticQuarticHandledByAberth` (test aggiornato, `1/(x⁴+x³+1)`): result > 0, finite. PASS.
+  - Regression: 1946/1946 non-stress PASS (1944 baseline + 2 nuovi), zero rotture sui test pre-esistenti.
+- **STATO**: ✅ RISOLTA 2026-06-03 — driver deg≥5 operativo via Aberth + residue al polo semplice. B4 sub-block 2 chiuso; B4 chiude completamente.
+
 ### F5.6-ABERTH-ROOT-ISOLATOR — Simultaneous complex root isolator for univariate polynomials — RISOLTA 2026-06-03
 - **File**: `include/cas/numeric/complex_root_isolator.hpp` (NEW, ~60 LOC); `src/numeric/aberth_root_isolator.cpp` (NEW, ~250 LOC); `test/unit/numeric/test_aberth_root_isolator.cpp` (NEW, 5 test); `CMakeLists.txt` (sorgente + test registrati).
 - **Categoria CLAUDE.md**: nuova capability F5.6 sub-block 1 (infrastruttura per Residue theorem driver deg≥5); zero hardcode introdotti. Tutte le costanti algoritmiche (max_iter, tol, precision_digits) sono campi configurabili di `AberthOptions`.

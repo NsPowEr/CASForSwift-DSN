@@ -24,6 +24,8 @@
 #include "cas/numeric/complex_root_isolator.hpp"
 #include "cas/symbolic.hpp"
 
+#include "complex_bigfloat_internal.hpp"
+
 #include <cstddef>
 #include <utility>
 #include <vector>
@@ -32,42 +34,7 @@ namespace cas::numeric {
 
 namespace {
 
-struct CBF {
-    BigFloat re;
-    BigFloat im;
-
-    CBF() = default;
-    CBF(BigFloat r, BigFloat i) : re(std::move(r)), im(std::move(i)) {}
-
-    static CBF zero(mpfr_prec_t prec) {
-        return CBF{BigFloat(prec), BigFloat(prec)};
-    }
-    static CBF from_real(BigFloat r) {
-        BigFloat zero_im(r.precision_bits());
-        return CBF{std::move(r), std::move(zero_im)};
-    }
-    static CBF from_double_pair(double r, double i, mpfr_prec_t prec) {
-        return CBF{BigFloat::from_double(r, prec), BigFloat::from_double(i, prec)};
-    }
-
-    bool is_zero() const noexcept { return re.is_zero() && im.is_zero(); }
-
-    CBF operator+(const CBF& o) const { return CBF{re + o.re, im + o.im}; }
-    CBF operator-(const CBF& o) const { return CBF{re - o.re, im - o.im}; }
-    CBF operator-() const { return CBF{-re, -im}; }
-    CBF operator*(const CBF& o) const {
-        return CBF{re * o.re - im * o.im, re * o.im + im * o.re};
-    }
-    CBF operator/(const CBF& o) const {
-        BigFloat denom = o.re * o.re + o.im * o.im;
-        BigFloat new_re = (re * o.re + im * o.im) / denom;
-        BigFloat new_im = (im * o.re - re * o.im) / denom;
-        return CBF{std::move(new_re), std::move(new_im)};
-    }
-
-    BigFloat abs() const { return BigFloat::sqrt(re * re + im * im); }
-    BigFloat abs_sq() const { return re * re + im * im; }
-};
+using detail::CBF;
 
 // Convert ExprPtr literal to BigFloat at requested precision.  Accepts
 // IntegerLit and RationalLit (the algebra layer hands us literal coefficients

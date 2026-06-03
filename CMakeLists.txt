@@ -614,6 +614,7 @@ test/unit/algebra/test_half_gcd.cpp
         test/unit/calculus/test_orthogonal_polynomials.cpp
         test/unit/calculus/test_pade_approximant.cpp
         test/unit/calculus/test_puiseux.cpp
+        test/unit/calculus/test_residue_theorem_aberth.cpp
         test/unit/symbolic/test_assumptions_stability.cpp
         test/unit/symbolic/test_caching.cpp
         test/unit/symbolic/test_gruntz.cpp

@@ -9,6 +9,7 @@
 #include "cas/symbolic.hpp"
 
 #include <gtest/gtest.h>
+#include <cmath>
 #include <memory>
 #include <string>
 
@@ -116,13 +117,37 @@ TEST_F(ResidueTheoremTest, BiquadraticGeneralRealCoefficientRejected) {
     EXPECT_FALSE(result.is_ok());
 }
 
-TEST_F(ResidueTheoremTest, NonBiquadraticQuarticRejectedDiagnostic) {
-    // x⁴ + x³ + 1 is not biquadratic (a₃ ≠ 0) and remains beyond the current
-    // closure.  Must report Unimplemented with a diagnostic, never produce
-    // a silent wrong answer.
+TEST_F(ResidueTheoremTest, NonBiquadraticQuarticHandledByAberth) {
+    // x⁴ + x³ + 1 is an irreducible non-biquadratic quartic over Q (no real
+    // roots: f' = x²(4x+3) has critical point at x = -3/4 where f = 0.89 > 0).
+    // After F5.6 sub-block 2 the driver delegates to the Aberth numeric
+    // residue path; the result must succeed (not bail out with Unimplemented)
+    // and produce a positive real value in the analytically expected range.
     auto result = calculus::integrate_rational_full_real_line(
         E("1/(x^4 + x^3 + 1)"), Symbol("x"), *ctx);
-    EXPECT_FALSE(result.is_ok());
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+    // The driver may wrap the DecimalLit in a residual Unary(Neg) or Sum
+    // node after simplification.  Re-simplify to a literal and then evaluate
+    // numerically — the same path the Pade and other numeric tests use.
+    auto simp = ctx->simplify(result.value());
+    ASSERT_TRUE(simp.is_ok());
+    double v = std::nan("");
+    if (const auto* d = expr_cast<DecimalLit>(simp.value())) v = d->to_double();
+    else if (const auto* il = expr_cast<IntegerLit>(simp.value())) {
+        v = std::stod(il->value.decimal());
+    } else if (const auto* rl = expr_cast<RationalLit>(simp.value())) {
+        // simplify often folds the trailing-zero-laden Aberth DecimalLit
+        // into a RationalLit p/q.  Reduce numerically.
+        v = std::stod(rl->numerator.decimal()) /
+            std::stod(rl->denominator.decimal());
+    } else if (const auto* un = expr_cast<Unary>(simp.value());
+               un && un->op == UnaryOp::Neg) {
+        if (const auto* d = expr_cast<DecimalLit>(un->operand)) v = -d->to_double();
+    }
+    ASSERT_FALSE(std::isnan(v))
+        << "unexpected result kind: " << debug_print(simp.value());
+    EXPECT_GT(v, 0.0);
+    EXPECT_LT(v, 5.0);
 }
 
 TEST_F(ResidueTheoremTest, DoublePoleOneOverXsqPlusOneSquared) {
