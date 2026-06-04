@@ -72,6 +72,32 @@ enum class FiniteDiffOrder {
     ExprPtr expr, const Symbol& s, const Symbol& t,
     symbolic::CASContext& ctx);
 
+/// @brief Risch DE elementare in Q(x) (Bronstein §6.1+§6.2): risolve
+///        y' + f·y = g per y razionale in `var`, con f, g razionali in `var`
+///        e coefficienti razionali (Q).  Dispatcher unico: tenta prima il
+///        ramo polynomial (y ∈ Q[var]), poi il ramo rational (y ∈ Q(var)).
+///        Usato come building block per estensione cap.8 (Risch DE su torri
+///        logaritmiche/esponenziali).
+[[nodiscard]] Result<ExprPtr> solve_risch_de_q(
+    ExprPtr f_expr, ExprPtr g_expr, const Symbol& var, symbolic::CASContext& ctx);
+
+/// @brief Risch DE per estensione logaritmica θ = log(u), u ∈ Q(var)
+///        (Bronstein §6.4.1, "PolyRischDE_logarithmic").  Risolve
+///        y' + f·y = g  con f, g polinomiali in θ a coefficienti in Q(var).
+///        Cerca y polinomio in θ a coefficienti in Q(var).
+///
+///        Algoritmo: per ogni grado i = deg(g) down to 0,
+///          y_i' + f_0 · y_i = g_i − (i+1) · θ' · y_{i+1}
+///        dove θ' = u'/u ∈ Q(var); back-substitution top-down sui gradi.
+///        Ogni equazione di grado i è una Risch DE su Q(var), risolta via
+///        solve_risch_de_q.  Restituisce y come Σ y_i · log(u)^i.
+[[nodiscard]] Result<ExprPtr> solve_risch_de_logarithmic_q(
+    ExprPtr f_expr,
+    ExprPtr g_expr,
+    ExprPtr u_arg,
+    const Symbol& var,
+    symbolic::CASContext& ctx);
+
 /// @brief Parametric Risch DE in Q[x] (Bronstein Symbolic Integration I §7.1).
 /// Risolve  y' + f·y = Σ_i c_i · g_i  per y ∈ Q[var] e c_i ∈ Q.
 /// Restituisce una base dello spazio nullo del sistema lineare omogeneo:

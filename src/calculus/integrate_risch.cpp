@@ -557,9 +557,13 @@ risch_extract_rational_coeffs(const algebra::PolyExpr& poly) {
     return y_expr;
 }
 
+}  // namespace
+
 // Dispatch: try polynomial-fast path first; if either f or g has a
 // non-trivial denominator, fall back to the rational-coefficient solver.
-[[nodiscard]] Result<ExprPtr> solve_risch_de_q(
+// Public to cas::calculus per riuso da risch_logarithmic.cpp (cap.8) e
+// risch_parametric.cpp (cap.7).
+Result<ExprPtr> solve_risch_de_q(
     ExprPtr f_expr, ExprPtr g_expr, const Symbol& var, symbolic::CASContext& ctx) {
     auto f_simp = ctx.simplify(f_expr);
     auto g_simp = ctx.simplify(g_expr);
@@ -569,6 +573,8 @@ risch_extract_rational_coeffs(const algebra::PolyExpr& poly) {
     if (poly_attempt.is_ok()) return poly_attempt;
     return solve_risch_de_rational_q(f_expr, g_expr, var, ctx);
 }
+
+namespace {
 
 // Integrate the polynomial-in-t part of a single logarithmic extension
 // tower:  ∫ Σ_{k=0..n} a_k(x) * t^k dx,   where t = ln(u(x)),  Dt = u'/u.
