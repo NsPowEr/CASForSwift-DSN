@@ -72,6 +72,20 @@ enum class FiniteDiffOrder {
     ExprPtr expr, const Symbol& s, const Symbol& t,
     symbolic::CASContext& ctx);
 
+/// @brief Z-transform Z{a_n}(z) = Σ_{n=0}^∞ a_n · z^(−n) — F5.8 / Task #16.
+/// Convention: causal unilateral Z-transform.  Pipeline:
+///   (1) linearità su Sum + estrazione scalari Product;
+///   (2) coppie assiomatiche fondamentali (1, n, n^k, r^n, cos(ωn), sin(ωn),
+///       δ[n−k] via z^(−k));
+///   (3) proprietà di scaling (modulation r^n·a_n → A(z/r)) e
+///       differenziazione (n·a_n → −z·A'(z));
+///   (4) Unimplemented diagnostico esplicito per pattern non riconosciuti.
+/// Nessun set chiuso silenzioso: ogni coppia base è assioma matematico
+/// (Eccezione 2 di CLAUDE.md).
+[[nodiscard]] Result<ExprPtr> z_transform(
+    ExprPtr expr, const Symbol& n, const Symbol& z,
+    symbolic::CASContext& ctx);
+
 /// @brief Risch DE elementare in Q(x) (Bronstein §6.1+§6.2): risolve
 ///        y' + f·y = g per y razionale in `var`, con f, g razionali in `var`
 ///        e coefficienti razionali (Q).  Dispatcher unico: tenta prima il
