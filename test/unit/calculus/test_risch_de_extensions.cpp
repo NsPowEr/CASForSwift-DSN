@@ -179,5 +179,56 @@ TEST_F(RischExponentialDeTest, FPolyInTheta_DiagnosticUnimplemented) {
     EXPECT_EQ(res.error().kind, CASErrorKind::Unimplemented);
 }
 
+// ============================================================================
+// Wiring di integrate() — esercita il fast-path che chiama
+// solve_risch_de_{logarithmic,exponential}_q quando l'integranda è polinomiale
+// in un singolo generatore trascendentale.
+// ============================================================================
+
+class RischDeWiringTest : public ::testing::Test {
+protected:
+    symbolic::CASContext ctx;
+    Symbol x{"x"};
+
+    [[nodiscard]] bool integrate_and_verify(const std::string& src) {
+        AstArena& arena = ctx.arena();
+        auto t = Lexer(src).tokenize();
+        EXPECT_TRUE(t.is_ok()) << src << ": " << t.error().message;
+        Parser p(t.value(), arena);
+        auto e_res = p.parse();
+        EXPECT_TRUE(e_res.is_ok()) << src;
+        ExprPtr e = e_res.value();
+        auto r = integrate(e, x, ctx);
+        if (r.is_error()) return false;
+        auto d_back = diff(r.value(), x, 1U, ctx);
+        if (d_back.is_error()) return false;
+        ExprPtr delta = arena.make<Binary>(BinaryOp::Sub, d_back.value(), e);
+        auto delta_tog = algebra::together(delta, ctx);
+        if (delta_tog.is_error()) return false;
+        auto delta_simp = ctx.simplify(delta_tog.value());
+        if (delta_simp.is_error()) return false;
+        if (const auto* il = expr_cast<IntegerLit>(delta_simp.value()))
+            return il->value.is_zero();
+        if (const auto* rl = expr_cast<RationalLit>(delta_simp.value()))
+            return rl->numerator.is_zero();
+        return false;
+    }
+};
+
+// ∫ ln(x) dx = x·ln(x) - x
+TEST_F(RischDeWiringTest, IntegralOfLnX) {
+    EXPECT_TRUE(integrate_and_verify("ln(x)"));
+}
+
+// ∫ ln(x)^2 dx = x·ln(x)^2 - 2x·ln(x) + 2x
+TEST_F(RischDeWiringTest, IntegralOfLnXSquared) {
+    EXPECT_TRUE(integrate_and_verify("ln(x)^2"));
+}
+
+// ∫ exp(2x) dx = (1/2)·exp(2x)
+TEST_F(RischDeWiringTest, IntegralOfExp2x) {
+    EXPECT_TRUE(integrate_and_verify("exp(2*x)"));
+}
+
 }  // namespace
 }  // namespace cas::calculus

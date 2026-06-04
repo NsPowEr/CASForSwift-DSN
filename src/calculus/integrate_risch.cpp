@@ -807,6 +807,93 @@ Result<ExprPtr> integrate_risch(ExprPtr expr, const Symbol& var, symbolic::CASCo
         if (res.is_ok()) return res;
     }
 
+    // 2b-bis. PolyRischDE wiring (cap.8 §6.4.1/§6.4.2) — antiderivata diretta
+    // di una integranda polinomiale in θ = log(u) o θ = exp(u) con u ∈ Q(var).
+    //
+    // Equivalenza:  ∫ g(x,θ) dx = y(x,θ)  ⟺  y' + 0·y = g.
+    // Quindi chiamiamo solve_risch_de_{logarithmic,exponential}_q con f=0
+    // e ricaviamo direttamente y come polinomio in θ a coefficienti razionali.
+    //
+    // Riconoscimento del generatore θ: walk dell'AST per raccogliere tutte le
+    // istanze di FuncCall(Ln/Exp).  Wiring fast-path solo per torre con un
+    // unico generatore (log(u) o exp(u)) ben definito; torre mista o generatori
+    // multipli ricadono su 2c/Hermite/Trager.
+    {
+        ExprPtr ln_arg = nullptr;
+        ExprPtr exp_arg = nullptr;
+        bool generator_conflict = false;
+        std::function<void(ExprPtr)> scan = [&](ExprPtr e) {
+            if (!e || generator_conflict) return;
+            if (const auto* fc = expr_cast<FuncCall>(e)) {
+                if (fc->func_id == BuiltinOp::Ln && fc->args.size() == 1U) {
+                    if (!ln_arg) ln_arg = fc->args[0];
+                    else if (!deep_struct_equal(ln_arg, fc->args[0]))
+                        generator_conflict = true;
+                } else if (fc->func_id == BuiltinOp::Exp && fc->args.size() == 1U) {
+                    if (!exp_arg) exp_arg = fc->args[0];
+                    else if (!deep_struct_equal(exp_arg, fc->args[0]))
+                        generator_conflict = true;
+                }
+                for (ExprPtr a : fc->args) scan(a);
+                return;
+            }
+            if (const auto* bin = expr_cast<Binary>(e)) {
+                scan(bin->left); scan(bin->right); return;
+            }
+            if (const auto* un = expr_cast<Unary>(e)) { scan(un->operand); return; }
+            if (const auto* sum = expr_cast<Sum>(e)) {
+                for (ExprPtr t : sum->terms) scan(t); return;
+            }
+            if (const auto* prod = expr_cast<Product>(e)) {
+                for (ExprPtr f : prod->factors) scan(f); return;
+            }
+        };
+        scan(expr);
+
+        // Procedi solo se torre con esattamente UN generatore (puro log o puro exp).
+        if (!generator_conflict) {
+            ExprPtr zero = arena.make<IntegerLit>(BigInt(0));
+            if (ln_arg && !exp_arg) {
+                auto y = solve_risch_de_logarithmic_q(zero, expr, ln_arg, var, context);
+                if (y.is_ok()) {
+                    // Verifica round-trip: D(y) deve uguagliare expr.
+                    auto Dy = diff(y.value(), var, 1U, context);
+                    if (Dy.is_ok()) {
+                        ExprPtr delta = arena.make<Binary>(BinaryOp::Sub, Dy.value(), expr);
+                        auto delta_tog = algebra::together(delta, context);
+                        if (delta_tog.is_ok()) {
+                            auto delta_simp = context.simplify(delta_tog.value());
+                            if (delta_simp.is_ok()) {
+                                if (expr_is<IntegerLit>(delta_simp.value())
+                                    && expr_ref<IntegerLit>(delta_simp.value()).value.is_zero()) {
+                                    return context.simplify(y.value());
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if (exp_arg && !ln_arg) {
+                auto y = solve_risch_de_exponential_q(zero, expr, exp_arg, var, context);
+                if (y.is_ok()) {
+                    auto Dy = diff(y.value(), var, 1U, context);
+                    if (Dy.is_ok()) {
+                        ExprPtr delta = arena.make<Binary>(BinaryOp::Sub, Dy.value(), expr);
+                        auto delta_tog = algebra::together(delta, context);
+                        if (delta_tog.is_ok()) {
+                            auto delta_simp = context.simplify(delta_tog.value());
+                            if (delta_simp.is_ok()) {
+                                if (expr_is<IntegerLit>(delta_simp.value())
+                                    && expr_ref<IntegerLit>(delta_simp.value()).value.is_zero()) {
+                                    return context.simplify(y.value());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // 2c. Product(f, exp(g)) Risch DE shortcut (Bronstein cap. 6).
     // For integrand = f(x)·exp(g(x)) with f, g polynomial in var, the
     // antiderivative has the form y(x)·exp(g(x)) where y satisfies the
