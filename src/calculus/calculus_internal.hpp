@@ -72,6 +72,15 @@ enum class FiniteDiffOrder {
     ExprPtr expr, const Symbol& s, const Symbol& t,
     symbolic::CASContext& ctx);
 
+/// @brief Inverse Laplace via Bronstein residue formula — F5.8 / Task #17.
+///        L⁻¹{F(s)}(t) = Σ_k Res_{s = p_k}[F(s)·e^(s·t)] su tutti i poli di F.
+///        Più generale del pattern-based inverse_laplace_transform: copre F
+///        razionale con polos qualsiasi (anche multipli), usando residue()
+///        del sub-engine F5.6.  Poli irrazionali / RootOf → Unimplemented.
+[[nodiscard]] Result<ExprPtr> inverse_laplace_residue_q(
+    ExprPtr F, const Symbol& s, const Symbol& t,
+    symbolic::CASContext& ctx);
+
 /// @brief Mellin transform M{f(t)}(s) = ∫_0^∞ t^(s-1) · f(t) dt — F5.8 / Task #15.
 /// Pipeline assiomatica + proprietà:
 ///   - Linearità su Sum, fattoriale Product scalare;
