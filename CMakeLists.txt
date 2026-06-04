@@ -166,6 +166,7 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/risch_de_extensions.cpp
     src/calculus/risch_log_expand.cpp
     src/calculus/z_transform.cpp
+    src/calculus/mellin_transform.cpp
     src/calculus/differential_field.cpp
     src/calculus/limit.cpp
     src/calculus/limit_helpers.cpp
@@ -519,6 +520,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/calculus/test_risch_parametric.cpp
         test/unit/calculus/test_risch_de_extensions.cpp
         test/unit/calculus/test_z_transform.cpp
+        test/unit/calculus/test_mellin_transform.cpp
         test/unit/numeric/test_mpfr_foundation.cpp
         test/unit/algebra/test_gaussian_int.cpp
         test/unit/algebra/test_gaussian_factor.cpp

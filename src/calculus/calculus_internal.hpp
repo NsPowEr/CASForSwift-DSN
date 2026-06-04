@@ -72,6 +72,19 @@ enum class FiniteDiffOrder {
     ExprPtr expr, const Symbol& s, const Symbol& t,
     symbolic::CASContext& ctx);
 
+/// @brief Mellin transform M{f(t)}(s) = ∫_0^∞ t^(s-1) · f(t) dt — F5.8 / Task #15.
+/// Pipeline assiomatica + proprietà:
+///   - Linearità su Sum, fattoriale Product scalare;
+///   - Coppie base:  exp(-a·t)              → Γ(s)/a^s
+///                   t^a · exp(-b·t)        → Γ(s+a)/b^(s+a)
+///                   1/(1+t)^a              → Γ(s)·Γ(a-s)/Γ(a)
+///   - Proprietà:    f(a·t)                 → a^(-s) · F(s)        (scaling)
+///                   t^a · f(t)             → F(s+a)               (modulation)
+/// Per pattern non riconosciuti restituisce Unimplemented diagnostico.
+[[nodiscard]] Result<ExprPtr> mellin_transform(
+    ExprPtr expr, const Symbol& t, const Symbol& s,
+    symbolic::CASContext& ctx);
+
 /// @brief Z-transform Z{a_n}(z) = Σ_{n=0}^∞ a_n · z^(−n) — F5.8 / Task #16.
 /// Convention: causal unilateral Z-transform.  Pipeline:
 ///   (1) linearità su Sum + estrazione scalari Product;
