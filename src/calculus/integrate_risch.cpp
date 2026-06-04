@@ -6,7 +6,6 @@
 #include "cas/error_helpers.hpp"
 #include "../algebra/polynomial_internal.hpp"
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -16,6 +15,92 @@
 namespace cas::calculus {
 
 namespace {
+
+// HPP-007 helper: deep tree walker that substitutes every occurrence of a
+// target subexpression with a replacement.  The standard substitute() takes a
+// Symbol; here we need to replace a transcendental subexpression (e.g. ln(x))
+// with a fresh Symbol so the simplifier sees a multivariate rational where
+// polynomial GCD cancellation becomes reachable.
+[[nodiscard]] bool deep_struct_equal(ExprPtr a, ExprPtr b);
+[[nodiscard]] bool deep_struct_equal(ExprPtr a, ExprPtr b) {
+    if (a == b) return true;
+    if (!a || !b) return false;
+    if (const auto* sa = expr_cast<Symbol>(a))
+        if (const auto* sb = expr_cast<Symbol>(b)) return sa->name == sb->name;
+    if (const auto* ia = expr_cast<IntegerLit>(a))
+        if (const auto* ib = expr_cast<IntegerLit>(b)) return ia->value == ib->value;
+    if (const auto* ra = expr_cast<RationalLit>(a))
+        if (const auto* rb = expr_cast<RationalLit>(b))
+            return ra->numerator == rb->numerator && ra->denominator == rb->denominator;
+    if (const auto* ca = expr_cast<Constant>(a))
+        if (const auto* cb = expr_cast<Constant>(b)) return ca->value == cb->value;
+    if (const auto* fa = expr_cast<FuncCall>(a))
+        if (const auto* fb = expr_cast<FuncCall>(b)) {
+            if (fa->func_id != fb->func_id || fa->args.size() != fb->args.size()) return false;
+            for (std::size_t i = 0; i < fa->args.size(); ++i)
+                if (!deep_struct_equal(fa->args[i], fb->args[i])) return false;
+            return true;
+        }
+    if (const auto* ba = expr_cast<Binary>(a))
+        if (const auto* bb = expr_cast<Binary>(b))
+            return ba->op == bb->op &&
+                   deep_struct_equal(ba->left, bb->left) &&
+                   deep_struct_equal(ba->right, bb->right);
+    if (const auto* ua = expr_cast<Unary>(a))
+        if (const auto* ub = expr_cast<Unary>(b))
+            return ua->op == ub->op && deep_struct_equal(ua->operand, ub->operand);
+    if (const auto* su_a = expr_cast<Sum>(a))
+        if (const auto* su_b = expr_cast<Sum>(b)) {
+            if (su_a->terms.size() != su_b->terms.size()) return false;
+            for (std::size_t i = 0; i < su_a->terms.size(); ++i)
+                if (!deep_struct_equal(su_a->terms[i], su_b->terms[i])) return false;
+            return true;
+        }
+    if (const auto* pa = expr_cast<Product>(a))
+        if (const auto* pb = expr_cast<Product>(b)) {
+            if (pa->factors.size() != pb->factors.size()) return false;
+            for (std::size_t i = 0; i < pa->factors.size(); ++i)
+                if (!deep_struct_equal(pa->factors[i], pb->factors[i])) return false;
+            return true;
+        }
+    return false;
+}
+
+[[nodiscard]] ExprPtr deep_replace_expr(
+    ExprPtr e, ExprPtr target, ExprPtr replacement, AstArena& arena) {
+    if (!e) return e;
+    if (deep_struct_equal(e, target)) return replacement;
+    if (const auto* fc = expr_cast<FuncCall>(e)) {
+        std::vector<ExprPtr> na;
+        na.reserve(fc->args.size());
+        for (ExprPtr a : fc->args)
+            na.push_back(deep_replace_expr(a, target, replacement, arena));
+        return arena.make<FuncCall>(fc->func_id, std::move(na));
+    }
+    if (const auto* bin = expr_cast<Binary>(e))
+        return arena.make<Binary>(bin->op,
+            deep_replace_expr(bin->left,  target, replacement, arena),
+            deep_replace_expr(bin->right, target, replacement, arena));
+    if (const auto* un = expr_cast<Unary>(e))
+        return arena.make<Unary>(un->op,
+            deep_replace_expr(un->operand, target, replacement, arena));
+    if (const auto* sum = expr_cast<Sum>(e)) {
+        std::vector<ExprPtr> nt;
+        nt.reserve(sum->terms.size());
+        for (ExprPtr t : sum->terms)
+            nt.push_back(deep_replace_expr(t, target, replacement, arena));
+        return arena.make<Sum>(std::move(nt));
+    }
+    if (const auto* prod = expr_cast<Product>(e)) {
+        std::vector<ExprPtr> nf;
+        nf.reserve(prod->factors.size());
+        for (ExprPtr f : prod->factors)
+            nf.push_back(deep_replace_expr(f, target, replacement, arena));
+        return arena.make<Product>(std::move(nf));
+    }
+    return e;
+}
+
 
 // Extract a Rational from an expression that simplifies to a rational literal.
 [[nodiscard]] std::optional<Rational> risch_as_rational(ExprPtr e) {
@@ -615,18 +700,16 @@ Result<ExprPtr> integrate_risch(ExprPtr expr, const Symbol& var, symbolic::CASCo
     // and similar nested-log cases that Hermite/Rothstein-Trager cannot
     // express (resultant root is non-constant rational function of x).
     //
-    // Verification by differentiation roundtrip: candidate F = c·ln(g);
-    // accept iff D(F) - gen_expr simplifies to 0. This bypasses fragile
-    // shape inspection on the candidate constant c.
-    // Try each extension as candidate g such that integrand = c · D(g)/g
-    // for some constant c. For pragmatic detection, try small rational
-    // constants (c ∈ {1, -1, 1/2, 2, -1/2, -2}) and verify by subtraction.
-    auto try_constant = [&](ExprPtr cF, ExprPtr DF_val) -> Result<ExprPtr> {
-        ExprPtr delta = arena.make<Binary>(BinaryOp::Sub, DF_val, expr);
-        // together() reduces rational sub-expressions over a common
-        // denominator before simplify — required because raw simplify
-        // does not commute the (1/x)·(1/y) → 1/(xy) transform that the
-        // subtraction needs to reach zero.
+    // Formal-extraction approach (HPP-007 closure): for each candidate
+    // g in the field tower, compute c = integrand / D(ln(g)) symbolically,
+    // accept iff c is constant in var AND verifies the round-trip
+    // D(c·ln(g)) − integrand = 0.  This eliminates the previous closed
+    // set {±1, ±1/2, ±2} which silently missed cases like c=3 from
+    // ∫ 3/(x·ln(x)) dx = 3·ln(ln(x)).
+    auto verify_and_return = [&](ExprPtr cF) -> Result<ExprPtr> {
+        auto DcF = diff(cF, var, 1U, context);
+        if (DcF.is_error()) return fail<ExprPtr>(DcF.error());
+        ExprPtr delta = arena.make<Binary>(BinaryOp::Sub, DcF.value(), expr);
         auto delta_tog = algebra::together(delta, context);
         if (delta_tog.is_error()) return fail<ExprPtr>(delta_tog.error());
         auto delta_simp = context.simplify(delta_tog.value());
@@ -635,17 +718,20 @@ Result<ExprPtr> integrate_risch(ExprPtr expr, const Symbol& var, symbolic::CASCo
             && expr_ref<IntegerLit>(delta_simp.value()).value.is_zero()) {
             return context.simplify(cF);
         }
-        // F0.8-MIGRATED
         return make_unimplemented<ExprPtr>(
-            "calculus", "try_risch_exponential_rational",
-            "trial constant did not cancel residue",
+            "calculus", "try_risch_log_candidate",
+            "formal constant did not pass round-trip verification",
             cas::error::reason_codes::RISCH_NO_MATCH,
-            "Extend trial constant set or implement full exponential Risch solver",
+            "Verify the extension tower is well-formed for the integrand",
             "F0.8");
     };
-    const std::array<std::pair<long long, long long>, 6> trial_consts = {{
-        {1, 1}, {-1, 1}, {1, 2}, {2, 1}, {-1, 2}, {-2, 1},
-    }};
+    // Formal-extraction strategy for c = expr/DF.  The simplifier alone cannot
+    // cancel mixed factors like x · (x·ln(x))^-1 · ln(x) because it treats the
+    // transcendental ln(x) as opaque.  We use apart_num_den to split both expr
+    // and DF into (numerator, denominator), cross-multiply to form a single
+    // rational, and rely on simplify to cancel the resulting symbolic factors
+    // structurally.  When that yields a var-independent expression, it is the
+    // candidate constant — round-trip differentiation then verifies it.
     for (const auto& ext : field.extensions()) {
         ExprPtr g;
         if (ext.type == ExtensionType::Logarithmic) {
@@ -659,15 +745,60 @@ Result<ExprPtr> integrate_risch(ExprPtr expr, const Symbol& var, symbolic::CASCo
         auto DF_res = diff(F_unit, var, 1U, context);
         if (DF_res.is_error()) continue;
         ExprPtr DF = DF_res.value();
-        for (const auto& [num, den] : trial_consts) {
-            ExprPtr c_const = (den == 1)
-                ? static_cast<ExprPtr>(arena.make<IntegerLit>(BigInt(num)))
-                : static_cast<ExprPtr>(arena.make<RationalLit>(BigInt(num), BigInt(den)));
-            ExprPtr cF = arena.make<Binary>(BinaryOp::Mul, c_const, F_unit);
-            ExprPtr cDF = arena.make<Binary>(BinaryOp::Mul, c_const, DF);
-            auto res = try_constant(cF, cDF);
-            if (res.is_ok()) return res;
+        // Split both sides into num/den so the cross-multiplied ratio
+        //   c = (num(expr) · den(DF)) / (den(expr) · num(DF))
+        // exposes the common transcendental factors to simplify().
+        auto expr_nd = algebra::apart_num_den(expr,    context);
+        auto df_nd   = algebra::apart_num_den(DF,      context);
+        if (expr_nd.is_error() || df_nd.is_error()) continue;
+        ExprPtr num = arena.make<Binary>(BinaryOp::Mul,
+            expr_nd.value().numerator, df_nd.value().denominator);
+        ExprPtr den = arena.make<Binary>(BinaryOp::Mul,
+            expr_nd.value().denominator, df_nd.value().numerator);
+        auto num_simp = context.simplify(num);
+        auto den_simp = context.simplify(den);
+        if (num_simp.is_error() || den_simp.is_error()) continue;
+        ExprPtr c_raw = arena.make<Binary>(BinaryOp::Div,
+            num_simp.value(), den_simp.value());
+        // Replace each transcendental generator g_j of the differential field
+        // with a fresh symbol u_j so the simplifier sees a multivariate
+        // rational in {var, u_1, ..., u_k}: polynomial-level GCD cancellation
+        // is then reachable (otherwise factors like (x·ln(x))^-1 vs ln(x)
+        // remain opaque transcendentals and never cancel structurally).
+        ExprPtr c_subst = c_raw;
+        std::vector<Symbol> probe_syms;
+        probe_syms.reserve(field.extensions().size());
+        for (const auto& sub : field.extensions()) {
+            ExprPtr gen;
+            if (sub.type == ExtensionType::Logarithmic) {
+                gen = arena.make<FuncCall>(BuiltinOp::Ln,
+                    std::vector<ExprPtr>{sub.argument});
+            } else if (sub.type == ExtensionType::Exponential) {
+                gen = arena.make<FuncCall>(BuiltinOp::Exp,
+                    std::vector<ExprPtr>{sub.argument});
+            } else {
+                continue;
+            }
+            Symbol fresh = context.make_fresh_symbol("hpp7");
+            probe_syms.push_back(fresh);
+            ExprPtr fresh_e = arena.make<Symbol>(fresh);
+            c_subst = deep_replace_expr(c_subst, gen, fresh_e, arena);
         }
+        auto c_tog = algebra::together(c_subst, context);
+        if (c_tog.is_error()) continue;
+        auto c_exp  = algebra::expand(c_tog.value(), context);
+        if (c_exp.is_error()) continue;
+        auto c_simp = context.simplify(c_exp.value());
+        if (c_simp.is_error()) continue;
+        if (depends_on(c_simp.value(), var)) continue;  // not a constant in var
+        bool depends_on_probe = false;
+        for (const Symbol& u : probe_syms) {
+            if (depends_on(c_simp.value(), u)) { depends_on_probe = true; break; }
+        }
+        if (depends_on_probe) continue;
+        ExprPtr cF = arena.make<Binary>(BinaryOp::Mul, c_simp.value(), F_unit);
+        auto res = verify_and_return(cF);
+        if (res.is_ok()) return res;
     }
 
     // 2c. Product(f, exp(g)) Risch DE shortcut (Bronstein cap. 6).

@@ -266,6 +266,36 @@ Maxima 5.49.0 (Homebrew bottle, `/opt/homebrew/Cellar/maxima/5.49.0/`) è il **r
 
 ---
 
+## REGOLA TIMEOUT TEST (CRITICA — Anti-Hang)
+
+**VIETATO** lanciare l'eseguibile dei test senza un timeout esplicito. Se l'agente introduce un loop infinito (o un O(2^n) in un percorso non testato in precedenza), `cas_foundation_tests` può bloccarsi **per ore** consumando CPU senza alcun output utile.
+
+### Regole operative obbligatorie
+
+1. **Ogni invocazione di `cas_foundation_tests` o di qualsiasi binario di test DEVE essere lanciata con:**
+   - `--gtest_filter=` esplicito sulla famiglia di test pertinente al cambio (mai eseguire l'intera suite senza filtro durante lo sviluppo iterativo);
+   - timeout di shell hard via Bash tool (`timeout` parameter ≤ 120 s per filtro mirato, ≤ 600 s per la suite completa pre-commit).
+2. **Mai usare `run_in_background=true` per la suite intera durante lo sviluppo iterativo**: se il processo si blocca senza output, non c'è notifica e l'agente attende silenzioso. Usare invece foreground con timeout esplicito.
+3. **Suite completa solo come gate pre-commit**: dopo che tutti i test mirati passano e il codice è considerato pronto, eseguire `cas_foundation_tests` con timeout 600s. Se supera 600s, abortire e investigare hang/loop prima di riprovare.
+4. **Se un test si blocca**: STOP immediato del processo (`TaskStop` o `kill`); aggiungere `std::cerr` mirato per individuare il punto di stallo; **NON ripetere** la stessa invocazione senza prima isolare la causa.
+5. **In CMakeLists.txt aggiungere `set_tests_properties(... PROPERTIES TIMEOUT 60)`** per ogni test gtest individuale registrato — protezione di rete via CTest.
+
+### Anti-pattern vietati
+
+- `./build/cas_foundation_tests` senza filtro né timeout.
+- `cmake --build && ./build/cas_foundation_tests` come "verifica finale" senza considerare possibili regressioni di complessità.
+- Background bash con `tail -5` e attendere senza scadenza: se la suite hang prima del primo output, l'agente non riceve nulla.
+
+### Risposta a un hang
+
+Se l'agente lancia un test e non riceve output entro il timeout fissato:
+1. Killare il processo (mai aspettarlo "ancora un po'").
+2. Restringere il filtro al sottoset più piccolo che produce hang.
+3. Aggiungere instrumentazione (`std::cerr`) nel codice modificato.
+4. Identificare il loop/ricorsione; ripristinare lo stato sicuro via `git stash` se il codice introdotto è il colpevole sospetto.
+
+---
+
 ## WORKFLOW: PRIMA DI DICHIARARE UN TASK COMPLETATO
 
 1. **Integrità Matematica**: Tutti i test unitari e di integrazione passano al 100%.

@@ -702,10 +702,13 @@ test/unit/algebra/test_half_gcd.cpp
     target_link_libraries(assumptions_stability_test PRIVATE cas_core GTest::gtest_main)
 
     include(GoogleTest)
+    # Per-test wall-clock cap (CLAUDE.md REGOLA TIMEOUT TEST): ogni test gtest
+    # individuale viene killato da CTest oltre 60s. Protezione di rete contro
+    # loop infiniti introdotti accidentalmente nel core algoritmico.
     gtest_discover_tests(cas_foundation_tests DISCOVERY_TIMEOUT 60
-        PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
+        PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0" TIMEOUT 60)
     gtest_discover_tests(assumptions_stability_test DISCOVERY_TIMEOUT 60
-        PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
+        PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0" TIMEOUT 60)
 endif()
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     include(CheckCXXCompilerFlag)

@@ -456,12 +456,19 @@
 - **Fix corretto**: `ctx.fsolve_tolerance()` con default `1e-10`, esposto come `numeric_tolerance_` in `CASContext`. Già predisposto parzialmente in `ctx.numeric_tolerance()` (L2-06 audit).
 - **Blocking dependency**: Nessuno.
 
-### HPP-007 — Risch trial constants set chiuso (integrate_risch.cpp:623)
-- **File**: `src/calculus/integrate_risch.cpp:623`
+### HPP-007 — Risch trial constants set chiuso — RISOLTA 2026-06-04
+- **File**: `src/calculus/integrate_risch.cpp:612-690` (section 2b: Risch logarithmic-derivative recognizer).
 - **Categoria CLAUDE.md**: Cat 3 — set fisso che esclude silenziosamente input validi.
-- **Descrizione**: `const std::array<std::pair<long long, long long>, 6> trial_consts = {{1,1},{-1,1},{1,2},{2,1},{-1,2},{-2,1}}`. Cerca costante `c` nell'insieme chiuso `{±1,±1/2,±2}`. Integrali come `∫3/(x·ln(x)) dx = 3·ln(ln(x))` richiedono `c=3` non nel set → Unimplemented silenzioso (risultato mancante, non errore diagnostico).
-- **Fix corretto**: Risoluzione formale via equazione del campo residuale (Risch structure theorem step): `c·D(F) = integrand` → `c = integrand / D(F)` con verifica che `c` sia costante rispetto alla variabile di integrazione. Nessun set chiuso richiesto.
-- **Blocking dependency**: L1-02 Risch completo (Bronstein cap. 9).
+- **Stato pre-fix**: `const std::array<std::pair<long long, long long>, 6> trial_consts = {{1,1},{-1,1},{1,2},{2,1},{-1,2},{-2,1}}` cercava costante `c` nell'insieme chiuso `{±1,±1/2,±2}`. Integrali come `∫3/(x·ln(x)) dx = 3·ln(ln(x))` con `c=3` cadevano fuori dal set → fallback Hermite/RT con risultato sbagliato (`ln(x)^-1·ln|x|`) o Unimplemented silenzioso.
+- **Fix applicato 2026-06-04**: Risoluzione formale via equazione del campo residuale (Risch structure theorem step). Per ogni generatore `g_i` della tower differenziale, calcola `c = expr / D(ln(g_i))` con strategia di cancellazione polinomiale:
+  1. `apart_num_den(expr)` e `apart_num_den(DF)` per esporre `num · den_DF / (den · num_DF)`.
+  2. Sostituzione profonda di ogni transcendental `g_j` con simbolo fresco `u_j` via `deep_replace_expr` (walker AST custom, helper interno in `integrate_risch.cpp`).
+  3. `together + expand + simplify` sulla forma multivariata in `{var, u_1, …}`.
+  4. Test `depends_on(var) OR depends_on(u_j) → continue; altrimenti `c` è genuina costante.
+  5. Verifica round-trip `D(c·F) − integrand → 0` prima di accettare.
+  Nessun set chiuso. Copre `c=1`, `c=3`, `c=5/7`, e in generale qualsiasi razionale.
+- **Verifica**: 6/6 PASS su `RischLogarithmicProbeTest.*` (incluso 3 nuovi test `IntegralOfReciprocalOfXLnX`, `HPP007_FormalConstantExtraction_c3`, `HPP007_FormalConstantExtraction_c5over7`). Regression sweep famiglie critiche (Risch/Integrate/Calculus/Algebra/Symbolic/Simplify) 446/446 PASS in 41s.
+- **STATO**: ✅ RISOLTA 2026-06-04.
 
 ### HPP-008 — ODE solver C+i literal naming — RISOLTA 2026-06-02
 - **File**: `src/calculus/ode_solver_advanced.cpp:228` (loop generating integration constants for nth-order linear ODE).
