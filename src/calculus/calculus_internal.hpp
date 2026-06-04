@@ -114,6 +114,19 @@ enum class FiniteDiffOrder {
     const Symbol& var,
     symbolic::CASContext& ctx);
 
+/// @brief Cap.9 structure theorem (sub-case log-factorization): decompone
+///        log(u(var)) → Σ m_i · log(p_i(var)) + log(content) sfruttando la
+///        fattorizzazione di u in Q[var].  Walk dell'AST, applica la
+///        riduzione ad ogni occorrenza di FuncCall(Ln, polinomio).  Lascia
+///        intatte le log con argomento non polinomiale.
+///
+///        Caso d'uso: pre-processore per il wiring cap.8 (integrate_risch
+///        section 2b-bis); decomporre log argomenti riconduce torre log
+///        con generatori multipli ma algebricamente dipendenti a torre
+///        con generatore unico, abilitando l'antiderivata esatta.
+[[nodiscard]] ExprPtr expand_log_args_via_factorization(
+    ExprPtr e, const Symbol& var, symbolic::CASContext& ctx);
+
 /// @brief Parametric Risch DE in Q[x] (Bronstein Symbolic Integration I §7.1).
 /// Risolve  y' + f·y = Σ_i c_i · g_i  per y ∈ Q[var] e c_i ∈ Q.
 /// Restituisce una base dello spazio nullo del sistema lineare omogeneo:

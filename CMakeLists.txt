@@ -164,6 +164,7 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/integrate_risch.cpp
     src/calculus/risch_parametric.cpp
     src/calculus/risch_de_extensions.cpp
+    src/calculus/risch_log_expand.cpp
     src/calculus/differential_field.cpp
     src/calculus/limit.cpp
     src/calculus/limit_helpers.cpp

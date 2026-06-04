@@ -814,11 +814,16 @@ Result<ExprPtr> integrate_risch(ExprPtr expr, const Symbol& var, symbolic::CASCo
     // Quindi chiamiamo solve_risch_de_{logarithmic,exponential}_q con f=0
     // e ricaviamo direttamente y come polinomio in θ a coefficienti razionali.
     //
+    // Pre-processo cap.9 (structure theorem, sub-case log-factorization):
+    // espandi log(u(x)) → Σ m_i · log(p_i) per fondere generatori log
+    // algebricamente dipendenti in un singolo log irreducibile prima del scan.
+    //
     // Riconoscimento del generatore θ: walk dell'AST per raccogliere tutte le
     // istanze di FuncCall(Ln/Exp).  Wiring fast-path solo per torre con un
     // unico generatore (log(u) o exp(u)) ben definito; torre mista o generatori
     // multipli ricadono su 2c/Hermite/Trager.
     {
+        ExprPtr preproc = expand_log_args_via_factorization(expr, var, context);
         ExprPtr ln_arg = nullptr;
         ExprPtr exp_arg = nullptr;
         bool generator_conflict = false;
@@ -848,47 +853,43 @@ Result<ExprPtr> integrate_risch(ExprPtr expr, const Symbol& var, symbolic::CASCo
                 for (ExprPtr f : prod->factors) scan(f); return;
             }
         };
-        scan(expr);
+        scan(preproc);
 
         // Procedi solo se torre con esattamente UN generatore (puro log o puro exp).
         if (!generator_conflict) {
             ExprPtr zero = arena.make<IntegerLit>(BigInt(0));
+            // Use the preprocessed expression `preproc` for the Risch DE
+            // solver: log expansion may have fused multiple algebraically
+            // dependent generators into a single one, so the solver must see
+            // the fused form (otherwise it would fail to match θ_sym).
+            // Round-trip check: per confronto post-expand, applica
+            // expand_log su entrambi i lati così identità tipo ln(x²)=2·ln(x)
+            // si cancellano (l'antiderivata vive nel campo "log-expanded").
+            auto roundtrip_ok = [&](ExprPtr y) -> bool {
+                auto Dy = diff(y, var, 1U, context);
+                if (Dy.is_error()) return false;
+                ExprPtr Dy_exp = expand_log_args_via_factorization(Dy.value(), var, context);
+                ExprPtr expr_exp = expand_log_args_via_factorization(expr, var, context);
+                ExprPtr delta = arena.make<Binary>(BinaryOp::Sub, Dy_exp, expr_exp);
+                auto delta_tog = algebra::together(delta, context);
+                if (delta_tog.is_error()) return false;
+                auto delta_simp = context.simplify(delta_tog.value());
+                if (delta_simp.is_error()) return false;
+                if (const auto* il = expr_cast<IntegerLit>(delta_simp.value()))
+                    return il->value.is_zero();
+                if (const auto* rl = expr_cast<RationalLit>(delta_simp.value()))
+                    return rl->numerator.is_zero();
+                return false;
+            };
             if (ln_arg && !exp_arg) {
-                auto y = solve_risch_de_logarithmic_q(zero, expr, ln_arg, var, context);
-                if (y.is_ok()) {
-                    // Verifica round-trip: D(y) deve uguagliare expr.
-                    auto Dy = diff(y.value(), var, 1U, context);
-                    if (Dy.is_ok()) {
-                        ExprPtr delta = arena.make<Binary>(BinaryOp::Sub, Dy.value(), expr);
-                        auto delta_tog = algebra::together(delta, context);
-                        if (delta_tog.is_ok()) {
-                            auto delta_simp = context.simplify(delta_tog.value());
-                            if (delta_simp.is_ok()) {
-                                if (expr_is<IntegerLit>(delta_simp.value())
-                                    && expr_ref<IntegerLit>(delta_simp.value()).value.is_zero()) {
-                                    return context.simplify(y.value());
-                                }
-                            }
-                        }
-                    }
+                auto y = solve_risch_de_logarithmic_q(zero, preproc, ln_arg, var, context);
+                if (y.is_ok() && roundtrip_ok(y.value())) {
+                    return context.simplify(y.value());
                 }
             } else if (exp_arg && !ln_arg) {
-                auto y = solve_risch_de_exponential_q(zero, expr, exp_arg, var, context);
-                if (y.is_ok()) {
-                    auto Dy = diff(y.value(), var, 1U, context);
-                    if (Dy.is_ok()) {
-                        ExprPtr delta = arena.make<Binary>(BinaryOp::Sub, Dy.value(), expr);
-                        auto delta_tog = algebra::together(delta, context);
-                        if (delta_tog.is_ok()) {
-                            auto delta_simp = context.simplify(delta_tog.value());
-                            if (delta_simp.is_ok()) {
-                                if (expr_is<IntegerLit>(delta_simp.value())
-                                    && expr_ref<IntegerLit>(delta_simp.value()).value.is_zero()) {
-                                    return context.simplify(y.value());
-                                }
-                            }
-                        }
-                    }
+                auto y = solve_risch_de_exponential_q(zero, preproc, exp_arg, var, context);
+                if (y.is_ok() && roundtrip_ok(y.value())) {
+                    return context.simplify(y.value());
                 }
             }
         }

@@ -202,7 +202,10 @@ protected:
         if (r.is_error()) return false;
         auto d_back = diff(r.value(), x, 1U, ctx);
         if (d_back.is_error()) return false;
-        ExprPtr delta = arena.make<Binary>(BinaryOp::Sub, d_back.value(), e);
+        // Confronto post-expand_log per gestire identità ln(x²)=2·ln(x).
+        ExprPtr Dy_exp = expand_log_args_via_factorization(d_back.value(), x, ctx);
+        ExprPtr e_exp  = expand_log_args_via_factorization(e, x, ctx);
+        ExprPtr delta = arena.make<Binary>(BinaryOp::Sub, Dy_exp, e_exp);
         auto delta_tog = algebra::together(delta, ctx);
         if (delta_tog.is_error()) return false;
         auto delta_simp = ctx.simplify(delta_tog.value());
@@ -228,6 +231,39 @@ TEST_F(RischDeWiringTest, IntegralOfLnXSquared) {
 // ∫ exp(2x) dx = (1/2)·exp(2x)
 TEST_F(RischDeWiringTest, IntegralOfExp2x) {
     EXPECT_TRUE(integrate_and_verify("exp(2*x)"));
+}
+
+// ∫ ln(x²) dx — generatore ln(x²), wiring cap.8 diretto.
+// Round-trip valido perché D(2x·log(x²) - ?·x) = ... (verifica via diff).
+TEST_F(RischDeWiringTest, IntegralOfLnXSquared_AsXSquaredArg) {
+    EXPECT_TRUE(integrate_and_verify("ln(x^2)"));
+}
+
+// ∫ (ln(x) + ln(x²)) dx — generatori distinti senza expand,
+// dipendenti dopo expand: log(x²) → 2·log(x), quindi integrand = 3·log(x).
+// Cap.9 pre-processo + cap.8 wiring → 3·(x·log(x) - x).
+TEST_F(RischDeWiringTest, IntegralOfLnX_PlusLnXSquared_FusedViaExpansion) {
+    EXPECT_TRUE(integrate_and_verify("ln(x) + ln(x^2)"));
+}
+
+// ∫ ln(x·(x+1)) dx — log di prodotto.  Cap.9 espande in log(x)+log(x+1).
+// Successivo wiring scopre 2 generatori distinti — skip wiring; ricade
+// su Hermite/RT.  Test: integrate non deve crashare (può ritornare
+// successo o Unimplemented diagnostico).
+TEST_F(RischDeWiringTest, IntegralOfLnXTimesXPlusOne_NoCrash) {
+    AstArena& arena = ctx.arena();
+    auto t = Lexer("ln(x*(x+1))").tokenize();
+    ASSERT_TRUE(t.is_ok());
+    Parser p(t.value(), arena);
+    auto e = p.parse();
+    ASSERT_TRUE(e.is_ok());
+    auto r = integrate(e.value(), x, ctx);
+    // Esito: ok con verifica round-trip OPPURE Unimplemented esplicito.
+    if (r.is_ok()) {
+        EXPECT_TRUE(integrate_and_verify("ln(x*(x+1))"));
+    } else {
+        EXPECT_EQ(r.error().kind, CASErrorKind::Unimplemented);
+    }
 }
 
 }  // namespace
