@@ -274,9 +274,10 @@ Maxima 5.49.0 (Homebrew bottle, `/opt/homebrew/Cellar/maxima/5.49.0/`) è il **r
 
 1. **Ogni invocazione di `cas_foundation_tests` o di qualsiasi binario di test DEVE essere lanciata con:**
    - `--gtest_filter=` esplicito sulla famiglia di test pertinente al cambio (mai eseguire l'intera suite senza filtro durante lo sviluppo iterativo);
-   - timeout di shell hard via Bash tool (`timeout` parameter ≤ 120 s per filtro mirato, ≤ 600 s per la suite completa pre-commit).
+   - timeout di shell hard via Bash tool (`timeout` parameter ≤ 120 s per filtro mirato, ≤ 600 s per la suite quick pre-commit, ≤ 1800 s per la suite slow incluso VanHoeij/PrimitiveElement).
+   - **Modo preferito**: `bash scripts/test_quick.sh` (cap 600 s, esclude i test slow noti) per sviluppo iterativo; `bash scripts/test_quick.sh --slow` (cap 1800 s) come gate pre-commit completo. Lo script ha la lista canonica di esclusioni — non modificarla senza prima indagare la regressione di complessità.
 2. **Mai usare `run_in_background=true` per la suite intera durante lo sviluppo iterativo**: se il processo si blocca senza output, non c'è notifica e l'agente attende silenzioso. Usare invece foreground con timeout esplicito.
-3. **Suite completa solo come gate pre-commit**: dopo che tutti i test mirati passano e il codice è considerato pronto, eseguire `cas_foundation_tests` con timeout 600s. Se supera 600s, abortire e investigare hang/loop prima di riprovare.
+3. **Suite completa solo come gate pre-commit**: dopo che tutti i test mirati passano e il codice è considerato pronto, eseguire `bash scripts/test_quick.sh` (quick) o `--slow` (completa). Se la quick supera 600 s o la slow 1800 s, abortire e investigare hang/loop prima di riprovare.
 4. **Se un test si blocca**: STOP immediato del processo (`TaskStop` o `kill`); aggiungere `std::cerr` mirato per individuare il punto di stallo; **NON ripetere** la stessa invocazione senza prima isolare la causa.
 5. **In CMakeLists.txt aggiungere `set_tests_properties(... PROPERTIES TIMEOUT 60)`** per ogni test gtest individuale registrato — protezione di rete via CTest.
 
