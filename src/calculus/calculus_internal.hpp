@@ -72,6 +72,48 @@ enum class FiniteDiffOrder {
     ExprPtr expr, const Symbol& s, const Symbol& t,
     symbolic::CASContext& ctx);
 
+/// @brief Parametric Risch DE in Q[x] (Bronstein Symbolic Integration I §7.1).
+/// Risolve  y' + f·y = Σ_i c_i · g_i  per y ∈ Q[var] e c_i ∈ Q.
+/// Restituisce una base dello spazio nullo del sistema lineare omogeneo:
+///   Σ_j (y'+f·y)_j · y_k + Σ_i (-g_i)_j · c_i = 0  per ogni coefficiente j.
+/// Ogni soluzione della base è una coppia (y, [c_1,...,c_m]).  La dimensione
+/// dello spazio nullo è (numero_unknowns - rank).
+///
+/// Casi:
+///   - Base vuota          → solo soluzione banale (y=0, c=0).  L'integrand
+///                           rispetto all'estensione è "non-elementare".
+///   - Base con (0, [c])   → combinazione di c_i·g_i è già nulla (no info).
+///   - Base con (y, [c])   → identità y' + f·y = Σ c_i·g_i utile per
+///                           ricostruzione antiderivata in cap.8/9.
+struct ParametricRischDeQSolution {
+    ExprPtr y;                              ///< polynomial in `var`
+    std::vector<Rational> c;                ///< rational scalars c_1...c_m
+};
+[[nodiscard]] Result<std::vector<ParametricRischDeQSolution>>
+solve_risch_de_parametric_q(
+    ExprPtr f_expr,
+    const std::vector<ExprPtr>& g_vec,
+    const Symbol& var,
+    symbolic::CASContext& ctx);
+
+/// @brief Limited Integration in Q[x] (Bronstein §7.2 caso polinomiale).
+/// Dato f ∈ Q[var], trova rappresentazione  f = g' + Σ_i c_i · h_i
+/// dove g ∈ Q[var] è "elementary" (antiderivata esatta della parte ridotta) e
+/// {h_i} è il vettore di forzanti residue non-integrabili in Q[var].  Nel caso
+/// polinomiale puro Q[var], la decomposizione è triviale (g = ∫f, residuo
+/// vuoto) ma la routine esiste come building block per cap.8 (Risch DE
+/// generale su torre trascendentale) e cap.9 (structure theorem).
+struct LimitedIntegrationQSolution {
+    ExprPtr g;                              ///< polynomial antiderivative
+    std::vector<Rational> c;                ///< scalars on residue basis
+};
+[[nodiscard]] Result<LimitedIntegrationQSolution>
+limited_integration_q(
+    ExprPtr f_expr,
+    const std::vector<ExprPtr>& residue_basis,
+    const Symbol& var,
+    symbolic::CASContext& ctx);
+
 /// @brief ODE Laplace solver (L3-10).
 /// Risolve linear ODE coefficienti costanti: Σ coeffs[k]·y^(k) = forcing(t).
 /// initial_conditions[j] = y^(j)(0), j=0..n-1.
