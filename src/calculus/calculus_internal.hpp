@@ -98,6 +98,22 @@ enum class FiniteDiffOrder {
     const Symbol& var,
     symbolic::CASContext& ctx);
 
+/// @brief Risch DE per estensione esponenziale θ = exp(u), u ∈ Q(var)
+///        (Bronstein §6.4.2, "PolyRischDE_exponential").  Risolve
+///        y' + f·y = g  con f, g polinomiali in θ a coefficienti in Q(var).
+///        Cerca y polinomio in θ a coefficienti in Q(var).
+///
+///        Algoritmo: per ciascun grado i (decoupled, a differenza del caso log),
+///          y_i' + (i · u' + f_0) · y_i = g_i
+///        ogni equazione è una Risch DE indipendente su Q(var), risolta via
+///        solve_risch_de_q.  Restituisce y = Σ y_i · exp(u)^i.
+[[nodiscard]] Result<ExprPtr> solve_risch_de_exponential_q(
+    ExprPtr f_expr,
+    ExprPtr g_expr,
+    ExprPtr u_arg,
+    const Symbol& var,
+    symbolic::CASContext& ctx);
+
 /// @brief Parametric Risch DE in Q[x] (Bronstein Symbolic Integration I §7.1).
 /// Risolve  y' + f·y = Σ_i c_i · g_i  per y ∈ Q[var] e c_i ∈ Q.
 /// Restituisce una base dello spazio nullo del sistema lineare omogeneo:

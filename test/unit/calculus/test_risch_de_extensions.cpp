@@ -126,5 +126,58 @@ TEST_F(RischLogarithmicDeTest, FPolyInTheta_DiagnosticUnimplemented) {
     EXPECT_EQ(res.error().kind, CASErrorKind::Unimplemented);
 }
 
+// ============================================================================
+// Caso esponenziale θ = exp(u).
+// ============================================================================
+
+class RischExponentialDeTest : public ::testing::Test {
+protected:
+    symbolic::CASContext ctx;
+    Symbol x{"x"};
+};
+
+// θ = exp(x), θ' = exp(x).  f = 0, g = 1: y' = 1 → y = x.
+TEST_F(RischExponentialDeTest, F0_G1_YEqualsX) {
+    auto f = parse_expr("0", ctx.arena());
+    auto g = parse_expr("1", ctx.arena());
+    auto u = parse_expr("x", ctx.arena());
+    auto res = solve_risch_de_exponential_q(f, g, u, x, ctx);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+    EXPECT_TRUE(verify_de(res.value(), f, g, x, ctx));
+}
+
+// θ = exp(x).  f = 0, g = exp(x).  Grado 1: y_1' + 1·y_1 = 1 → y_1 = 1.
+// Grado 0: y_0' = 0 → y_0 = 0.  Risultato: y = exp(x).
+TEST_F(RischExponentialDeTest, F0_GExpX_YEqualsExpX) {
+    auto f = parse_expr("0", ctx.arena());
+    auto g = parse_expr("exp(x)", ctx.arena());
+    auto u = parse_expr("x", ctx.arena());
+    auto res = solve_risch_de_exponential_q(f, g, u, x, ctx);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+    EXPECT_TRUE(verify_de(res.value(), f, g, x, ctx));
+}
+
+// θ = exp(2x), θ' = 2·exp(2x), u' = 2.  f = 0, g = exp(2x).
+// Grado 1: y_1' + 2·y_1 = 1 → y_1 = 1/2.
+// y = (1/2)·exp(2x).  Round-trip: D[(1/2)·exp(2x)] = exp(2x). ✓
+TEST_F(RischExponentialDeTest, F0_GExp2x_YEqualsHalfExp2x) {
+    auto f = parse_expr("0", ctx.arena());
+    auto g = parse_expr("exp(2*x)", ctx.arena());
+    auto u = parse_expr("2*x", ctx.arena());
+    auto res = solve_risch_de_exponential_q(f, g, u, x, ctx);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+    EXPECT_TRUE(verify_de(res.value(), f, g, x, ctx));
+}
+
+// f polinomiale in θ esponenziale: Unimplemented diagnostico atteso.
+TEST_F(RischExponentialDeTest, FPolyInTheta_DiagnosticUnimplemented) {
+    auto f = parse_expr("exp(x)", ctx.arena());
+    auto g = parse_expr("1", ctx.arena());
+    auto u = parse_expr("x", ctx.arena());
+    auto res = solve_risch_de_exponential_q(f, g, u, x, ctx);
+    ASSERT_TRUE(res.is_error());
+    EXPECT_EQ(res.error().kind, CASErrorKind::Unimplemented);
+}
+
 }  // namespace
 }  // namespace cas::calculus

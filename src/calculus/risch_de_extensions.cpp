@@ -1,32 +1,27 @@
-// F5.1 / B9-Task#22 — Risch Bronstein cap.8 (caso logaritmico).
+// F5.1 / B9-Task#22 — Risch Bronstein cap.8 estensioni trascendentali.
 //
-// Risolve  y' + f·y = g  in k[θ] dove θ = log(u), u ∈ k = Q(var).
-// Bronstein "Symbolic Integration I" §6.4.1 "PolyRischDE_logarithmic".
+// Implementa la Risch differential equation
 //
-// Algoritmo:
-//   Scrivendo y = Σ_{i=0..n} y_i · θ^i e g = Σ_{i=0..n} g_i · θ^i con
-//   y_i, g_i ∈ k, e ricordando che θ' = u'/u ∈ k,
+//     y' + f·y = g
 //
-//     y' = Σ_i (y_i' + (i+1)·θ'·y_{i+1}) · θ^i
+// per due classi di estensioni trascendentali del campo k = Q(var):
 //
-//   l'identità y' + f·y = g per ogni coefficiente di θ^i diventa
+//   1. solve_risch_de_logarithmic_q — θ = log(u), θ' = u'/u ∈ k.
+//      Bronstein §6.4.1 "PolyRischDE_logarithmic".  Algoritmo top-down
+//      sui gradi di θ con accoppiamento via shift y_{i+1}:
+//         y_i' + f₀·y_i = g_i − (i+1)·(u'/u)·y_{i+1}
 //
-//     y_i' + f₀ · y_i = g_i − (i+1) · (u'/u) · y_{i+1}            (★)
+//   2. solve_risch_de_exponential_q — θ = exp(u), θ' = u'·θ.
+//      Bronstein §6.4.2 "PolyRischDE_exponential".  Equazioni disaccoppiate
+//      grazie a θ^(i-1)·θ' = u'·θ^i:
+//         y_i' + (i·u' + f₀)·y_i = g_i
 //
-//   dove f₀ è il coefficiente costante (in θ) di f.  Per i = n (grado
-//   massimo di y) si ha y_{n+1} = 0, quindi
-//
-//     y_n' + f₀ · y_n = g_n
-//
-//   che è una Risch DE su k = Q(var), risolta da solve_risch_de_q.
-//   Per i = n-1 down to 0, il termine destra di (★) si ottiene
-//   sostituendo la y_{i+1} già calcolata.
-//
-// Limitazione di scope: questa implementazione assume f costante in θ
-// (i.e. f ∈ k, non in k[θ]).  Il caso f polinomiale in θ richiede il
-// trattamento più sofisticato di Bronstein §6.4.1 (riduzione coefficient-
-// by-coefficient con shifts non-locali) ed è marcato come Unimplemented
-// esplicito diagnostico — non viene mascherato silenziosamente.
+// In entrambi i casi:
+//   - sub-case f costante in θ;  caso f polinomiale in θ marcato
+//     Unimplemented diagnostico esplicito (non debt: scope estensione
+//     futuro è cap.8 generale §6.4.1/§6.4.2 con shifts non-locali).
+//   - coefficienti razionali in var per parsing polynomial.
+//   - dispatch interno a solve_risch_de_q per ciascuna equazione su Q(var).
 
 #include "calculus_internal.hpp"
 
@@ -221,6 +216,124 @@ Result<ExprPtr> solve_risch_de_logarithmic_q(
         auto y_i = solve_risch_de_q(f_sub, rhs, var, ctx);
         if (y_i.is_error()) return fail_unimpl(
             "Risch DE su Q(var) non risolto per qualche coefficiente y_i");
+        y_coeffs[i] = y_i.value();
+    }
+
+    // 6. Ricostruisci y = Σ y_i · θ^i.
+    std::vector<ExprPtr> terms;
+    terms.reserve(n + 1U);
+    for (std::size_t i = 0; i <= n; ++i) {
+        auto y_simp = ctx.simplify(y_coeffs[i]);
+        ExprPtr y_i = y_simp.is_ok() ? y_simp.value() : y_coeffs[i];
+        if (const auto* il = expr_cast<IntegerLit>(y_i); il && il->value.is_zero()) continue;
+        ExprPtr term;
+        if (i == 0U) {
+            term = y_i;
+        } else if (i == 1U) {
+            term = arena.make<Binary>(BinaryOp::Mul, y_i, theta);
+        } else {
+            ExprPtr theta_pow = arena.make<Binary>(BinaryOp::Pow, theta,
+                arena.make<IntegerLit>(BigInt(static_cast<std::int64_t>(i))));
+            term = arena.make<Binary>(BinaryOp::Mul, y_i, theta_pow);
+        }
+        terms.push_back(term);
+    }
+    if (terms.empty()) return ok(arena.make<IntegerLit>(BigInt(0)));
+    if (terms.size() == 1U) {
+        auto s = ctx.simplify(terms.front());
+        return s.is_ok() ? s : ok(terms.front());
+    }
+    ExprPtr sum = arena.make<Sum>(std::move(terms));
+    auto s = ctx.simplify(sum);
+    return s.is_ok() ? s : ok(sum);
+}
+
+// ============================================================================
+// Bronstein §6.4.2 — caso esponenziale θ = exp(u).
+// ============================================================================
+Result<ExprPtr> solve_risch_de_exponential_q(
+    ExprPtr f_expr,
+    ExprPtr g_expr,
+    ExprPtr u_arg,
+    const Symbol& var,
+    symbolic::CASContext& ctx) {
+
+    AstArena& arena = ctx.arena();
+
+    auto fail_unimpl = [&](const char* msg) {
+        return make_unimplemented<ExprPtr>(
+            "calculus", "solve_risch_de_exponential_q",
+            msg,
+            cas::error::reason_codes::RISCH_NO_POLYNOMIAL_SOLUTION,
+            "Exponential Risch DE: estendere a f polinomiale in θ o cap.8 generale",
+            "F0.8");
+    };
+
+    // 1. θ = exp(u);  θ' = u' · θ ∈ k[θ].
+    //    Tuttavia per i ≥ 0,  i·θ^(i-1)·θ' = i·u'·θ^i, quindi le equazioni
+    //    per i diversi disaccoppiano (coefficiente di θ^i dipende solo da y_i).
+    ExprPtr theta = arena.make<FuncCall>(BuiltinOp::Exp, std::vector<ExprPtr>{u_arg});
+    auto u_prime_res = diff(u_arg, var, 1U, ctx);
+    if (u_prime_res.is_error()) return fail_unimpl("cannot differentiate u(x)");
+    ExprPtr u_prime = u_prime_res.value();
+    auto u_prime_simp = ctx.simplify(u_prime);
+    if (u_prime_simp.is_ok()) u_prime = u_prime_simp.value();
+
+    // 2. Sostituisci θ con simbolo fresco per parsing polinomiale.
+    Symbol theta_sym = ctx.make_fresh_symbol("riscτ");
+    ExprPtr theta_sym_e = arena.make<Symbol>(theta_sym);
+    ExprPtr f_sub = deep_replace(f_expr, theta, theta_sym_e, arena);
+    ExprPtr g_sub = deep_replace(g_expr, theta, theta_sym_e, arena);
+
+    // 3. f costante in θ richiesto (sub-case base §6.4.2).
+    if (depends_on(f_sub, theta_sym))
+        return fail_unimpl("f is polynomial in θ; Bronstein §6.4.2 general case "
+                           "not yet implemented");
+
+    // 4. Parse g come polinomio in θ.
+    auto g_poly_res = algebra::parse_polynomial(g_sub, theta_sym, ctx);
+    if (g_poly_res.is_error())
+        return fail_unimpl("g is not polynomial in θ");
+    const std::vector<ExprPtr>& g_coeffs_raw = g_poly_res.value().coefficients();
+    std::vector<ExprPtr> g_coeffs(g_coeffs_raw.begin(), g_coeffs_raw.end());
+    while (!g_coeffs.empty()) {
+        auto simp = ctx.simplify(g_coeffs.back());
+        if (simp.is_ok()) {
+            if (const auto* il = expr_cast<IntegerLit>(simp.value());
+                il && il->value.is_zero()) {
+                g_coeffs.pop_back();
+                continue;
+            }
+        }
+        break;
+    }
+    if (g_coeffs.empty())
+        return ok(arena.make<IntegerLit>(BigInt(0)));
+
+    const std::size_t n = g_coeffs.size() - 1U;
+
+    // 5. Per ciascun grado i (indipendentemente), risolvi
+    //       y_i' + (i · u' + f) · y_i = g_i
+    std::vector<ExprPtr> y_coeffs(n + 1U, arena.make<IntegerLit>(BigInt(0)));
+    for (std::size_t i = 0; i <= n; ++i) {
+        // f_eff_i = i · u' + f_sub
+        ExprPtr f_eff;
+        if (i == 0U) {
+            f_eff = f_sub;
+        } else {
+            ExprPtr i_coef = arena.make<IntegerLit>(
+                BigInt(static_cast<std::int64_t>(i)));
+            ExprPtr term = arena.make<Binary>(BinaryOp::Mul, i_coef, u_prime);
+            f_eff = arena.make<Binary>(BinaryOp::Add, term, f_sub);
+        }
+        auto f_eff_tog = algebra::together(f_eff, ctx);
+        if (f_eff_tog.is_ok()) f_eff = f_eff_tog.value();
+        auto f_eff_simp = ctx.simplify(f_eff);
+        if (f_eff_simp.is_ok()) f_eff = f_eff_simp.value();
+
+        auto y_i = solve_risch_de_q(f_eff, g_coeffs[i], var, ctx);
+        if (y_i.is_error()) return fail_unimpl(
+            "Risch DE non risolto per qualche coefficiente y_i (caso exp)");
         y_coeffs[i] = y_i.value();
     }
 

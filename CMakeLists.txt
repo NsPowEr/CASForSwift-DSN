@@ -163,7 +163,7 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/integrate_hermite.cpp
     src/calculus/integrate_risch.cpp
     src/calculus/risch_parametric.cpp
-    src/calculus/risch_logarithmic.cpp
+    src/calculus/risch_de_extensions.cpp
     src/calculus/differential_field.cpp
     src/calculus/limit.cpp
     src/calculus/limit_helpers.cpp
@@ -515,7 +515,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/symbolic/test_rootof_auto_trigger.cpp
         test/unit/calculus/test_integrate_risch_exp_mix.cpp
         test/unit/calculus/test_risch_parametric.cpp
-        test/unit/calculus/test_risch_logarithmic_de.cpp
+        test/unit/calculus/test_risch_de_extensions.cpp
         test/unit/numeric/test_mpfr_foundation.cpp
         test/unit/algebra/test_gaussian_int.cpp
         test/unit/algebra/test_gaussian_factor.cpp
