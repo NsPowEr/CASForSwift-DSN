@@ -823,7 +823,13 @@ Result<ExprPtr> integrate_risch(ExprPtr expr, const Symbol& var, symbolic::CASCo
     // unico generatore (log(u) o exp(u)) ben definito; torre mista o generatori
     // multipli ricadono su 2c/Hermite/Trager.
     {
+        // Pre-processo cap.9 composto: prima log-factorization, poi
+        // exp-decomposition.  Le due fasi sono indipendenti (log opera su
+        // FuncCall(Ln,·), exp su FuncCall(Exp,·)) e commutano, ma applicarle
+        // entrambe prima dello scan è necessario quando l'integranda contiene
+        // generatori dipendenti di entrambi i tipi (es. exp(2x)+log(x²)).
         ExprPtr preproc = expand_log_args_via_factorization(expr, var, context);
+        preproc = expand_exp_args_via_decomposition(preproc, var, context);
         ExprPtr ln_arg = nullptr;
         ExprPtr exp_arg = nullptr;
         bool generator_conflict = false;
@@ -869,7 +875,9 @@ Result<ExprPtr> integrate_risch(ExprPtr expr, const Symbol& var, symbolic::CASCo
                 auto Dy = diff(y, var, 1U, context);
                 if (Dy.is_error()) return false;
                 ExprPtr Dy_exp = expand_log_args_via_factorization(Dy.value(), var, context);
+                Dy_exp = expand_exp_args_via_decomposition(Dy_exp, var, context);
                 ExprPtr expr_exp = expand_log_args_via_factorization(expr, var, context);
+                expr_exp = expand_exp_args_via_decomposition(expr_exp, var, context);
                 ExprPtr delta = arena.make<Binary>(BinaryOp::Sub, Dy_exp, expr_exp);
                 auto delta_tog = algebra::together(delta, context);
                 if (delta_tog.is_error()) return false;

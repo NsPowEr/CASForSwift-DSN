@@ -165,6 +165,7 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/risch_parametric.cpp
     src/calculus/risch_de_extensions.cpp
     src/calculus/risch_log_expand.cpp
+    src/calculus/risch_exp_expand.cpp
     src/calculus/z_transform.cpp
     src/calculus/mellin_transform.cpp
     src/calculus/inverse_laplace_residue.cpp
@@ -522,6 +523,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/calculus/test_integrate_risch_exp_mix.cpp
         test/unit/calculus/test_risch_parametric.cpp
         test/unit/calculus/test_risch_de_extensions.cpp
+        test/unit/calculus/test_risch_exp_expand.cpp
         test/unit/calculus/test_z_transform.cpp
         test/unit/calculus/test_mellin_transform.cpp
         test/unit/calculus/test_inverse_laplace_residue.cpp

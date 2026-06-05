@@ -186,6 +186,20 @@ enum class FiniteDiffOrder {
 [[nodiscard]] ExprPtr expand_log_args_via_factorization(
     ExprPtr e, const Symbol& var, symbolic::CASContext& ctx);
 
+/// @brief Cap.9 structure theorem (sub-case exp-decomposition): decompone
+///        exp(Σ_i a_i) → Π_i exp(a_i)  e  exp(n·u) → exp(u)^n  per n intero,
+///        normalizzando i generatori esponenziali della torre.  Mirror della
+///        log-factorization: l'identità deriva dalle proprietà del derivation
+///        sui monomial trascendentali (D(exp(u)) = u'·exp(u)).
+///
+///        Caso d'uso: pre-processore per il wiring cap.8 (integrate_risch
+///        section 2b-bis); senza decomposizione exp, generatori come exp(2x)
+///        e exp(x) appaiono distinti nella torre quando in realtà exp(2x) =
+///        exp(x)² è algebricamente dipendente.  La normalizzazione abilita
+///        l'antiderivata esatta tramite generatore primitivo unico.
+[[nodiscard]] ExprPtr expand_exp_args_via_decomposition(
+    ExprPtr e, const Symbol& var, symbolic::CASContext& ctx);
+
 /// @brief Parametric Risch DE in Q[x] (Bronstein Symbolic Integration I §7.1).
 /// Risolve  y' + f·y = Σ_i c_i · g_i  per y ∈ Q[var] e c_i ∈ Q.
 /// Restituisce una base dello spazio nullo del sistema lineare omogeneo:
