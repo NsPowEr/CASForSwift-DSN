@@ -182,6 +182,8 @@ namespace {
     case BuiltinOp::JacobiP:    return 53;
     case BuiltinOp::LaguerreL:  return 52;
     case BuiltinOp::LambertW:   return 81;
+    case BuiltinOp::DiracDelta: return 82;
+    case BuiltinOp::Heaviside:  return 83;
     case BuiltinOp::Unknown:    return 1;
     }
     // Unreachable: enum is exhaustive above. Return a deterministic low rank

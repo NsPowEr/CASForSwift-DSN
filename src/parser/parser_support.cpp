@@ -36,7 +36,9 @@ bool is_builtin_function(std::string_view name) {
         "abs",   "sign",   "gamma",  "beta",  "erf",    "erfc",   "zeta",   "Gamma",
         "arg",   "Re",     "Im",     "conj",  "conjugate",
         "bessel_zero", "BesselZero",
-        "RootOf"
+        "RootOf",
+        "delta", "DiracDelta",
+        "theta", "Theta", "heaviside", "Heaviside"
     };
 
     for (const auto builtin : builtins) {

@@ -523,6 +523,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/calculus/test_z_transform.cpp
         test/unit/calculus/test_mellin_transform.cpp
         test/unit/calculus/test_inverse_laplace_residue.cpp
+        test/unit/calculus/test_dirac_heaviside_smoke.cpp
         test/unit/numeric/test_mpfr_foundation.cpp
         test/unit/algebra/test_gaussian_int.cpp
         test/unit/algebra/test_gaussian_factor.cpp

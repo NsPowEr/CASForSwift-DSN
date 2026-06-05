@@ -66,6 +66,8 @@ enum class BuiltinOp : std::uint16_t {
     JacobiP,
     LaguerreL,
     LambertW,
+    DiracDelta,
+    Heaviside,
 };
 
 [[nodiscard]] constexpr BuiltinOp get_builtin_op(std::string_view name) noexcept {
@@ -129,6 +131,8 @@ enum class BuiltinOp : std::uint16_t {
     if (name == "JacobiP" || name == "jacobiP") return BuiltinOp::JacobiP;
     if (name == "LaguerreL" || name == "laguerreL") return BuiltinOp::LaguerreL;
     if (name == "LambertW" || name == "lambertW" || name == "W") return BuiltinOp::LambertW;
+    if (name == "DiracDelta" || name == "delta") return BuiltinOp::DiracDelta;
+    if (name == "Heaviside" || name == "heaviside" || name == "theta" || name == "Theta") return BuiltinOp::Heaviside;
     return BuiltinOp::Unknown;
 }
 
@@ -193,6 +197,8 @@ enum class BuiltinOp : std::uint16_t {
         case BuiltinOp::JacobiP: return "JacobiP";
         case BuiltinOp::LaguerreL: return "LaguerreL";
         case BuiltinOp::LambertW: return "LambertW";
+        case BuiltinOp::DiracDelta: return "DiracDelta";
+        case BuiltinOp::Heaviside: return "Heaviside";
         case BuiltinOp::Unknown: return "unknown";
     }
     return "unknown";
