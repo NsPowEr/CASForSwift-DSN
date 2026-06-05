@@ -510,10 +510,20 @@ namespace {
         }
     }
 
+    // Fallback finale: Bronstein residue formula (F5.8 / Task #17).
+    //   L⁻¹{F(s)}(t) = Σ_k Res_{s=p_k}[F(s)·e^(s·t)].
+    //   Più generale del pattern table elementare; copre F razionale con
+    //   polos qualsiasi (anche multipli).  Restituisce Unimplemented solo
+    //   se anche il residue path fallisce.
+    {
+        auto via_residue = inverse_laplace_residue_q(expr, s, t, ctx);
+        if (via_residue.is_ok()) return via_residue;
+    }
+
     // F0.8-MIGRATED
     return make_unimplemented<ExprPtr>(
         "calculus", "inverse_laplace_transform",
-        "expression not in elementary inverse Laplace table",
+        "expression not in elementary inverse Laplace table nor residue-decomposable",
         cas::error::reason_codes::LAPLACE_UNKNOWN_FORM,
         "Extend the inverse Laplace table or implement Bromwich integral / PFD bridge",
         "F0.8");

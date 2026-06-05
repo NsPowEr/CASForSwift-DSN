@@ -26,6 +26,17 @@ Result<ExprPtr> Integrator::integrate(ExprPtr expr, const Symbol& var) {
     }
     DepthGuard guard(depth_);
 
+    // 0. Dirac sifting fast-path: ∫ δ(arg(t)) · f(t) dt = f(a)/|arg'(a)|.
+    //    Detect early per evitare che integrate_once tratti δ come integrand
+    //    elementare e fallisca.  La routine restituisce Unimplemented se
+    //    l'integranda non contiene δ riconoscibile, fall-through naturale.
+    {
+        auto sifting = try_integrate_dirac_sifting(expr, var, context_);
+        if (sifting.is_ok()) {
+            return context_.simplify(sifting.value());
+        }
+    }
+
     // 1. Try elementary patterns first (substitution, partial fractions, arctan, etc.)
     {
         auto direct = integrate_once(expr, var);

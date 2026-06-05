@@ -89,5 +89,15 @@ TEST_F(IntegrateDiracTest, NonLinearArgumentUnimplemented) {
     EXPECT_EQ(res.error().kind, CASErrorKind::Unimplemented);
 }
 
+// Wiring check: integrate(δ(x-3)·x², x) deve passare via section 0
+// del dispatch e produrre 9 (sifting), NON Unimplemented.
+TEST_F(IntegrateDiracTest, IntegrateWiringDispatchesSifting) {
+    auto e = parse_expr("delta(x - 3) * x^2", ctx.arena());
+    auto r = integrate(e, x, ctx);
+    ASSERT_TRUE(r.is_ok()) << r.error().message;
+    auto expected = parse_expr("9", ctx.arena());
+    EXPECT_TRUE(same_after_simplify(r.value(), expected, ctx));
+}
+
 }  // namespace
 }  // namespace cas::calculus

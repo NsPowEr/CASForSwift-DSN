@@ -85,5 +85,19 @@ TEST_F(InvLaplaceResidueTest, OneOverSSquaredMinus1) {
     EXPECT_TRUE(same_after_subst_t(res.value(), expected, t, ctx));
 }
 
+// Wiring check: inverse_laplace_transform (pattern-based) deve cadere
+// sul fallback residue per F(s) NON nelle coppie elementari pre-esistenti.
+// Esempio: 1/(s³-s) = 1/(s(s-1)(s+1)) ha 3 polos {0, 1, -1}; pattern
+// table classico richiede partial fractions, ma il fallback residue
+// chiude direttamente.
+TEST_F(InvLaplaceResidueTest, WiringFallback_OneOverSCubedMinusS) {
+    auto F = parse_expr("1/(s^3 - s)", ctx.arena());
+    auto res = inverse_laplace_transform(F, s, t, ctx);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+    // L⁻¹{1/(s(s²-1))} = cosh(t) - 1.  Verifica at t=0: cosh(0)-1 = 0.
+    auto expected = parse_expr("(1/2)*(exp(t) + exp(-t)) - 1", ctx.arena());
+    EXPECT_TRUE(same_after_subst_t(res.value(), expected, t, ctx));
+}
+
 }  // namespace
 }  // namespace cas::calculus
