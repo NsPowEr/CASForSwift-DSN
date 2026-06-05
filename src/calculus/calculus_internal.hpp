@@ -72,6 +72,23 @@ enum class FiniteDiffOrder {
     ExprPtr expr, const Symbol& s, const Symbol& t,
     symbolic::CASContext& ctx);
 
+/// @brief Fourier transform F{f(t)}(ω) = ∫_{-∞}^{∞} f(t)·exp(-i·ω·t) dt — F5.8 / Task #14.
+/// Convention: ω-axis, segno -i nell'integrazione.  Pipeline assiomatica:
+///   - Linearità su Sum, estrazione scalari Product;
+///   - Coppie axiomatic via Dirac δ:
+///       δ(t)                    → 1
+///       δ(t−a)                  → exp(−i·ω·a)            (time shift on δ)
+///       1                       → 2π·δ(ω)
+///       exp(i·a·t)              → 2π·δ(ω−a)
+///       exp(−a·t²)              → √(π/a)·exp(−ω²/(4a))   (Gaussian, a > 0)
+///       cos(a·t)                → π·[δ(ω−a) + δ(ω+a)]
+///       sin(a·t)                → -i·π·[δ(ω−a) − δ(ω+a)]
+///   - Time shift: F{f(t−t₀)}(ω) = exp(−i·ω·t₀)·F(ω);
+///   - Pattern non riconosciuti → Unimplemented diagnostico esplicito.
+[[nodiscard]] Result<ExprPtr> fourier_transform(
+    ExprPtr expr, const Symbol& t, const Symbol& omega,
+    symbolic::CASContext& ctx);
+
 /// @brief Sifting property ∫ δ(arg(t)) · f(t) dt = f(a)/|c| dove a è il
 ///        polo di δ (arg(a) = 0) e c = arg'(a).  Caso arg lineare in `var`.
 ///        Restituisce Unimplemented se arg non lineare o δ multipli.
