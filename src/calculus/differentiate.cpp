@@ -372,6 +372,27 @@ private:
                         make_function(arena_, "sqrt", {make_constant(arena_, MathConstant::Pi)})),
                     make_function(arena_, "exp", {make_unary(arena_, UnaryOp::Neg, make_power(arena_, argument, make_integer(arena_, 2)))})
                 });
+            } else if (func_id == BuiltinOp::EllipticK) {
+                // dK/dk = E(k)/(k(1-k²)) − K(k)/k
+                ExprPtr k_arg = argument;
+                ExprPtr E_k = make_function(arena_, "EllipticE", {k_arg});
+                ExprPtr K_k = make_function(arena_, "EllipticK", {k_arg});
+                ExprPtr k_sq = arena_.make<Binary>(BinaryOp::Pow, k_arg,
+                    make_integer(arena_, 2));
+                ExprPtr one_minus_k_sq = arena_.make<Binary>(BinaryOp::Sub,
+                    make_integer(arena_, 1), k_sq);
+                ExprPtr denom = arena_.make<Binary>(BinaryOp::Mul, k_arg,
+                    one_minus_k_sq);
+                ExprPtr first = arena_.make<Binary>(BinaryOp::Div, E_k, denom);
+                ExprPtr second = arena_.make<Binary>(BinaryOp::Div, K_k, k_arg);
+                outer = arena_.make<Binary>(BinaryOp::Sub, first, second);
+            } else if (func_id == BuiltinOp::EllipticE) {
+                // dE/dk = (E(k) − K(k))/k
+                ExprPtr k_arg = argument;
+                ExprPtr E_k = make_function(arena_, "EllipticE", {k_arg});
+                ExprPtr K_k = make_function(arena_, "EllipticK", {k_arg});
+                ExprPtr E_minus_K = arena_.make<Binary>(BinaryOp::Sub, E_k, K_k);
+                outer = arena_.make<Binary>(BinaryOp::Div, E_minus_K, k_arg);
             } else if (func_id == BuiltinOp::Gamma ) {
                 outer = make_product(arena_, {
                     make_function(arena_, "Gamma", {argument}),

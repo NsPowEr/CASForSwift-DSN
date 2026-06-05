@@ -403,6 +403,38 @@ Result<ExprPtr> Simplifier::simplify_funcall_special(
         }
     }
 
+    // Elliptic integrals (F5.9 / Task #20).
+    //
+    // Coppie axiomatic (Abramowitz-Stegun §17.4–§17.7):
+    //   K(0) = π/2,   E(0) = π/2,   E(1) = 1
+    //   F(φ, 0) = φ                       (incomplete primo tipo a k = 0)
+    //   Π(0, k) = K(k)                    (Π degenera in K se n = 0)
+    auto half = [&]() {
+        return arena_.make<Binary>(BinaryOp::Div,
+            arena_.make<Constant>(MathConstant::Pi),
+            make_integer(arena_, BigInt(2)));
+    };
+    if ((op == BuiltinOp::EllipticK || op == BuiltinOp::EllipticE)
+        && args.size() == 1U) {
+        if (is_zero_expr(args[0])) return ok(half());
+        if (op == BuiltinOp::EllipticE) {
+            if (const auto* il = expr_cast<IntegerLit>(args[0]);
+                il && il->value == BigInt(1)) {
+                return ok(make_integer(arena_, BigInt(1)));
+            }
+        }
+    }
+    if (op == BuiltinOp::EllipticF && args.size() == 2U) {
+        if (is_zero_expr(args[1])) return ok(args[0]);  // F(φ, 0) = φ
+    }
+    if (op == BuiltinOp::EllipticPi && args.size() == 2U) {
+        if (is_zero_expr(args[0])) {
+            // Π(0, k) = K(k).
+            return simplify_expr(arena_.make<FuncCall>(BuiltinOp::EllipticK,
+                std::vector<ExprPtr>{args[1]}));
+        }
+    }
+
     const auto& orig_args = expr_ref<FuncCall>(original).args;
     if (expr_ptr_sequence_identical(args, orig_args)) return ok(original);
     return ok(arena_.make<FuncCall>(op, std::move(args)));

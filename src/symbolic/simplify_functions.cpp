@@ -72,6 +72,10 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const FuncCall& node
     case BuiltinOp::Hypergeometric0F1:
     case BuiltinOp::Hypergeometric1F1:
     case BuiltinOp::Hypergeometric2F1:
+    case BuiltinOp::EllipticK:
+    case BuiltinOp::EllipticE:
+    case BuiltinOp::EllipticPi:
+    case BuiltinOp::EllipticF:
         return simplify_funcall_special(original, op, std::move(args), target_before);
 
     case BuiltinOp::BesselJ:

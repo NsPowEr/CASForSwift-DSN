@@ -71,6 +71,10 @@ enum class BuiltinOp : std::uint16_t {
     Hypergeometric0F1,
     Hypergeometric1F1,
     Hypergeometric2F1,
+    EllipticK,
+    EllipticE,
+    EllipticPi,
+    EllipticF,
 };
 
 [[nodiscard]] constexpr BuiltinOp get_builtin_op(std::string_view name) noexcept {
@@ -139,6 +143,10 @@ enum class BuiltinOp : std::uint16_t {
     if (name == "Hypergeometric0F1" || name == "hyp0F1") return BuiltinOp::Hypergeometric0F1;
     if (name == "Hypergeometric1F1" || name == "hyp1F1" || name == "Kummer1F1" || name == "KummerM") return BuiltinOp::Hypergeometric1F1;
     if (name == "Hypergeometric2F1" || name == "hyp2F1") return BuiltinOp::Hypergeometric2F1;
+    if (name == "EllipticK" || name == "ellipticK") return BuiltinOp::EllipticK;
+    if (name == "EllipticE" || name == "ellipticE") return BuiltinOp::EllipticE;
+    if (name == "EllipticPi" || name == "ellipticPi") return BuiltinOp::EllipticPi;
+    if (name == "EllipticF" || name == "ellipticF") return BuiltinOp::EllipticF;
     return BuiltinOp::Unknown;
 }
 
@@ -208,6 +216,10 @@ enum class BuiltinOp : std::uint16_t {
         case BuiltinOp::Hypergeometric0F1: return "Hypergeometric0F1";
         case BuiltinOp::Hypergeometric1F1: return "Hypergeometric1F1";
         case BuiltinOp::Hypergeometric2F1: return "Hypergeometric2F1";
+        case BuiltinOp::EllipticK: return "EllipticK";
+        case BuiltinOp::EllipticE: return "EllipticE";
+        case BuiltinOp::EllipticPi: return "EllipticPi";
+        case BuiltinOp::EllipticF: return "EllipticF";
         case BuiltinOp::Unknown: return "unknown";
     }
     return "unknown";

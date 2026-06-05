@@ -187,6 +187,10 @@ namespace {
     case BuiltinOp::Hypergeometric0F1: return 84;
     case BuiltinOp::Hypergeometric1F1: return 85;
     case BuiltinOp::Hypergeometric2F1: return 86;
+    case BuiltinOp::EllipticK:  return 87;
+    case BuiltinOp::EllipticE:  return 88;
+    case BuiltinOp::EllipticPi: return 89;
+    case BuiltinOp::EllipticF:  return 90;
     case BuiltinOp::Unknown:    return 1;
     }
     // Unreachable: enum is exhaustive above. Return a deterministic low rank

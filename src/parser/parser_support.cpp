@@ -41,7 +41,11 @@ bool is_builtin_function(std::string_view name) {
         "theta", "Theta", "heaviside", "Heaviside",
         "Hypergeometric0F1", "hyp0F1",
         "Hypergeometric1F1", "hyp1F1", "Kummer1F1", "KummerM",
-        "Hypergeometric2F1", "hyp2F1"
+        "Hypergeometric2F1", "hyp2F1",
+        "EllipticK", "ellipticK",
+        "EllipticE", "ellipticE",
+        "EllipticPi", "ellipticPi",
+        "EllipticF", "ellipticF"
     };
 
     for (const auto builtin : builtins) {
