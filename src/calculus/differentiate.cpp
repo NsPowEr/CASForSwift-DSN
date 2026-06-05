@@ -456,6 +456,67 @@ private:
 
                 return ok(make_product(arena_, {outer, x_derivative.value()}));
             }
+            // 0F1(;b;z): d/dz = (1/b) · 0F1(;b+1;z); differenziazione rispetto
+            // a b non supportata (parametri trattati come costanti rispetto a var).
+            if (call.func_id == BuiltinOp::Hypergeometric0F1) {
+                ExprPtr b = call.args[0];
+                ExprPtr z = call.args[1];
+                if (depends_on(b, var)) {
+                    return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
+                        "Differentiation of Hypergeometric0F1 w.r.t parametri non supportata"));
+                }
+                auto z_d = differentiate_once(z, var);
+                if (z_d.is_error()) return z_d;
+                ExprPtr b_plus_1 = make_sum(arena_, {b, make_integer(arena_, 1)});
+                ExprPtr new_fc = make_function(arena_, "Hypergeometric0F1", {b_plus_1, z});
+                ExprPtr one_over_b = make_function(arena_, "_div", {make_integer(arena_, 1), b});
+                // _div placeholder: use Binary(Div).
+                ExprPtr div_expr = arena_.make<Binary>(BinaryOp::Div, make_integer(arena_, 1), b);
+                ExprPtr result = make_product(arena_, {div_expr, new_fc, z_d.value()});
+                (void)one_over_b;
+                return ok(result);
+            }
+        } else if (call.args.size() == 3U) {
+            // 1F1(a;b;z): d/dz = (a/b) · 1F1(a+1; b+1; z).
+            if (call.func_id == BuiltinOp::Hypergeometric1F1) {
+                ExprPtr a = call.args[0];
+                ExprPtr b = call.args[1];
+                ExprPtr z = call.args[2];
+                if (depends_on(a, var) || depends_on(b, var)) {
+                    return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
+                        "Differentiation of Hypergeometric1F1 w.r.t parametri non supportata"));
+                }
+                auto z_d = differentiate_once(z, var);
+                if (z_d.is_error()) return z_d;
+                ExprPtr a_plus_1 = make_sum(arena_, {a, make_integer(arena_, 1)});
+                ExprPtr b_plus_1 = make_sum(arena_, {b, make_integer(arena_, 1)});
+                ExprPtr new_fc = make_function(arena_, "Hypergeometric1F1",
+                    {a_plus_1, b_plus_1, z});
+                ExprPtr a_over_b = arena_.make<Binary>(BinaryOp::Div, a, b);
+                return ok(make_product(arena_, {a_over_b, new_fc, z_d.value()}));
+            }
+        } else if (call.args.size() == 4U) {
+            // 2F1(a,b;c;z): d/dz = (a·b/c) · 2F1(a+1, b+1; c+1; z).
+            if (call.func_id == BuiltinOp::Hypergeometric2F1) {
+                ExprPtr a = call.args[0];
+                ExprPtr b = call.args[1];
+                ExprPtr c = call.args[2];
+                ExprPtr z = call.args[3];
+                if (depends_on(a, var) || depends_on(b, var) || depends_on(c, var)) {
+                    return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
+                        "Differentiation of Hypergeometric2F1 w.r.t parametri non supportata"));
+                }
+                auto z_d = differentiate_once(z, var);
+                if (z_d.is_error()) return z_d;
+                ExprPtr a1 = make_sum(arena_, {a, make_integer(arena_, 1)});
+                ExprPtr b1 = make_sum(arena_, {b, make_integer(arena_, 1)});
+                ExprPtr c1 = make_sum(arena_, {c, make_integer(arena_, 1)});
+                ExprPtr new_fc = make_function(arena_, "Hypergeometric2F1",
+                    {a1, b1, c1, z});
+                ExprPtr ab = make_product(arena_, {a, b});
+                ExprPtr ab_over_c = arena_.make<Binary>(BinaryOp::Div, ab, c);
+                return ok(make_product(arena_, {ab_over_c, new_fc, z_d.value()}));
+            }
         }
 
         return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Differentiation is not implemented for function '" + call.name + "' with " + std::to_string(call.args.size()) + " arguments"));

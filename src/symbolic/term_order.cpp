@@ -184,6 +184,9 @@ namespace {
     case BuiltinOp::LambertW:   return 81;
     case BuiltinOp::DiracDelta: return 82;
     case BuiltinOp::Heaviside:  return 83;
+    case BuiltinOp::Hypergeometric0F1: return 84;
+    case BuiltinOp::Hypergeometric1F1: return 85;
+    case BuiltinOp::Hypergeometric2F1: return 86;
     case BuiltinOp::Unknown:    return 1;
     }
     // Unreachable: enum is exhaustive above. Return a deterministic low rank

@@ -38,7 +38,10 @@ bool is_builtin_function(std::string_view name) {
         "bessel_zero", "BesselZero",
         "RootOf",
         "delta", "DiracDelta",
-        "theta", "Theta", "heaviside", "Heaviside"
+        "theta", "Theta", "heaviside", "Heaviside",
+        "Hypergeometric0F1", "hyp0F1",
+        "Hypergeometric1F1", "hyp1F1", "Kummer1F1", "KummerM",
+        "Hypergeometric2F1", "hyp2F1"
     };
 
     for (const auto builtin : builtins) {
