@@ -72,6 +72,12 @@ enum class FiniteDiffOrder {
     ExprPtr expr, const Symbol& s, const Symbol& t,
     symbolic::CASContext& ctx);
 
+/// @brief Sifting property ∫ δ(arg(t)) · f(t) dt = f(a)/|c| dove a è il
+///        polo di δ (arg(a) = 0) e c = arg'(a).  Caso arg lineare in `var`.
+///        Restituisce Unimplemented se arg non lineare o δ multipli.
+[[nodiscard]] Result<ExprPtr> try_integrate_dirac_sifting(
+    ExprPtr expr, const Symbol& var, symbolic::CASContext& ctx);
+
 /// @brief Inverse Laplace via Bronstein residue formula — F5.8 / Task #17.
 ///        L⁻¹{F(s)}(t) = Σ_k Res_{s = p_k}[F(s)·e^(s·t)] su tutti i poli di F.
 ///        Più generale del pattern-based inverse_laplace_transform: copre F
