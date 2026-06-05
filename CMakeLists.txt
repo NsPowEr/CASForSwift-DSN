@@ -529,6 +529,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/calculus/test_integrate_dirac.cpp
         test/unit/calculus/test_fourier_transform.cpp
         test/unit/calculus/test_hypergeometric_pfq.cpp
+        test/unit/calculus/test_special_closed_forms.cpp
         test/unit/numeric/test_mpfr_foundation.cpp
         test/unit/algebra/test_gaussian_int.cpp
         test/unit/algebra/test_gaussian_factor.cpp
