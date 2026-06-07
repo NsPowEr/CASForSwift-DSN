@@ -56,8 +56,7 @@
   1. Per ComplexLit(a,b) con (a,b) entrambi ≠ 0 e razionali: calcolare `|z|² = a² + b²` (Rational); ritornare `½·ln(a²+b²) + i·atan2_symbolic(b,a)` (richiede `atan2_symbolic` per coppie razionali tipo (1,1)→π/4, (1,0)→0, etc).
   2. Estendere Product simplifier per riconoscere il pattern `exp(iθ)·exp(-iθ) = 1` come fast-path (riduzione preventiva prima di Euler factor).
 - **Workaround attuale**: i casi triviali (ln(±1), ln(±i)) sono coperti via dispatch esplicito; gli altri restituiscono ln(ComplexLit) opaco (no Unimplemented silenzioso — l'output è strutturalmente valido ma non semplificato).
-- **STATO**: APERTO — F1.6 canonicalizzazione completa; ln(a+bi) generale richiede atan2 simbolico + identità trig cancellation forte.
-
+- **STATO**: RISOLTO — F1.6 canonicalizzazione completa e formula `ln|z| + i*arg(z)` integrata su base Abs/Arg robuste in `simplify_exp_log.cpp`. Test passati correttamente (M20).
 ### F5.7-ZEIL-HIGHER-ORDER — Zeilberger higher-order recurrence solver non implementato
 - **File**: `src/symbolic/summation_zeilberger.cpp`.
 - **Categoria CLAUDE.md**: Cat 3 (algoritmo incompleto).

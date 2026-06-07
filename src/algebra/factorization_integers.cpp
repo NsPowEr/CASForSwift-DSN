@@ -383,25 +383,28 @@ void append_factor_with_multiplicity(
                 const std::size_t r = mod_factors.size();
                 if (r >= ctx.van_hoeij_threshold()) {
                     // Primary: van Hoeij knapsack (polynomial-time for large r).
-                    // Invariant: pk > 2·Mignotte_bound(f, n/2) — ensured by loop above.
-                    auto vh = van_hoeij_knapsack_factor(remaining, lifted, pk,
-                                                         ctx.lll_delta(),
-                                                         ctx.van_hoeij_lll_threshold());
-                    if (vh.has_value()) accept_factor(*vh);
-                    // Secondary: subset enumeration (catches what knapsack misses for
-                    // moderate r where enumeration is still tractable).
-                    // Bounded by C(r, n/2) with Mignotte pruning — polynomial for n/2 ≤ 8.
-                    if (remaining.size() > 1U) {
+                    bool found = true;
+                    while (found && remaining.size() > 1U) {
+                        found = false;
+                        auto vh = van_hoeij_knapsack_factor(remaining, lifted, pk,
+                                                             ctx.lll_delta(),
+                                                             ctx.van_hoeij_lll_threshold());
+                        if (vh.has_value()) { accept_factor(*vh); found = true; continue; }
+                        
                         auto recombined = find_factor_by_hensel_recombination(
                             remaining, mod_factors, p, k, remaining.degree() / 2U);
-                        if (recombined.has_value()) accept_factor(*recombined);
+                        if (recombined.has_value()) { accept_factor(*recombined); found = true; continue; }
                     }
                     per_factor_lll();  // tertiary: per-factor LLL
                 } else {
                     // Fast path: O(2^r) subset enumeration with Mignotte pruning (r < 8).
-                    auto recombined = find_factor_by_hensel_recombination(
-                        remaining, mod_factors, p, k, remaining.degree() / 2U);
-                    if (recombined.has_value()) accept_factor(*recombined);
+                    bool found = true;
+                    while (found && remaining.size() > 1U) {
+                        found = false;
+                        auto recombined = find_factor_by_hensel_recombination(
+                            remaining, mod_factors, p, k, remaining.degree() / 2U);
+                        if (recombined.has_value()) { accept_factor(*recombined); found = true; continue; }
+                    }
                     per_factor_lll();
                 }
             }

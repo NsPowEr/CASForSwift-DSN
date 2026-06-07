@@ -166,7 +166,7 @@ TEST(VanHoeijDirect, Deg6_TripleQuadratic_EnumPath) {
 }
 
 // ── deg-16: product of 8 distinct quadratics x²-d, r=8..16 modular factors ──
-TEST(VanHoeijDirect, DISABLED_Deg16_EightQuadratics_FindsRealFactor) {
+TEST(VanHoeijDirect, Deg16_EightQuadratics_FindsRealFactor) {
     const std::vector<long long> ds = {2, 3, 5, 7, 11, 13, 17, 19};
     IntPoly f = make_poly({1});
     for (long long d : ds) f = poly_mul(f, make_poly({-d, 0, 1}));
@@ -189,7 +189,7 @@ TEST(VanHoeijDirect, DISABLED_Deg16_EightQuadratics_FindsRealFactor) {
 // rational LLL on a ~dim-16..24 lattice takes ~30s — correct but heavy; it is
 // excluded from the default suite (run with --gtest_filter='*Stress*').
 // DISABILITATO: Test di stress matematico fisiologicamente in timeout (>60s) sotto Debug Mode (-O0). Da eseguire in Release Mode o via target dedicato cas_stress_tests.
-TEST(VanHoeijStress, DISABLED_Deg24_TwelveQuadratics_AcceptanceGate) {
+TEST(VanHoeijStress, Deg24_TwelveQuadratics_AcceptanceGate) {
     const std::vector<long long> ds = {2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37};
     IntPoly f = make_poly({1});
     for (long long d : ds) f = poly_mul(f, make_poly({-d, 0, 1}));

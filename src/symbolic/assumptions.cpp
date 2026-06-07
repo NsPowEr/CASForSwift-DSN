@@ -615,11 +615,31 @@ bool Assumptions::prove_relation(ExprPtr current, ExprPtr target, bool strict_ne
         if (visited.contains(curr.get())) continue;
         visited.insert(curr.get());
 
+        // If target is 0, any node proven to be strictly negative satisfies the strict relation < 0.
+        if (target == nullptr) {
+            if (const auto* sym = expr_cast<Symbol>(curr)) {
+                if (negative_symbols_.contains(sym->name)) return true;
+            }
+        }
+
         auto it = relations_.find(curr);
         if (it != relations_.end()) {
             for (const auto& rel : it->second) {
                 bool new_strict = strict_so_far || (rel.type == RelType::Less);
                 stack.push_back({rel.target, new_strict});
+            }
+        }
+        
+        // F2.x-C1: Assumptions transitive closure.
+        // Implicitly bridge 0 to all positive symbols that act as sources in the relation graph.
+        if (curr == nullptr) {
+            for (const auto& [node, rels] : relations_) {
+                if (!node) continue;
+                if (const auto* sym = expr_cast<Symbol>(node)) {
+                    if (positive_symbols_.contains(sym->name)) {
+                        stack.push_back({node, true});
+                    }
+                }
             }
         }
     }

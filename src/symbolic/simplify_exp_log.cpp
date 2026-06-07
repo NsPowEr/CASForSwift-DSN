@@ -291,13 +291,19 @@ Result<ExprPtr> Simplifier::simplify_funcall_exp_log_sqrt(
                     ++i_count;
                     continue;
                 }
-                // ComplexLit(0, ±1) is the canonical post-F1.6 form of ±i.
+                // A purely imaginary coefficient captures any scaled factor of I.
                 if (const auto* cl = expr_cast<ComplexLit>(f);
-                    cl != nullptr && cl->re_num.is_zero()
-                    && cl->im_den == BigInt(1)
-                    && (cl->im_num == BigInt(1) || cl->im_num == BigInt(-1))) {
+                    cl != nullptr && cl->re_num.is_zero() && !cl->im_num.is_zero()) {
                     ++i_count;
-                    if (cl->im_num == BigInt(-1)) neg_unit = !neg_unit;
+                    if (cl->im_num == BigInt(-1) && cl->im_den == BigInt(1)) {
+                        neg_unit = !neg_unit;
+                    } else if (!(cl->im_num == BigInt(1) && cl->im_den == BigInt(1))) {
+                        if (cl->im_den == BigInt(1)) {
+                            theta_factors.push_back(make_integer(arena_, cl->im_num));
+                        } else {
+                            theta_factors.push_back(arena_.make<RationalLit>(cl->im_num, cl->im_den));
+                        }
+                    }
                     continue;
                 }
                 theta_factors.push_back(f);
@@ -436,35 +442,16 @@ Result<ExprPtr> Simplifier::simplify_funcall_exp_log_sqrt(
             }
         }
         // Post-F1.6: arguments may arrive as ComplexLit after canonicalization.
-        // Principal-branch dispatch on canonical forms:
-        //   ln(0 + 1·i)   →  i·π/2
-        //   ln(0 + (-1)·i) → -i·π/2
-        //   ln(-1 + 0·i)  →  i·π
-        if (const auto* cl = expr_cast<ComplexLit>(args.front())) {
-            if (cl->re_num.is_zero() && cl->im_den == BigInt(1)) {
-                if (cl->im_num == BigInt(1)) {
-                    ExprPtr i_pi = arena_.make<Product>(std::vector<ExprPtr>{
-                        arena_.make<Constant>(MathConstant::I),
-                        arena_.make<Constant>(MathConstant::Pi)});
-                    return simplify_expr(arena_.make<Binary>(
-                        BinaryOp::Div, i_pi, make_integer(arena_, BigInt(2))));
-                }
-                if (cl->im_num == BigInt(-1)) {
-                    ExprPtr neg_i_pi = arena_.make<Product>(std::vector<ExprPtr>{
-                        arena_.make<IntegerLit>(BigInt(-1)),
-                        arena_.make<Constant>(MathConstant::I),
-                        arena_.make<Constant>(MathConstant::Pi)});
-                    return simplify_expr(arena_.make<Binary>(
-                        BinaryOp::Div, neg_i_pi, make_integer(arena_, BigInt(2))));
-                }
-            }
-            if (cl->im_num.is_zero() && cl->re_den == BigInt(1)
-                && cl->re_num == BigInt(-1)) {
-                ExprPtr i_pi = arena_.make<Product>(std::vector<ExprPtr>{
-                    arena_.make<Constant>(MathConstant::I),
-                    arena_.make<Constant>(MathConstant::Pi)});
-                return simplify_expr(i_pi);
-            }
+        // HC-F16-LN-COMPLEX-FULL: General formula ln(a + b·I) = ln|z| + I·arg(z).
+        // Naturally handles all complex literals, delegating to robust Abs and Arg.
+        if (expr_is<ComplexLit>(args.front())) {
+            ExprPtr z = args.front();
+            ExprPtr abs_z = arena_.make<FuncCall>(BuiltinOp::Abs, std::vector<ExprPtr>{z});
+            ExprPtr arg_z = arena_.make<FuncCall>(BuiltinOp::Arg, std::vector<ExprPtr>{z});
+            ExprPtr ln_abs = arena_.make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{abs_z});
+            ExprPtr i_arg = arena_.make<Product>(std::vector<ExprPtr>{
+                arena_.make<Constant>(MathConstant::I), arg_z});
+            return simplify_expr(arena_.make<Sum>(std::vector<ExprPtr>{ln_abs, i_arg}));
         }
         // ln(-1) = I·π  (also covered by ln(-x) above, but explicit for clarity)
         if (const auto* il = expr_cast<IntegerLit>(args.front()); il && il->value == BigInt(-1)) {
