@@ -131,6 +131,8 @@ set(CAS_SYMBOLIC_SOURCES
     src/symbolic/summation_zeilberger_helpers.cpp
     src/symbolic/simplify_arithmetic_chain_sum.cpp
     src/symbolic/simplify_arithmetic_chain.cpp
+    src/symbolic/simplify_arithmetic_chain_gamma.cpp
+    src/symbolic/simplify_arithmetic_chain_sqrt.cpp
     src/symbolic/simplify_functions.cpp
     src/symbolic/simplify_trig_chebyshev.cpp
     src/symbolic/simplify_trig_tables.cpp

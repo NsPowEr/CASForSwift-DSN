@@ -198,6 +198,18 @@ private:
     [[nodiscard]] ExprPtr build_monomial(const MonomialKey& key, const Rational& coefficient);
     static void merge_symbolic_factors(std::vector<std::pair<ExprPtr, BigInt>>& factors);
 
+    // L3-04 Gamma reflection identity applied to symbolic factor pairs.
+    // Implementation in simplify_arithmetic_chain_gamma.cpp.
+    [[nodiscard]] Result<void> apply_gamma_reflection_pairs(
+        std::vector<std::pair<ExprPtr, BigInt>>& symbolic,
+        ComplexRational& coefficient);
+
+    // sqrt(a)·sqrt(a) → a and sqrt(a)·sqrt(b) → sqrt(ab) collapses.
+    // Implementation in simplify_arithmetic_chain_sqrt.cpp.
+    [[nodiscard]] Result<void> collapse_sqrt_pairs(
+        std::vector<std::pair<ExprPtr, BigInt>>& symbolic,
+        ComplexRational& coefficient);
+
     AstArena& arena_;
     const Assumptions* assumptions_;
     const RewriteProvider* rewrite_provider_;

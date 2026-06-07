@@ -210,62 +210,11 @@ Result<ExprPtr> Simplifier::simplify_product_factors(
             target_before, make_integer(arena_, BigInt(0)));
     merge_symbolic_factors(symbolic);
 
-    // Step 4: L3-04 Gamma reflection identity.
-    //   Γ(z)·Γ(1-z) = π/sin(πz)    [m=1 case]
-    //   Γ(z)·Γ(-z)  = -π/(z·sin(πz)) [m=0 case]
-    // Fires only when two Gamma factors sum to an integer m ∈ {0, 1}.
+    // Step 4: Gamma reflection identity — implementation lives in
+    // simplify_arithmetic_chain_gamma.cpp.
     {
-        auto gamma_arg = [](const std::pair<ExprPtr, BigInt>& p) -> ExprPtr {
-            if (p.second != BigInt(1)) return nullptr;
-            const auto* fc = expr_cast<FuncCall>(p.first);
-            if (!fc || fc->func_id != BuiltinOp::Gamma || fc->args.size() != 1U)
-                return nullptr;
-            return fc->args[0];
-        };
-        bool reflected_any = false;
-        bool keep_scanning = true;
-        while (keep_scanning) {
-            keep_scanning = false;
-            std::vector<std::size_t> gamma_idx;
-            for (std::size_t i = 0; i < symbolic.size(); ++i)
-                if (gamma_arg(symbolic[i]) != nullptr) gamma_idx.push_back(i);
-            for (std::size_t a = 0; a < gamma_idx.size() && !keep_scanning; ++a) {
-                for (std::size_t b = a + 1; b < gamma_idx.size() && !keep_scanning; ++b) {
-                    ExprPtr za = gamma_arg(symbolic[gamma_idx[a]]);
-                    ExprPtr zb = gamma_arg(symbolic[gamma_idx[b]]);
-                    if (!za || !zb) continue;
-                    auto sum_simp = simplify_expr(
-                        arena_.make<Sum>(std::vector<ExprPtr>{za, zb}));
-                    if (sum_simp.is_error()) continue;
-                    const auto* m_lit = expr_cast<IntegerLit>(sum_simp.value());
-                    if (!m_lit) continue;
-                    const bool m_is_one  = (m_lit->value == BigInt(1));
-                    const bool m_is_zero = m_lit->value.is_zero();
-                    if (!m_is_one && !m_is_zero) continue;
-                    ExprPtr pi_const = arena_.make<Constant>(MathConstant::Pi);
-                    auto pi_z_simp = simplify_expr(
-                        arena_.make<Product>(std::vector<ExprPtr>{pi_const, za}));
-                    if (pi_z_simp.is_error()) continue;
-                    auto sin_simp = simplify_expr(
-                        arena_.make<FuncCall>(BuiltinOp::Sin,
-                            std::vector<ExprPtr>{pi_z_simp.value()}));
-                    if (sin_simp.is_error()) continue;
-                    std::size_t ia = gamma_idx[a], ib = gamma_idx[b];
-                    if (ia > ib) std::swap(ia, ib);
-                    symbolic.erase(symbolic.begin() + ib);
-                    symbolic.erase(symbolic.begin() + ia);
-                    symbolic.push_back({pi_const,          BigInt(1)});
-                    symbolic.push_back({sin_simp.value(),  BigInt(-1)});
-                    if (m_is_zero) {
-                        coefficient = coefficient * ComplexRational(Rational(BigInt(-1)));
-                        symbolic.push_back({za, BigInt(-1)});
-                    }
-                    reflected_any = true;
-                    keep_scanning = true;
-                }
-            }
-        }
-        if (reflected_any) merge_symbolic_factors(symbolic);
+        auto gamma_res = apply_gamma_reflection_pairs(symbolic, coefficient);
+        if (gamma_res.is_error()) return fail<ExprPtr>(gamma_res.error());
     }
 
     // Step 4.5: Rational cancellation of negated-Sum pairs.
@@ -393,119 +342,11 @@ Result<ExprPtr> Simplifier::simplify_product_factors(
         }
     }
 
-    // Step 6.5: HC-F4-QR-SYMBOLIC-TIMEOUT fix — sqrt(a)·sqrt(a) → a quando a è
-    // strutturalmente non-negativo (somma/prodotto di quadrati, Pow esponente
-    // pari, FuncCall sempre non-negativo, costante non-negativa) oppure
-    // dichiarato tale via assumptions. Evita di delegare a Step 7 che produce
-    // sqrt(a²) e poi tenta perfect-square detection via factorize — costo
-    // esponenziale su rationali grandi (8×8 QR random).
+    // Steps 6.5 / 7: sqrt(a)*sqrt(a) and sqrt(a)*sqrt(b) collapses live in
+    // simplify_arithmetic_chain_sqrt.cpp.
     {
-        auto is_struct_nonneg = [](ExprPtr e, auto&& self) -> bool {
-            if (!e) return false;
-            if (const auto* il = expr_cast<IntegerLit>(e)) return !il->value.is_negative();
-            if (const auto* rl = expr_cast<RationalLit>(e)) return !rl->numerator.is_negative();
-            if (const auto* b = expr_cast<Binary>(e); b && b->op == BinaryOp::Pow) {
-                if (const auto* il = expr_cast<IntegerLit>(b->right)) {
-                    if (!il->value.is_negative() && (il->value % BigInt(2)).is_zero()) return true;
-                }
-            }
-            if (const auto* sum = expr_cast<Sum>(e)) {
-                for (auto t : sum->terms) if (!self(t, self)) return false;
-                return true;
-            }
-            if (const auto* prod = expr_cast<Product>(e)) {
-                for (auto f : prod->factors) if (!self(f, self)) return false;
-                return true;
-            }
-            if (const auto* fc = expr_cast<FuncCall>(e)) {
-                if (fc->func_id == BuiltinOp::Sqrt
-                    || fc->func_id == BuiltinOp::Abs
-                    || fc->func_id == BuiltinOp::Exp
-                    || fc->func_id == BuiltinOp::Cosh) return true;
-            }
-            return false;
-        };
-        auto known_nonneg = [&](ExprPtr e) -> bool {
-            if (is_struct_nonneg(e, is_struct_nonneg)) return true;
-            if (assumptions_ && assumptions_->is_nonnegative(e)) return true;
-            return false;
-        };
-        bool merged_any = true;
-        while (merged_any) {
-            merged_any = false;
-            for (std::size_t i = 0; i < symbolic.size() && !merged_any; ++i) {
-                if (symbolic[i].second != BigInt(1)) continue;
-                const auto* fa = expr_cast<FuncCall>(symbolic[i].first);
-                if (!fa || fa->func_id != BuiltinOp::Sqrt || fa->args.size() != 1U) continue;
-                for (std::size_t j = i + 1; j < symbolic.size(); ++j) {
-                    if (symbolic[j].second != BigInt(1)) continue;
-                    const auto* fb = expr_cast<FuncCall>(symbolic[j].first);
-                    if (!fb || fb->func_id != BuiltinOp::Sqrt || fb->args.size() != 1U) continue;
-                    if (fa->args[0] != fb->args[0]) continue;
-                    if (!known_nonneg(fa->args[0])) continue;
-                    ExprPtr arg = fa->args[0];
-                    symbolic.erase(symbolic.begin() + j);
-                    symbolic.erase(symbolic.begin() + i);
-                    symbolic.push_back({arg, BigInt(1)});
-                    merged_any = true;
-                    break;
-                }
-            }
-        }
-    }
-
-    // Step 7: L1-12 sqrt(a)·sqrt(b) → sqrt(a·b) for non-negative rational args.
-    {
-        auto get_rat_pos = [](ExprPtr e) -> std::optional<Rational> {
-            const auto* fc = expr_cast<FuncCall>(e);
-            if (!fc || fc->func_id != BuiltinOp::Sqrt || fc->args.size() != 1U)
-                return std::nullopt;
-            if (const auto* il = expr_cast<IntegerLit>(fc->args[0])) {
-                if (il->value.is_negative()) return std::nullopt;
-                return Rational(il->value, BigInt(1));
-            }
-            if (const auto* rl = expr_cast<RationalLit>(fc->args[0])) {
-                if (rl->numerator.is_negative()) return std::nullopt;
-                return Rational(rl->numerator, rl->denominator);
-            }
-            return std::nullopt;
-        };
-        bool merged_any = true;
-        while (merged_any) {
-            merged_any = false;
-            for (std::size_t i = 0; i < symbolic.size() && !merged_any; ++i) {
-                if (symbolic[i].second != BigInt(1)) continue;
-                auto ra = get_rat_pos(symbolic[i].first);
-                if (!ra) continue;
-                for (std::size_t j = i + 1; j < symbolic.size(); ++j) {
-                    if (symbolic[j].second != BigInt(1)) continue;
-                    auto rb = get_rat_pos(symbolic[j].first);
-                    if (!rb) continue;
-                    Rational prod = (*ra) * (*rb);
-                    ExprPtr arg = (prod.denominator() == BigInt(1))
-                        ? static_cast<ExprPtr>(arena_.make<IntegerLit>(prod.numerator()))
-                        : static_cast<ExprPtr>(arena_.make<RationalLit>(
-                            prod.numerator(), prod.denominator()));
-                    auto new_sqrt = simplify_expr(
-                        arena_.make<FuncCall>(BuiltinOp::Sqrt,
-                            std::vector<ExprPtr>{arg}));
-                    ExprPtr replacement = new_sqrt.is_ok() ? new_sqrt.value()
-                        : arena_.make<FuncCall>(BuiltinOp::Sqrt,
-                            std::vector<ExprPtr>{arg});
-                    symbolic.erase(symbolic.begin() + j);
-                    symbolic.erase(symbolic.begin() + i);
-                    LiteralRational rep_rat;
-                    auto rep_check = try_get_exact_rational(replacement, rep_rat);
-                    if (rep_check.is_ok() && rep_check.value()) {
-                        coefficient = coefficient * ComplexRational(std::move(rep_rat.value));
-                    } else {
-                        symbolic.push_back({replacement, BigInt(1)});
-                    }
-                    merged_any = true;
-                    break;
-                }
-            }
-        }
+        auto sqrt_res = collapse_sqrt_pairs(symbolic, coefficient);
+        if (sqrt_res.is_error()) return fail<ExprPtr>(sqrt_res.error());
     }
 
     // Step 8: distribute coefficient over a Sum factor (if present).
