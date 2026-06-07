@@ -40,12 +40,11 @@
 
 ## Voci aperte
 
-### HC-F16-TRAGER-QI — Trager Q(α) factorization su `RootOf(y^2+1)` non riconosce isomorfismo con Q(i)
-- **File**: `src/algebra/factorization_polynomials.cpp` (factor_polynomial Trager path); `test/unit/algebra/test_factorization_trager.cpp::X2Plus1OverRootOfI`.
-- **Categoria CLAUDE.md**: Cat 4 (bail-out su tipo) + Cat 5 (gerarchia statica) — RootOf e ComplexLit non condividono il dispatcher di estensione algebrica.
-- **Descrizione**: Per `factor_polynomial(x^2+1, x, ext=RootOf(y^2+1,y,0))` Trager dovrebbe produrre `(x-α)·(x+α)` dove α è il root index 0. Con F1.6 le costanti complesse sono ComplexLit(0,1); il driver non identifica `RootOf(y^2+1, y, 0) ≡ ComplexLit(0,1)`, restituisce un solo fattore o un product reconstruction mismatched.
-- **Fix corretto**: implementare bridge `RootOf(p, y, k) → ComplexLit(...)` quando `p` ha radici razionali su Q(i) — caso speciale `p = y^2+1` → ComplexLit(0,±1) selezionato via `k`. Più in generale (task B2): traduzione bidirezionale tra dominio simbolico Q(α) e Q(i) via `mathematically_equal` + selezione canonica.
-- **STATO**: APERTO — bloccato fino a chiusura task F1.6-B2 (Q(α)↔ComplexLit unification).
+### HC-F16-TRAGER-QI — Trager Q(α) factorization su `RootOf(y^2+1)` non riconosce isomorfismo con Q(i) — RISOLTA 2026-06-07
+- **File**: `src/algebra/polynomial_arithmetic.cpp` (expand_expr_impl leaf set).
+- **Root cause**: `expand_expr_impl` non aveva case ComplexLit nella leaf-pass-through, causando bail-out `Unimplemented "Tipo di espressione non supportato in expand"` quando `verify_product_equals_original` espandeva il prodotto Trager che conteneva ComplexLit canonici (post-F1.6).
+- **Fix applicato**: aggiunto `expr_is<ComplexLit>(expr)` al gruppo leaf in `expand_expr_impl` (delega a `poly_clone_into_context` che a sua volta usa il `materialize_expr` fixato in F1.6-A1).
+- **Verifica**: tutti i 5 test `FactorPolynomialTrager_QAlpha.*` ora PASSANO (`X2Plus1OverRootOfI`, `X2Minus2OverRootOfSqrt2`, `X3Minus2OverRootOfCubeRoot2`, `X4Minus5X2Plus6OverRootOfSqrt2`, `X3Minus3XPlus1OverItsOwnRootOf`).
 
 ### HC-F16-LN-COMPLEX-FULL — ln(a+bi) generale + Euler factorization residuo
 - **File**: `src/symbolic/simplify_exp_log.cpp` (ln branch, exp Euler), `test/unit/symbolic/test_complex_log_branch.cpp` (2 test residui).

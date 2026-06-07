@@ -212,6 +212,7 @@ void append_product_factors(std::vector<ExprPtr>& out, ExprPtr expr) {
     if (
         expr_is<IntegerLit>(expr) ||
         expr_is<RationalLit>(expr) ||
+        expr_is<ComplexLit>(expr) ||
         expr_is<Symbol>(expr) ||
         expr_is<Constant>(expr)) {
         return clone_into_context(expr, ctx);
