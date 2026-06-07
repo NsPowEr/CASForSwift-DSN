@@ -98,6 +98,8 @@ set(CAS_FOUNDATION_SOURCES
     src/foundation/bigint_numtheory.cpp
     src/foundation/bigint_factor_pollard.cpp
     src/foundation/rational.cpp
+    src/foundation/complex_rational.cpp
+
     src/foundation/error.cpp
 )
 
@@ -442,6 +444,14 @@ add_executable(cas_benchmarks
 target_link_libraries(cas_benchmarks PRIVATE cas_core)
 target_compile_features(cas_benchmarks PRIVATE cxx_std_20)
 
+
+# F0.6 Benchmark Regression CI Gate
+add_custom_target(check_bench_regression
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_bench_regression.sh --current benchmark_results.txt --baseline ${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/baseline_release.json
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Checking for benchmark regressions..."
+)
+
 add_executable(audit_perf
     tools/audit_perf.cpp
 )
@@ -503,6 +513,8 @@ if(CAS_ENABLE_TESTING)
         test/fuzz/test_parser_fuzz.cpp
         test/fuzz/test_symbolic_fuzz.cpp
         test/unit/error/test_diagnostic.cpp
+        test/unit/error/test_unimplemented_payload.cpp
+
         test/unit/ast/test_ast_model.cpp
         test/unit/ast/test_ast_debug.cpp
         test/unit/foundation/test_foundation.cpp
@@ -830,3 +842,10 @@ if(ENABLE_COVERAGE)
         message(WARNING "lcov/genhtml not found — 'coverage' target unavailable. Install lcov.")
     endif()
 endif()
+
+# F0.6 Anti-monolith CI Gate
+add_custom_target(check_anti_monolith
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_file_size.sh
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    COMMENT "Scanning for anti-monolith violations (files > 500 lines)..."
+)

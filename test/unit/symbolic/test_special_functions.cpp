@@ -464,7 +464,7 @@ TEST_F(SpecialFunctionsTest, PochhammerNegativeIndex) {
 // HPP-015 closure: configurable bit budget for closed-form expansions of
 // special functions taking a positive integer argument.
 TEST_F(SpecialFunctionsTest, HPP015_DigammaBitBudgetConfigurable) {
-    // Default budget = 16 bits.  bit_length(70000) = 17 → Unimplemented.
+    // Default budget = 16 bits.  bit_length(70000) = 17 → Unimplemented (HPP-015).
     auto e = parse_expr("Digamma(70000)", ctx->arena());
     ASSERT_TRUE(e.is_ok());
     auto s = ctx->simplify(e.value());
@@ -480,7 +480,7 @@ TEST_F(SpecialFunctionsTest, HPP015_DigammaBitBudgetConfigurable) {
 
     // Reduce budget below default → previously-OK input rejected.
     ctx->set_max_special_fn_integer_arg_bits(2U);
-    auto e3 = parse_expr("Digamma(8)", ctx->arena());  // bit_length(8) = 4 > 2
+    auto e3 = parse_expr("Digamma(8)", ctx->arena());  // bit_length(8) = 4 > 2 (HPP-015)
     ASSERT_TRUE(e3.is_ok());
     auto s3 = ctx->simplify(e3.value());
     ASSERT_TRUE(s3.is_error());

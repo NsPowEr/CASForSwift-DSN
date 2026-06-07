@@ -261,7 +261,7 @@ constexpr int kTrigCombinationMaxDepth = 3;
 // Remaining open item: wire CASContext::max_trig_exact_denom() through the
 // static call chain so the limit is user-configurable at runtime (see
 // HARDCODE_LEDGER.md entry HPP-014-RT).
-constexpr int kBaseAngleMaxDenom = 60;
+constexpr int kBaseAngleMaxDenom = 120;
 
 [[nodiscard]] static ExprPtr try_angle_combination(Rational ref, BuiltinOp func, AstArena& arena) {
     // F1.4c depth guard: bail out if mutual recursion exceeds kTrigCombinationMaxDepth.
@@ -274,7 +274,7 @@ constexpr int kBaseAngleMaxDenom = 60;
     const TrigCombinationDepthGuard depth_guard;
 
     const Rational zero(BigInt(0));
-    if (ref.denominator() < BigInt(7)) return nullptr;
+    if (ref.denominator() < BigInt(3)) return nullptr;
 
     // GCD helper for int (used in coprimality check).
     auto igcd = [](int a, int b) -> int {

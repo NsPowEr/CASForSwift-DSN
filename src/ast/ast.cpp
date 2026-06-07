@@ -44,6 +44,10 @@ void destroy_node(ExprNode* node) noexcept {
         static_cast<IntegerLit*>(node)->~IntegerLit();
         break;
     case ExprKind::RationalLit:
+    case ExprKind::ComplexLit:
+        static_cast<ComplexLit*>(node)->~ComplexLit();
+        break;
+
         static_cast<RationalLit*>(node)->~RationalLit();
         break;
     case ExprKind::DecimalLit:
@@ -246,6 +250,14 @@ bool structural_equal(ExprPtr lhs, ExprPtr rhs) noexcept {
         return big_int_equal(lhs_value.numerator, rhs_value.numerator) &&
                big_int_equal(lhs_value.denominator, rhs_value.denominator);
     }
+
+    case ExprKind::ComplexLit: {
+        const auto& l = expr_ref<ComplexLit>(lhs);
+        const auto& r = expr_ref<ComplexLit>(rhs);
+        return big_int_equal(l.re_num, r.re_num) && big_int_equal(l.re_den, r.re_den) &&
+               big_int_equal(l.im_num, r.im_num) && big_int_equal(l.im_den, r.im_den);
+    }
+
     case ExprKind::DecimalLit:
         return expr_ref<DecimalLit>(lhs).text == expr_ref<DecimalLit>(rhs).text;
     case ExprKind::Symbol:
@@ -350,6 +362,15 @@ std::size_t expr_hash(ExprPtr expr) noexcept {
 
     switch (expr->kind) {
     case ExprKind::IntegerLit:
+    case ExprKind::ComplexLit: {
+        const auto& node = expr_ref<ComplexLit>(expr);
+        hash_combine(seed, node.re_num.hash());
+        hash_combine(seed, node.re_den.hash());
+        hash_combine(seed, node.im_num.hash());
+        hash_combine(seed, node.im_den.hash());
+        break;
+    }
+
         hash_combine(seed, expr_ref<IntegerLit>(expr).value.hash());
         break;
     case ExprKind::RationalLit: {
@@ -472,6 +493,9 @@ std::string_view expr_kind_name(ExprKind kind) noexcept {
         return "IntegerLit";
     case ExprKind::RationalLit:
         return "RationalLit";
+    case ExprKind::ComplexLit:
+        return "ComplexLit";
+
     case ExprKind::DecimalLit:
         return "DecimalLit";
     case ExprKind::Symbol:
@@ -526,6 +550,12 @@ ExprPtr clone_into_arena(ExprPtr expr, AstArena& target, std::unordered_map<Expr
         cloned = target.make<RationalLit>(node.numerator, node.denominator);
         break;
     }
+    case ExprKind::ComplexLit: {
+        const auto& node = expr_ref<ComplexLit>(expr);
+        cloned = target.make<ComplexLit>(node.re_num, node.re_den, node.im_num, node.im_den);
+        break;
+    }
+
     case ExprKind::DecimalLit:
         cloned = target.make<DecimalLit>(expr_ref<DecimalLit>(expr).text);
         break;

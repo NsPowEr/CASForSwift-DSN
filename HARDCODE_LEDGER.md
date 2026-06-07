@@ -15,6 +15,29 @@
 
 ---
 
+### HPP-026 — integrate.cpp 1000 iteration limit
+- **File**: `src/calculus/integrate.cpp:172`
+- **Categoria CLAUDE.md**: Cat 1 (budget non configurabile)
+- **Descrizione**: Limite rigido di 1000 iterazioni per integrazione numerica/simbolica.
+- **Fix corretto**: Esporre `ctx.max_integration_steps()`.
+- **STATO**: APERTO
+
+
+### HPP-024 — fsolve kTolerance=1e-10 hardcoded
+- **File**: `src/algebra/fsolve.cpp:77`
+- **Categoria CLAUDE.md**: Cat 1 (budget non configurabile)
+- **Descrizione**: Tolleranza di convergenza Newton-Raphson fissata a 1e-10.
+- **Fix corretto**: Esporre `ctx.fsolve_tolerance()` in `CASContextParams`.
+- **STATO**: APERTO
+
+### HPP-025 — matrix_ops score constants
+- **File**: `src/linalg/matrix_ops.cpp:242-255`
+- **Categoria CLAUDE.md**: Cat 2 (magic numbers)
+- **Descrizione**: Costanti 1000/500/400 per euristica pivot.
+- **Fix corretto**: Unificare euristica con `matrix_bareiss.cpp` via `PivotScore`.
+- **STATO**: APERTO
+
+
 ## Voci aperte
 
 ### F5.7-ZEIL-HIGHER-ORDER — Zeilberger higher-order recurrence solver non implementato
@@ -91,6 +114,20 @@
 - **Algoritmo**: data `Σ_{k=a}^{b} t(k)` con `t` ipergeometrico:
   1. `symbolic::gosper_sum(t, k, ctx)` → indefinite antidifference `S(k)` con `S(k+1) − S(k) = t(k)`.
   2. Newton-Leibniz finite-calculus: `Σ_{k=a}^{b} t(k) = S(b+1) − S(a)`.
+
+### F0.8-ERROR-STRUCT — Structured Unimplemented Diagnostic
+- **File**: `include/cas/error.hpp`, `include/cas/error_helpers.hpp`
+- **Categoria CLAUDE.md**: N/A (Infrastruttura)
+- **Descrizione**: Sostituite stringhe nude con `UnimplementedPayload` (module, function, reason_code, ticket_id).
+- **STATO**: ✅ RISOLTA 2026-06-07
+
+
+### F0.6-QA-INFRA — QA Infrastructure Integration
+- **File**: `CMakeLists.txt`, `scripts/file_size_whitelist.txt`
+- **Categoria CLAUDE.md**: N/A (Infrastruttura)
+- **Descrizione**: Integrati rapidcheck (F0.4), anti-monolith CI gate e benchmark regression gate (F0.6).
+- **STATO**: ✅ RISOLTA 2026-06-07
+
   3. Substitute + simplify. Risultato simbolico.
   4. Se Gosper non trova antidifference → fallthrough a Unimplemented esplicito (nessun risultato silenziosamente sbagliato).
 - **Self-check Regola Zero**:
@@ -605,17 +642,17 @@
 
 ---
 
-### HPP-F1.1-MUL — kToom3MaxLimbs=4096 fallback a Karatsuba — APERTA PERMANENTE
+### HPP-F1.1-MUL — kFFTThreshold=8192 fallback a Karatsuba — APERTA PERMANENTE
 
-- **File**: `src/foundation/bigint_mul_toom3.cpp:55` — `kToom3MaxLimbs = 4096U`.
+- **File**: `src/foundation/bigint_mul_toom3.cpp:55` — `kFFTThreshold = 8192U`.
 - **Categoria CLAUDE.md**: Categoria 1 (budget computazionale non configurabile) + Eccezione legittima 3.
-- **Descrizione**: Per n ≥ 4096 limbs (≈131072 bit, ≈39500 decimal digits), Toom-3
+- **Descrizione**: Per n ≥ 8192 limbs (≈131072 bit, ≈39500 decimal digits), Toom-3
   cade su Karatsuba. Schönhage-Strassen FFT (O(n log n log log n)) sarebbe superiore
   ma richiede NTT ring (Z/pZ per p primo NTT-friendly), radici dell'unità modulari,
   e pipeline cooley-tukey completa — ~2-4 settimane di implementazione.
-  La soglia 4096 è motivata dal workload pratico del CAS (polinomi simbolici raramente
+  La soglia 8192 è motivata dal workload pratico del CAS (polinomi simbolici raramente
   superano 10000 bit nei coefficienti BigInt).
-- **Stato corrente (F1.1)**: Karatsuba fallback corretto ma subottimale per n≥4096.
+- **Stato corrente (F1.1)**: Karatsuba fallback corretto ma subottimale per n≥8192.
   21/21 test `BigIntProductionTest` passano incluso `MultiplyDivideInverse_Toom3` con
   input a 67 limbs (640 cifre decimali).
 - **Fix corretto (futuro)**: `bigint_mul_fft.cpp` — Schönhage-Strassen NTT con primo

@@ -123,6 +123,8 @@ private:
 
     // Forward declarations of simplification methods
     [[nodiscard]] Result<ExprPtr> simplify_node(ExprPtr original, const IntegerLit& node);
+    [[nodiscard]] Result<ExprPtr> simplify_node(ExprPtr original, const ComplexLit& node);
+
     [[nodiscard]] Result<ExprPtr> simplify_node(ExprPtr original, const RationalLit& node);
     [[nodiscard]] Result<ExprPtr> simplify_node(ExprPtr original, const DecimalLit& node);
     [[nodiscard]] Result<ExprPtr> simplify_node(ExprPtr original, const Symbol& node);

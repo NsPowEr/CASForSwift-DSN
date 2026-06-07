@@ -174,6 +174,8 @@ bool poly_depends_on(ExprPtr expr, const std::string& variable_name) {
     case ExprKind::DecimalLit:
     case ExprKind::Symbol:
     case ExprKind::Constant:
+    case ExprKind::ComplexLit:
+
         return false;
     case ExprKind::Unary:
         return poly_depends_on(expr_ref<Unary>(expr).operand, variable_name);

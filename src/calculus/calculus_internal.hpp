@@ -353,4 +353,11 @@ using MRVSet = std::set<ExprPtr, MRVCompare>;
 [[nodiscard]] Result<ExprPtr> rewrite_mrv(ExprPtr e, const MRVSet& mrv, ExprPtr w, const Symbol& var, symbolic::CASContext& ctx);
 [[nodiscard]] Result<ExprPtr> compute_limit_mrv(ExprPtr expr, const Symbol& var, ExprPtr point, symbolic::CASContext& ctx);
 
+// Bronstein Chapter 8 general variable-coefficient and parametric Risch DE solvers
+[[nodiscard]] Result<ExprPtr> solve_risch_de_general(
+    ExprPtr f, ExprPtr g, const Symbol& var, const DifferentialField& field, symbolic::CASContext& ctx);
+
+[[nodiscard]] Result<std::vector<ParametricRischDeQSolution>> solve_risch_de_parametric_field(
+    ExprPtr f, const std::vector<ExprPtr>& g_vec, std::size_t ext_idx, const DifferentialField& field, symbolic::CASContext& ctx);
+
 }  // namespace cas::calculus

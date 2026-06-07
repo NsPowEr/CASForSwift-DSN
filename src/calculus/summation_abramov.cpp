@@ -193,6 +193,43 @@ namespace cas::calculus {
 //
 // Irreducibility is guaranteed by the caller: atoms come from
 // partial_fractions/factor_over_integers which returns Q-irreducible factors.
+[[nodiscard]] static Rational compute_hermite_factor(unsigned int m, unsigned int r) {
+    if (r == 0U) return Rational(1);
+    
+    auto fact = [](unsigned int n) -> BigInt {
+        BigInt res(1);
+        for (unsigned int i = 2U; i <= n; ++i) {
+            res *= BigInt(static_cast<long long>(i));
+        }
+        return res;
+    };
+    
+    BigInt num = fact(m + r - 2U);
+    BigInt den = fact(r) * fact(m - 1U);
+    return Rational(num, den);
+}
+
+// B6-bis: RootOf-aware digamma/polygamma antidifference for Q-irreducible quadratic atoms.
+//
+// Given atom = (B₁·k + B₀) / Q(k)^m  with Q = d₂·k² + d₁·k + d₀ irreducible over Q
+//
+//   Let Qtilde(t) = t² + p·t + q  (monic, p = d₁/d₂, q = d₀/d₂),
+//       α = RootOf(Qtilde, t, 0),  β = RootOf(Qtilde, t, 1).
+//
+//   Hermite decomposition over Q(α) (see Bronstein "Symbolic Integration I" §5.6):
+//     (A₁k + A₀) / ((k-α)^m(k-β)^m) = Σ_{j=1}^m C_j/(k-α)^j + Σ_{j=1}^m D_j/(k-β)^j
+//
+//   where  A_i = B_i/d₂^m.
+//   For j = 1..m:
+//     Let r = m - j.
+//     If r = 0 (j = m):
+//       C_m = (A₁α + A₀)/(α-β)^m,  D_m = (A₁β + A₀)/(β-α)^m.
+//     If r >= 1:
+//       C_j = (-1)^r * factor / (α-β)^(m+r) * [ (m+r-1)(A₁α + A₀) - r A₁ (α-β) ],
+//       D_j = (-1)^r * factor / (β-α)^(m+r) * [ (m+r-1)(A₁β + A₀) - r A₁ (β-α) ],
+//     where factor = (m + r - 2)! / (r! * (m-1)!).
+//
+//   Antidifference:  S(k) = Σ_{j=1}^m [ C_j·polygamma_antidiff(k-α, j) + D_j·polygamma_antidiff(k-β, j) ].
 [[nodiscard]] static std::optional<ExprPtr> try_quadratic_atom_antidiff(
     ExprPtr term, const Symbol& k, symbolic::CASContext& ctx) {
     AstArena& arena = ctx.arena();
@@ -211,13 +248,17 @@ namespace cas::calculus {
     ExprPtr N = N_s.value();
     ExprPtr D = D_s.value();
 
-    // Only handle m = 1 (plain quadratic denominator, not a power).
+    unsigned int m = 1U;
+    ExprPtr base = D;
     if (const auto* bin = expr_cast<Binary>(D); bin && bin->op == BinaryOp::Pow) {
-        return std::nullopt;
+        const auto* exp_lit = expr_cast<IntegerLit>(bin->right);
+        if (!exp_lit || exp_lit->value.is_negative() || exp_lit->value.bit_length() > 64U) return std::nullopt;
+        m = static_cast<unsigned int>(exp_lit->value.to_u64());
+        base = bin->left;
     }
 
-    // Denominator must be exactly degree 2 in k with rational coefficients.
-    auto D_coeffs_res = algebra::univariate_coefficients(D, k, ctx);
+    // Denominator base must be exactly degree 2 in k with rational coefficients.
+    auto D_coeffs_res = algebra::univariate_coefficients(base, k, ctx);
     if (D_coeffs_res.is_error() || D_coeffs_res.value().size() != 3U)
         return std::nullopt;
     const auto& dc = D_coeffs_res.value();  // [d0, d1, d2] ascending degree
@@ -244,7 +285,7 @@ namespace cas::calculus {
     Rational p_rat = d1_rat / d2_rat;
     Rational q_rat = d0_rat / d2_rat;
 
-    // Build Q̃(t) = t² + p·t + q in a fresh variable t (bound inside RootOf).
+    // Build Qtilde(t) = t² + p·t + q in a fresh variable t (bound inside RootOf).
     Symbol t_sym = ctx.make_fresh_symbol("t");
     ExprPtr t_e   = arena.make<Symbol>(t_sym);
     ExprPtr t_sq  = arena.make<Binary>(BinaryOp::Pow, t_e,
@@ -258,47 +299,106 @@ namespace cas::calculus {
     if (q_tilde_s.is_error()) return std::nullopt;
     ExprPtr q_tilde = q_tilde_s.value();
 
-    // α = first root, β = second root of Q̃.
+    // α = first root, β = second root of Qtilde.
     ExprPtr alpha = arena.make<RootOf>(q_tilde, t_sym,
         std::optional<std::size_t>{0U});
     ExprPtr beta  = arena.make<RootOf>(q_tilde, t_sym,
         std::optional<std::size_t>{1U});
 
-    // Effective numerator coefficients: A_i = nc[i] / d₂.
+    // Effective numerator coefficients: A_i = nc[i] / d₂^m.
     ExprPtr d2_e  = d2_s.value();
-    ExprPtr A0_raw = arena.make<Binary>(BinaryOp::Div, nc[0], d2_e);
+    ExprPtr d2_m = (m == 1U)
+        ? d2_e
+        : arena.make<Binary>(BinaryOp::Pow, d2_e,
+            arena.make<IntegerLit>(BigInt(static_cast<long long>(m))));
+    auto d2_m_s = ctx.simplify(d2_m);
+    if (d2_m_s.is_error()) return std::nullopt;
+    ExprPtr d2_m_eff = d2_m_s.value();
+
+    ExprPtr A0_raw = arena.make<Binary>(BinaryOp::Div, nc[0], d2_m_eff);
     auto A0_s = ctx.simplify(A0_raw);
     if (A0_s.is_error()) return std::nullopt;
     ExprPtr A0 = A0_s.value();
 
     ExprPtr A1 = arena.make<IntegerLit>(BigInt(0));
     if (nc.size() == 2U) {
-        ExprPtr A1_raw = arena.make<Binary>(BinaryOp::Div, nc[1], d2_e);
+        ExprPtr A1_raw = arena.make<Binary>(BinaryOp::Div, nc[1], d2_m_eff);
         auto A1_simp = ctx.simplify(A1_raw);
         if (A1_simp.is_error()) return std::nullopt;
         A1 = A1_simp.value();
     }
 
-    // Residue formula:  C = (A₁α + A₀)/(α−β),  D = (A₁β + A₀)/(β−α).
+    std::vector<ExprPtr> S_terms;
+    S_terms.reserve(2U * m);
+
     ExprPtr alpha_minus_beta = arena.make<Binary>(BinaryOp::Sub, alpha, beta);
     ExprPtr beta_minus_alpha = arena.make<Unary>(UnaryOp::Neg, alpha_minus_beta);
 
-    ExprPtr A1_alpha     = arena.make<Binary>(BinaryOp::Mul, A1, alpha);
-    ExprPtr num_at_alpha = arena.make<Binary>(BinaryOp::Add, A1_alpha, A0);
-    ExprPtr C = arena.make<Binary>(BinaryOp::Div, num_at_alpha, alpha_minus_beta);
+    for (unsigned int j = 1U; j <= m; ++j) {
+        unsigned int r = m - j;
+        ExprPtr C_coeff, D_coeff;
+        if (r == 0U) {
+            ExprPtr denom_C = (m == 1U)
+                ? alpha_minus_beta
+                : arena.make<Binary>(BinaryOp::Pow, alpha_minus_beta,
+                    arena.make<IntegerLit>(BigInt(static_cast<long long>(m))));
+            ExprPtr denom_D = (m == 1U)
+                ? beta_minus_alpha
+                : arena.make<Binary>(BinaryOp::Pow, beta_minus_alpha,
+                    arena.make<IntegerLit>(BigInt(static_cast<long long>(m))));
 
-    ExprPtr A1_beta     = arena.make<Binary>(BinaryOp::Mul, A1, beta);
-    ExprPtr num_at_beta = arena.make<Binary>(BinaryOp::Add, A1_beta, A0);
-    ExprPtr D_coeff = arena.make<Binary>(BinaryOp::Div, num_at_beta, beta_minus_alpha);
+            ExprPtr A1_alpha = arena.make<Binary>(BinaryOp::Mul, A1, alpha);
+            ExprPtr num_C = arena.make<Binary>(BinaryOp::Add, A1_alpha, A0);
+            C_coeff = arena.make<Binary>(BinaryOp::Div, num_C, denom_C);
 
-    // Antidifference: S(k) = C·ψ(k−α) + D·ψ(k−β).
-    ExprPtr k_sym_e      = arena.make<Symbol>(k);
-    ExprPtr k_minus_alpha = arena.make<Binary>(BinaryOp::Sub, k_sym_e, alpha);
-    ExprPtr k_minus_beta  = arena.make<Binary>(BinaryOp::Sub, k_sym_e, beta);
+            ExprPtr A1_beta = arena.make<Binary>(BinaryOp::Mul, A1, beta);
+            ExprPtr num_D = arena.make<Binary>(BinaryOp::Add, A1_beta, A0);
+            D_coeff = arena.make<Binary>(BinaryOp::Div, num_D, denom_D);
+        } else {
+            Rational factor_rat = compute_hermite_factor(m, r);
+            if (r % 2U == 1U) {
+                factor_rat = -factor_rat;
+            }
+            ExprPtr scale = rational_expr(arena, factor_rat);
 
-    ExprPtr S1 = polygamma_antidiff(C,       k_minus_alpha, 1U, ctx);
-    ExprPtr S2 = polygamma_antidiff(D_coeff, k_minus_beta,  1U, ctx);
-    return arena.make<Binary>(BinaryOp::Add, S1, S2);
+            ExprPtr denom_C = arena.make<Binary>(BinaryOp::Pow, alpha_minus_beta,
+                arena.make<IntegerLit>(BigInt(static_cast<long long>(m + r))));
+            ExprPtr denom_D = arena.make<Binary>(BinaryOp::Pow, beta_minus_alpha,
+                arena.make<IntegerLit>(BigInt(static_cast<long long>(m + r))));
+
+            ExprPtr A1_alpha = arena.make<Binary>(BinaryOp::Mul, A1, alpha);
+            ExprPtr A1_alpha_plus_A0 = arena.make<Binary>(BinaryOp::Add, A1_alpha, A0);
+            ExprPtr m_plus_r_minus_1_expr = arena.make<IntegerLit>(BigInt(static_cast<long long>(m + r - 1U)));
+            ExprPtr term_C_1 = arena.make<Binary>(BinaryOp::Mul, m_plus_r_minus_1_expr, A1_alpha_plus_A0);
+            ExprPtr r_A1 = arena.make<Binary>(BinaryOp::Mul, arena.make<IntegerLit>(BigInt(static_cast<long long>(r))), A1);
+            ExprPtr term_C_2 = arena.make<Binary>(BinaryOp::Mul, r_A1, alpha_minus_beta);
+            ExprPtr expr_C = arena.make<Binary>(BinaryOp::Sub, term_C_1, term_C_2);
+            ExprPtr scale_expr_C = arena.make<Binary>(BinaryOp::Mul, scale, expr_C);
+            C_coeff = arena.make<Binary>(BinaryOp::Div, scale_expr_C, denom_C);
+
+            ExprPtr A1_beta = arena.make<Binary>(BinaryOp::Mul, A1, beta);
+            ExprPtr A1_beta_plus_A0 = arena.make<Binary>(BinaryOp::Add, A1_beta, A0);
+            ExprPtr term_D_1 = arena.make<Binary>(BinaryOp::Mul, m_plus_r_minus_1_expr, A1_beta_plus_A0);
+            ExprPtr term_D_2 = arena.make<Binary>(BinaryOp::Mul, r_A1, beta_minus_alpha);
+            ExprPtr expr_D = arena.make<Binary>(BinaryOp::Sub, term_D_1, term_D_2);
+            ExprPtr scale_expr_D = arena.make<Binary>(BinaryOp::Mul, scale, expr_D);
+            D_coeff = arena.make<Binary>(BinaryOp::Div, scale_expr_D, denom_D);
+        }
+
+        ExprPtr k_sym_e = arena.make<Symbol>(k);
+        ExprPtr k_minus_alpha = arena.make<Binary>(BinaryOp::Sub, k_sym_e, alpha);
+        ExprPtr k_minus_beta = arena.make<Binary>(BinaryOp::Sub, k_sym_e, beta);
+
+        ExprPtr S1 = polygamma_antidiff(C_coeff, k_minus_alpha, j, ctx);
+        ExprPtr S2 = polygamma_antidiff(D_coeff, k_minus_beta,  j, ctx);
+        S_terms.push_back(S1);
+        S_terms.push_back(S2);
+    }
+
+    ExprPtr combined = (S_terms.size() == 1U)
+        ? S_terms.front()
+        : arena.make<Sum>(std::move(S_terms));
+    return combined;
 }
 
 // ── public functions (declared in summation_internal.hpp) ─────────────────────
@@ -426,7 +526,7 @@ Result<ExprPtr> try_abramov_definite(
         // Q-linear atoms: A/(c₁k+c₀)^m → polygamma antidifference.
         auto antidiff_opt = try_polygamma_antidiff(atom_simp.value(), var, ctx);
 
-        // Q-irreducible quadratic atoms: (B₁k+B₀)/Q(k), m=1 → RootOf digamma.
+        // Q-irreducible quadratic atoms: (B₁k+B₀)/Q(k)^m → RootOf polygamma.
         if (!antidiff_opt.has_value())
             antidiff_opt = try_quadratic_atom_antidiff(atom_simp.value(), var, ctx);
 
@@ -435,8 +535,8 @@ Result<ExprPtr> try_abramov_definite(
                 .kind    = CASErrorKind::Unimplemented,
                 .message = "Abramov: partial-fraction atom not of supported form. "
                            "Handled: Q-linear A/(ck+d)^m and Q-irreducible "
-                           "quadratic (B₁k+B₀)/Q(k) with m=1. "
-                           "Unhandled: Q-irreducible deg≥3 or quadratic^m (m>1).",
+                           "quadratic (B₁k+B₀)/Q(k)^m. "
+                           "Unhandled: Q-irreducible deg≥3.",
             });
         }
 

@@ -1,0 +1,5 @@
+if(EXISTS "/Users/REAL_CAS_ENGINE_C++/cas_foundation_tests[1]_tests.cmake")
+  include("/Users/REAL_CAS_ENGINE_C++/cas_foundation_tests[1]_tests.cmake")
+else()
+  add_test(cas_foundation_tests_NOT_BUILT cas_foundation_tests_NOT_BUILT)
+endif()

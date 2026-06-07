@@ -98,3 +98,24 @@ src/algebra/polynomial_groebner_f5.cpp
 # src/algebra/polynomial_groebner_fglm.cpp (~572 lines) — FGLM;
 #   split target: F3.3 linear algebra phase to polynomial_groebner_fglm_linalg.cpp
 src/algebra/polynomial_groebner_fglm.cpp
+
+# include/cas/cas_context_params.hpp      (508 lines) — split target: F1.3
+include/cas/cas_context_params.hpp
+
+# src/calculus/differential_field.cpp      (577 lines) — split target: F5.1
+src/calculus/differential_field.cpp
+
+# src/calculus/ode_classifier.cpp          (924 lines) — split target: F5.3
+src/calculus/ode_classifier.cpp
+
+# src/calculus/ode_solver_frobenius.cpp    (644 lines) — split target: F5.3
+src/calculus/ode_solver_frobenius.cpp
+
+# src/calculus/summation_abramov.cpp       (562 lines) — split target: F5.7
+src/calculus/summation_abramov.cpp
+
+# src/linalg/matrix_smith.cpp              (551 lines) — split target: F4.2
+src/linalg/matrix_smith.cpp
+
+# src/symbolic/summation_zeilberger_helpers.cpp (545 lines) — split target: F5.7
+src/symbolic/summation_zeilberger_helpers.cpp

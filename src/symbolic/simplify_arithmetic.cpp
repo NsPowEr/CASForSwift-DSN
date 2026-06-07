@@ -10,6 +10,11 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const IntegerLit&) {
     return ok(original);
 }
 
+Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const ComplexLit&) {
+    return ok(original);
+}
+
+
 Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const RationalLit& node) {
     auto value = Rational::make(node.numerator, node.denominator);
     if (value.is_error()) return fail<ExprPtr>(value.error());

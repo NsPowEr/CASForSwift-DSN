@@ -113,6 +113,12 @@ std::string TextFormatter::format_internal(ExprPtr expr, std::unordered_map<Expr
             return node.value.decimal();
         } else if constexpr (std::is_same_v<NodeT, RationalLit>) {
             return node.numerator.decimal() + "/" + node.denominator.decimal();
+        } else if constexpr (std::is_same_v<NodeT, ComplexLit>) {
+            std::string re = node.re_num.decimal();
+            if (node.re_den != BigInt(1)) re += "/" + node.re_den.decimal();
+            std::string im = node.im_num.decimal();
+            if (node.im_den != BigInt(1)) im += "/" + node.im_den.decimal();
+            return "(" + re + " + " + im + "*I)";
         } else if constexpr (std::is_same_v<NodeT, DecimalLit>) {
             return node.text;
         } else if constexpr (std::is_same_v<NodeT, Symbol>) {

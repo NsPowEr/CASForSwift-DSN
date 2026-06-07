@@ -206,6 +206,51 @@ Result<ExprPtr> Simplifier::simplify_funcall_special(
                 if ((n % 2U) == 0U) prod = arena_.make<Unary>(UnaryOp::Neg, prod);
                 return simplify_expr(prod);
             }
+            if (const auto* sum = expr_cast<Sum>(args[1]); sum && sum->terms.size() >= 2U) {
+                int idx = -1;
+                BigInt shift(0);
+                for (std::size_t i = 0; i < sum->terms.size(); ++i) {
+                    if (const auto* il2 = expr_cast<IntegerLit>(sum->terms[i])) {
+                        if (idx == -1) { idx = static_cast<int>(i); shift = il2->value; }
+                        else { idx = -1; break; }
+                    }
+                }
+                if (idx >= 0 && !shift.is_zero() && !shift.is_negative()
+                    && shift.bit_length() <= polygamma_bits) {
+                    std::vector<ExprPtr> rest;
+                    rest.reserve(sum->terms.size() - 1U);
+                    for (std::size_t i = 0; i < sum->terms.size(); ++i) {
+                        if (static_cast<int>(i) != idx) rest.push_back(sum->terms[i]);
+                    }
+                    ExprPtr z = rest.size() == 1U ? rest.front() : arena_.make<Sum>(std::move(rest));
+                    const std::uint64_t num_shifts = shift.to_u64();
+                    
+                    std::vector<ExprPtr> terms;
+                    terms.push_back(arena_.make<FuncCall>(BuiltinOp::Polygamma,
+                        std::vector<ExprPtr>{args[0], z}));
+                    
+                    // factor = (-1)^n * n!
+                    BigInt sign = (n % 2U == 0U) ? BigInt(1) : BigInt(-1);
+                    BigInt fact(1);
+                    for (std::uint64_t k = 2U; k <= n; ++k) {
+                        fact *= BigInt(static_cast<std::int64_t>(k));
+                    }
+                    BigInt scale = sign * fact;
+                    ExprPtr scale_expr = make_integer(arena_, scale);
+                    
+                    for (std::uint64_t k = 0U; k < num_shifts; ++k) {
+                        ExprPtr shift_k = (k == 0U)
+                            ? z
+                            : static_cast<ExprPtr>(arena_.make<Sum>(std::vector<ExprPtr>{
+                                  z, make_integer(arena_, BigInt(static_cast<std::int64_t>(k)))}));
+                        ExprPtr den = arena_.make<Binary>(BinaryOp::Pow, shift_k,
+                            make_integer(arena_, BigInt(static_cast<std::int64_t>(n + 1U))));
+                        ExprPtr term = arena_.make<Binary>(BinaryOp::Div, scale_expr, den);
+                        terms.push_back(term);
+                    }
+                    return simplify_expr(arena_.make<Sum>(std::move(terms)));
+                }
+            }
         }
     }
 

@@ -9,6 +9,8 @@ set(CAS_PROPERTY_SOURCES
     test_matrix_inverse.cpp
     test_factor_product.cpp
     test_partial_fractions_roundtrip.cpp
+    test_bigint_property.cpp
+
 )
 
 add_executable(cas_property_tests ${CAS_PROPERTY_SOURCES})

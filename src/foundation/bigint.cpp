@@ -409,6 +409,11 @@ BigInt BigInt::multiply_magnitude(const BigInt& lhs, const BigInt& rhs) {
         return BigInt(0);
     }
 
+    const std::size_t n_max = std::max(lhs.limb_count(), rhs.limb_count());
+    if (n_max >= 64U && n_max < 8192U) {
+        return multiply_magnitude_toom3(lhs, rhs);
+    }
+
     const std::size_t n = std::max(lhs.limbs_.size(), rhs.limbs_.size());
     if (n < 32U) {
         std::vector<std::uint32_t> result(lhs.limbs_.size() + rhs.limbs_.size(), 0U);
@@ -462,25 +467,14 @@ std::pair<BigInt, BigInt> BigInt::divide_magnitude(const BigInt& dividend, const
     if (dividend.is_zero() || compare_magnitude(dividend, divisor) < 0) {
         return {BigInt(0), dividend};
     }
-
-    BigInt quotient(0);
-    BigInt remainder = dividend;
-    const BigInt one(1);
-
-    while (compare_magnitude(remainder, divisor) >= 0) {
-        std::size_t shift = remainder.bit_length() - divisor.bit_length();
-        BigInt scaled = divisor.shift_left_bits(shift);
-        if (compare_magnitude(scaled, remainder) > 0) {
-            --shift;
-            scaled = divisor.shift_left_bits(shift);
-        }
-
-        remainder = subtract_magnitude(remainder, scaled);
-        quotient = add_magnitude(quotient, one.shift_left_bits(shift));
+    if (divisor.limb_count() < 2U) {
+        BigInt quotient = dividend;
+        std::uint32_t rem_val = quotient.divide_by_small(divisor.limb_at(0));
+        quotient.invalidate_decimal_cache();
+        return {std::move(quotient), BigInt(rem_val)};
     }
+    return divide_knuth_d(dividend, divisor);
 
-    return {std::move(quotient), std::move(remainder)};
-}
 
 std::pair<BigInt, BigInt> BigInt::divide_with_remainder(const BigInt& dividend, const BigInt& divisor) {
     assert(!divisor.is_zero());

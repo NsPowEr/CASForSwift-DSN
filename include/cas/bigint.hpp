@@ -81,7 +81,7 @@ private:
     [[nodiscard]] static BigInt add_magnitude(const BigInt& lhs, const BigInt& rhs);
     [[nodiscard]] static BigInt subtract_magnitude(const BigInt& lhs, const BigInt& rhs);
     [[nodiscard]] static BigInt multiply_magnitude(const BigInt& lhs, const BigInt& rhs);
-    // F1.1 Toom-3: used by multiply_magnitude for n in [kToom3Threshold, kToom3MaxLimbs).
+    // F1.1 Toom-3: used by multiply_magnitude for n in [kToom3Threshold, kFFTThreshold).
     // Reference: Brent-Zimmermann "Modern Computer Arithmetic" §1.3.3.
     [[nodiscard]] static BigInt multiply_magnitude_toom3(const BigInt& lhs, const BigInt& rhs);
     // F1.1 Knuth Algorithm D: normalized long division.

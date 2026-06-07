@@ -1,0 +1,5 @@
+if(EXISTS "/Users/REAL_CAS_ENGINE_C++/assumptions_stability_test[1]_tests.cmake")
+  include("/Users/REAL_CAS_ENGINE_C++/assumptions_stability_test[1]_tests.cmake")
+else()
+  add_test(assumptions_stability_test_NOT_BUILT assumptions_stability_test_NOT_BUILT)
+endif()

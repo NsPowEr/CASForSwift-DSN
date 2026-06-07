@@ -16,6 +16,8 @@ enum class CASErrorKind : std::uint8_t {
     AssumptionConflict,
     InvalidArgument,
     InternalError,
+    DivisionByZero,
+
 };
 
 // ---------------------------------------------------------------------------

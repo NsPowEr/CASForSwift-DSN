@@ -1,0 +1,5 @@
+if(EXISTS "/Users/REAL_CAS_ENGINE_C++/test/property/cas_property_tests[1]_tests.cmake")
+  include("/Users/REAL_CAS_ENGINE_C++/test/property/cas_property_tests[1]_tests.cmake")
+else()
+  add_test(cas_property_tests_NOT_BUILT cas_property_tests_NOT_BUILT)
+endif()

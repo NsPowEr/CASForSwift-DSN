@@ -146,6 +146,14 @@ private:
         return ok(std::move(out).str());
     }
 
+    [[nodiscard]] Result<std::string> print_node(const ComplexLit& value, int) const {
+        std::string re = value.re_num.decimal();
+        if (value.re_den != BigInt(1)) re += "/" + value.re_den.decimal();
+        std::string im = value.im_num.decimal();
+        if (value.im_den != BigInt(1)) im += "/" + value.im_den.decimal();
+        return ok("(" + re + " + " + im + "*I)");
+    }
+
     [[nodiscard]] Result<std::string> print_node(const DecimalLit& value, int) const {
         return ok(value.text);
     }

@@ -118,6 +118,11 @@ struct DebugPrintVisitor {
         out << value.denominator.decimal() << ')';
         return std::move(out).str();
     }
+    [[nodiscard]] std::string operator()(const ComplexLit& value) const {
+        return "ComplexLit(" + value.re_num.decimal() + "/" + value.re_den.decimal() + " + " +
+               value.im_num.decimal() + "/" + value.im_den.decimal() + "i)";
+    }
+
 
     [[nodiscard]] std::string operator()(const DecimalLit& value) const {
         return "DecimalLit(" + value.text + ")";

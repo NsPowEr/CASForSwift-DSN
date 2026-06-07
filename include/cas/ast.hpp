@@ -39,6 +39,8 @@ enum class ExprKind : std::uint8_t {
     Derivative,
     Limit,
     RootOf,
+    ComplexLit,
+
     Matrix,
     SeriesExp,
     Quantity,
@@ -167,6 +169,20 @@ struct DecimalLit : ExprNode {
 
     std::string text;
 };
+
+struct ComplexLit : ExprNode {
+    static constexpr ExprKind KIND = ExprKind::ComplexLit;
+
+    ComplexLit(BigInt re_num, BigInt re_den, BigInt im_num, BigInt im_den)
+        : ExprNode(KIND), re_num(std::move(re_num)), re_den(std::move(re_den)),
+          im_num(std::move(im_num)), im_den(std::move(im_den)) {}
+
+    BigInt re_num;
+    BigInt re_den;
+    BigInt im_num;
+    BigInt im_den;
+};
+
 
 struct Symbol : ExprNode {
     static constexpr ExprKind KIND = ExprKind::Symbol;
@@ -540,6 +556,9 @@ decltype(auto) visit_expr(ExprPtr expr, Visitor&& visitor) {
         return std::forward<Visitor>(visitor)(expr_ref<IntegerLit>(expr));
     case ExprKind::RationalLit:
         return std::forward<Visitor>(visitor)(expr_ref<RationalLit>(expr));
+    case ExprKind::ComplexLit:
+        return std::forward<Visitor>(visitor)(expr_ref<ComplexLit>(expr));
+
     case ExprKind::DecimalLit:
         return std::forward<Visitor>(visitor)(expr_ref<DecimalLit>(expr));
     case ExprKind::Symbol:

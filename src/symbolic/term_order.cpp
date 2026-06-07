@@ -18,6 +18,8 @@ namespace {
     case ExprKind::RationalLit:
     case ExprKind::DecimalLit:
     case ExprKind::Constant:
+    case ExprKind::ComplexLit:
+
         return 1;
     case ExprKind::Symbol:
         return 2;

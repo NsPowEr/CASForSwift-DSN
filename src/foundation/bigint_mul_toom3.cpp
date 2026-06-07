@@ -15,11 +15,11 @@
 //
 // Dispatch:
 //   n < kToom3Threshold (64)         → Karatsuba (bigint_arithmetic.cpp)
-//   n in [64, kToom3MaxLimbs=4096)   → Toom-3 (this file)
-//   n >= kToom3MaxLimbs              → Karatsuba fallback (Schönhage-Strassen deferred)
+//   n in [64, kFFTThreshold=4096)   → Toom-3 (this file)
+//   n >= kFFTThreshold              → Karatsuba fallback (Schönhage-Strassen deferred)
 //
 // HARDCODE-OF-PASSAGE HPP-F1.1-MUL:
-//   kToom3MaxLimbs = 4096 — falls back to Karatsuba for n >= 4096.
+//   kFFTThreshold = 4096 — falls back to Karatsuba for n >= 4096.
 //   Schönhage-Strassen FFT (O(n log n log log n)) deferred as Aperta permanente.
 //   See HARDCODE_LEDGER.md.
 
@@ -37,7 +37,7 @@ namespace cas {
 static constexpr std::size_t kToom3Threshold = 64U;
 
 // Maximum limbs for Toom-3. Above this, fall back to Karatsuba.
-static constexpr std::size_t kToom3MaxLimbs = 4096U;
+static constexpr std::size_t kFFTThreshold = 8192U;
 
 namespace {
 
@@ -132,7 +132,7 @@ BigInt BigInt::multiply_magnitude_toom3(const BigInt& lhs, const BigInt& rhs) {
     const std::size_t n = std::max(lhs.limb_count(), rhs.limb_count());
 
     // Guard: if below Toom-3 threshold or above max, delegate.
-    if (n < kToom3Threshold || n >= kToom3MaxLimbs) {
+    if (n < kToom3Threshold || n >= kFFTThreshold) {
         return multiply_magnitude(lhs, rhs);
     }
 
