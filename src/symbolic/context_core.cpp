@@ -157,6 +157,7 @@ namespace cas::symbolic {
                 std::is_same_v<Node, IntegerLit> ||
                 std::is_same_v<Node, RationalLit> ||
                 std::is_same_v<Node, DecimalLit> ||
+                std::is_same_v<Node, ComplexLit> ||
                 std::is_same_v<Node, Symbol> ||
                 std::is_same_v<Node, Constant>) {
                 return arena.make<Node>(node);
@@ -256,6 +257,7 @@ namespace cas::symbolic {
                 std::is_same_v<Node, IntegerLit> ||
                 std::is_same_v<Node, RationalLit> ||
                 std::is_same_v<Node, DecimalLit> ||
+                std::is_same_v<Node, ComplexLit> ||
                 std::is_same_v<Node, Symbol> ||
                 std::is_same_v<Node, Constant>) {
                 return arena.make<Node>(node);

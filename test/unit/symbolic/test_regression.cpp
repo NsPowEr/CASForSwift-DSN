@@ -74,14 +74,25 @@ TEST(SymbolicRegression, LogOfZero) {
 }
 
 TEST(SymbolicRegression, SqrtOfNegativeWithoutComplex) {
+    // sqrt(-1) must canonicalize to i. Accept either form:
+    //   - legacy Constant::I (pre-F1.6 ComplexLit canonical form), or
+    //   - ComplexLit(0,1) (post-F1.6 canonical exact Q[i] form).
     CASContext ctx;
     auto expr = parse_expr("sqrt(-1)", ctx.arena());
     ASSERT_TRUE(expr.is_ok());
     auto simplified = ctx.simplify(expr.value());
     ASSERT_TRUE(simplified.is_ok());
-    const auto* constant = expr_cast<Constant>(simplified.value());
-    ASSERT_NE(constant, nullptr);
-    EXPECT_EQ(constant->value, MathConstant::I);
+
+    if (const auto* constant = expr_cast<Constant>(simplified.value())) {
+        EXPECT_EQ(constant->value, MathConstant::I);
+        return;
+    }
+    const auto* complex = expr_cast<ComplexLit>(simplified.value());
+    ASSERT_NE(complex, nullptr)
+        << "sqrt(-1) must simplify to Constant::I or ComplexLit(0,1)";
+    EXPECT_TRUE(complex->re_num.is_zero());
+    EXPECT_EQ(complex->im_num, BigInt(1));
+    EXPECT_EQ(complex->im_den, BigInt(1));
 }
 
 TEST(SymbolicRegression, ImaginaryUnitIsConstantNotSymbol) {

@@ -1,4 +1,5 @@
 #include "simplify_impl.hpp"
+#include "cas/complex_rational.hpp"
 #include <algorithm>
 #include <limits>
 
@@ -56,10 +57,20 @@ bool DepthGuard::exceeded() const { return simplification_depth > max_depth_; }
     return arena.make<Constant>(value);
 }
 
+[[nodiscard]] ExprPtr make_complex(AstArena& arena, const ComplexRational& value) {
+    if (value.is_real()) {
+        return make_rational(arena, value.real());
+    }
+    return arena.make<ComplexLit>(
+        value.real().numerator(), value.real().denominator(),
+        value.imag().numerator(), value.imag().denominator());
+}
+
 [[nodiscard]] bool is_zero_expr(ExprPtr expr) {
     if (!expr) return false;
     if (const auto* integer = expr_cast<IntegerLit>(expr)) return integer->value.is_zero();
     if (const auto* rational = expr_cast<RationalLit>(expr)) return rational->numerator.is_zero();
+    if (const auto* complex = expr_cast<ComplexLit>(expr)) return complex->re_num.is_zero() && complex->im_num.is_zero();
     return false;
 }
 
@@ -68,6 +79,8 @@ bool DepthGuard::exceeded() const { return simplification_depth > max_depth_; }
     static const BigInt kOne(1);
     if (const auto* integer = expr_cast<IntegerLit>(expr)) return integer->value == kOne;
     if (const auto* rational = expr_cast<RationalLit>(expr)) return rational->numerator == kOne && rational->denominator == kOne;
+    if (const auto* complex = expr_cast<ComplexLit>(expr))
+        return complex->re_num == kOne && complex->re_den == kOne && complex->im_num.is_zero();
     return false;
 }
 
@@ -86,6 +99,40 @@ bool DepthGuard::exceeded() const { return simplification_depth > max_depth_; }
         auto exact = Rational::make(rational->numerator, rational->denominator);
         if (exact.is_error()) return fail<bool>(exact.error());
         out = LiteralRational{.value = std::move(exact.value()), .exact = true};
+        return ok(true);
+    }
+    return ok(false);
+}
+
+[[nodiscard]] Result<bool> try_get_exact_complex(ExprPtr expr, LiteralComplex& out) {
+    if (!expr) return ok(false);
+    if (const auto* complex = expr_cast<ComplexLit>(expr)) {
+        auto re = Rational::make(complex->re_num, complex->re_den);
+        auto im = Rational::make(complex->im_num, complex->im_den);
+        if (re.is_error()) return fail<bool>(re.error());
+        if (im.is_error()) return fail<bool>(im.error());
+        out = LiteralComplex{.value = ComplexRational(std::move(re.value()), std::move(im.value())), .exact = true};
+        return ok(true);
+    }
+    if (const auto* constant_node = expr_cast<Constant>(expr);
+        constant_node != nullptr && constant_node->value == MathConstant::I) {
+        out = LiteralComplex{.value = ComplexRational::imag_unit(), .exact = true};
+        return ok(true);
+    }
+    if (const auto* u = expr_cast<Unary>(expr);
+        u != nullptr && u->op == UnaryOp::Neg)
+    {
+        LiteralComplex inner;
+        auto rec = try_get_exact_complex(u->operand, inner);
+        if (rec.is_ok() && rec.value()) {
+            out = LiteralComplex{.value = -inner.value, .exact = true};
+            return ok(true);
+        }
+    }
+    LiteralRational lr;
+    auto res = try_get_exact_rational(expr, lr);
+    if (res.is_ok() && res.value()) {
+        out = LiteralComplex{.value = ComplexRational(std::move(lr.value)), .exact = true};
         return ok(true);
     }
     return ok(false);
@@ -183,7 +230,7 @@ template <typename UInt>
 
 [[nodiscard]] int polynomial_degree(ExprPtr expr) noexcept {
     if (!expr) return -1;
-    if (expr_is<IntegerLit>(expr) || expr_is<RationalLit>(expr) || expr_is<DecimalLit>(expr) || expr_is<Constant>(expr)) return 0;
+    if (expr_is<IntegerLit>(expr) || expr_is<RationalLit>(expr) || expr_is<DecimalLit>(expr) || expr_is<Constant>(expr) || expr_is<ComplexLit>(expr)) return 0;
     if (expr_is<Symbol>(expr)) return 1;
     if (const auto* product = expr_cast<Product>(expr)) {
         int degree = 0;

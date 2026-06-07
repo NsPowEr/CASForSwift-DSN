@@ -44,11 +44,10 @@ void destroy_node(ExprNode* node) noexcept {
         static_cast<IntegerLit*>(node)->~IntegerLit();
         break;
     case ExprKind::RationalLit:
+        static_cast<RationalLit*>(node)->~RationalLit();
+        break;
     case ExprKind::ComplexLit:
         static_cast<ComplexLit*>(node)->~ComplexLit();
-        break;
-
-        static_cast<RationalLit*>(node)->~RationalLit();
         break;
     case ExprKind::DecimalLit:
         static_cast<DecimalLit*>(node)->~DecimalLit();
@@ -362,6 +361,8 @@ std::size_t expr_hash(ExprPtr expr) noexcept {
 
     switch (expr->kind) {
     case ExprKind::IntegerLit:
+        hash_combine(seed, expr_ref<IntegerLit>(expr).value.hash());
+        break;
     case ExprKind::ComplexLit: {
         const auto& node = expr_ref<ComplexLit>(expr);
         hash_combine(seed, node.re_num.hash());
@@ -370,9 +371,6 @@ std::size_t expr_hash(ExprPtr expr) noexcept {
         hash_combine(seed, node.im_den.hash());
         break;
     }
-
-        hash_combine(seed, expr_ref<IntegerLit>(expr).value.hash());
-        break;
     case ExprKind::RationalLit: {
         const auto& node = expr_ref<RationalLit>(expr);
         hash_combine(seed, node.numerator.hash());

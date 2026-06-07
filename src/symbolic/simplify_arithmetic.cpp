@@ -70,7 +70,15 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const Unary& node) {
         auto exact = try_get_exact_rational(operand.value(), rational);
         if (exact.is_error()) return fail<ExprPtr>(exact.error());
         if (exact.value()) return make_rational_result(arena_, -rational.value);
-        
+
+        LiteralComplex complex_val;
+        auto exact_c = try_get_exact_complex(operand.value(), complex_val);
+        if (exact_c.is_error()) return fail<ExprPtr>(exact_c.error());
+        if (exact_c.value()) {
+            return traced_result(RuleId::SimplifyCollectLikeTerms, target_before,
+                                 make_complex(arena_, -complex_val.value));
+        }
+
         if (const auto* nested = expr_cast<Unary>(operand.value()); nested != nullptr && nested->op == UnaryOp::Neg) {
             return traced_result(RuleId::SimplifyCollectLikeTerms, target_before, nested->operand);
         }
@@ -240,32 +248,38 @@ Result<ExprPtr> Simplifier::simplify_power(ExprPtr base, ExprPtr exponent, ExprP
         }
     }
 
-    LiteralRational base_rat, exp_rat;
-    auto b_exact = try_get_exact_rational(base, base_rat);
-    if (b_exact.is_error()) return fail<ExprPtr>(b_exact.error());
+    LiteralRational exp_rat;
+    LiteralComplex base_comp;
+    auto b_c_exact = try_get_exact_complex(base, base_comp);
+    if (b_c_exact.is_error()) return fail<ExprPtr>(b_c_exact.error());
     auto e_exact = try_get_exact_rational(exponent, exp_rat);
     if (e_exact.is_error()) return fail<ExprPtr>(e_exact.error());
 
-    if (b_exact.value() && e_exact.value()) {
-        // Guard 0^0: indeterminate form. Pre-fix pow_rational_nonnegative
-        // collapsed silently to 1 (mathematically false; cf. Maple,
-        // Mathematica, SymPy which flag it). We do NOT raise an error
-        // because callers like the limit engine legitimately produce
-        // 0^0 as an intermediate substitution step and resolve it via
-        // L'Hôpital / Gruntz (lim_{x→0+} x^x = 1). Instead we keep the
-        // expression symbolic — Pow(0, 0) — so the caller decides.
-        if (base_rat.value.numerator().is_zero() && exp_rat.value.numerator().is_zero()) {
+    if (b_c_exact.value() && e_exact.value()) {
+        if (base_comp.value.is_zero() && exp_rat.value.numerator().is_zero()) {
             return ok(arena_.make<Binary>(BinaryOp::Pow, base, exponent));
         }
         if (exp_rat.value.is_integer()) {
             const BigInt power = exp_rat.value.numerator();
-            if (!power.is_negative()) {
-                return make_rational_result(arena_, pow_rational_nonnegative(base_rat.value, power));
+            if (power.is_zero()) return ok(make_integer(arena_, BigInt(1)));
+            
+            ComplexRational res = ComplexRational::one();
+            ComplexRational b = base_comp.value;
+            BigInt p = power.is_negative() ? -power : power;
+            
+            while (!p.is_zero()) {
+                if ((p % BigInt(2)) == BigInt(1)) res = res * b;
+                p /= BigInt(2);
+                if (!p.is_zero()) b = b * b;
             }
-            Rational result = pow_rational_nonnegative(base_rat.value, -power);
-            auto inverse = checked_divide(Rational(BigInt(1)), result);
-            if (inverse.is_error()) return fail<ExprPtr>(inverse.error());
-            return make_rational_result(arena_, std::move(inverse.value()));
+            
+            if (power.is_negative()) {
+                auto inv = res.divide(ComplexRational::one()); // Wait, 1/res
+                auto inv_res = ComplexRational::one().divide(res);
+                if (inv_res.is_error()) return fail<ExprPtr>(inv_res.error());
+                return ok(make_complex(arena_, inv_res.value()));
+            }
+            return ok(make_complex(arena_, res));
         }
     }
 
@@ -700,10 +714,53 @@ Result<std::optional<MonomialTerm>> Simplifier::extract_monomial(ExprPtr expr) {
     if (const auto* product = expr_cast<Product>(expr)) {
         Rational coefficient(BigInt(1));
         std::vector<std::pair<ExprPtr, BigInt>> factors;
+        // Canonical marker for the imaginary unit in monomial keys: a hash-
+        // consed Constant::I.  Both `ComplexLit(0, n/d)` and `Constant::I`
+        // map to the same marker, so monomials that differ only by the sign
+        // or magnitude of a purely-imaginary factor collapse correctly in
+        // the Sum collector.
+        const ExprPtr i_marker = arena_.make<Constant>(MathConstant::I);
         for (ExprPtr factor : product->factors) {
             auto factor_exact = try_get_exact_rational(factor, rational);
             if (factor_exact.is_ok() && factor_exact.value()) {
                 coefficient *= rational.value;
+                continue;
+            }
+            // Purely-imaginary ComplexLit: split into rational coefficient
+            // and a single shared `I` marker so monomial keys are stable
+            // under sign/magnitude variations.
+            if (const auto* cl = expr_cast<ComplexLit>(factor);
+                cl != nullptr && cl->re_num.is_zero() && !cl->im_num.is_zero()) {
+                auto rat = Rational::make(cl->im_num, cl->im_den);
+                if (rat.is_ok()) {
+                    coefficient *= rat.value();
+                    bool found = false;
+                    for (auto& f : factors) {
+                        if (f.first == i_marker) { f.second += BigInt(1); found = true; break; }
+                    }
+                    if (!found) factors.push_back({i_marker, BigInt(1)});
+                    continue;
+                }
+            }
+            // Real-only ComplexLit folds into coefficient.
+            if (const auto* cl = expr_cast<ComplexLit>(factor);
+                cl != nullptr && cl->im_num.is_zero() && !cl->re_num.is_zero()) {
+                auto rat = Rational::make(cl->re_num, cl->re_den);
+                if (rat.is_ok()) {
+                    coefficient *= rat.value();
+                    continue;
+                }
+            }
+            // Constant::I shares the marker with imaginary ComplexLit so
+            // mixed-form products (e.g. `Pi * I` vs `Pi * ComplexLit(0,1)`)
+            // collapse to the same key.
+            if (const auto* c = expr_cast<Constant>(factor);
+                c != nullptr && c->value == MathConstant::I) {
+                bool found = false;
+                for (auto& f : factors) {
+                    if (f.first == i_marker) { f.second += BigInt(1); found = true; break; }
+                }
+                if (!found) factors.push_back({i_marker, BigInt(1)});
                 continue;
             }
             if (expr_is<Symbol>(factor)) {

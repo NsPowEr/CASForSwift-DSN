@@ -134,9 +134,8 @@ Result<ExprPtr> Simplifier::simplify_product_factors(
 
     // Step 3: separate numeric coefficient, imaginary unit accumulation,
     //         infinity tracking, and symbolic base/exponent pairs.
-    Rational coefficient(BigInt(1));
+    ComplexRational coefficient = ComplexRational::one();
     std::vector<std::pair<ExprPtr, BigInt>> symbolic;
-    BigInt i_count(0);
     bool has_infinity = false;
     int infinity_sign = 1;
 
@@ -157,24 +156,34 @@ Result<ExprPtr> Simplifier::simplify_product_factors(
             continue;
         }
 
-        LiteralRational rat;
-        auto exact = try_get_exact_rational(f, rat);
-        if (exact.is_ok() && exact.value()) { coefficient *= rat.value; continue; }
-
-        if (const auto* unary = expr_cast<Unary>(f);
-            unary != nullptr && unary->op == UnaryOp::Neg) {
-            coefficient *= Rational(BigInt(-1));
-            f = unary->operand;
+        if (sign == -1) {
+            coefficient = coefficient * ComplexRational(Rational(BigInt(-1)));
         }
 
-        if (is_constant_expr(f, MathConstant::I)) { i_count += BigInt(1); continue; }
+        LiteralComplex comp;
+        auto exact = try_get_exact_complex(core, comp);
+        if (exact.is_ok() && exact.value()) {
+            coefficient = coefficient * comp.value;
+            continue;
+        }
 
-        if (const auto* binary = expr_cast<Binary>(f);
+        if (is_constant_expr(core, MathConstant::I)) {
+            coefficient = coefficient * ComplexRational::imag_unit();
+            continue;
+        }
+
+        if (const auto* binary = expr_cast<Binary>(core);
             binary != nullptr && binary->op == BinaryOp::Pow) {
             if (is_constant_expr(binary->left, MathConstant::I)) {
                 if (auto exponent = try_get_integer_exponent(binary->right);
                     exponent.has_value()) {
-                    i_count += *exponent;
+                    // I^n = I % 4
+                    BigInt rem = *exponent % BigInt(4);
+                    if (rem.is_negative()) rem += BigInt(4);
+                    long long r = rem.to_u64();
+                    if (r == 1) coefficient = coefficient * ComplexRational::imag_unit();
+                    else if (r == 2) coefficient = coefficient * ComplexRational(Rational(BigInt(-1)));
+                    else if (r == 3) coefficient = coefficient * ComplexRational(Rational(BigInt(0)), Rational(BigInt(-1)));
                     continue;
                 }
             }
@@ -184,34 +193,19 @@ Result<ExprPtr> Simplifier::simplify_product_factors(
                 continue;
             }
         }
-        symbolic.push_back({f, BigInt(1)});
+        symbolic.push_back({core, BigInt(1)});
     }
 
     if (has_infinity) {
-        if (coefficient.numerator().is_negative()) infinity_sign *= -1;
-        BigInt rem = i_count % BigInt(4);
-        if (rem == BigInt(2) || rem == BigInt(3)) infinity_sign *= -1;
+        if (coefficient.real().numerator().is_negative() || coefficient.imag().numerator().is_negative()) 
+            infinity_sign *= -1; // Simplified infinity sign check
         ExprPtr inf = arena_.make<Constant>(MathConstant::Infinity);
         if (infinity_sign < 0)
             return ok(arena_.make<Unary>(UnaryOp::Neg, inf));
         return ok(inf);
     }
 
-    if (!i_count.is_zero()) {
-        BigInt rem = i_count % BigInt(4);
-        if (rem.is_negative()) rem += BigInt(4);
-        long long r = rem.to_u64();
-        if (r == 1)
-            symbolic.push_back({arena_.make<Constant>(MathConstant::I), BigInt(1)});
-        else if (r == 2)
-            coefficient *= Rational(BigInt(-1));
-        else if (r == 3) {
-            coefficient *= Rational(BigInt(-1));
-            symbolic.push_back({arena_.make<Constant>(MathConstant::I), BigInt(1)});
-        }
-    }
-
-    if (coefficient.numerator().is_zero())
+    if (coefficient.is_zero())
         return traced_result(RuleId::SimplifyMultiplyByZero,
             target_before, make_integer(arena_, BigInt(0)));
     merge_symbolic_factors(symbolic);
@@ -263,7 +257,7 @@ Result<ExprPtr> Simplifier::simplify_product_factors(
                     symbolic.push_back({pi_const,          BigInt(1)});
                     symbolic.push_back({sin_simp.value(),  BigInt(-1)});
                     if (m_is_zero) {
-                        coefficient *= Rational(BigInt(-1));
+                        coefficient = coefficient * ComplexRational(Rational(BigInt(-1)));
                         symbolic.push_back({za, BigInt(-1)});
                     }
                     reflected_any = true;
@@ -302,7 +296,7 @@ Result<ExprPtr> Simplifier::simplify_product_factors(
                     BigInt abs_kb = kb.is_negative() ? BigInt(0) - kb : kb;
                     BigInt two(2);
                     if (!((abs_kb % two).is_zero()))
-                        coefficient *= Rational(BigInt(-1));
+                        coefficient = coefficient * ComplexRational(Rational(BigInt(-1)));
                     BigInt new_exp = ka + kb;
                     // Remove jj first (higher index).
                     symbolic.erase(symbolic.begin() + static_cast<std::ptrdiff_t>(jj));
@@ -350,7 +344,7 @@ Result<ExprPtr> Simplifier::simplify_product_factors(
         }
         if (sc_pair) {
             const auto [si, ci] = *sc_pair;
-            coefficient *= Rational(BigInt(1), BigInt(2));
+            coefficient = coefficient * ComplexRational(Rational(BigInt(1), BigInt(2)));
             ExprPtr two_arg = arena_.make<Binary>(BinaryOp::Mul,
                 make_integer(arena_, BigInt(2)), sc_arg);
             ExprPtr sin2x = arena_.make<FuncCall>(BuiltinOp::Sin,
@@ -503,7 +497,7 @@ Result<ExprPtr> Simplifier::simplify_product_factors(
                     LiteralRational rep_rat;
                     auto rep_check = try_get_exact_rational(replacement, rep_rat);
                     if (rep_check.is_ok() && rep_check.value()) {
-                        coefficient *= rep_rat.value;
+                        coefficient = coefficient * ComplexRational(std::move(rep_rat.value));
                     } else {
                         symbolic.push_back({replacement, BigInt(1)});
                     }
@@ -530,7 +524,7 @@ Result<ExprPtr> Simplifier::simplify_product_factors(
         }
         // Second scan needed when the first loop exited early on coefficient check.
         if (!found_sum
-            && !(coefficient == Rational(BigInt(1)))
+            && !(coefficient == ComplexRational::one())
             && std::any_of(symbolic.begin(), symbolic.end(),
                 [](const auto& p) {
                     return expr_is<Sum>(p.first) && p.second == BigInt(1);
@@ -555,8 +549,8 @@ Result<ExprPtr> Simplifier::simplify_product_factors(
             std::vector<ExprPtr> distributed_terms;
             for (ExprPtr term : sum->terms) {
                 std::vector<ExprPtr> factors_for_term;
-                if (!(coefficient == Rational(BigInt(1))))
-                    factors_for_term.push_back(make_rational(arena_, coefficient));
+                if (!(coefficient == ComplexRational::one()))
+                    factors_for_term.push_back(make_complex(arena_, coefficient));
                 factors_for_term.push_back(term);
                 for (const auto& [base, exp] : other_sym) {
                     factors_for_term.push_back(exp == BigInt(1)
@@ -574,9 +568,9 @@ Result<ExprPtr> Simplifier::simplify_product_factors(
 
     // Step 9: assemble final normalized result.
     std::vector<ExprPtr> normalized;
-    bool is_neg = (coefficient == Rational(BigInt(-1)));
-    if (!is_neg && (!(coefficient == Rational(BigInt(1))) || symbolic.empty()))
-        normalized.push_back(make_rational(arena_, coefficient));
+    bool is_neg = (coefficient == ComplexRational(Rational(BigInt(-1))));
+    if (!is_neg && (!(coefficient == ComplexRational::one()) || symbolic.empty()))
+        normalized.push_back(make_complex(arena_, coefficient));
     for (const auto& [base, exp] : symbolic) {
         if (exp.is_zero()) continue;
         normalized.push_back(exp == BigInt(1)
@@ -590,7 +584,7 @@ Result<ExprPtr> Simplifier::simplify_product_factors(
 
     if (normalized.empty())
         return traced_result(RuleId::SimplifyMultiplyByOne,
-            target_before, make_rational(arena_, coefficient));
+            target_before, make_complex(arena_, coefficient));
 
     ExprPtr result = normalized.size() == 1U
         ? normalized.front()

@@ -50,15 +50,28 @@ void expect_expr_equal(ExprPtr actual, ExprPtr expected, symbolic::CASContext& c
 }
 
 [[nodiscard]] bool is_imaginary_unit(ExprPtr expr) {
-    const auto* constant = expr_cast<Constant>(expr);
-    return constant != nullptr && constant->value == MathConstant::I;
+    if (const auto* constant = expr_cast<Constant>(expr)) {
+        return constant->value == MathConstant::I;
+    }
+    if (const auto* complex = expr_cast<ComplexLit>(expr)) {
+        return complex->re_num.is_zero()
+            && complex->im_num == BigInt(1)
+            && complex->im_den == BigInt(1);
+    }
+    return false;
 }
 
 [[nodiscard]] bool is_negative_imaginary_unit(ExprPtr expr) {
-    const auto* unary = expr_cast<Unary>(expr);
-    return unary != nullptr &&
-        unary->op == UnaryOp::Neg &&
-        is_imaginary_unit(unary->operand);
+    if (const auto* unary = expr_cast<Unary>(expr);
+        unary != nullptr && unary->op == UnaryOp::Neg) {
+        return is_imaginary_unit(unary->operand);
+    }
+    if (const auto* complex = expr_cast<ComplexLit>(expr)) {
+        return complex->re_num.is_zero()
+            && complex->im_num == BigInt(-1)
+            && complex->im_den == BigInt(1);
+    }
+    return false;
 }
 
 }  // namespace

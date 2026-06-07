@@ -56,11 +56,26 @@ int TextFormatter::precedence(ExprPtr expr) {
     if (!expr) return 0;
     return visit_expr(expr, [](const auto& node) -> int {
         using NodeT = std::decay_t<decltype(node)>;
-        if constexpr (std::is_same_v<NodeT, IntegerLit> || std::is_same_v<NodeT, DecimalLit> || 
-                      std::is_same_v<NodeT, Symbol> || std::is_same_v<NodeT, Constant> || 
+        if constexpr (std::is_same_v<NodeT, IntegerLit> || std::is_same_v<NodeT, DecimalLit> ||
+                      std::is_same_v<NodeT, Symbol> || std::is_same_v<NodeT, Constant> ||
                       std::is_same_v<NodeT, FuncCall> || std::is_same_v<NodeT, Matrix> ||
                       std::is_same_v<NodeT, Quantity>) {
             return 100; // Atomici
+        } else if constexpr (std::is_same_v<NodeT, RationalLit>) {
+            return 100;
+        } else if constexpr (std::is_same_v<NodeT, ComplexLit>) {
+            const bool re_zero = node.re_num.is_zero();
+            const bool im_zero = node.im_num.is_zero();
+            if (re_zero && im_zero) return 100;
+            if (re_zero) {
+                // "I", "-I" → atomic; "n * I" → product-like.
+                if (node.im_den == BigInt(1)
+                    && (node.im_num == BigInt(1) || node.im_num == BigInt(-1)))
+                    return 100;
+                return 70;
+            }
+            if (im_zero) return 100;
+            return 60;  // "a + b * I" — sum-like.
         } else if constexpr (std::is_same_v<NodeT, Unary>) {
             return 80;
         } else if constexpr (std::is_same_v<NodeT, Binary>) {
@@ -114,11 +129,41 @@ std::string TextFormatter::format_internal(ExprPtr expr, std::unordered_map<Expr
         } else if constexpr (std::is_same_v<NodeT, RationalLit>) {
             return node.numerator.decimal() + "/" + node.denominator.decimal();
         } else if constexpr (std::is_same_v<NodeT, ComplexLit>) {
-            std::string re = node.re_num.decimal();
-            if (node.re_den != BigInt(1)) re += "/" + node.re_den.decimal();
-            std::string im = node.im_num.decimal();
-            if (node.im_den != BigInt(1)) im += "/" + node.im_den.decimal();
-            return "(" + re + " + " + im + "*I)";
+            const bool re_zero = node.re_num.is_zero();
+            const bool im_zero = node.im_num.is_zero();
+            if (re_zero && im_zero) return "0";
+
+            auto rat_str = [](const BigInt& num, const BigInt& den) {
+                std::string s = num.decimal();
+                if (den != BigInt(1)) s += "/" + den.decimal();
+                return s;
+            };
+
+            auto im_term = [&]() {
+                // Render imaginary part standalone: "I", "-I", "n * I", "-n * I", "(p/q) * I".
+                if (node.im_den == BigInt(1)) {
+                    if (node.im_num == BigInt(1)) return std::string("I");
+                    if (node.im_num == BigInt(-1)) return std::string("-I");
+                    return node.im_num.decimal() + " * I";
+                }
+                return "(" + rat_str(node.im_num, node.im_den) + ") * I";
+            };
+
+            if (re_zero) return im_term();
+            if (im_zero) return rat_str(node.re_num, node.re_den);
+
+            std::string re_s = rat_str(node.re_num, node.re_den);
+            // Imaginary part joined to real with explicit sign.
+            const bool im_neg = node.im_num.is_negative();
+            BigInt im_abs_num = im_neg ? -node.im_num : node.im_num;
+            std::string im_body;
+            if (node.im_den == BigInt(1)) {
+                if (im_abs_num == BigInt(1)) im_body = "I";
+                else im_body = im_abs_num.decimal() + " * I";
+            } else {
+                im_body = "(" + rat_str(im_abs_num, node.im_den) + ") * I";
+            }
+            return re_s + (im_neg ? " - " : " + ") + im_body;
         } else if constexpr (std::is_same_v<NodeT, DecimalLit>) {
             return node.text;
         } else if constexpr (std::is_same_v<NodeT, Symbol>) {
@@ -156,12 +201,36 @@ std::string TextFormatter::format_internal(ExprPtr expr, std::unordered_map<Expr
                 ExprPtr term = node.terms[i];
                 const auto* unary = expr_cast<Unary>(term);
                 bool is_neg = (unary != nullptr && unary->op == UnaryOp::Neg);
-                
+
+                // ComplexLit with zero real and negative imaginary part renders
+                // naturally as "- |im| * I" when joined to a preceding term.
+                std::string neg_complex_body;
+                if (!is_neg) {
+                    if (const auto* cl = expr_cast<ComplexLit>(term);
+                        cl != nullptr && cl->re_num.is_zero()
+                        && cl->im_num.is_negative())
+                    {
+                        is_neg = true;
+                        BigInt abs_num = -cl->im_num;
+                        if (cl->im_den == BigInt(1)) {
+                            if (abs_num == BigInt(1)) neg_complex_body = "I";
+                            else neg_complex_body = abs_num.decimal() + " * I";
+                        } else {
+                            neg_complex_body = "(" + abs_num.decimal() + "/"
+                                + cl->im_den.decimal() + ") * I";
+                        }
+                    }
+                }
+
                 if (i == 0) {
                     s += format_child(expr, term);
                 } else {
                     if (is_neg) {
-                        s += " - " + format_child(expr, unary->operand);
+                        if (unary != nullptr) {
+                            s += " - " + format_child(expr, unary->operand);
+                        } else {
+                            s += " - " + neg_complex_body;
+                        }
                     } else {
                         s += " + " + format_child(expr, term);
                     }

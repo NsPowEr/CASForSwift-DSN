@@ -49,9 +49,9 @@ struct DecimalApprox {
 
 }  // namespace
 
-Rational::Rational() = default;
+Rational::Rational() : numerator_(0), denominator_(1) {}
 
-Rational::Rational(BigInt numerator) : numerator_(std::move(numerator)) {}
+Rational::Rational(BigInt numerator) : numerator_(std::move(numerator)), denominator_(1) {}
 
 Rational::Rational(BigInt numerator, BigInt denominator)
     : numerator_(std::move(numerator)), denominator_(std::move(denominator)) {

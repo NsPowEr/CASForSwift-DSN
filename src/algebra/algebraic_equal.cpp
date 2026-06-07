@@ -35,6 +35,33 @@ Result<bool> mathematically_equal(ExprPtr lhs, ExprPtr rhs, CASContext& context)
         return ok(true);
     }
 
+    // F1.6 bridge: Constant::I ↔ ComplexLit(0,1) (and other purely-imaginary
+    // ComplexLit forms) live on different AST kinds but represent the same
+    // algebraic value.  A direct simplify of (lhs - rhs) drives both forms
+    // through the same Sum coefficient pool (ComplexRational accumulator) and
+    // collapses to IntegerLit(0) when equal.
+    {
+        auto diff_simple = context.simplify(
+            context.arena().make<Binary>(BinaryOp::Sub, lhs_s.value(), rhs_s.value()));
+        if (diff_simple.is_ok()) {
+            if (const auto* il = expr_cast<IntegerLit>(diff_simple.value());
+                il != nullptr && il->value.is_zero()) {
+                finalize();
+                return ok(true);
+            }
+            if (const auto* rl = expr_cast<RationalLit>(diff_simple.value());
+                rl != nullptr && rl->numerator.is_zero()) {
+                finalize();
+                return ok(true);
+            }
+            if (const auto* cl = expr_cast<ComplexLit>(diff_simple.value());
+                cl != nullptr && cl->re_num.is_zero() && cl->im_num.is_zero()) {
+                finalize();
+                return ok(true);
+            }
+        }
+    }
+
     auto diff_expr = context.arena().make<Binary>(BinaryOp::Sub, lhs_s.value(), rhs_s.value());
     auto normal_diff = polynomial_normal_form(diff_expr, context);
     if (normal_diff.is_ok()) {

@@ -116,6 +116,12 @@ TEST_F(AcidTest, Test4_SymbolicEigenvals) {
             if (u->op == UnaryOp::Neg && expr_is<Constant>(u->operand) && expr_cast<Constant>(u->operand)->value == MathConstant::I) {
                 found_neg_i = true;
             }
+        } else if (const auto* cl = expr_cast<ComplexLit>(val)) {
+            // F1.6: solver may return canonical ComplexLit(0, ±1) for ±i.
+            if (cl->re_num.is_zero() && cl->im_den == BigInt(1)) {
+                if (cl->im_num == BigInt(1))  found_i = true;
+                if (cl->im_num == BigInt(-1)) found_neg_i = true;
+            }
         }
     }
 

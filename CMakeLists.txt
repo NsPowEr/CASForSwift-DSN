@@ -525,6 +525,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/parser/test_parser.cpp
         test/unit/parser/test_parser_roundtrip.cpp
         test/unit/symbolic/test_calculus.cpp
+        test/unit/symbolic/test_complex_simplification.cpp
         test/unit/symbolic/test_calculus_f4.cpp
         test/unit/symbolic/test_multiple_integral.cpp
         test/unit/symbolic/test_limit_tower_adaptive.cpp

@@ -283,16 +283,29 @@ Result<ExprPtr> Simplifier::simplify_funcall_exp_log_sqrt(
         // further splits via exp(α+iβ) = exp(α)(cos β + i sin β).
         if (const auto* prod_arg = expr_cast<Product>(args.front())) {
             int i_count = 0;
+            bool neg_unit = false;
             std::vector<ExprPtr> theta_factors;
             for (ExprPtr f : prod_arg->factors) {
                 if (const auto* cc = expr_cast<Constant>(f);
                     cc && cc->value == MathConstant::I) {
                     ++i_count;
-                } else {
-                    theta_factors.push_back(f);
+                    continue;
                 }
+                // ComplexLit(0, ±1) is the canonical post-F1.6 form of ±i.
+                if (const auto* cl = expr_cast<ComplexLit>(f);
+                    cl != nullptr && cl->re_num.is_zero()
+                    && cl->im_den == BigInt(1)
+                    && (cl->im_num == BigInt(1) || cl->im_num == BigInt(-1))) {
+                    ++i_count;
+                    if (cl->im_num == BigInt(-1)) neg_unit = !neg_unit;
+                    continue;
+                }
+                theta_factors.push_back(f);
             }
             if (i_count == 1) {
+                if (neg_unit) {
+                    theta_factors.push_back(make_integer(arena_, BigInt(-1)));
+                }
                 ExprPtr theta;
                 if (theta_factors.empty()) theta = make_integer(arena_, BigInt(1));
                 else if (theta_factors.size() == 1U) theta = theta_factors[0];
@@ -420,6 +433,37 @@ Result<ExprPtr> Simplifier::simplify_funcall_exp_log_sqrt(
                     arena_.make<Constant>(MathConstant::Pi)});
                 return simplify_expr(arena_.make<Binary>(
                     BinaryOp::Div, neg_i_pi, make_integer(arena_, BigInt(2))));
+            }
+        }
+        // Post-F1.6: arguments may arrive as ComplexLit after canonicalization.
+        // Principal-branch dispatch on canonical forms:
+        //   ln(0 + 1·i)   →  i·π/2
+        //   ln(0 + (-1)·i) → -i·π/2
+        //   ln(-1 + 0·i)  →  i·π
+        if (const auto* cl = expr_cast<ComplexLit>(args.front())) {
+            if (cl->re_num.is_zero() && cl->im_den == BigInt(1)) {
+                if (cl->im_num == BigInt(1)) {
+                    ExprPtr i_pi = arena_.make<Product>(std::vector<ExprPtr>{
+                        arena_.make<Constant>(MathConstant::I),
+                        arena_.make<Constant>(MathConstant::Pi)});
+                    return simplify_expr(arena_.make<Binary>(
+                        BinaryOp::Div, i_pi, make_integer(arena_, BigInt(2))));
+                }
+                if (cl->im_num == BigInt(-1)) {
+                    ExprPtr neg_i_pi = arena_.make<Product>(std::vector<ExprPtr>{
+                        arena_.make<IntegerLit>(BigInt(-1)),
+                        arena_.make<Constant>(MathConstant::I),
+                        arena_.make<Constant>(MathConstant::Pi)});
+                    return simplify_expr(arena_.make<Binary>(
+                        BinaryOp::Div, neg_i_pi, make_integer(arena_, BigInt(2))));
+                }
+            }
+            if (cl->im_num.is_zero() && cl->re_den == BigInt(1)
+                && cl->re_num == BigInt(-1)) {
+                ExprPtr i_pi = arena_.make<Product>(std::vector<ExprPtr>{
+                    arena_.make<Constant>(MathConstant::I),
+                    arena_.make<Constant>(MathConstant::Pi)});
+                return simplify_expr(i_pi);
             }
         }
         // ln(-1) = I·π  (also covered by ln(-x) above, but explicit for clarity)

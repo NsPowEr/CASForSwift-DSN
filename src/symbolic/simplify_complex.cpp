@@ -8,12 +8,24 @@ namespace cas::symbolic::detail {
 extract_complex_parts(ExprPtr expr, AstArena& arena) {
     ExprPtr zero = arena.make<IntegerLit>(BigInt(0));
 
+    if (const auto* complex = expr_cast<ComplexLit>(expr)) {
+        return std::make_pair(
+            make_rational(arena, Rational(complex->re_num, complex->re_den)),
+            make_rational(arena, Rational(complex->im_num, complex->im_den)));
+    }
+
     auto is_imaginary_unit = [](ExprPtr e) -> bool {
         const auto* c = expr_cast<Constant>(e);
         return c != nullptr && c->value == MathConstant::I;
     };
 
     auto extract_imag_factor = [&](ExprPtr e) -> ExprPtr {
+        if (const auto* complex = expr_cast<ComplexLit>(e)) {
+             // (a+bi) is not purely imaginary unless a=0.
+             if (complex->re_num.is_zero())
+                 return make_rational(arena, Rational(complex->im_num, complex->im_den));
+             return nullptr;
+        }
         if (is_imaginary_unit(e))
             return arena.make<IntegerLit>(BigInt(1));
         if (const auto* u = expr_cast<Unary>(e);
@@ -50,6 +62,12 @@ extract_complex_parts(ExprPtr expr, AstArena& arena) {
 
     ExprPtr maybe_b = extract_imag_factor(expr);
     if (maybe_b) return std::make_pair(zero, maybe_b);
+    
+    LiteralRational lr;
+    if (try_get_exact_rational(expr, lr).is_ok() && lr.exact) {
+        return std::make_pair(expr, zero);
+    }
+
     return std::nullopt;
 }
 
@@ -59,6 +77,25 @@ Result<ExprPtr> Simplifier::simplify_funcall_complex(
     ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr target_before) {
 
     if (args.size() == 1U) {
+        if (op == BuiltinOp::Re) {
+            LiteralComplex comp;
+            if (try_get_exact_complex(args.front(), comp).is_ok() && comp.exact) {
+                return ok(make_rational(arena_, comp.value.real()));
+            }
+        }
+        if (op == BuiltinOp::Im) {
+            LiteralComplex comp;
+            if (try_get_exact_complex(args.front(), comp).is_ok() && comp.exact) {
+                return ok(make_rational(arena_, comp.value.imag()));
+            }
+        }
+        if (op == BuiltinOp::Conj) {
+            LiteralComplex comp;
+            if (try_get_exact_complex(args.front(), comp).is_ok() && comp.exact) {
+                return ok(make_complex(arena_, comp.value.conjugate()));
+            }
+        }
+
         auto parts = extract_complex_parts(args.front(), arena_);
 
         if (op == BuiltinOp::Re) {

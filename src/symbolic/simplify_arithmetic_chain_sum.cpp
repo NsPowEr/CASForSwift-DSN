@@ -94,35 +94,35 @@ Result<ExprPtr> Simplifier::simplify_sum_terms(
             flat_terms = std::move(rebuilt);
         }
     }
+// Step 4: collect numeric-coefficient like-terms into MonomialKey map.
+ComplexRational constant = ComplexRational::zero();
+std::map<MonomialKey, Rational> collected;
+bool has_infinity = false;
+bool has_neg_infinity = false;
 
-    // Step 4: collect numeric-coefficient like-terms into MonomialKey map.
-    Rational constant(BigInt(0));
-    std::map<MonomialKey, Rational> collected;
-    bool has_infinity = false;
-    bool has_neg_infinity = false;
+for (ExprPtr term : flat_terms) {
+    auto timeout = check_timeout();
+    if (timeout.is_error()) return fail<ExprPtr>(timeout.error());
 
-    for (ExprPtr term : flat_terms) {
-        auto timeout = check_timeout();
-        if (timeout.is_error()) return fail<ExprPtr>(timeout.error());
-
-        if (is_constant_expr(term, MathConstant::Infinity)) {
-            has_infinity = true; continue;
+    if (is_constant_expr(term, MathConstant::Infinity)) {
+        has_infinity = true; continue;
+    }
+    if (const auto* u = expr_cast<Unary>(term);
+        u != nullptr && u->op == UnaryOp::Neg)
+    {
+        if (is_constant_expr(u->operand, MathConstant::Infinity)) {
+            has_neg_infinity = true; continue;
         }
-        if (const auto* u = expr_cast<Unary>(term);
-            u != nullptr && u->op == UnaryOp::Neg)
-        {
-            if (is_constant_expr(u->operand, MathConstant::Infinity)) {
-                has_neg_infinity = true; continue;
-            }
-        }
+    }
 
-        LiteralRational rational;
-        auto exact = try_get_exact_rational(term, rational);
-        if (exact.is_ok() && exact.value()) {
-            constant += rational.value;
-            continue;
-        }
-        auto monomial_res = extract_monomial(term);
+    LiteralComplex complex;
+    auto exact = try_get_exact_complex(term, complex);
+    if (exact.is_ok() && exact.value()) {
+        constant = constant + complex.value;
+        continue;
+    }
+
+    auto monomial_res = extract_monomial(term);
         if (monomial_res.is_error()) return fail<ExprPtr>(monomial_res.error());
         if (!monomial_res.value().has_value()) {
             collected[MonomialKey{.factors = {{term, BigInt(1)}}}] += Rational(BigInt(1));
@@ -145,8 +145,9 @@ Result<ExprPtr> Simplifier::simplify_sum_terms(
         if (!coeff.numerator().is_zero())
             normalized.push_back(build_monomial(key, coeff));
     }
-    if (!constant.numerator().is_zero())
-        normalized.push_back(make_rational(arena_, constant));
+    if (!constant.is_zero() || (collected.empty() && normalized.empty())) {
+        normalized.insert(normalized.begin(), make_complex(arena_, constant));
+    }
 
     // Step 5: F1.4 symbolic like-term pass (a·x + b·x → (a+b)·x).
     // Numeric like-terms already merged above; this handles symbolic coefficients.

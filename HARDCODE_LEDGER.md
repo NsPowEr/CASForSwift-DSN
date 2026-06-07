@@ -40,6 +40,25 @@
 
 ## Voci aperte
 
+### HC-F16-TRAGER-QI — Trager Q(α) factorization su `RootOf(y^2+1)` non riconosce isomorfismo con Q(i)
+- **File**: `src/algebra/factorization_polynomials.cpp` (factor_polynomial Trager path); `test/unit/algebra/test_factorization_trager.cpp::X2Plus1OverRootOfI`.
+- **Categoria CLAUDE.md**: Cat 4 (bail-out su tipo) + Cat 5 (gerarchia statica) — RootOf e ComplexLit non condividono il dispatcher di estensione algebrica.
+- **Descrizione**: Per `factor_polynomial(x^2+1, x, ext=RootOf(y^2+1,y,0))` Trager dovrebbe produrre `(x-α)·(x+α)` dove α è il root index 0. Con F1.6 le costanti complesse sono ComplexLit(0,1); il driver non identifica `RootOf(y^2+1, y, 0) ≡ ComplexLit(0,1)`, restituisce un solo fattore o un product reconstruction mismatched.
+- **Fix corretto**: implementare bridge `RootOf(p, y, k) → ComplexLit(...)` quando `p` ha radici razionali su Q(i) — caso speciale `p = y^2+1` → ComplexLit(0,±1) selezionato via `k`. Più in generale (task B2): traduzione bidirezionale tra dominio simbolico Q(α) e Q(i) via `mathematically_equal` + selezione canonica.
+- **STATO**: APERTO — bloccato fino a chiusura task F1.6-B2 (Q(α)↔ComplexLit unification).
+
+### HC-F16-LN-COMPLEX-FULL — ln(a+bi) generale + Euler factorization residuo
+- **File**: `src/symbolic/simplify_exp_log.cpp` (ln branch, exp Euler), `test/unit/symbolic/test_complex_log_branch.cpp` (2 test residui).
+- **Categoria CLAUDE.md**: Cat 8 (pattern matching chiuso) — la dispatch ln ora copre i punti speciali canonici via ComplexLit ({0±i, -1}), ma manca la formula generale `ln(a+bi) = ½ln(a²+b²) + i·atan2(b,a)` per coppie (a,b) arbitrarie.
+- **Descrizione**: F1.6 ha canonicalizzato `i → ComplexLit(0,1)` e fatto cascadare l'identificazione attraverso `try_get_exact_complex`. Restano 2 test:
+  1. `LnOfOnePlusIIsLnSqrtTwoPlusIPiOverFour` — richiede formula ln(a+bi) completa per a=b=1 (output: ln√2 + iπ/4).
+  2. `ExpOfImaginaryPiOverFourGoldenRoundtrip` — `exp(iπ/4)·exp(-iπ/4) = 1` richiede che il simplifier collassi `cos²(π/4) + sin²(π/4) = 1` DOPO Euler factorization; dipende da fold trigonometrico già parziale (`may_rewrite_sum_terms` esegue il check ma non sempre completa la cancellazione su Product di Sum espansi).
+- **Fix corretto**: implementare nel ln handler:
+  1. Per ComplexLit(a,b) con (a,b) entrambi ≠ 0 e razionali: calcolare `|z|² = a² + b²` (Rational); ritornare `½·ln(a²+b²) + i·atan2_symbolic(b,a)` (richiede `atan2_symbolic` per coppie razionali tipo (1,1)→π/4, (1,0)→0, etc).
+  2. Estendere Product simplifier per riconoscere il pattern `exp(iθ)·exp(-iθ) = 1` come fast-path (riduzione preventiva prima di Euler factor).
+- **Workaround attuale**: i casi triviali (ln(±1), ln(±i)) sono coperti via dispatch esplicito; gli altri restituiscono ln(ComplexLit) opaco (no Unimplemented silenzioso — l'output è strutturalmente valido ma non semplificato).
+- **STATO**: APERTO — F1.6 canonicalizzazione completa; ln(a+bi) generale richiede atan2 simbolico + identità trig cancellation forte.
+
 ### F5.7-ZEIL-HIGHER-ORDER — Zeilberger higher-order recurrence solver non implementato
 - **File**: `src/symbolic/summation_zeilberger.cpp`.
 - **Categoria CLAUDE.md**: Cat 3 (algoritmo incompleto).

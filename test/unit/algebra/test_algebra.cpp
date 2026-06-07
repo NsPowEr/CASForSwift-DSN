@@ -22,6 +22,8 @@ namespace {
     if (!e) return false;
     if (const auto* il = expr_cast<IntegerLit>(e)) return il->value.is_zero();
     if (const auto* rl = expr_cast<RationalLit>(e)) return rl->numerator.is_zero();
+    if (const auto* cl = expr_cast<ComplexLit>(e))
+        return cl->re_num.is_zero() && cl->im_num.is_zero();
     return false;
 }
 
@@ -103,15 +105,24 @@ namespace {
 }
 
 [[nodiscard]] bool is_imaginary_unit(ExprPtr expr) {
-    const auto* constant = expr_cast<Constant>(expr);
-    return constant != nullptr && constant->value == MathConstant::I;
+    if (const auto* constant = expr_cast<Constant>(expr))
+        return constant->value == MathConstant::I;
+    if (const auto* cl = expr_cast<ComplexLit>(expr))
+        return cl->re_num.is_zero()
+            && cl->im_num == BigInt(1)
+            && cl->im_den == BigInt(1);
+    return false;
 }
 
 [[nodiscard]] bool is_negative_imaginary_unit(ExprPtr expr) {
-    const auto* unary = expr_cast<Unary>(expr);
-    return unary != nullptr &&
-        unary->op == UnaryOp::Neg &&
-        is_imaginary_unit(unary->operand);
+    if (const auto* unary = expr_cast<Unary>(expr);
+        unary != nullptr && unary->op == UnaryOp::Neg)
+        return is_imaginary_unit(unary->operand);
+    if (const auto* cl = expr_cast<ComplexLit>(expr))
+        return cl->re_num.is_zero()
+            && cl->im_num == BigInt(-1)
+            && cl->im_den == BigInt(1);
+    return false;
 }
 
 // ─── solve_polynomial ───────────────────────────────────────────────────

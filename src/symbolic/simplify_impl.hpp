@@ -2,6 +2,7 @@
 
 #include "cas/symbolic.hpp"
 #include "cas/rational.hpp"
+#include "cas/complex_rational.hpp"
 #include <chrono>
 #include <functional>
 #include <string>
@@ -53,6 +54,11 @@ struct LiteralRational {
     bool exact{false};
 };
 
+struct LiteralComplex {
+    ComplexRational value;
+    bool exact{false};
+};
+
 struct MonomialKey {
     std::vector<std::pair<ExprPtr, BigInt>> factors;
     
@@ -82,10 +88,12 @@ struct MonomialTerm {
 [[nodiscard]] ExprPtr make_rational(AstArena& arena, Rational value);
 [[nodiscard]] Result<ExprPtr> make_rational_result(AstArena& arena, Rational value);
 [[nodiscard]] ExprPtr make_constant(AstArena& arena, MathConstant value);
+[[nodiscard]] ExprPtr make_complex(AstArena& arena, const ComplexRational& value);
 [[nodiscard]] bool is_zero_expr(ExprPtr expr);
 [[nodiscard]] bool is_one_expr(ExprPtr expr);
 [[nodiscard]] bool is_constant_expr(ExprPtr expr, MathConstant constant);
 [[nodiscard]] Result<bool> try_get_exact_rational(ExprPtr expr, LiteralRational& out);
+[[nodiscard]] Result<bool> try_get_exact_complex(ExprPtr expr, LiteralComplex& out);
 [[nodiscard]] Rational decimal_to_rational(const DecimalLit& node);
 [[nodiscard]] std::optional<BigInt> try_get_integer_exponent(ExprPtr expr);
 [[nodiscard]] Rational pow_rational_nonnegative(Rational base, BigInt exponent);
@@ -123,10 +131,9 @@ private:
 
     // Forward declarations of simplification methods
     [[nodiscard]] Result<ExprPtr> simplify_node(ExprPtr original, const IntegerLit& node);
-    [[nodiscard]] Result<ExprPtr> simplify_node(ExprPtr original, const ComplexLit& node);
-
     [[nodiscard]] Result<ExprPtr> simplify_node(ExprPtr original, const RationalLit& node);
     [[nodiscard]] Result<ExprPtr> simplify_node(ExprPtr original, const DecimalLit& node);
+    [[nodiscard]] Result<ExprPtr> simplify_node(ExprPtr original, const ComplexLit& node);
     [[nodiscard]] Result<ExprPtr> simplify_node(ExprPtr original, const Symbol& node);
     [[nodiscard]] Result<ExprPtr> simplify_node(ExprPtr original, const Constant& node);
     [[nodiscard]] Result<ExprPtr> simplify_node(ExprPtr original, const Unary& node);
