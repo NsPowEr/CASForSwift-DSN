@@ -747,6 +747,7 @@ Per evitare ripetizione del problema attuale (tracker ottimista, codice MVP):
 
 Per ogni task in ogni fase, applicare il protocollo standard:
 
+0. **LETTURA SPECIFICA OBBLIGATORIA (CLAUDE.md REGOLA 0.1)**: Verificare e leggere il file `.md` corrispondente in `.APROJECT_REFERENCES/MISSING_FEATURES_SPECS/` prima di scrivere qualsiasi codice.
 1. **Contratto matematico**: dominio, output, casi esclusi, invarianti, errori
 2. **Algoritmo canonico** con citazione bibliografica (autore, anno, pagina)
 3. **Certificatore indipendente** dal path principale

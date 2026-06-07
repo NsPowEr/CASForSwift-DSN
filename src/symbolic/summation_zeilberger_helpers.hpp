@@ -23,8 +23,10 @@ namespace cas::symbolic::zeilberger_detail {
 [[nodiscard]] ExprPtr cancel_common_factors_in_ratio(
     ExprPtr ratio, symbolic::CASContext& ctx);
 
-[[nodiscard]] std::optional<ExprPtr> compute_shift_ratio(
-    ExprPtr F, const Symbol& sym, symbolic::CASContext& ctx);
+[[nodiscard]] // Compute F(sym+delta)/F(sym) as a rational function in sym.
+// Returns {Num, Den} pair where Num/Den is the ratio.
+std::optional<std::pair<ExprPtr, ExprPtr>> compute_shift_ratio(
+    ExprPtr F, const Symbol& sym, symbolic::CASContext& ctx, long long delta = 1);
 
 [[nodiscard]] bool struct_equal(ExprPtr a, ExprPtr b);
 

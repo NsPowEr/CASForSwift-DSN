@@ -119,21 +119,35 @@ TEST_F(ZeilbergerTest, NumericUpperBound_DoesNotCrash) {
     SUCCEED();
 }
 
-// Binomial sum returns Unimplemented (not closed form) due to simplifier
-// gap (HARDCODE_LEDGER F5.7-ZEIL-GAMMA-RATIO).  Important contract: no crash,
-// no silently wrong answer.
-TEST_F(ZeilbergerTest, BinomialSum_GracefulUnimplemented) {
+// Pochhammer fast-path (closes simplifier gap F5.7-ZEIL-GAMMA-RATIO for the
+// linear-shift case).  Binomial term F(n,k) = Γ(n+1)/(Γ(k+1)·Γ(n-k+1)) has
+// shift ratio F(n,k+1)/F(n,k) = (n-k)/(k+1).
+TEST_F(ZeilbergerTest, ShiftRatio_BinomialPochhammerPath) {
+    auto F = parse("gamma(n+1)/(gamma(k+1)*gamma(n-k+1))", ctx.arena());
+    auto ratio = symbolic::zeilberger_detail::compute_shift_ratio(F, k, ctx);
+    ASSERT_TRUE(ratio.has_value());
+    auto expected = parse("(n-k)/(k+1)", ctx.arena());
+    ExprPtr ratio_expr = ctx.arena().make<Binary>(BinaryOp::Div, ratio->first, ratio->second);
+    EXPECT_TRUE(simplifies_to_zero(ratio_expr,
+                                   ctx.simplify(expected).value(), ctx))
+        << "ratio = " << debug_print(ratio_expr);
+}
+
+// Binomial sum Σ_{k=0..n} C(n,k) = 2^n.
+// This now works thanks to the Pochhammer fast-path (Task #12).
+TEST_F(ZeilbergerTest, BinomialSum_EndToEnd) {
     auto term = parse("gamma(n+1)/(gamma(k+1)*gamma(n-k+1))", ctx.arena());
     auto lo   = parse("0", ctx.arena());
     auto hi   = parse("n", ctx.arena());
     auto res  = calculus::sum(term, k, lo, hi, ctx);
-    // Must NOT crash. May or may not produce a closed form depending on
-    // the simplifier's evolving handling of gamma ratios.  If it returns
-    // an error it must be Unimplemented (never silently wrong).
-    if (res.is_error()) {
-        EXPECT_EQ(res.error().kind, CASErrorKind::Unimplemented)
-            << "Got non-Unimplemented error: " << res.error().message;
-    }
+    
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+    ExprPtr result = res.value();
+    
+    auto expected = parse("2^n", ctx.arena());
+    EXPECT_TRUE(simplifies_to_zero(result,
+                                   ctx.simplify(expected).value(), ctx))
+        << "result = " << debug_print(result);
 }
 
 }  // namespace cas::test

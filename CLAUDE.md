@@ -36,6 +36,30 @@ viene rifiutata.
 
 ---
 
+### REGOLA 0.1: MANDATORY SPECIFICATION CHECK (BLOCCO ANTI-ALLUCINAZIONE)
+Prima di scrivere anche UNA SOLA RIGA DI CODICE per risolvere un task listato in `PLAN_HP_PRIME_PARITY.md` o `CAS_TASKS.md`, l'agente **DEVE OBBLIGATORIAMENTE** verificare l'esistenza e leggere il file di specifica corrispondente nella directory `.APROJECT_REFERENCES/MISSING_FEATURES_SPECS/`.
+
+**Protocollo Esecutivo:**
+1. L'Agente usa il comando `ls -lR .APROJECT_REFERENCES/MISSING_FEATURES_SPECS/` per mappare i file.
+2. L'Agente fa un `cat` o `read_file` del file `.md` associato al task (es. `Zeilberger_Algorithm.md`, `Galois_Groups.md`, ecc.).
+3. L'Agente DEVE includere nel suo piano (Plan Mode) o nel suo primo messaggio di risposta la frase: *"Ho letto la specifica formale [NomeFile.md] e implementerò le formule esatte e i vincoli ivi contenuti"*.
+
+Se un sub-agent viene spawnato per un task, l'Orchestratore HA IL DOVERE di passargli il path assoluto del file `.md` nel prompt di ingaggio. **Qualsiasi codice scritto senza aver prima letto la specifica formale pertinente è considerato INVALIDO e va scartato.**
+
+---
+
+### REGOLA 0.2: DIVIETO ASSOLUTO DI DISABILITARE TEST
+
+> **MAI E POI MAI** disabilitare test, commentare asserzioni o aggirare le suite di test per ignorare i fallimenti.
+
+Questo vale per:
+1. **Test Funzionali (`test/unit/*`)**: Se un test fallisce, significa che c'è un bug matematico o architetturale. Risolvi il bug nel codice del motore, non nasconderlo nel test modificando aspettative o disabilitando l'esecuzione.
+2. **Benchmark (`scripts/benchmark.sh` o simili)**: È vietato alterare i benchmark o evitare l'esecuzione per far sembrare il codice performante. Se c'è una regressione, bisogna ottimizzare la logica.
+
+Aggirare questa regola inserendo furbescamente `#if 0`, macro di `DISABLE`, o commentando le righe problematiche comporterà il **rigetto immediato** del lavoro. L'orchestratore deve sempre sorvegliare su questo aspetto.
+
+---
+
 ## DIVIETO HARDCODE — Catalogo Anti-Pattern
 
 > **Regola assoluta**: Un valore hardcoded in un algoritmo matematico è un bug latente.

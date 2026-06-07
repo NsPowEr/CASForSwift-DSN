@@ -1,7 +1,7 @@
 # SESSION HANDOFF — F5 Closure Multi-Session
 
 > **Data ultimo aggiornamento**: 2026-06-03
-> **Sessione**: B1 + B2 (a,b,c) completate; pre-B2b cleanup chiuso (Regola1 simplify_exp_log + restore QR 8x8 verification + RootOf dispatch eigen/jordan); B3-B9 da eseguire
+> **Sessione**: B1 + B2 (a,b,c) + B3 completate; pre-B2b cleanup chiuso (Regola1 simplify_exp_log + restore QR 8x8 verification + RootOf dispatch eigen/jordan); B4-B9 da eseguire
 > **Orchestrator**: Opus 4.7
 > **Modalità utente**: caveman ultra (interno) + no shortcut + no hardcode
 

@@ -166,6 +166,49 @@ Result<std::vector<MultivariateTerm>> parse_multivariate_impl(ExprPtr expr, symb
 
 } // namespace
 
+
+
+BigInt MultivariatePolynomial::integer_content() const {
+    if (terms_.empty()) return BigInt(0);
+    BigInt cont = terms_[0].coefficient;
+    for (std::size_t i = 1; i < terms_.size() && cont != BigInt(1); ++i) {
+        cont = gcd(cont, terms_[i].coefficient);
+    }
+    return cont;
+}
+
+MultivariatePolynomial MultivariatePolynomial::derivative(const Symbol& var) const {
+    std::vector<MultivariateTerm> new_terms;
+    new_terms.reserve(terms_.size());
+    
+    for (const auto& term : terms_) {
+        unsigned int exp = 0;
+        for (const auto& factor : term.factors) {
+            if (factor.first.name == var.name) {
+                exp = factor.second;
+                break;
+            }
+        }
+        
+        if (exp > 0) {
+            MultivariateTerm new_term;
+            new_term.coefficient = term.coefficient * BigInt(static_cast<long long>(exp));
+            for (const auto& factor : term.factors) {
+                if (factor.first.name == var.name) {
+                    if (exp > 1) {
+                        new_term.factors.emplace_back(var, exp - 1);
+                    }
+                } else {
+                    new_term.factors.push_back(factor);
+                }
+            }
+            new_terms.push_back(std::move(new_term));
+        }
+    }
+    
+    return MultivariatePolynomial(std::move(new_terms));
+}
+
 Result<MultivariatePolynomial> parse_multivariate_polynomial(ExprPtr expr, symbolic::CASContext& ctx) {
     auto terms = parse_multivariate_impl(expr, ctx);
     if (terms.is_error()) return fail<MultivariatePolynomial>(terms.error());

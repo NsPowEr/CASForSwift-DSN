@@ -46,10 +46,9 @@ void lll_reduction(LatticeMatrix& b, double delta_val) {
         }
     };
     
+    recompute_gs();
     std::size_t k = 1;
     while (k < n) {
-        recompute_gs();
-        
         // Size reduction
         for (int j = (int)k - 1; j >= 0; --j) {
             if (mu[k][j].numerator().abs() * BigInt(2) > mu[k][j].denominator().abs()) {
@@ -59,7 +58,11 @@ void lll_reduction(LatticeMatrix& b, double delta_val) {
                     for (std::size_t l = 0; l < m; ++l) {
                         b[k][l] -= r_q * b[j][l];
                     }
-                    recompute_gs();
+                    // Update mu values analytically
+                    for (int l = 0; l < j; ++l) {
+                        mu[k][l] -= r_q * mu[j][l];
+                    }
+                    mu[k][j] -= r_q;
                 }
             }
         }
@@ -69,6 +72,7 @@ void lll_reduction(LatticeMatrix& b, double delta_val) {
             k++;
         } else {
             std::swap(b[k], b[k - 1]);
+            recompute_gs(); // Recompute Gram-Schmidt only when a swap occurs
             k = std::max((std::size_t)1, k - 1);
         }
     }

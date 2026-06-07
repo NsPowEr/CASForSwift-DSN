@@ -486,6 +486,7 @@ TEST(VanHoeijFactorTest, AcceptanceGate_AG1_LLLPath_ForcedFor3Quadratics) {
 // it takes ~30s due to repeated LLL calls (8 factors × LLL per call). The LLL IS
 // correct (passes when run), but exceeds the 5s threshold for normal tests.
 // Run with: --gtest_filter='*StressTest*AG1b*'
+// DISABILITATO: Test di stress matematico fisiologicamente in timeout (>60s) sotto Debug Mode (-O0). Da eseguire in Release Mode o via target dedicato cas_stress_tests.
 TEST(VanHoeijFactorTest, DISABLED_StressTest_AG1b_8Quadratics_deg16_NaturalLLLPath) {
     symbolic::CASContext ctx;
     ctx.set_van_hoeij_threshold(1);
@@ -601,6 +602,7 @@ TEST(VanHoeijFactorTest, AcceptanceGate_AG2_SwinnertonDyer_SD3_Irreducible) {
 // Forces r ≥ 20 modular factors → definitely in LLL path.
 // Verifies LLL terminates and returns correct factorization.
 // Note: this may be slow for some prime choices. Placed in StressTest if >5s.
+// DISABILITATO: Test di stress matematico fisiologicamente in timeout (>60s) sotto Debug Mode (-O0). Da eseguire in Release Mode o via target dedicato cas_stress_tests.
 TEST(VanHoeijFactorTest, DISABLED_StressTest_AG3_12Quadratics_deg24_LLLPath) {
     symbolic::CASContext ctx;
     ctx.set_van_hoeij_threshold(1);

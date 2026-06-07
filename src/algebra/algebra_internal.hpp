@@ -123,6 +123,14 @@ struct IntegerSquareFreeFactor {
     unsigned int multiplicity{1U};
 };
 
+struct MultivariateSquareFreeFactor {
+    MultivariatePolynomial factor;
+    unsigned int multiplicity{1U};
+};
+
+[[nodiscard]] Result<std::vector<MultivariateSquareFreeFactor>> square_free_factorize_multivariate(
+    const MultivariatePolynomial& poly, symbolic::CASContext& ctx);
+
 [[nodiscard]] Result<std::vector<IntegerSquareFreeFactor>> square_free_factorize_integer_poly(const IntPoly& primitive, symbolic::CASContext& ctx);
 [[nodiscard]] Result<void> append_integer_factor_component(Factorization& factorization, const IntPoly& component, unsigned int multiplicity, const Symbol& var, symbolic::CASContext& ctx);
 [[nodiscard]] BigInt select_factorization_prime(const IntPoly& f);

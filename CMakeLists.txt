@@ -6,6 +6,17 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# ─── APPLE SILICON E IOS ARCHITECTURE SUPPORT ───
+if(APPLE AND NOT CMAKE_OSX_ARCHITECTURES)
+    # Se CMake gira sotto Rosetta 2 (uname restituisce x86_64), force ARM se c'è l'Homebrew di Apple Silicon
+    # o se è una compilazione standard moderna per garantire il funzionamento su iPadOS/iOS/macOS M-series.
+    if(EXISTS "/opt/homebrew/bin/brew")
+        set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "Build architectures for Apple platforms" FORCE)
+    else()
+        execute_process(COMMAND uname -m OUTPUT_VARIABLE HOST_ARCH OUTPUT_STRIP_TRAILING_WHITESPACE)
+        set(CMAKE_OSX_ARCHITECTURES "${HOST_ARCH}" CACHE STRING "Build architectures for Apple platforms" FORCE)
+    endif()
+endif()
 option(CAS_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer in debug-oriented builds." ON)
 option(CAS_ENABLE_TESTING "Enable unit tests and CTest integration." ON)
 option(CAS_ENABLE_GUI "Build the optional detachable manual GUI lab." OFF)
@@ -650,6 +661,8 @@ test/unit/algebra/test_half_gcd.cpp
         test/unit/test_hpprime_acid.cpp
         test/unit/test_ode.cpp
         test/unit/test_ode_critical.cpp
+        test/unit/test_ode_class_f5.cpp
+        test/unit/test_ode_solv_f5.cpp
         test/unit/test_acid_complex_canonical.cpp
         test/unit/calculus/test_asymptotes_rootsum.cpp
         test/unit/test_limit_mrv_cancellation.cpp

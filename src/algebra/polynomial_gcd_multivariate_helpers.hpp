@@ -3,6 +3,7 @@
 #include "cas/algebra.hpp"
 #include "cas/rational.hpp"
 #include "cas/result.hpp"
+#include "cas/symbolic.hpp"
 #include "polynomial_internal.hpp"
 
 #include <map>
@@ -55,6 +56,7 @@ using CoeffMap = std::map<FactorKey, BigInt, FactorKeyLess>;
 [[nodiscard]] Result<std::optional<MultivariatePolynomial>> exact_quotient(
     const MultivariatePolynomial& dividend,
     const MultivariatePolynomial& divisor,
-    const std::vector<Symbol>& vars);
+    const std::vector<Symbol>& vars,
+    symbolic::CASContext& ctx);
 
 } // namespace cas::algebra

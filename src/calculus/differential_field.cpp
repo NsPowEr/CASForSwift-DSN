@@ -2,6 +2,7 @@
 #include "cas/algebra.hpp"
 #include "cas/calculus.hpp"
 #include "cas/symbolic.hpp"
+#include "cas/error_helpers.hpp"
 #include "../algebra/polynomial_internal.hpp"
 #include "calculus_internal.hpp"
 #include <algorithm>
@@ -28,10 +29,7 @@ Result<void> visit_recursive_impl(ExprPtr expr, F&& f, unsigned int depth) {
             .hint = std::nullopt,
         });
     }
-    auto res = f(expr);
-    if (res.is_error()) return res;
-
-    return visit_expr(expr, [&](const auto& node) -> Result<void> {
+    auto child_res = visit_expr(expr, [&](const auto& node) -> Result<void> {
         using T = std::decay_t<decltype(node)>;
         if constexpr (std::is_same_v<T, Unary>) {
             return visit_recursive_impl(node.operand, f, depth + 1U);
@@ -57,6 +55,9 @@ Result<void> visit_recursive_impl(ExprPtr expr, F&& f, unsigned int depth) {
         }
         return ok();
     });
+    if (child_res.is_error()) return child_res;
+
+    return f(expr);
 }
 
 template <typename F>
@@ -118,6 +119,127 @@ Result<void> DifferentialField::add_extension(ExprPtr expr, [[maybe_unused]] sym
             }
 
             if (!exists) {
+                ExprPtr u = call->args[0];
+
+                if (type == ExtensionType::Logarithmic) {
+                    auto du_res = this->derive(u, ctx);
+                    if (du_res.is_ok()) {
+                        ExprPtr integrand = ctx.arena().make<Binary>(BinaryOp::Div, du_res.value(), u);
+                        
+                        bool is_zero = false;
+                        if (auto s = ctx.simplify(integrand); s.is_ok()) {
+                            integrand = s.value();
+                            if (auto* il = expr_cast<IntegerLit>(integrand)) is_zero = il->value.is_zero();
+                            else if (auto* rl = expr_cast<RationalLit>(integrand)) is_zero = rl->numerator.is_zero();
+                        }
+                        
+                        if (!is_zero) {
+                            bool is_dependent = false;
+                            auto w_res = integrate(integrand, base_var_, ctx);
+                            if (w_res.is_ok()) {
+                                auto gen_res = this->to_field_generators(w_res.value(), ctx);
+                                if (gen_res.is_ok()) {
+                                    bool has_func_call = false;
+                                    auto check_tree = [&](auto& self, ExprPtr e) -> void {
+                                        if (!e) return;
+                                        visit_expr(e, [&](const auto& n) -> ExprPtr {
+                                            using T = std::decay_t<decltype(n)>;
+                                            if constexpr (std::is_same_v<T, FuncCall>) {
+                                                has_func_call = true;
+                                            } else if constexpr (std::is_same_v<T, Unary>) {
+                                                self(self, n.operand);
+                                            } else if constexpr (std::is_same_v<T, Binary>) {
+                                                self(self, n.left);
+                                                self(self, n.right);
+                                            } else if constexpr (std::is_same_v<T, Sum>) {
+                                                for (const auto& a : n.terms) self(self, a);
+                                            } else if constexpr (std::is_same_v<T, Product>) {
+                                                for (const auto& a : n.factors) self(self, a);
+                                            }
+                                            return ExprPtr{};
+                                        });
+                                    };
+                                    check_tree(check_tree, gen_res.value());
+                                    if (!has_func_call) is_dependent = true;
+                                }
+                            }
+                            if (is_dependent) {
+                                return make_unimplemented<void>(
+                                    "calculus", "add_extension",
+                                    "Algebraically dependent logarithmic extension detected",
+                                    cas::error::reason_codes::RISCH_LOG_EXTENSION_GENERAL,
+                                    "Implement exact dependent extension replacement",
+                                    "F5.1");
+                            }
+                        } else {
+                            return ok();
+                        }
+                    }
+                } else if (type == ExtensionType::Exponential) {
+                    auto du_res = this->derive(u, ctx);
+                    if (du_res.is_ok()) {
+                        ExprPtr du = du_res.value();
+                        
+                        bool is_zero = false;
+                        if (auto s = ctx.simplify(du); s.is_ok()) {
+                            du = s.value();
+                            if (auto* il = expr_cast<IntegerLit>(du)) is_zero = il->value.is_zero();
+                            else if (auto* rl = expr_cast<RationalLit>(du)) is_zero = rl->numerator.is_zero();
+                        }
+                        
+                        if (!is_zero) {
+                            bool is_dependent = false;
+                            auto int_res = integrate(du, base_var_, ctx);
+                            if (int_res.is_ok()) {
+                                auto gen_res = this->to_field_generators(int_res.value(), ctx);
+                                if (gen_res.is_ok()) {
+                                    bool has_non_log = false;
+                                    auto check_tree = [&](auto& self, ExprPtr e) -> void {
+                                        if (!e) return;
+                                        visit_expr(e, [&](const auto& n) -> ExprPtr {
+                                            using T = std::decay_t<decltype(n)>;
+                                            if constexpr (std::is_same_v<T, Symbol>) {
+                                                if (n.name == base_var_.name) has_non_log = true;
+                                                else {
+                                                    for (const auto& ext : extensions_) {
+                                                        if (ext.t_var.name == n.name && ext.type == ExtensionType::Exponential) {
+                                                            has_non_log = true;
+                                                        }
+                                                    }
+                                                }
+                                            } else if constexpr (std::is_same_v<T, FuncCall>) {
+                                                has_non_log = true;
+                                            } else if constexpr (std::is_same_v<T, Unary>) {
+                                                self(self, n.operand);
+                                            } else if constexpr (std::is_same_v<T, Binary>) {
+                                                self(self, n.left);
+                                                self(self, n.right);
+                                            } else if constexpr (std::is_same_v<T, Sum>) {
+                                                for (const auto& a : n.terms) self(self, a);
+                                            } else if constexpr (std::is_same_v<T, Product>) {
+                                                for (const auto& a : n.factors) self(self, a);
+                                            }
+                                            return ExprPtr{};
+                                        });
+                                    };
+                                    check_tree(check_tree, gen_res.value());
+                                    if (!has_non_log) is_dependent = true;
+                                }
+                            }
+                            if (is_dependent) {
+                                return make_unimplemented<void>(
+                                    "calculus", "add_extension",
+                                    "Algebraically dependent exponential extension detected",
+                                    cas::error::reason_codes::RISCH_EXPONENTIAL_DE,
+                                    "Implement exact dependent extension replacement",
+                                    "F5.1");
+                            }
+                        } else {
+                            return ok();
+                        }
+                    }
+                }
+
                 Symbol t("t_" + std::to_string(extensions_.size()));
                 extensions_.push_back({type, call->args[0], t});
             }

@@ -41,6 +41,9 @@ public:
     [[nodiscard]] std::size_t total_degree() const noexcept;
     [[nodiscard]] std::vector<Symbol> variables() const;
     [[nodiscard]] const std::vector<MultivariateTerm>& terms() const noexcept;
+    
+    [[nodiscard]] MultivariatePolynomial derivative(const Symbol& var) const;
+    [[nodiscard]] BigInt integer_content() const;
 
     [[nodiscard]] MultivariatePolynomial operator+(const MultivariatePolynomial& other) const;
     [[nodiscard]] MultivariatePolynomial operator*(const MultivariatePolynomial& other) const;

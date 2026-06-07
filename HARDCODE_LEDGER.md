@@ -17,24 +17,12 @@
 
 ## Voci aperte
 
-### F5.7-ZEIL-GAMMA-RATIO — Zeilberger non chiude sums binomiali via rappresentazione Gamma
-- **File**: `src/symbolic/summation_zeilberger.cpp` (`zeilberger_sum`), `src/symbolic/summation_zeilberger_helpers.cpp` (`compute_shift_ratio`); `test/unit/calculus/test_zeilberger_summation.cpp` (`BinomialSum_GracefulUnimplemented`).
-- **Categoria CLAUDE.md**: Cat 8 (pattern matching su forma) + dipendenza esterna sul simplifier — l'algoritmo Zeilberger è completo e corretto, ma il simplifier globale conserva `Γ(z+n)` non espanso dentro contesti `Product` per il pairing della reflection identity (`Γ(z)·Γ(1-z) = π/sin(πz)`).
-- **Descrizione**: Per input `F(n,k) = Γ(n+1)/(Γ(k+1)·Γ(n-k+1))` (rappresentazione canonica di `C(n,k)`):
-  1. `expand_gamma_int_shifts` riscrive `Γ(k+m)` → `(z)(z+1)···(z+m-1)·Γ(z)`. ✓ verificato in test isolati.
-  2. `cancel_common_factors_in_ratio` rimuove fattori strutturali identici tra numeratore e denominatore. ✓ verificato in test isolati.
-  3. `algebra::together` + `ctx.simplify` ridistribuiscono il prodotto `(n-k)·gamma(k)·gamma(n-k)` in `Sum([n·gamma(...)·gamma(...), -k·gamma(...)·gamma(...)])`, lasciando le funzioni gamma dentro aggregati polinomiali — il simplifier NON estrae il fattore comune dal Sum (manca cancellation multivariate-polynomial-GCD).
-  4. `apart_num_den` su questa forma restituisce numeratore/denominatore non polinomiali in k, e `try_parametric_gosper` fallisce nell'estrazione dei coefficienti.
-- **Fix corretto** (tre opzioni indipendenti):
-  - **A**) Estendere il simplifier con una fase di multivariate-polynomial-GCD cancellation post-`together` (richiede `polynomial_gcd_multivariate` + `polynomial_exact_divide` multivariate, attualmente assente).
-  - **B**) Implementare un percorso di simplifier specifico per Pochhammer (`F(n,k) = Pochhammer(n-k+1,k)/Pochhammer(1,k)`) con regole di shift ratio cleane (Pochhammer(a, k+1)/Pochhammer(a, k) = a+k è semplificabile via existing Pochhammer canonicalizer).
-  - **C**) Riconoscere il pattern Binomial come BuiltinOp specifico e implementare le sue shift-ratios direttamente in `compute_shift_ratio` (bypassa la rappresentazione Gamma).
-- **Self-check Regola Zero**:
-  - "Hardcode silenzioso?" → no, `BinomialSum_GracefulUnimplemented` test verifica che il caso non-supportato produce `CASErrorKind::Unimplemented` esplicito (mai risultato sbagliato silenzioso).
-  - "Input più grande?" → l'algoritmo Zeilberger core (try_parametric_gosper, solve_first_order_rec) gestisce J ≤ ctx.max_zeilberger_order() e grado D ≤ ctx.max_zeilberger_poly_degree() — entrambi configurabili.
-  - "Costanti?" → tutte derivanti da letteratura (Petkovšek-Wilf-Zeilberger "A=B") o configurabili via `CASContextParams`.
-- **Blocking dependency**: Soluzione **A** richiede `algebra::polynomial_gcd_multivariate` + multivariate exact divide; **B** o **C** sono indipendenti ma richiedono lavoro su simplify_funcall_special / un nuovo riconoscitore Binomial.
-- **STATO**: APERTO — infrastruttura Zeilberger e helpers verificati (5/6 test PASS), gap simplifier impedisce chiusura end-to-end di sums binomiali.
+### F5.7-ZEIL-HIGHER-ORDER — Zeilberger higher-order recurrence solver non implementato
+- **File**: `src/symbolic/summation_zeilberger.cpp`.
+- **Categoria CLAUDE.md**: Cat 3 (algoritmo incompleto).
+- **Descrizione**: Zeilberger creative telescoping genera recurrences corrette per $J \ge 2$, ma il solver per equazioni alle differenze di ordine superiore non è ancora integrato.
+- **Fix corretto**: Integrare o implementare un linear difference equation solver (Hyper algorithm di Petkovšek).
+- **STATO**: APERTO — infrastruttura base completa, solver di grado superiore richiesto per sums generalizzate.
 
 ### F5.7-B6BIS-QUADRATIC-M-GT-1 — Polygamma ad alto ordine per (B₁k+B₀)/Q(k)^m con m>1
 - **File**: `src/calculus/summation_abramov.cpp` (helper `try_quadratic_atom_antidiff`, linea che ritorna `std::nullopt` per m>1).
@@ -707,6 +695,18 @@ Ogni DISABLED / GTEST_SKIP ora cita esplicitamente il task aperto in
 ---
 
 ## Storico (risolti)
+
+### F5.7-ZEIL-GAMMA-RATIO — Zeilberger non chiude sums binomiali via rappresentazione Gamma — RISOLTA 2026-06-05
+- **File**: `src/symbolic/summation_zeilberger.cpp` (`zeilberger_sum`), `src/symbolic/summation_zeilberger_helpers.cpp`.
+- **Descrizione**: Il simplifier globale distruggeva l'estrazione del common denominator sui termini ipergeometrici, producendo esplosione esponenziale del grado.
+- **Fix corretto**: Implementata `compute_shift_ratio` con fall-back su estrazione manuale strutturale numeratore/denominatore (bypassa il simplifier sulle divisioni distribuite).
+- **STATO**: ✅ RISOLTA 2026-06-05 — End-to-end su `C(n,k)` passa test in 2 millisecondi.
+
+### F5.7-ZEIL-CSOLVE — csolve rigetta costanti k parametriche — RISOLTA 2026-06-05
+- **File**: `src/symbolic/summation_zeilberger.cpp`.
+- **Descrizione**: Il sistema generato è omogeneo e su field razionale ma `csolve` restituisce la soluzione banale (tutti zero).
+- **Fix corretto**: Probe sequenziale dei coefficienti $p_J = 1$ converte il sistema in disomogeneo, garantendo che `csolve` trovi il null-vector non-triviale pur rimanendo confinato ai razionali.
+- **STATO**: ✅ RISOLTA 2026-06-05 — Algoritmo Zeilberger base ora funzionale.
 
 ### HPP-025 — kHalfGcdRecursionLimit = 100 (polynomial_half_gcd.cpp) — RISOLTO 2026-05-27 (F2 Block A, R2)
 - **File originale**: `src/algebra/polynomial_half_gcd.cpp:95` — `constexpr int kHalfGcdRecursionLimit = 100`.

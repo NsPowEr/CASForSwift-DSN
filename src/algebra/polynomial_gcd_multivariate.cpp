@@ -2,6 +2,7 @@
 #include "cas/symbolic.hpp"
 #include "algebra_internal.hpp"
 #include "polynomial_internal.hpp"
+#include "polynomial_gcd_multivariate_helpers.hpp"
 
 #include <algorithm>
 #include <array>
@@ -15,18 +16,15 @@
 namespace cas::algebra {
 
 namespace {
+    using Monomial = std::vector<unsigned int>;
+    using SparsePoly = std::map<Monomial, BigInt>;
+}
 
-using FactorKey = std::vector<std::pair<std::string, unsigned int>>;
 
-struct FactorKeyLess {
-    [[nodiscard]] bool operator()(const FactorKey& lhs, const FactorKey& rhs) const noexcept {
-        return lhs < rhs;
-    }
-};
 
-using CoeffMap = std::map<FactorKey, BigInt, FactorKeyLess>;
-using Monomial = std::vector<unsigned int>;
-using SparsePoly = std::map<Monomial, BigInt>;
+[[nodiscard]] bool FactorKeyLess::operator()(const FactorKey& lhs, const FactorKey& rhs) const noexcept {
+    return lhs < rhs;
+}
 
 [[nodiscard]] FactorKey make_factor_key(const std::vector<std::pair<Symbol, unsigned int>>& factors,
                                         const std::optional<std::string>& omit_var = std::nullopt) {
@@ -101,7 +99,7 @@ using SparsePoly = std::map<Monomial, BigInt>;
 }
 
 [[nodiscard]] CoeffMap to_coeff_map(const MultivariatePolynomial& poly,
-                                    const std::optional<std::string>& omit_var = std::nullopt) {
+                                    const std::optional<std::string>& omit_var) {
     CoeffMap coefficients;
     for (const auto& term : poly.terms()) {
         coefficients[make_factor_key(term.factors, omit_var)] += term.coefficient;
@@ -697,22 +695,20 @@ void sparse_subtract(SparsePoly& lhs, const SparsePoly& rhs) {
     // limit).  Bound justification: by Schwartz-Zippel, each nesting level
     // expands fan-out by at most (2*D+3) evaluations; default 4096 safely covers
     // all currently-tested inputs (≤4 vars, deg ≤2) while bounding pathological
-    // inputs until Brown/Zippel is implemented (L1-08/F3.1).
+    // inputs.
     if (++call_count > ctx.max_gcd_total_calls()) {
         return fail<MultivariatePolynomial>(make_error(
             CASErrorKind::Unimplemented,
             "polynomial_gcd_multivariate [module=algebra, function=gcd_multivariate, "
             "reason_code=GCD_MULTIVARIATE_BUDGET_EXCEEDED, ticket=L1-08/F3.1]: "
-            "total call budget exceeded — increase ctx.max_gcd_total_calls() or "
-            "await Brown/Zippel GCD implementation (F3.1)"));
+            "total call budget exceeded — increase ctx.max_gcd_total_calls()"));
     }
     if (depth > ctx.max_gcd_recursion_depth()) {
         return fail<MultivariatePolynomial>(make_error(
             CASErrorKind::Unimplemented,
             "polynomial_gcd_multivariate [module=algebra, function=gcd_multivariate, "
             "reason_code=GCD_MULTIVARIATE_BUDGET_EXCEEDED, ticket=L1-08/F3.1]: "
-            "recursion depth limit reached — increase ctx.max_gcd_recursion_depth() or "
-            "await Brown/Zippel GCD implementation (F3.1)"));
+            "recursion depth limit reached — increase ctx.max_gcd_recursion_depth()"));
     }
 
     MultivariatePolynomial p = normalize_multivariate_gcd(P);
@@ -1028,7 +1024,9 @@ void sparse_subtract(SparsePoly& lhs, const SparsePoly& rhs) {
     return ok(std::optional<MultivariatePolynomial>{std::nullopt});
 }
 
-} // namespace
+
+
+
 
 Result<MultivariatePolynomial> gcd_multivariate_eval_interp(
     const MultivariatePolynomial& P,
@@ -1059,7 +1057,7 @@ Result<ExprPtr> polynomial_gcd_multivariate(ExprPtr p, ExprPtr q, symbolic::CASC
         return fail<ExprPtr>(Q.error());
     }
 
-    auto G = gcd_multivariate_eval_interp(P.value(), Q.value(), ctx);
+    auto G = gcd_zippel_sparse(P.value(), Q.value(), ctx);
     if (G.is_error()) {
         return fail<ExprPtr>(G.error());
     }

@@ -139,6 +139,7 @@ TEST_F(GaloisDeg5Test, Reducible_QuadraticTimesCubic) {
 // changes. The fast Frobenius path (S5_Selmer, F20_XPower5MinusTwo above)
 // covers the regression baseline; only this slow path tests the fallback
 // in isolation.
+// DISABILITATO: Test di stress matematico fisiologicamente in timeout (>60s) sotto Debug Mode (-O0). Da eseguire in Release Mode o via target dedicato cas_stress_tests.
 TEST_F(GaloisDeg5Test, DISABLED_StressTest_S5_DeterministicFallback_BudgetZero) {
     symbolic::CASContext ctx_small;
     ctx_small.set_max_galois_frobenius_primes(0U);
@@ -151,6 +152,7 @@ TEST_F(GaloisDeg5Test, DISABLED_StressTest_S5_DeterministicFallback_BudgetZero) 
     EXPECT_EQ(r.value(), "S5");
 }
 
+// DISABILITATO: Test di stress matematico fisiologicamente in timeout (>60s) sotto Debug Mode (-O0). Da eseguire in Release Mode o via target dedicato cas_stress_tests.
 TEST_F(GaloisDeg5Test, DISABLED_StressTest_F20_DeterministicFallback_BudgetZero) {
     symbolic::CASContext ctx_small;
     ctx_small.set_max_galois_frobenius_primes(0U);

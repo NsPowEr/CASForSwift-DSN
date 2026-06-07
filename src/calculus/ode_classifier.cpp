@@ -162,6 +162,351 @@ namespace cas::calculus {
     return ctx.simplify(res);
 }
 
+struct FirstOrderLinearInYPrime {
+    ExprPtr A; // Coefficient of y'
+    ExprPtr B; // Constant term (w.r.t y')
+};
+
+static std::optional<FirstOrderLinearInYPrime> extract_first_order_yprime(
+    ExprPtr E, const Symbol& y, const Symbol& x, ExprPtr y_prime, symbolic::CASContext& ctx) {
+    AstArena& arena = ctx.arena();
+    auto eval_yp = [&](long long k) -> Result<ExprPtr> {
+        ExprPtr val = arena.make<IntegerLit>(BigInt(k));
+        auto s = substitute_any(E, y_prime, val, ctx);
+        if (s.is_error()) return s;
+        return ctx.simplify(s.value());
+    };
+    
+    auto e0 = eval_yp(0); if (e0.is_error()) return std::nullopt;
+    auto e1 = eval_yp(1); if (e1.is_error()) return std::nullopt;
+    auto e2 = eval_yp(2); if (e2.is_error()) return std::nullopt;
+    
+    ExprPtr B = e0.value();
+    auto A_raw = ctx.simplify(arena.make<Binary>(BinaryOp::Sub, e1.value(), B));
+    if (A_raw.is_error()) return std::nullopt;
+    ExprPtr A = A_raw.value();
+    
+    auto two = arena.make<IntegerLit>(BigInt(2));
+    auto expected_e2 = ctx.simplify(arena.make<Binary>(BinaryOp::Add,
+        arena.make<Binary>(BinaryOp::Mul, two, A), B));
+    if (expected_e2.is_error()) return std::nullopt;
+    auto diff = algebra::expand(arena.make<Binary>(BinaryOp::Sub, e2.value(), expected_e2.value()), ctx);
+    if (diff.is_error() || !is_zero_expr(diff.value(), ctx)) return std::nullopt;
+    
+    auto depends_on_yp = [&](ExprPtr e) {
+        auto mo = find_max_order(e, y, x);
+        return mo.has_value() && *mo >= 1U;
+    };
+    if (depends_on_yp(A) || depends_on_yp(B)) return std::nullopt;
+    
+    return FirstOrderLinearInYPrime{A, B};
+}
+
+[[nodiscard]] static std::optional<OdeClassification> try_separable(
+    ExprPtr E, const Symbol& y, const Symbol& x, ExprPtr y_prime, symbolic::CASContext& ctx) {
+    auto lin = extract_first_order_yprime(E, y, x, y_prime, ctx);
+    if (!lin) return std::nullopt;
+    ExprPtr A = lin->A;
+    ExprPtr B = lin->B;
+    
+    if (is_zero_expr(A, ctx)) return std::nullopt;
+    
+    AstArena& arena = ctx.arena();
+    
+    if (is_zero_expr(B, ctx)) {
+        OdeClassification res(OdeType::Separable, E, y, x);
+        res.components.push_back(arena.make<IntegerLit>(BigInt(1)));
+        res.components.push_back(arena.make<IntegerLit>(BigInt(0)));
+        return res;
+    }
+
+    if (!depends_on(A, x) && !depends_on(B, y)) {
+        OdeClassification res(OdeType::Separable, E, y, x);
+        res.components.push_back(A);
+        res.components.push_back(ctx.simplify(arena.make<Unary>(UnaryOp::Neg, B)).value());
+        return res;
+    }
+
+    std::pair<long long, long long> points[] = {{0,0}, {1,1}, {0,1}, {1,0}, {-1,-1}, {2,2}};
+    for (auto [x0, y0] : points) {
+        auto eval_xy = [&](ExprPtr expr, long long xv, long long yv) -> Result<ExprPtr> {
+            auto s1 = substitute_any(expr, arena.make<Symbol>(x.name), arena.make<IntegerLit>(BigInt(xv)), ctx);
+            if (s1.is_error()) return s1;
+            auto s2 = substitute_any(s1.value(), arena.make<Symbol>(y.name), arena.make<IntegerLit>(BigInt(yv)), ctx);
+            if (s2.is_error()) return s2;
+            return ctx.simplify(s2.value());
+        };
+        
+        auto A0_res = eval_xy(A, x0, y0);
+        auto B0_res = eval_xy(B, x0, y0);
+        if (A0_res.is_error() || B0_res.is_error()) continue;
+        ExprPtr A0 = A0_res.value();
+        ExprPtr B0 = B0_res.value();
+        
+        if (is_zero_expr(A0, ctx) || is_zero_expr(B0, ctx)) continue;
+        
+        auto Ax_y0_res = substitute_any(A, arena.make<Symbol>(y.name), arena.make<IntegerLit>(BigInt(y0)), ctx);
+        auto Bx_y0_res = substitute_any(B, arena.make<Symbol>(y.name), arena.make<IntegerLit>(BigInt(y0)), ctx);
+        if (Ax_y0_res.is_error() || Bx_y0_res.is_error()) continue;
+        ExprPtr Ax_y0 = ctx.simplify(Ax_y0_res.value()).value();
+        ExprPtr Bx_y0 = ctx.simplify(Bx_y0_res.value()).value();
+        
+        auto Ax0_y_res = substitute_any(A, arena.make<Symbol>(x.name), arena.make<IntegerLit>(BigInt(x0)), ctx);
+        auto Bx0_y_res = substitute_any(B, arena.make<Symbol>(x.name), arena.make<IntegerLit>(BigInt(x0)), ctx);
+        if (Ax0_y_res.is_error() || Bx0_y_res.is_error()) continue;
+        ExprPtr Ax0_y = ctx.simplify(Ax0_y_res.value()).value();
+        ExprPtr Bx0_y = ctx.simplify(Bx0_y_res.value()).value();
+        
+        auto term1 = arena.make<Binary>(BinaryOp::Mul, A, 
+            arena.make<Binary>(BinaryOp::Mul, Bx_y0, 
+                arena.make<Binary>(BinaryOp::Mul, Bx0_y, A0)));
+        auto term2 = arena.make<Binary>(BinaryOp::Mul, B, 
+            arena.make<Binary>(BinaryOp::Mul, Ax0_y, 
+                arena.make<Binary>(BinaryOp::Mul, B0, Ax_y0)));
+        
+        auto diff = algebra::expand(arena.make<Binary>(BinaryOp::Sub, term1, term2), ctx);
+        if (diff.is_ok() && is_zero_expr(diff.value(), ctx)) {
+            auto M_raw = ctx.simplify(arena.make<Binary>(BinaryOp::Div, 
+                arena.make<Unary>(UnaryOp::Neg, Bx_y0), Ax_y0));
+            auto N_raw = ctx.simplify(arena.make<Binary>(BinaryOp::Div,
+                arena.make<Binary>(BinaryOp::Mul, Ax0_y, B0),
+                arena.make<Binary>(BinaryOp::Mul, Bx0_y, A0)));
+                
+            if (M_raw.is_ok() && N_raw.is_ok()) {
+                OdeClassification res(OdeType::Separable, E, y, x);
+                res.components.push_back(N_raw.value());
+                res.components.push_back(M_raw.value());
+                return res;
+            }
+        }
+    }
+    
+    return std::nullopt;
+}
+
+[[nodiscard]] static std::optional<OdeClassification> try_exact(
+    ExprPtr E, const Symbol& y, const Symbol& x, ExprPtr y_prime, symbolic::CASContext& ctx) {
+    auto lin = extract_first_order_yprime(E, y, x, y_prime, ctx);
+    if (!lin) return std::nullopt;
+    ExprPtr N = lin->A;
+    ExprPtr M = lin->B;
+    
+
+    
+    AstArena& arena = ctx.arena();
+    
+    auto dM_dy = cas::calculus::diff(M, Symbol(y.name), 1, ctx);
+    auto dN_dx = cas::calculus::diff(N, Symbol(x.name), 1, ctx);
+    if (dM_dy.is_error() || dN_dx.is_error()) return std::nullopt;
+    
+    auto diff = algebra::expand(arena.make<Binary>(BinaryOp::Sub, dM_dy.value(), dN_dx.value()), ctx);
+    if (diff.is_ok()) {
+        if (is_zero_expr(diff.value(), ctx)) {
+            OdeClassification res(OdeType::Exact, E, y, x);
+            res.components.push_back(M);
+            res.components.push_back(N);
+            return res;
+        }
+    } else {
+    }
+    
+    return std::nullopt;
+}
+
+static std::optional<ExprPtr> get_y_power(ExprPtr term, const Symbol& y, symbolic::CASContext& ctx) {
+    AstArena& arena = ctx.arena();
+    if (!depends_on(term, y)) return arena.make<IntegerLit>(BigInt(0));
+    
+    if (const auto* un = expr_cast<Unary>(term)) {
+        if (un->op == UnaryOp::Neg) {
+            return get_y_power(un->operand, y, ctx);
+        }
+    }
+    
+    if (const auto* prod = expr_cast<Product>(term)) {
+        ExprPtr y_pow = nullptr;
+        for (auto f : prod->factors) {
+            if (depends_on(f, y)) {
+                if (y_pow) return std::nullopt;
+                if (const auto* sym = expr_cast<Symbol>(f)) {
+                    if (sym->name == y.name) y_pow = arena.make<IntegerLit>(BigInt(1));
+                    else return std::nullopt;
+                } else if (const auto* bin = expr_cast<Binary>(f)) {
+                    if (bin->op == BinaryOp::Pow) {
+                        if (const auto* sym = expr_cast<Symbol>(bin->left); sym && sym->name == y.name) {
+                            if (!depends_on(bin->right, y)) y_pow = bin->right;
+                            else return std::nullopt;
+                        } else return std::nullopt;
+                    } else return std::nullopt;
+                } else return std::nullopt;
+            }
+        }
+        return y_pow;
+    } else {
+        if (const auto* sym = expr_cast<Symbol>(term)) {
+            if (sym->name == y.name) return arena.make<IntegerLit>(BigInt(1));
+        } else if (const auto* bin = expr_cast<Binary>(term)) {
+            if (bin->op == BinaryOp::Pow) {
+                if (const auto* sym = expr_cast<Symbol>(bin->left); sym && sym->name == y.name) {
+                    if (!depends_on(bin->right, y)) return bin->right;
+                }
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] static std::optional<OdeClassification> try_bernoulli(
+    ExprPtr E, const Symbol& y, const Symbol& x, ExprPtr y_prime, symbolic::CASContext& ctx) {
+    auto lin = extract_first_order_yprime(E, y, x, y_prime, ctx);
+    if (!lin) return std::nullopt;
+    ExprPtr A = lin->A;
+    ExprPtr B = lin->B;
+    
+    AstArena& arena = ctx.arena();
+    if (depends_on(A, y)) return std::nullopt;
+    
+    std::vector<ExprPtr> terms;
+    std::function<void(ExprPtr, bool)> collect_terms = [&](ExprPtr e, bool neg) {
+        if (const auto* sum = expr_cast<Sum>(e)) {
+            for (auto t : sum->terms) collect_terms(t, neg);
+        } else if (const auto* bin = expr_cast<Binary>(e)) {
+            if (bin->op == BinaryOp::Add) {
+                collect_terms(bin->left, neg);
+                collect_terms(bin->right, neg);
+            } else if (bin->op == BinaryOp::Sub) {
+                collect_terms(bin->left, neg);
+                collect_terms(bin->right, !neg);
+            } else {
+                terms.push_back(neg ? arena.make<Unary>(UnaryOp::Neg, e) : e);
+            }
+        } else if (const auto* un = expr_cast<Unary>(e)) {
+            if (un->op == UnaryOp::Neg) collect_terms(un->operand, !neg);
+            else terms.push_back(neg ? arena.make<Unary>(UnaryOp::Neg, e) : e);
+        } else {
+            terms.push_back(neg ? arena.make<Unary>(UnaryOp::Neg, e) : e);
+        }
+    };
+    collect_terms(B, false);
+    
+    struct Group {
+        ExprPtr power;
+        std::vector<ExprPtr> coeffs;
+    };
+    std::vector<Group> groups;
+    
+    for (auto t : terms) {
+        auto p_opt = get_y_power(t, y, ctx);
+        if (!p_opt) return std::nullopt;
+        ExprPtr p = *p_opt;
+        
+        ExprPtr yp;
+        if (is_zero_expr(p, ctx)) {
+            yp = arena.make<IntegerLit>(BigInt(1));
+        } else if (const auto* il = expr_cast<IntegerLit>(p); il && il->value == BigInt(1)) {
+            yp = arena.make<Symbol>(y.name);
+        } else {
+            yp = arena.make<Binary>(BinaryOp::Pow, arena.make<Symbol>(y.name), p);
+        }
+        auto C_raw = ctx.simplify(arena.make<Binary>(BinaryOp::Div, t, yp));
+        if (C_raw.is_error()) return std::nullopt;
+        ExprPtr C = C_raw.value();
+        
+        bool found = false;
+        for (auto& g : groups) {
+            auto diff = algebra::expand(arena.make<Binary>(BinaryOp::Sub, g.power, p), ctx);
+            if (diff.is_ok() && is_zero_expr(diff.value(), ctx)) {
+                g.coeffs.push_back(C);
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            groups.push_back({p, {C}});
+        }
+    }
+    
+    if (groups.size() != 2) return std::nullopt;
+    
+    int idx_1 = -1;
+    for (size_t i = 0; i < groups.size(); ++i) {
+        auto diff = algebra::expand(arena.make<Binary>(BinaryOp::Sub, groups[i].power, arena.make<IntegerLit>(BigInt(1))), ctx);
+        if (diff.is_ok() && is_zero_expr(diff.value(), ctx)) {
+            idx_1 = static_cast<int>(i);
+            break;
+        }
+    }
+    if (idx_1 == -1) return std::nullopt;
+    
+    int idx_n = 1 - idx_1;
+    ExprPtr n_expr = groups[idx_n].power;
+    
+    ExprPtr P_raw = ctx.simplify(arena.make<Sum>(groups[idx_1].coeffs)).value();
+    ExprPtr Q_raw = ctx.simplify(arena.make<Unary>(UnaryOp::Neg, arena.make<Sum>(groups[idx_n].coeffs))).value();
+    
+    auto P = ctx.simplify(arena.make<Binary>(BinaryOp::Div, P_raw, A));
+    auto Q = ctx.simplify(arena.make<Binary>(BinaryOp::Div, Q_raw, A));
+    if (P.is_error() || Q.is_error()) return std::nullopt;
+    
+    OdeClassification res(OdeType::Bernoulli, E, y, x);
+    res.components.push_back(P.value());
+    res.components.push_back(Q.value());
+    res.components.push_back(n_expr);
+    return res;
+}
+
+[[nodiscard]] static std::optional<OdeClassification> try_homogeneous(
+    ExprPtr E, const Symbol& y, const Symbol& x, ExprPtr y_prime, symbolic::CASContext& ctx) {
+    auto lin = extract_first_order_yprime(E, y, x, y_prime, ctx);
+    if (!lin) return std::nullopt;
+    ExprPtr A = lin->A;
+    ExprPtr B = lin->B;
+    
+    AstArena& arena = ctx.arena();
+    
+    Symbol v_sym = ctx.make_fresh_symbol("v");
+    ExprPtr v_expr = arena.make<Symbol>(v_sym.name);
+    ExprPtr vx = arena.make<Binary>(BinaryOp::Mul, v_expr, arena.make<Symbol>(x.name));
+    
+    auto A1_res = substitute_any(A, arena.make<Symbol>(x.name), arena.make<IntegerLit>(BigInt(1)), ctx);
+    if (A1_res.is_error()) return std::nullopt;
+    auto A1_v_res = substitute_any(A1_res.value(), arena.make<Symbol>(y.name), v_expr, ctx);
+    if (A1_v_res.is_error()) return std::nullopt;
+    ExprPtr A1 = ctx.simplify(A1_v_res.value()).value();
+    
+    auto B1_res = substitute_any(B, arena.make<Symbol>(x.name), arena.make<IntegerLit>(BigInt(1)), ctx);
+    if (B1_res.is_error()) return std::nullopt;
+    auto B1_v_res = substitute_any(B1_res.value(), arena.make<Symbol>(y.name), v_expr, ctx);
+    if (B1_v_res.is_error()) return std::nullopt;
+    ExprPtr B1 = ctx.simplify(B1_v_res.value()).value();
+    
+    auto Ax_res = substitute_any(A, arena.make<Symbol>(y.name), vx, ctx);
+    if (Ax_res.is_error()) return std::nullopt;
+    ExprPtr Ax = ctx.simplify(Ax_res.value()).value();
+    
+    auto Bx_res = substitute_any(B, arena.make<Symbol>(y.name), vx, ctx);
+    if (Bx_res.is_error()) return std::nullopt;
+    ExprPtr Bx = ctx.simplify(Bx_res.value()).value();
+    
+    auto term1 = arena.make<Binary>(BinaryOp::Mul, Ax, B1);
+    auto term2 = arena.make<Binary>(BinaryOp::Mul, Bx, A1);
+    
+    auto diff = algebra::expand(arena.make<Binary>(BinaryOp::Sub, term1, term2), ctx);
+    if (diff.is_ok() && is_zero_expr(diff.value(), ctx)) {
+        auto F_v_raw = ctx.simplify(arena.make<Binary>(BinaryOp::Div,
+            arena.make<Unary>(UnaryOp::Neg, B1), A1));
+        if (F_v_raw.is_ok()) {
+            OdeClassification res(OdeType::Homogeneous, E, y, x);
+            res.parameter = v_sym;
+            res.components.push_back(F_v_raw.value());
+            return res;
+        }
+    }
+    
+    return std::nullopt;
+}
+
+
 // Detect the Riccati family  y' = q_0(x) + q_1(x)·y + q_2(x)·y²  with q_2 ≢ 0.
 // Returns std::nullopt if `E` (the equation written as E = 0) does not fit the
 // Riccati pattern; on success, fills `components` with [q_0, q_1, q_2] in this
@@ -486,6 +831,18 @@ namespace cas::calculus {
         // a chance to recognise nonlinear families (F5.3): Riccati first,
         // then Lagrange (Clairaut / d'Alembert).
         if (n == 1U) {
+            auto separable = try_separable(E, y, x, y_ders[1], ctx);
+            if (separable.has_value()) return ok(std::move(*separable));
+
+            auto exact = try_exact(E, y, x, y_ders[1], ctx);
+            if (exact.has_value()) return ok(std::move(*exact));
+
+            auto bernoulli = try_bernoulli(E, y, x, y_ders[1], ctx);
+            if (bernoulli.has_value()) return ok(std::move(*bernoulli));
+
+            auto homogeneous = try_homogeneous(E, y, x, y_ders[1], ctx);
+            if (homogeneous.has_value()) return ok(std::move(*homogeneous));
+
             auto riccati = try_riccati(E, y, x, y_ders[0], y_ders[1], ctx);
             if (riccati.has_value()) return ok(std::move(*riccati));
             auto lagrange = try_lagrange(E, y, x, y_ders[0], y_ders[1], ctx);

@@ -630,13 +630,7 @@ namespace {
 
         auto b_k_res = integrate(rhs, var, context);
         if (b_k_res.is_error()) {
-            // F0.8-MIGRATED
-            return make_unimplemented<ExprPtr>(
-                "calculus", "integrate_risch_log_extension",
-                "lower-field integration failed at degree k=" + std::to_string(kz),
-                cas::error::reason_codes::RISCH_LOG_EXTENSION_GENERAL,
-                "Extend the logarithmic extension solver or add reduction-of-order step",
-                "F0.8");
+            return b_k_res;
         }
         b[kz] = b_k_res.value();
     }
@@ -1099,26 +1093,10 @@ Result<ExprPtr> integrate_risch(ExprPtr expr, const Symbol& var, symbolic::CASCo
                                         "Implement full Risch DE solver for exponential extensions (Bronstein §5.8)",
                                         "F0.8");
                                 }
-                            }
-                        } else if (ext.type == ExtensionType::Logarithmic) {
-                            if (k == 1 && integrate_detail::is_same_symbol(ext.argument, var) && integrate_detail::is_one(coeff)) {
-                                int_terms.push_back(arena.make<Sum>(std::vector<ExprPtr>{
-                                    arena.make<Binary>(BinaryOp::Mul, arena.make<Symbol>(var), arena.make<Symbol>(t_top)),
-                                    arena.make<Unary>(UnaryOp::Neg, arena.make<Symbol>(var))
-                                }));
-                            } else {
-                                // F0.8-MIGRATED
-                                return make_unimplemented<ExprPtr>(
-                                    "calculus", "integrate_risch_logarithmic_extension",
-                                    "log extension term with non-trivial coefficient or high degree",
-                                    cas::error::reason_codes::RISCH_LOG_EXTENSION_GENERAL,
-                                    "Implement full Risch logarithmic extension (Bronstein §5.10)",
-                                    "F0.8");
-                            }
+                        }
                         }
                     }
                 }
-                
                 if (!int_terms.empty()) {
                     ExprPtr raw = int_terms.size() == 1 ? int_terms[0] : arena.make<Sum>(std::move(int_terms));
                     auto simp = context.simplify(raw);

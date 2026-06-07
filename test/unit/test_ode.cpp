@@ -113,8 +113,8 @@ TEST_F(OdeTest, Riccati_QzeroNull_BernoulliReduction) {
 
     auto cls = classify_ode(eq, y, x, ctx);
     ASSERT_TRUE(cls.is_ok());
-    EXPECT_EQ(cls.value().type, OdeType::Riccati);
-    ASSERT_EQ(cls.value().components.size(), 3U);
+    EXPECT_EQ(cls.value().type, OdeType::Separable);
+    ASSERT_EQ(cls.value().components.size(), 2U);
 
     auto sol = solve_ode(eq, y, x, ctx);
     ASSERT_TRUE(sol.is_ok()) << sol.error().message;
@@ -135,7 +135,7 @@ TEST_F(OdeTest, Riccati_ConstantCoeff_NegativeDisc) {
 
     auto cls = classify_ode(eq, y, x, ctx);
     ASSERT_TRUE(cls.is_ok());
-    EXPECT_EQ(cls.value().type, OdeType::Riccati);
+    EXPECT_EQ(cls.value().type, OdeType::Separable);
 
     auto sol = solve_ode(eq, y, x, ctx);
     ASSERT_TRUE(sol.is_ok()) << sol.error().message;
@@ -158,7 +158,7 @@ TEST_F(OdeTest, Riccati_ConstantCoeff_PositiveDisc) {
 
     auto cls = classify_ode(eq, y, x, ctx);
     ASSERT_TRUE(cls.is_ok());
-    EXPECT_EQ(cls.value().type, OdeType::Riccati);
+    EXPECT_EQ(cls.value().type, OdeType::Separable);
 
     auto sol = solve_ode(eq, y, x, ctx);
     ASSERT_TRUE(sol.is_ok()) << sol.error().message;

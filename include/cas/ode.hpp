@@ -14,6 +14,7 @@ enum class OdeType {
     Linear1stOrder,
     Bernoulli,
     Exact,
+    Homogeneous,
     // F5.3 nonlinear 1st-order families.
     // Riccati:    y' = q_0(x) + q_1(x)·y + q_2(x)·y²,  q_2 ≢ 0.
     //   components: [q_0, q_1, q_2].
