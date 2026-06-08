@@ -175,25 +175,23 @@ TEST_F(QuantityTest, SubtractionSameUnit) {
 }
 
 TEST_F(QuantityTest, AdditionDifferentUnits) {
+    // F6.6-T1: SI dimensional analysis rejects sums across distinct
+    // dimensions.  Adding length and time has no physical meaning, so the
+    // simplifier surfaces CASErrorKind::Undefined instead of leaving the
+    // ambiguous Quantity sum in the output.
     SIDimensions m; m.m = 1;
     SIDimensions s; s.s = 1;
     auto val5 = arena->make<IntegerLit>(BigInt(5));
     auto val2 = arena->make<IntegerLit>(BigInt(2));
-    
+
     auto q1 = arena->make<Quantity>(val5, m);
     auto q2 = arena->make<Quantity>(val2, s);
-    
-    // Test: 5[m] + 2[s] -> 5[m] + 2[s] (stay separate)
+
     auto sum = arena->make<Sum>(std::vector<ExprPtr>{q1, q2});
     auto simplified = symbolic::simplify(sum, *arena);
-    
-    ASSERT_TRUE(simplified.is_ok());
-    formatter::TextFormatter fmt;
-    // Note: TextFormatter sorts Sum terms. Quantity precedence is 100.
-    // canonical_compare might put m before s or vice versa.
-    std::string result = fmt.format(simplified.value());
-    EXPECT_TRUE(result == "5[m] + 2[s]" || result == "2[s] + 5[m]")
-        << "got: " << result;
+
+    ASSERT_TRUE(simplified.is_error());
+    EXPECT_EQ(simplified.error().kind, CASErrorKind::Undefined);
 }
 
 } // namespace cas

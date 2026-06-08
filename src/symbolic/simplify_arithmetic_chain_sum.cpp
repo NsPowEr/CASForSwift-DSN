@@ -67,6 +67,12 @@ Result<ExprPtr> Simplifier::simplify_sum_terms(
     }
 
     // Step 3: L3-08 Quantity addition — group by SI dimension, sum values.
+    // F6.6-T1: enforce SI dimensional analysis on the Sum.  A term mixing
+    // two distinct SI dimensions (e.g. `1·m + 1·s`) violates the physical
+    // law that only commensurable quantities can be summed.  Once detected
+    // we surface CASErrorKind::Undefined with the offending dimension pair
+    // so callers can react instead of silently producing a half-collapsed
+    // Quantity expression.
     {
         std::map<SIDimensions, std::vector<ExprPtr>> by_dim;
         std::vector<ExprPtr> non_qty;
@@ -77,8 +83,12 @@ Result<ExprPtr> Simplifier::simplify_sum_terms(
                 non_qty.push_back(t);
             }
         }
-        if (!by_dim.empty()
-            && (by_dim.size() > 1 || by_dim.begin()->second.size() > 1))
+        if (by_dim.size() > 1) {
+            return fail<ExprPtr>(make_error(CASErrorKind::Undefined,
+                "Sum mixes incompatible SI dimensions — addition is "
+                "undefined across distinct quantity dimensions (F6.6)"));
+        }
+        if (!by_dim.empty() && by_dim.begin()->second.size() > 1)
         {
             std::vector<ExprPtr> rebuilt = std::move(non_qty);
             for (auto& [dim, vals] : by_dim) {
