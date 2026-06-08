@@ -138,6 +138,13 @@ Result<double> NumericEvaluator::evaluate(ExprPtr expr) {
                     return ok(std::sqrt(args[0]));
                 }
                 if (node.func_id == BuiltinOp::Abs) return ok(std::abs(args[0]));
+                if (node.func_id == BuiltinOp::Erf) return ok(std::erf(args[0]));
+                if (node.func_id == BuiltinOp::Sinh) return ok(std::sinh(args[0]));
+                if (node.func_id == BuiltinOp::Cosh) return ok(std::cosh(args[0]));
+                if (node.func_id == BuiltinOp::Tanh) return ok(std::tanh(args[0]));
+                if (node.func_id == BuiltinOp::Asin) return ok(std::asin(args[0]));
+                if (node.func_id == BuiltinOp::Acos) return ok(std::acos(args[0]));
+                if (node.func_id == BuiltinOp::Atan) return ok(std::atan(args[0]));
                 if (node.name == "atan2") return ok(std::atan2(args[0], args[1]));
                 
                 // F0.8-MIGRATED

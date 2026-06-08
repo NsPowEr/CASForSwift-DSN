@@ -83,6 +83,7 @@ set(CAS_PUBLIC_HEADERS
     include/cas/rational.hpp
     include/cas/result.hpp
     include/cas/solve_inequality.hpp
+    include/cas/statistics.hpp
     include/cas/symbolic.hpp
     include/cas/token.hpp
     include/cas/units.hpp
@@ -316,6 +317,7 @@ set(CAS_NUMERIC_SOURCES
     src/numeric/lipschitz.cpp
     src/numeric/integration.cpp
     src/numeric/interpolation.cpp
+    src/statistics/normal.cpp
     src/numeric/ode.cpp
     src/numeric/sampler.cpp
     src/numeric/bigfloat.cpp
@@ -618,6 +620,7 @@ test/unit/algebra/test_half_gcd.cpp
         test/unit/numeric/test_bigfloat.cpp
         test/unit/numeric/test_gauss_kronrod.cpp
         test/unit/numeric/test_interpolation.cpp
+        test/unit/statistics/test_normal.cpp
         test/unit/formatter/test_formatter.cpp
         test/unit/gui/test_cas_gui_session.cpp
         test/unit/algebra/test_resultant.cpp
