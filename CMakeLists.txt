@@ -82,6 +82,7 @@ set(CAS_PUBLIC_HEADERS
     include/cas/parser.hpp
     include/cas/rational.hpp
     include/cas/result.hpp
+    include/cas/solve_inequality.hpp
     include/cas/symbolic.hpp
     include/cas/token.hpp
     include/cas/units.hpp
@@ -258,6 +259,7 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/polynomial_groebner_f5.cpp
     src/algebra/csolve.cpp
     src/algebra/fsolve.cpp
+    src/algebra/solve_inequality.cpp
     src/algebra/partial_fractions.cpp
     src/algebra/partial_fractions_lrt.cpp
     src/algebra/solve_polynomial.cpp
@@ -631,6 +633,7 @@ test/unit/algebra/test_half_gcd.cpp
     test/unit/algebra/test_algebraic_number_bridge.cpp
         test/unit/algebra/test_algebraic_tower.cpp
         test/unit/algebra/test_fsolve.cpp
+        test/unit/algebra/test_solve_inequality.cpp
         test/unit/algebra/test_factorization_lll.cpp
         test/unit/algebra/test_van_hoeij.cpp
         test/unit/algebra/test_factorization_trager.cpp
@@ -647,9 +650,10 @@ test/unit/algebra/test_half_gcd.cpp
         test/unit/symbolic/test_property_based.cpp
         test/unit/symbolic/test_regression.cpp
         test/unit/symbolic/test_quantity.cpp
-        # test/unit/symbolic/test_assumptions_advanced.cpp
-        # test/unit/symbolic/test_assumptions_advanced_new.cpp
+        test/unit/symbolic/test_assumptions_advanced.cpp
+        test/unit/symbolic/test_assumptions_advanced_new.cpp
         test/unit/symbolic/test_assumptions_relational.cpp
+        test/unit/symbolic/test_assumptions_canonical_50.cpp
         # test/unit/symbolic/test_simplification_advanced.cpp
         test/unit/symbolic/test_integration_advanced.cpp
         test/unit/symbolic/test_laurent_series.cpp
