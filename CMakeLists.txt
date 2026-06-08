@@ -876,9 +876,13 @@ if(ENABLE_COVERAGE)
     endif()
 endif()
 
-# F0.6 Anti-monolith CI Gate
-add_custom_target(check_anti_monolith
+# F0.6 / F7.0-A1.5 Anti-monolith CI Gate (HARD-FAIL on every build).
+# Wired into ALL target so a violation breaks the build, not just an opt-in check.
+# Whitelist managed in scripts/file_size_whitelist.txt — pre-existing debt only,
+# no new entries without a corresponding split task in CAS_TASKS.md.
+add_custom_target(check_anti_monolith ALL
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_file_size.sh
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    COMMENT "Scanning for anti-monolith violations (files > 500 lines)..."
+    COMMENT "F7.0-A1.5: Anti-monolith scan (files > 500 lines, whitelist-aware)..."
+    VERBATIM
 )

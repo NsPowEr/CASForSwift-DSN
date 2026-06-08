@@ -3,17 +3,16 @@
 # Format: one path relative to repo root per line, comments with #.
 # No new entries without a corresponding split task filed.
 
-# src/calculus/limit_mrv.cpp              (~1019 lines) — Gruntz MRV algorithm; split target: F5.2
-src/calculus/limit_mrv.cpp
+# src/calculus/limit_mrv.cpp — SPLIT DONE (F7.0-A1.3): now 181 LOC.
+#   Split into limit_mrv_set/_compare/_leading/_exp.cpp + limit_mrv_internal.hpp.
 
-# src/algebra/polynomial_gcd_multivariate.cpp  (~1010 lines) — Brown+Zippel; split target: F3.1
-src/algebra/polynomial_gcd_multivariate.cpp
+# src/algebra/polynomial_gcd_multivariate.cpp — SPLIT DONE (F7.0-A1.2): now 430 LOC.
+#   Split into _helpers/_interp/_sparse/_linear.cpp + _internal.hpp.
 
-# src/algebra/factorization_polynomials.cpp    (~1005 lines) — Cantor-Zassenhaus+recomb; split target: F2.3
-src/algebra/factorization_polynomials.cpp
+# src/algebra/factorization_polynomials.cpp — file removed/restructured previously.
 
-# src/calculus/integrate_risch.cpp        (~913 lines)  — Risch-Hermite pipeline; split target: F5.1
-src/calculus/integrate_risch.cpp
+# src/calculus/integrate_risch.cpp — SPLIT DONE (F7.0-A1.1): now 338 LOC.
+#   Split into integrate_risch_hermite/_rde.cpp + _internal.hpp.
 
 # src/symbolic/simplify_arithmetic.cpp    (~724 lines)  — like-term collection; split target: F1.4
 src/symbolic/simplify_arithmetic.cpp
@@ -52,8 +51,7 @@ src/algebra/solve_polynomial.cpp
 # src/symbolic/simplify_exp_log.cpp       (~550 lines)  — exp/log simplification; split target: F1.4
 src/symbolic/simplify_exp_log.cpp
 
-# src/symbolic/simplify_arithmetic_chain.cpp (~545 lines) — chain simplification; split target: F1.4
-src/symbolic/simplify_arithmetic_chain.cpp
+# src/symbolic/simplify_arithmetic_chain.cpp — SPLIT DONE (F1.6-B1): now 440 LOC.
 
 # include/cas/ast.hpp                     (~542 lines)  — public AST header; split target: F1.3
 include/cas/ast.hpp
@@ -105,8 +103,8 @@ include/cas/cas_context_params.hpp
 # src/calculus/differential_field.cpp      (577 lines) — split target: F5.1
 src/calculus/differential_field.cpp
 
-# src/calculus/ode_classifier.cpp          (924 lines) — split target: F5.3
-src/calculus/ode_classifier.cpp
+# src/calculus/ode_classifier.cpp — SPLIT DONE (F7.0-A1.4): now 172 LOC.
+#   Split into ode_classifier_first_order/_higher_order.cpp + _internal.hpp.
 
 # src/calculus/ode_solver_frobenius.cpp    (644 lines) — split target: F5.3
 src/calculus/ode_solver_frobenius.cpp
