@@ -150,6 +150,21 @@ struct IntegrationOptions {
     const IntegrationOptions& options = {});
 
 /**
+ * F7.3-T2 — Lagrange polynomial interpolation (barycentric form).
+ */
+struct InterpolationPoint {
+    double x;
+    double y;
+};
+
+[[nodiscard]] Result<std::vector<double>> lagrange_weights(
+    const std::vector<InterpolationPoint>& points);
+
+[[nodiscard]] Result<double> lagrange_evaluate(
+    const std::vector<InterpolationPoint>& points,
+    double x_eval);
+
+/**
  * Risolutore ODE.
  */
 struct OdePoint {

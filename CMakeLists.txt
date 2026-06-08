@@ -315,6 +315,7 @@ set(CAS_NUMERIC_SOURCES
     src/numeric/aberth_root_isolator.cpp
     src/numeric/lipschitz.cpp
     src/numeric/integration.cpp
+    src/numeric/interpolation.cpp
     src/numeric/ode.cpp
     src/numeric/sampler.cpp
     src/numeric/bigfloat.cpp
@@ -616,6 +617,7 @@ test/unit/algebra/test_half_gcd.cpp
         test/unit/numeric/test_numeric.cpp
         test/unit/numeric/test_bigfloat.cpp
         test/unit/numeric/test_gauss_kronrod.cpp
+        test/unit/numeric/test_interpolation.cpp
         test/unit/formatter/test_formatter.cpp
         test/unit/gui/test_cas_gui_session.cpp
         test/unit/algebra/test_resultant.cpp
