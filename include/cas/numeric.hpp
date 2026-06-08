@@ -131,9 +131,15 @@ struct MultiRootOptions {
 /**
  * Integrazione numerica.
  */
+enum class IntegrationScheme {
+    AdaptiveSimpson,   // 4th-order, low-cost legacy default.
+    GaussKronrod,      // F7.3-T1: Gauss-Kronrod 15/7 with nested error estimate.
+};
+
 struct IntegrationOptions {
     double tolerance{1e-8};
     std::uint32_t max_depth{20};
+    IntegrationScheme scheme{IntegrationScheme::AdaptiveSimpson};
 };
 
 [[nodiscard]] Result<double> integrate_numeric(

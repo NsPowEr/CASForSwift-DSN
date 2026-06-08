@@ -615,6 +615,7 @@ test/unit/algebra/test_half_gcd.cpp
     test/unit/linalg/test_eigen_over_extension.cpp
         test/unit/numeric/test_numeric.cpp
         test/unit/numeric/test_bigfloat.cpp
+        test/unit/numeric/test_gauss_kronrod.cpp
         test/unit/formatter/test_formatter.cpp
         test/unit/gui/test_cas_gui_session.cpp
         test/unit/algebra/test_resultant.cpp
