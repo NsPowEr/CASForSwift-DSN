@@ -257,7 +257,7 @@ void lll_reduction(LatticeMatrix& b, double delta = 0.75);
     std::size_t lll_threshold = 10U);
 
 // Modular Factoring
-[[nodiscard]] Result<std::vector<IntPoly>> factor_polynomial_mod_p(IntPoly f, const BigInt& p);
+[[nodiscard]] Result<std::vector<IntPoly>> factor_polynomial_mod_p(IntPoly f, const BigInt& p, symbolic::CASContext* ctx = nullptr);
 
 // Half-GCD (Knuth-Schönhage O(M(n)log n)) for integer polynomials (A4, F2 Block A).
 // Dispatcher calls this when min(deg(a), deg(b)) > ctx.half_gcd_degree_threshold().

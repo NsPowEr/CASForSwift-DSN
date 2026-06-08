@@ -206,7 +206,7 @@ Result<std::string> galois_group_quintic_irreducible(
             }
         }
         if (!skip) {
-            auto fact_mod = factor_polynomial_mod_p(f_int, p_big);
+            auto fact_mod = factor_polynomial_mod_p(f_int, p_big, &ctx);
             if (fact_mod.is_ok()) {
                 std::vector<std::size_t> cyc;
                 cyc.reserve(fact_mod.value().size());

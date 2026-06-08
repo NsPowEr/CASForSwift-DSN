@@ -335,10 +335,10 @@ void append_factor_with_multiplicity(
         const std::size_t deg_p_product = remaining.degree() * static_cast<std::size_t>(p.to_u64());
         auto mod_factors_res = (deg_p_product <= ctx.max_berlekamp_matrix_size())
             ? berlekamp_factor_mod_p(remaining, p, ctx.max_berlekamp_matrix_size())
-            : factor_polynomial_mod_p(remaining, p);
+            : factor_polynomial_mod_p(remaining, p, &ctx);
         // If Berlekamp returns Unimplemented (BERLEKAMP_MATRIX_TOO_LARGE), fall back to CZ.
         if (mod_factors_res.is_error()) {
-            mod_factors_res = factor_polynomial_mod_p(remaining, p);
+            mod_factors_res = factor_polynomial_mod_p(remaining, p, &ctx);
         }
         if (mod_factors_res.is_ok() && mod_factors_res.value().size() > 1) {
             auto mod_factors = mod_factors_res.value();

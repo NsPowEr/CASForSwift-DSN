@@ -18,6 +18,7 @@
 #include <vector>
 #include <list>
 #include <iterator>
+#include <random>
 
 namespace cas::symbolic {
 class CASContext;
@@ -201,6 +202,8 @@ public:
     void clear_interrupt() noexcept { interrupted_ = false; }
     [[nodiscard]] bool is_interrupted() const noexcept { return interrupted_; }
 
+    [[nodiscard]] std::mt19937& rng() noexcept { return rng_; }
+
     [[nodiscard]] Result<ExprPtr> simplify(ExprPtr expr);
     [[nodiscard]] Result<ExprPtr> substitute(ExprPtr expr, const Symbol& variable, ExprPtr value);
 
@@ -258,6 +261,7 @@ public:
     std::uint64_t fresh_symbol_counter_{0U};
     PostSimplifyHook post_simplify_hook_{nullptr};
     std::atomic_bool interrupted_{false};
+    std::mt19937 rng_{0xCAFEBABEULL};
 
 public:
 // Performance Caches

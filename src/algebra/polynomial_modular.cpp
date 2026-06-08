@@ -133,7 +133,7 @@ std::vector<std::pair<IntPoly, std::size_t>> distinct_degree_factorization(IntPo
     return result;
 }
 
-static std::vector<IntPoly> equal_degree_factorization(IntPoly f, std::size_t d, const BigInt& p) {
+static std::vector<IntPoly> equal_degree_factorization(IntPoly f, std::size_t d, const BigInt& p, symbolic::CASContext* ctx) {
     if (f.degree() == d) return {f};
     
     std::vector<IntPoly> factors;
@@ -142,7 +142,8 @@ static std::vector<IntPoly> equal_degree_factorization(IntPoly f, std::size_t d,
         std::uint64_t cv = coeff.to_u64();
         poly_seed ^= cv + 0x9e3779b9ULL + (poly_seed << 6U) + (poly_seed >> 2U);
     }
-    std::mt19937 rng(static_cast<std::uint32_t>(poly_seed));
+    std::mt19937 local_rng(static_cast<std::uint32_t>(poly_seed));
+    std::mt19937& rng = ctx ? ctx->rng() : local_rng;
     
     while (f.degree() > d) {
         // Choose random a(x) with deg(a) < deg(f)
@@ -157,7 +158,7 @@ static std::vector<IntPoly> equal_degree_factorization(IntPoly f, std::size_t d,
         IntPoly g = poly_gcd_mod(f, a, p);
         if (g.degree() > 0) {
             if (g.degree() % d == 0) {
-                for (auto&& fact : equal_degree_factorization(g, d, p)) factors.push_back(fact);
+                for (auto&& fact : equal_degree_factorization(g, d, p, ctx)) factors.push_back(fact);
                 f = poly_div_rem_mod(f, g, p).first;
                 continue;
             }
@@ -174,7 +175,7 @@ static std::vector<IntPoly> equal_degree_factorization(IntPoly f, std::size_t d,
             
             g = poly_gcd_mod(f, b, p);
             if (g.degree() > 0 && g.degree() < f.degree()) {
-                for (auto&& fact : equal_degree_factorization(g, d, p)) factors.push_back(fact);
+                for (auto&& fact : equal_degree_factorization(g, d, p, ctx)) factors.push_back(fact);
                 f = poly_div_rem_mod(f, g, p).first;
             }
         } else {
@@ -190,7 +191,7 @@ static std::vector<IntPoly> equal_degree_factorization(IntPoly f, std::size_t d,
             
             g = poly_gcd_mod(f, tr, p);
             if (g.degree() > 0 && g.degree() < f.degree()) {
-                for (auto&& fact : equal_degree_factorization(g, d, p)) factors.push_back(fact);
+                for (auto&& fact : equal_degree_factorization(g, d, p, ctx)) factors.push_back(fact);
                 f = poly_div_rem_mod(f, g, p).first;
             }
         }
@@ -199,7 +200,7 @@ static std::vector<IntPoly> equal_degree_factorization(IntPoly f, std::size_t d,
     return factors;
 }
 
-Result<std::vector<IntPoly>> factor_polynomial_mod_p(IntPoly f, const BigInt& p) {
+Result<std::vector<IntPoly>> factor_polynomial_mod_p(IntPoly f, const BigInt& p, symbolic::CASContext* ctx) {
     if (f.is_zero()) return ok(std::vector<IntPoly>{});
     
     BigInt lc = f.leading_coeff();
@@ -216,7 +217,7 @@ Result<std::vector<IntPoly>> factor_polynomial_mod_p(IntPoly f, const BigInt& p)
         if (g.degree() == d) {
             all_factors.push_back(g);
         } else {
-            auto edf = equal_degree_factorization(g, d, p);
+            auto edf = equal_degree_factorization(g, d, p, ctx);
             all_factors.insert(all_factors.end(), edf.begin(), edf.end());
         }
     }
