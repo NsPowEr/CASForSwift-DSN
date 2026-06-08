@@ -634,6 +634,7 @@ test/unit/algebra/test_half_gcd.cpp
         test/unit/algebra/test_algebraic_tower.cpp
         test/unit/algebra/test_fsolve.cpp
         test/unit/algebra/test_solve_inequality.cpp
+        test/unit/algebra/test_f2_gate_benchmark.cpp
         test/unit/algebra/test_factorization_lll.cpp
         test/unit/algebra/test_van_hoeij.cpp
         test/unit/algebra/test_factorization_trager.cpp
