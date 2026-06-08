@@ -319,6 +319,8 @@ set(CAS_NUMERIC_SOURCES
     src/numeric/interpolation.cpp
     src/statistics/normal.cpp
     src/statistics/regression.cpp
+    src/statistics/discrete.cpp
+    src/statistics/continuous.cpp
     src/numeric/ode.cpp
     src/numeric/sampler.cpp
     src/numeric/bigfloat.cpp
@@ -624,6 +626,8 @@ test/unit/algebra/test_half_gcd.cpp
         test/unit/numeric/test_parametric_sampler.cpp
         test/unit/statistics/test_normal.cpp
         test/unit/statistics/test_regression.cpp
+        test/unit/statistics/test_discrete.cpp
+        test/unit/statistics/test_continuous.cpp
         test/unit/formatter/test_formatter.cpp
         test/unit/gui/test_cas_gui_session.cpp
         test/unit/algebra/test_resultant.cpp
