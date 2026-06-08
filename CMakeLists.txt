@@ -621,6 +621,7 @@ test/unit/algebra/test_half_gcd.cpp
         test/unit/numeric/test_bigfloat.cpp
         test/unit/numeric/test_gauss_kronrod.cpp
         test/unit/numeric/test_interpolation.cpp
+        test/unit/numeric/test_parametric_sampler.cpp
         test/unit/statistics/test_normal.cpp
         test/unit/statistics/test_regression.cpp
         test/unit/formatter/test_formatter.cpp
