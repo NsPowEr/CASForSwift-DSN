@@ -65,4 +65,6 @@ private:
 
 [[nodiscard]] Result<Rational> checked_divide(const Rational& lhs, const Rational& rhs);
 
+[[nodiscard]] Rational double_to_rational_approx(double v);
+
 }  // namespace cas

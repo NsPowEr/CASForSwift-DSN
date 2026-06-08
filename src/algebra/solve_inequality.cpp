@@ -24,6 +24,8 @@
 #include "cas/ast.hpp"
 #include "cas/numeric.hpp"
 
+#include "cas/rational.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -31,22 +33,6 @@
 namespace cas::algebra {
 
 namespace {
-
-[[nodiscard]] Rational double_to_rational_approx(double v) {
-    if (v == 0.0) return Rational(BigInt(0));
-    // Use a 60-bit dyadic approximation: v ≈ n / 2^60.
-    constexpr int kBits = 60;
-    const double scaled = std::ldexp(v, kBits);
-    if (!std::isfinite(scaled)) {
-        // Fall back to the integer part if the scaling overflows.
-        return Rational(BigInt(static_cast<std::int64_t>(v)));
-    }
-    const auto n = static_cast<std::int64_t>(std::llround(scaled));
-    // 2^60 as BigInt without resorting to BigInt::pow.
-    BigInt den(1);
-    for (int i = 0; i < kBits; ++i) den = den * BigInt(2);
-    return Rational(BigInt(n), den);
-}
 
 // Conservative search window for find_polynomial_roots_sturm.  We do not
 // compute Cauchy's exact bound (it requires double-precision coefficient
