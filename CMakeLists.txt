@@ -277,6 +277,10 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/polynomial_gcd_brown_lc_scaling.cpp
     src/algebra/polynomial_gcd_fp_recursive.cpp
     src/algebra/polynomial_gcd_zippel_prony.cpp
+    src/algebra/polynomial_gcd_multivariate_helpers.cpp
+    src/algebra/polynomial_gcd_multivariate_interp.cpp
+    src/algebra/polynomial_gcd_multivariate_sparse.cpp
+    src/algebra/polynomial_gcd_multivariate_linear.cpp
     src/algebra/polynomial_gcd_multivariate.cpp
     src/algebra/algebraic_equal.cpp
     src/algebra/polynomial_integer.cpp

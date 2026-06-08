@@ -21,6 +21,14 @@ struct FactorKeyLess {
 
 using CoeffMap = std::map<FactorKey, BigInt, FactorKeyLess>;
 
+[[nodiscard]] FactorKey make_factor_key(const std::vector<std::pair<Symbol, unsigned int>>& factors,
+                                        const std::optional<std::string>& omit_var = std::nullopt);
+
+[[nodiscard]] std::vector<std::pair<Symbol, unsigned int>> key_to_factors(const FactorKey& key);
+
+[[nodiscard]] MultivariatePolynomial multiply_by_scalar(const MultivariatePolynomial& poly,
+                                                         const BigInt& scalar);
+
 [[nodiscard]] std::vector<Symbol> collect_all_variables(const MultivariatePolynomial& p,
                                                         const MultivariatePolynomial& q);
 [[nodiscard]] std::size_t degree_in_var(const MultivariatePolynomial& poly, const Symbol& var);
