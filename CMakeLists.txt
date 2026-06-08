@@ -197,6 +197,10 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/limit_polynomial.cpp
     src/calculus/limit_series.cpp
     src/calculus/limit_mrv.cpp
+    src/calculus/limit_mrv_compare.cpp
+    src/calculus/limit_mrv_set.cpp
+    src/calculus/limit_mrv_leading.cpp
+    src/calculus/limit_mrv_exp.cpp
     src/calculus/residue.cpp
     src/calculus/residue_theorem.cpp
     src/calculus/laurent_general.cpp
@@ -206,6 +210,8 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/diff_rules.cpp
     src/calculus/integrate_parts.cpp
     src/calculus/ode_classifier.cpp
+    src/calculus/ode_classifier_first_order.cpp
+    src/calculus/ode_classifier_higher_order.cpp
     src/calculus/ode_solver_1st_order.cpp
     src/calculus/ode_solver_advanced.cpp
     src/calculus/ode_solver_frobenius.cpp
