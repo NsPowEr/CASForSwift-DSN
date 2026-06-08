@@ -1,7 +1,10 @@
 #include "cas/numeric.hpp"
 #include "cas/error_helpers.hpp"
+#include "cas/symbolic.hpp"
+#include <algorithm>
 #include <cmath>
 #include <numbers>
+#include <string>
 
 namespace cas::numeric {
 
@@ -145,65 +148,44 @@ Result<double> NumericEvaluator::evaluate(ExprPtr expr) {
                     "Add std:: dispatch for '" + node.name + "' in evaluator.cpp or extend FuncCall handler",
                     "F1.x");
             } else if constexpr (std::is_same_v<NodeT, RootOf>) {
-                // Newton-Raphson per trovare una radice numerica del polinomio P(x) = 0
+                // F6.5-T1: Use Sturm-isolated real roots indexed in ascending
+                // order.  The previous seed-scheme heuristic (1.0, -1.0, 2.0,
+                // ...) did not guarantee a unique mapping from `root_index` to
+                // a specific root — adjacent indices could converge to the
+                // same Newton attractor.  Sturm isolation gives the canonical
+                // i-th real root by ascending value, matching the AST contract.
                 const std::string& var_name = node.variable.name;
-                
-                // Salvataggio ambiente
-                auto old_it = env_.find(var_name);
-                std::optional<double> old_val;
-                if (old_it != env_.end()) old_val = old_it->second;
 
-                auto f = [&](double val) -> Result<double> {
-                    env_[var_name] = val;
-                    return evaluate(node.polynomial);
-                };
-
-                auto df = [&](double val) -> Result<double> {
-                    const double h = 1e-7;
-                    auto f1 = f(val + h);
-                    if (f1.is_error()) return f1;
-                    auto f2 = f(val - h);
-                    if (f2.is_error()) return f2;
-                    return ok((f1.value() - f2.value()) / (2.0 * h));
-                };
-
-                // Guess iniziale: usiamo l'indice per diversificare i punti di partenza
-                double x = 0.0;
-                if (node.root_index.has_value()) {
-                    // Mappa 0 -> 1.0, 1 -> -1.0, 2 -> 2.0, 3 -> -2.0, etc.
-                    // Questo aiuta a trovare radici diverse per indici diversi
-                    double idx = static_cast<double>(*node.root_index);
-                    if (*node.root_index % 2 == 0) x = (idx / 2.0) + 1.0;
-                    else x = -((idx + 1.0) / 2.0);
+                // find_polynomial_roots_sturm needs a CASContext.  We build a
+                // throwaway one because the evaluator is intentionally
+                // decoupled from the symbolic engine state.
+                cas::symbolic::CASContext local_ctx;
+                constexpr double kHalfWidth = 1.0e3;
+                constexpr double kTol       = 1.0e-9;
+                auto roots_res = cas::numeric::find_polynomial_roots_sturm(
+                    node.polynomial, var_name, local_ctx,
+                    -kHalfWidth, kHalfWidth, kTol);
+                if (roots_res.is_error()) {
+                    return fail<double>(roots_res.error());
                 }
-                
-                bool found = false;
-                for (int attempt = 0; attempt < 10 && !found; ++attempt) {
-                    if (attempt > 0) {
-                        // Se il primo tentativo fallisce, proviamo una spirale
-                        x = (attempt % 2 == 0) ? static_cast<double>(attempt) : -static_cast<double>(attempt);
-                    }
-                    
-                    for (int i = 0; i < 50; ++i) {
-                        auto fx = f(x);
-                        if (fx.is_error()) break;
-                        if (std::abs(fx.value()) < 1e-10) { found = true; break; }
-
-                        auto dfx = df(x);
-                        if (dfx.is_error() || std::abs(dfx.value()) < 1e-15) break;
-
-                        double next_x = x - fx.value() / dfx.value();
-                        if (std::abs(next_x - x) < 1e-12) { found = true; x = next_x; break; }
-                        x = next_x;
-                    }
+                auto roots = std::move(roots_res.value());
+                if (roots.empty()) {
+                    return fail<double>(make_error(
+                        CASErrorKind::Undefined,
+                        "RootOf: polynomial has no real roots in the Sturm "
+                        "search window (±1e3)"));
                 }
-
-                // Ripristino ambiente
-                if (old_val) env_[var_name] = *old_val;
-                else env_.erase(var_name);
-
-                if (found) return ok(x);
-                return fail<double>(make_error(CASErrorKind::Undefined, "Newton-Raphson failed to converge for RootOf"));
+                std::sort(roots.begin(), roots.end());
+                const std::size_t idx = node.root_index.value_or(0);
+                if (idx >= roots.size()) {
+                    return fail<double>(make_error(
+                        CASErrorKind::InvalidArgument,
+                        "RootOf: root_index out of range (got " +
+                        std::to_string(idx) + ", only " +
+                        std::to_string(roots.size()) +
+                        " real roots found)"));
+                }
+                return ok(roots[idx]);
             } else {
                 // F0.8-MIGRATED
                 return make_unimplemented<double>(

@@ -62,20 +62,21 @@ TEST_F(RootOfTest, AlgebraicEqualityCubic) {
 }
 
 TEST_F(RootOfTest, NumericalEvaluation) {
-    // RootOf(x^2 - 2, x, 0) -> sqrt(2) approx 1.41421356
+    // F6.5-T1: root_index follows the canonical ascending order produced by
+    // the Sturm-isolated bracketing of real roots, so index 0 = -sqrt(2)
+    // (smallest) and index 1 = +sqrt(2) (largest).
     auto x = ctx->arena().make<Symbol>("x");
     auto x2 = ctx->arena().make<Binary>(BinaryOp::Pow, x, ctx->arena().make<IntegerLit>(BigInt(2)));
     auto poly = ctx->arena().make<Binary>(BinaryOp::Sub, x2, ctx->arena().make<IntegerLit>(BigInt(2)));
-    auto root = ctx->arena().make<RootOf>(poly, Symbol("x"), 0U); // index 0 is usually positive root
-    
-    auto val = numeric::eval(root);
-    ASSERT_TRUE(val.is_ok());
-    EXPECT_NEAR(val.value(), 1.41421356, 1e-7);
-    
-    auto root_neg = ctx->arena().make<RootOf>(poly, Symbol("x"), 1U);
+    auto root_neg = ctx->arena().make<RootOf>(poly, Symbol("x"), 0U);
     auto val_neg = numeric::eval(root_neg);
     ASSERT_TRUE(val_neg.is_ok());
     EXPECT_NEAR(val_neg.value(), -1.41421356, 1e-7);
+
+    auto root_pos = ctx->arena().make<RootOf>(poly, Symbol("x"), 1U);
+    auto val_pos = numeric::eval(root_pos);
+    ASSERT_TRUE(val_pos.is_ok());
+    EXPECT_NEAR(val_pos.value(), 1.41421356, 1e-7);
 }
 
 } // namespace cas::test
