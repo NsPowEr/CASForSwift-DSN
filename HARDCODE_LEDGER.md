@@ -15,6 +15,23 @@
 
 ---
 
+### HC-F70-A21-NUMERIC-BOUNDARY — solve_inequality double boundary
+- **File**: `src/algebra/solve_inequality.cpp:96-115`
+- **Categoria CLAUDE.md**: Cat 4 (confine numerico/simbolico)
+- **Descrizione**: `solve_inequality_1var` opera su input/output simbolico (Rational),
+  ma chiama `cas::numeric::find_polynomial_roots_sturm` (API numeric layer) che
+  accetta/restituisce `double`. Cast espliciti `long long → double` sui bound/tolerance
+  (configurabili via `ctx.solve_inequality_search_half_width()` +
+  `ctx.solve_inequality_sturm_tolerance_inv()`); conversione output `vector<double> →
+  vector<Rational>` via `Rational::double_to_rational_approx` (rational.cpp boundary).
+- **Motivazione**: il path numeric Sturm bisection è di per sé layer numerico (REGOLA 1
+  vieta `double` nel *core simbolico*, ammette ai confini numeric). Il calcolo simbolico
+  in `solve_inequality` rimane 100% Rational a monte e a valle.
+- **Fix completo (post-parità)**: scrivere `cas::numeric::find_polynomial_roots_sturm_rational`
+  con bisection in puro Rational/BigFloat, sostituire chiamata e rimuovere boundary double.
+- **STATO**: PARZIALMENTE CHIUSO — confine documentato, search bound + tolerance
+  configurabili (F7.0-A2.1). Completamento Rational-pure deferito a Fase 8 post-parità.
+
 ### HPP-026 — integrate.cpp 1000 iteration limit
 - **File**: `src/calculus/integrate.cpp:172`
 - **Categoria CLAUDE.md**: Cat 1 (budget non configurabile)

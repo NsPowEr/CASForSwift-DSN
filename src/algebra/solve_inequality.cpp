@@ -27,25 +27,19 @@
 #include "cas/rational.hpp"
 
 #include <algorithm>
-#include <cmath>
-#include <cstdint>
 
 namespace cas::algebra {
 
 namespace {
 
-// Conservative search window for find_polynomial_roots_sturm.  We do not
-// compute Cauchy's exact bound (it requires double-precision coefficient
-// evaluation that loses signal on large BigInt) — instead we pass a window
-// large enough that no polynomial with rational coefficients of moderate
-// magnitude has roots outside.  Sturm is exact inside the window: roots
-// outside it are not reported, but for typical CAS queries (poly with
-// integer / small-rational coefficients) a 10^6 half-width is sufficient.
-// Empirical default chosen to cover the typical test corpus while keeping the
-// Sturm bisection depth bound manageable.  Tolerance scales accordingly: a
-// 100-wide window combined with 1e-9 tol gives a depth of ~40 iterations.
-constexpr double kSearchHalfWidth = 1.0e3;
-constexpr double kSturmTolerance  = 1.0e-9;
+// F7.0-A2.1: search window + tolerance are read from CASContextParams
+// (ctx.solve_inequality_search_half_width() / _sturm_tolerance_inv()).
+// Defaults: half-width 10^3 (conservative Cauchy bound for moderate coefficients),
+// tolerance 1/10^9 (Mahler-separation safe for deg ≤ 10, H ≤ 100).
+// REGOLA 1 boundary: the long-long parameters are converted to double ONLY at
+// the call site of cas::numeric::find_polynomial_roots_sturm, which is the
+// numeric-evaluator layer (not the symbolic core). See HARDCODE_LEDGER.md
+// HC-F70-A21-NUMERIC-BOUNDARY.
 
 // Sign of poly at rational sample x, computed via substitute + simplify
 // over the exact symbolic engine.  Returns -1, 0, or +1.
@@ -97,12 +91,17 @@ Result<std::vector<InequalityInterval>> solve_inequality_1var(
             CASErrorKind::InvalidArgument, "solve_inequality_1var: null polynomial"));
     }
 
-    const double low = -kSearchHalfWidth;
-    const double high = kSearchHalfWidth;
+    // F7.0-A2.1: bounds + tolerance from CASContextParams (long long),
+    // converted to double only at the numeric-evaluator boundary.
+    const long long half_width_ll = ctx.solve_inequality_search_half_width();
+    const long long tol_inv_ll    = ctx.solve_inequality_sturm_tolerance_inv();
+    const double low  = -static_cast<double>(half_width_ll);
+    const double high =  static_cast<double>(half_width_ll);
+    const double tol  =  1.0 / static_cast<double>(tol_inv_ll);
 
-    // 2. Isolate real roots numerically.
+    // 2. Isolate real roots numerically (numeric layer, accepts double).
     auto roots_res = cas::numeric::find_polynomial_roots_sturm(
-        poly, var.name, ctx, low, high, kSturmTolerance);
+        poly, var.name, ctx, low, high, tol);
     if (roots_res.is_error()) {
         return fail<std::vector<InequalityInterval>>(roots_res.error());
     }

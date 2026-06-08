@@ -453,6 +453,27 @@ struct CASContextParams {
         return max_bernoulli_index_bits_;
     }
 
+    // ── solve_inequality (F6.4 / F7.0-A2.1) ──────────────────────────────────
+    // Search window half-width used by the Sturm-based univariate inequality
+    // solver. Acts as conservative Cauchy bound when the exact bound from
+    // poly coefficients exceeds it. Default 10^3 covers typical CAS corpus
+    // (poly with rational coefficients of moderate magnitude).
+    void set_solve_inequality_search_half_width(long long w) noexcept {
+        if (w > 0) solve_inequality_search_half_width_ = w;
+    }
+    [[nodiscard]] long long solve_inequality_search_half_width() const noexcept {
+        return solve_inequality_search_half_width_;
+    }
+    // Sturm bisection tolerance expressed as inverse denominator: tol = 1/D.
+    // Default D = 10^9 (tol = 10^-9) — Mahler-separation safe for deg ≤ 10,
+    // H ≤ 100 (Mahler measure root separation lower bound ~10^-12).
+    void set_solve_inequality_sturm_tolerance_inv(long long d) noexcept {
+        if (d > 0) solve_inequality_sturm_tolerance_inv_ = d;
+    }
+    [[nodiscard]] long long solve_inequality_sturm_tolerance_inv() const noexcept {
+        return solve_inequality_sturm_tolerance_inv_;
+    }
+
 protected:
     // All fields with their mathematically-derived or documented defaults.
     // Setters with clamping are CASContext out-of-line methods (context_core.cpp).
@@ -503,6 +524,8 @@ protected:
     unsigned int  max_zeilberger_order_{2U};          // F5.7
     unsigned int  max_zeilberger_poly_degree_{2U};    // F5.7
     unsigned int  max_zeilberger_cert_degree_{4U};    // F5.7
+    long long     solve_inequality_search_half_width_{1000LL};       // F7.0-A2.1
+    long long     solve_inequality_sturm_tolerance_inv_{1000000000LL}; // F7.0-A2.1
 };
 
 }  // namespace cas::symbolic
