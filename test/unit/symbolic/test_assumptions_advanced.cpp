@@ -80,6 +80,5 @@ TEST_F(AdvancedAssumptionsTest, NonlinearInference) {
     ctx.assumptions().assume_greater(x, ctx.arena().make<IntegerLit>(1));
     
     auto x2 = ctx.arena().make<Binary>(BinaryOp::Pow, x, ctx.arena().make<IntegerLit>(2));
-    // x > 1 => x^2 > 1
-    // EXPECT_TRUE(ctx.assumptions().is_greater(x2, ctx.arena().make<IntegerLit>(1)));
+    (void)x2; // EXPECT_TRUE pending: x > 1 => x^2 > 1 (not yet wired)
 }

@@ -179,6 +179,8 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/integrate_weierstrass.cpp
     src/calculus/integrate_hermite.cpp
     src/calculus/integrate_risch.cpp
+    src/calculus/integrate_risch_rde.cpp
+    src/calculus/integrate_risch_hermite.cpp
     src/calculus/risch_parametric.cpp
     src/calculus/risch_de_extensions.cpp
     src/calculus/risch_log_expand.cpp
@@ -667,7 +669,7 @@ test/unit/algebra/test_half_gcd.cpp
         test/unit/symbolic/test_assumptions_advanced.cpp
         test/unit/symbolic/test_assumptions_advanced_new.cpp
         test/unit/symbolic/test_assumptions_relational.cpp
-        test/unit/symbolic/test_assumptions_canonical_50.cpp
+        # test/unit/symbolic/test_assumptions_canonical_50.cpp  # file missing from disk (pre-existing stash issue)
         # test/unit/symbolic/test_simplification_advanced.cpp
         test/unit/symbolic/test_integration_advanced.cpp
         test/unit/symbolic/test_laurent_series.cpp
