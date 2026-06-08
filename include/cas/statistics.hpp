@@ -11,6 +11,8 @@
 #include "cas/result.hpp"
 #include "cas/symbolic.hpp"
 
+#include <vector>
+
 namespace cas::statistics {
 
 /// Normal distribution N(μ, σ²) — closed-form pdf via exp, cdf via Erf,
@@ -22,5 +24,18 @@ namespace cas::statistics {
     ExprPtr x, ExprPtr mu, ExprPtr sigma, symbolic::CASContext& ctx);
 
 [[nodiscard]] Result<double> normal_quantile(double p, double mu, double sigma);
+
+/// F7.2-T2 — Ordinary Least Squares result for univariate linear regression
+/// y ≈ intercept + slope · x.
+struct LinearRegressionResult {
+    double intercept;
+    double slope;
+    double r_squared;
+    double residual_sum_of_squares;
+};
+
+[[nodiscard]] Result<LinearRegressionResult> linear_regression(
+    const std::vector<double>& x,
+    const std::vector<double>& y);
 
 }  // namespace cas::statistics
