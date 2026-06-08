@@ -36,6 +36,7 @@ void Assumptions::assume_domain(const Symbol& symbol, Domain domain) {
         case Domain::Natural:
             real_symbols_.insert(symbol.name);
             integer_symbols_.insert(symbol.name);
+            assume_greater_equal(ExprPtr(&symbol), nullptr);
             break;
         case Domain::NonZero:
             assume_nonzero(symbol);
