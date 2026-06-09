@@ -496,6 +496,14 @@ add_executable(stress_verifier
 target_link_libraries(stress_verifier PRIVATE cas_core)
 target_compile_features(stress_verifier PRIVATE cxx_std_20)
 
+# F7.4-C1 — Golden corpus runner (CAS engine vs Maxima diff harness).
+add_executable(cas_golden_runner
+    test/golden/main.cpp
+)
+target_link_libraries(cas_golden_runner PRIVATE cas_core)
+target_include_directories(cas_golden_runner PRIVATE test/golden)
+target_compile_features(cas_golden_runner PRIVATE cxx_std_20)
+
 # ─── TOOLS SEPARATI (Standalone UI) ───
 add_subdirectory(tools/cas_ui)
 
