@@ -325,6 +325,8 @@ set(CAS_NUMERIC_SOURCES
     src/numeric/evaluator.cpp
     src/numeric/solvers.cpp
     src/numeric/sturm.cpp
+    src/numeric/interpolation_spline.cpp
+    src/numeric/ode_rkf45.cpp
     src/numeric/aberth_root_isolator.cpp
     src/numeric/lipschitz.cpp
     src/numeric/integration.cpp
@@ -593,6 +595,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/ast/test_arena_hash_dos.cpp
         test/unit/numeric/test_implicit_contour_vector.cpp
         test/unit/statistics/test_hypothesis_tests.cpp
+        test/unit/numeric/test_spline_hermite_rkf45.cpp
         test/unit/symbolic/test_async_depth_scope.cpp
         test/unit/symbolic/test_cancellation.cpp
         test/unit/symbolic/test_cache_assumption_invalidation.cpp

@@ -181,4 +181,55 @@ struct OdePoint {
     double t_end,
     double step_size);
 
+// F7.3-B3 — Natural cubic spline interpolation.
+// Input: sorted-by-x knot list (x_i, y_i), i = 0..n-1.
+// Internal representation: per-segment (a, b, c, d) cubic in s = (x - x_i),
+// i.e. S_i(s) = a_i + b_i s + c_i s² + d_i s³ for s ∈ [0, x_{i+1} - x_i].
+// Natural boundary: S''(x_0) = S''(x_{n-1}) = 0.
+struct CubicSpline {
+    std::vector<double> x;
+    std::vector<double> a, b, c, d;
+};
+[[nodiscard]] Result<CubicSpline> build_natural_cubic_spline(
+    const std::vector<InterpolationPoint>& knots);
+[[nodiscard]] Result<double> cubic_spline_evaluate(
+    const CubicSpline& spline, double x_eval);
+
+// F7.3-B3 — Cubic Hermite interpolation.
+// Input: (x_i, y_i, dy_i) where dy_i is the prescribed derivative at x_i.
+// Each segment is the unique cubic matching (y_i, dy_i, y_{i+1}, dy_{i+1}).
+struct HermiteSpline {
+    std::vector<double> x;
+    std::vector<double> y;
+    std::vector<double> dy;
+};
+[[nodiscard]] Result<HermiteSpline> build_hermite_spline(
+    const std::vector<double>& x,
+    const std::vector<double>& y,
+    const std::vector<double>& dy);
+[[nodiscard]] Result<double> hermite_evaluate(
+    const HermiteSpline& spline, double x_eval);
+
+// F7.3-B3 — Runge-Kutta-Fehlberg 4(5) adaptive ODE solver.
+// Solves dy/dt = f(t, y) from (t0, y0) to t_end. Step size adapted to keep
+// local truncation error ≤ tol per step. Returns the trajectory.
+struct RKF45Options {
+    double abs_tol;       // absolute tolerance per step
+    double rel_tol;       // relative tolerance per step
+    double initial_step;  // initial Δt guess
+    double max_step;      // hard cap (0 = unbounded)
+    std::uint32_t max_steps;  // safety cap on iteration count
+    static RKF45Options default_options() {
+        return {1e-6, 1e-6, 0.01, 0.0, 100000U};
+    }
+};
+[[nodiscard]] Result<std::vector<OdePoint>> solve_ode_rkf45(
+    ExprPtr expr,
+    const std::string& t_var,
+    const std::string& y_var,
+    double t0,
+    double y0,
+    double t_end,
+    RKF45Options options = RKF45Options::default_options());
+
 } // namespace cas::numeric
