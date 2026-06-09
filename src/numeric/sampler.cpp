@@ -136,4 +136,184 @@ Result<std::vector<SamplePoint>> ParametricSampler::sample(
     return ok(std::move(out));
 }
 
+// ─── F7.1-B1 Implicit / Contour / VectorField samplers ─────────────────
+
+ImplicitSampler::ImplicitSampler(ExprPtr expr, std::string var_x,
+                                 std::string var_y, Options options)
+    : expr_(expr), var_x_(std::move(var_x)),
+      var_y_(std::move(var_y)), options_(options) {}
+
+Result<double> ImplicitSampler::f(double x, double y) {
+    return eval(expr_, {{var_x_, x}, {var_y_, y}});
+}
+
+namespace {
+
+// Linear interpolation along a cell edge: returns the parameter t ∈ [0,1]
+// where (1-t)*va + t*vb == 0 (level=0 baseline applied to caller).
+double edge_zero(double va, double vb) {
+    if (vb == va) return 0.5;
+    return va / (va - vb);
+}
+
+}  // namespace
+
+Result<std::vector<SampleSegment>> ImplicitSampler::sample(
+    double x_min, double x_max, double y_min, double y_max) {
+    if (x_min >= x_max || y_min >= y_max || options_.nx < 2 || options_.ny < 2) {
+        return ok(std::vector<SampleSegment>{});
+    }
+
+    const std::uint32_t nx = options_.nx;
+    const std::uint32_t ny = options_.ny;
+    const double dx = (x_max - x_min) / static_cast<double>(nx - 1);
+    const double dy = (y_max - y_min) / static_cast<double>(ny - 1);
+    const double level = options_.level;
+
+    // Pre-evaluate grid values; record NaN/inf as level (skip cells).
+    std::vector<double> grid(static_cast<std::size_t>(nx) * ny);
+    for (std::uint32_t j = 0; j < ny; ++j) {
+        const double y = y_min + dy * static_cast<double>(j);
+        for (std::uint32_t i = 0; i < nx; ++i) {
+            const double x = x_min + dx * static_cast<double>(i);
+            auto v = f(x, y);
+            const double s = v.is_ok() ? v.value() : std::nan("");
+            grid[static_cast<std::size_t>(j) * nx + i] =
+                std::isfinite(s) ? (s - level) : std::nan("");
+        }
+    }
+
+    std::vector<SampleSegment> out;
+    auto sign_bit = [](double v) -> int { return (v >= 0.0) ? 1 : 0; };
+
+    auto edge_point = [&](double x_a, double y_a, double x_b, double y_b,
+                          double va, double vb) {
+        const double t = edge_zero(va, vb);
+        return SamplePoint{x_a + (x_b - x_a) * t, y_a + (y_b - y_a) * t};
+    };
+
+    for (std::uint32_t j = 0; j + 1 < ny; ++j) {
+        for (std::uint32_t i = 0; i + 1 < nx; ++i) {
+            const double v00 = grid[static_cast<std::size_t>(j) * nx + i];
+            const double v10 = grid[static_cast<std::size_t>(j) * nx + (i + 1)];
+            const double v11 = grid[static_cast<std::size_t>(j + 1) * nx + (i + 1)];
+            const double v01 = grid[static_cast<std::size_t>(j + 1) * nx + i];
+            if (std::isnan(v00) || std::isnan(v10) || std::isnan(v11) || std::isnan(v01)) {
+                continue;
+            }
+
+            const int idx =
+                (sign_bit(v00) << 0) |
+                (sign_bit(v10) << 1) |
+                (sign_bit(v11) << 2) |
+                (sign_bit(v01) << 3);
+
+            const double x0 = x_min + dx * static_cast<double>(i);
+            const double x1 = x0 + dx;
+            const double y0 = y_min + dy * static_cast<double>(j);
+            const double y1 = y0 + dy;
+
+            // Edge points labelled by adjacent vertices.
+            auto eb = [&]() { return edge_point(x0, y0, x1, y0, v00, v10); };
+            auto er = [&]() { return edge_point(x1, y0, x1, y1, v10, v11); };
+            auto et = [&]() { return edge_point(x0, y1, x1, y1, v01, v11); };
+            auto el = [&]() { return edge_point(x0, y0, x0, y1, v00, v01); };
+
+            // Marching-squares case table (16 entries). Cases 5/10 = saddle
+            // disambiguation; here we resolve by cell-average sign.
+            switch (idx) {
+                case 0:  case 15: break;                              // empty
+                case 1:  case 14: out.push_back({el(), eb()}); break; // bottom-left corner
+                case 2:  case 13: out.push_back({eb(), er()}); break; // bottom-right
+                case 4:  case 11: out.push_back({er(), et()}); break; // top-right
+                case 8:  case 7:  out.push_back({et(), el()}); break; // top-left
+                case 3:  case 12: out.push_back({el(), er()}); break; // horizontal cut
+                case 6:  case 9:  out.push_back({eb(), et()}); break; // vertical cut
+                case 5: {
+                    const double center = 0.25 * (v00 + v10 + v11 + v01);
+                    if (center >= 0.0) {
+                        out.push_back({el(), et()});
+                        out.push_back({eb(), er()});
+                    } else {
+                        out.push_back({el(), eb()});
+                        out.push_back({et(), er()});
+                    }
+                    break;
+                }
+                case 10: {
+                    const double center = 0.25 * (v00 + v10 + v11 + v01);
+                    if (center >= 0.0) {
+                        out.push_back({el(), eb()});
+                        out.push_back({et(), er()});
+                    } else {
+                        out.push_back({el(), et()});
+                        out.push_back({eb(), er()});
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    return ok(std::move(out));
+}
+
+ContourSampler::ContourSampler(ExprPtr expr, std::string var_x,
+                               std::string var_y,
+                               std::vector<double> levels,
+                               ImplicitSampler::Options options)
+    : expr_(expr), var_x_(std::move(var_x)), var_y_(std::move(var_y)),
+      levels_(std::move(levels)), options_(options) {}
+
+Result<std::vector<std::vector<SampleSegment>>> ContourSampler::sample(
+    double x_min, double x_max, double y_min, double y_max) {
+    std::vector<std::vector<SampleSegment>> out;
+    out.reserve(levels_.size());
+    for (double lv : levels_) {
+        ImplicitSampler::Options o = options_;
+        o.level = lv;
+        ImplicitSampler is(expr_, var_x_, var_y_, o);
+        auto segs = is.sample(x_min, x_max, y_min, y_max);
+        if (segs.is_error()) return fail<std::vector<std::vector<SampleSegment>>>(segs.error());
+        out.push_back(std::move(segs.value()));
+    }
+    return ok(std::move(out));
+}
+
+VectorFieldSampler::VectorFieldSampler(ExprPtr fx_expr, ExprPtr fy_expr,
+                                       std::string var_x, std::string var_y,
+                                       Options options)
+    : fx_expr_(fx_expr), fy_expr_(fy_expr),
+      var_x_(std::move(var_x)), var_y_(std::move(var_y)),
+      options_(options) {}
+
+Result<std::vector<VectorArrow>> VectorFieldSampler::sample(
+    double x_min, double x_max, double y_min, double y_max) {
+    if (x_min >= x_max || y_min >= y_max || options_.nx < 1 || options_.ny < 1) {
+        return ok(std::vector<VectorArrow>{});
+    }
+    const std::uint32_t nx = options_.nx;
+    const std::uint32_t ny = options_.ny;
+    const double dx = (x_max - x_min) / static_cast<double>(nx);
+    const double dy = (y_max - y_min) / static_cast<double>(ny);
+    std::vector<VectorArrow> out;
+    out.reserve(static_cast<std::size_t>(nx) * ny);
+    for (std::uint32_t j = 0; j < ny; ++j) {
+        const double y = y_min + dy * (static_cast<double>(j) + 0.5);
+        for (std::uint32_t i = 0; i < nx; ++i) {
+            const double x = x_min + dx * (static_cast<double>(i) + 0.5);
+            auto vx = eval(fx_expr_, {{var_x_, x}, {var_y_, y}});
+            auto vy = eval(fy_expr_, {{var_x_, x}, {var_y_, y}});
+            if (vx.is_error() || vy.is_error()) continue;
+            const double fx = vx.value();
+            const double fy = vy.value();
+            if (!std::isfinite(fx) || !std::isfinite(fy)) continue;
+            out.push_back(VectorArrow{
+                .base = {x, y},
+                .dir  = {fx, fy},
+            });
+        }
+    }
+    return ok(std::move(out));
+}
+
 } // namespace cas::numeric

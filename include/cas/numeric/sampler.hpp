@@ -73,4 +73,90 @@ private:
     Options options_;
 };
 
+// F7.1-B1 — Implicit curve sampler (marching squares).
+//
+// Given a bivariate scalar field f(x,y) and a rectangular domain
+// [x_min,x_max] × [y_min,y_max] sampled on a regular grid, emits the
+// piecewise-linear approximation of the level set { (x,y) : f(x,y) = level }.
+// Output: a list of line segments (each segment = pair of SamplePoint).
+struct SampleSegment {
+    SamplePoint a;
+    SamplePoint b;
+};
+
+class ImplicitSampler {
+public:
+    struct Options {
+        std::uint32_t nx;
+        std::uint32_t ny;
+        double level;
+        static Options default_options() {
+            return {64, 64, 0.0};
+        }
+    };
+
+    ImplicitSampler(ExprPtr expr, std::string var_x, std::string var_y,
+                    Options options = Options::default_options());
+
+    [[nodiscard]] Result<std::vector<SampleSegment>> sample(
+        double x_min, double x_max, double y_min, double y_max);
+
+private:
+    [[nodiscard]] Result<double> f(double x, double y);
+
+    ExprPtr expr_;
+    std::string var_x_;
+    std::string var_y_;
+    Options options_;
+};
+
+// F7.1-B1 — Contour sampler: one ImplicitSampler per requested level.
+class ContourSampler {
+public:
+    ContourSampler(ExprPtr expr, std::string var_x, std::string var_y,
+                   std::vector<double> levels,
+                   ImplicitSampler::Options options = ImplicitSampler::Options::default_options());
+
+    [[nodiscard]] Result<std::vector<std::vector<SampleSegment>>> sample(
+        double x_min, double x_max, double y_min, double y_max);
+
+private:
+    ExprPtr expr_;
+    std::string var_x_;
+    std::string var_y_;
+    std::vector<double> levels_;
+    ImplicitSampler::Options options_;
+};
+
+// F7.1-B1 — Vector field sampler.
+// At each (x,y) grid node, evaluates the 2-component field (fx, fy)
+// and returns (base, displacement) pairs ready for arrow rendering.
+struct VectorArrow {
+    SamplePoint base;
+    SamplePoint dir;   // unnormalized displacement (fx, fy) at base
+};
+
+class VectorFieldSampler {
+public:
+    struct Options {
+        std::uint32_t nx;
+        std::uint32_t ny;
+        static Options default_options() { return {16, 16}; }
+    };
+
+    VectorFieldSampler(ExprPtr fx_expr, ExprPtr fy_expr,
+                       std::string var_x, std::string var_y,
+                       Options options = Options::default_options());
+
+    [[nodiscard]] Result<std::vector<VectorArrow>> sample(
+        double x_min, double x_max, double y_min, double y_max);
+
+private:
+    ExprPtr fx_expr_;
+    ExprPtr fy_expr_;
+    std::string var_x_;
+    std::string var_y_;
+    Options options_;
+};
+
 } // namespace cas::numeric

@@ -589,6 +589,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/ast/test_arena_memory_budget.cpp
         test/unit/foundation/test_bigint_limb_budget.cpp
         test/unit/ast/test_arena_hash_dos.cpp
+        test/unit/numeric/test_implicit_contour_vector.cpp
         test/unit/symbolic/test_async_depth_scope.cpp
         test/unit/symbolic/test_cancellation.cpp
         test/unit/symbolic/test_cache_assumption_invalidation.cpp
