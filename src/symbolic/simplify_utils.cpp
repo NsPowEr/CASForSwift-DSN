@@ -17,6 +17,17 @@ DepthGuard::DepthGuard(int max_depth) : max_depth_(max_depth) { ++simplification
 DepthGuard::~DepthGuard() { --simplification_depth; }
 bool DepthGuard::exceeded() const { return simplification_depth > max_depth_; }
 
+// F7.0-A3.2 async depth propagation.
+int current_simplify_depth() noexcept { return simplification_depth; }
+
+AsyncDepthScope::AsyncDepthScope(int inherited_depth) noexcept
+    : prev_(simplification_depth) {
+    simplification_depth = inherited_depth;
+}
+AsyncDepthScope::~AsyncDepthScope() noexcept {
+    simplification_depth = prev_;
+}
+
 [[nodiscard]] bool is_odd_parity_function(BuiltinOp op) {
     return op == BuiltinOp::Sin || op == BuiltinOp::Tan || op == BuiltinOp::Cot || op == BuiltinOp::Csc ||
            op == BuiltinOp::Sinh || op == BuiltinOp::Tanh || op == BuiltinOp::Coth;

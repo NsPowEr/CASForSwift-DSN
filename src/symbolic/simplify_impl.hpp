@@ -31,6 +31,38 @@ private:
     int max_depth_;
 };
 
+// F7.0-A3.2: async-aware depth propagation primitives.
+//
+// CAS core is currently single-threaded by design (CASContext is NOT
+// thread-safe — see CLAUDE.md + F7.0 voice 7). However the `thread_local`
+// `simplification_depth` is a known footgun if any caller ever spawns a
+// std::async / std::jthread worker that calls into the simplifier: the worker
+// starts at depth 0 and bypasses the parent's recursion budget.
+//
+// To make the propagation pattern explicit when (and if) async simplification
+// is introduced, use the snapshot+scope helpers below:
+//
+//   // ON PARENT THREAD:
+//   const int parent_depth = current_simplify_depth();
+//   auto fut = std::async(std::launch::async, [parent_depth, ...] {
+//       AsyncDepthScope scope(parent_depth);   // worker inherits depth
+//       return ctx_clone.simplify(sub_expr);   // recursion budget preserved
+//   });
+//
+// AsyncDepthScope sets the current thread's simplification_depth to the given
+// value on construction and restores it on destruction.
+[[nodiscard]] int current_simplify_depth() noexcept;
+
+class AsyncDepthScope {
+public:
+    explicit AsyncDepthScope(int inherited_depth) noexcept;
+    ~AsyncDepthScope() noexcept;
+    AsyncDepthScope(const AsyncDepthScope&)            = delete;
+    AsyncDepthScope& operator=(const AsyncDepthScope&) = delete;
+private:
+    int prev_;
+};
+
 // RAII guard that inserts expr into active_simplify_nodes on construction
 // and removes it on destruction. cycle_detected() returns true if the
 // node was already present (i.e., we are inside a cycle).
