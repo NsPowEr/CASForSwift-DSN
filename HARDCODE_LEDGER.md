@@ -15,6 +15,26 @@
 
 ---
 
+### HC-F70-A43-EXTENDED-REAL — Extended-Real AST scope chiusura parziale
+- **File**: `include/cas/ast.hpp` (`enum class MathConstant`),
+  `src/symbolic/*` (76 switch su MathConstant).
+- **Categoria CLAUDE.md**: Cat 3 (set chiuso non esteso)
+- **Descrizione**: l'AST possiede già `MathConstant::Infinity` e
+  `MathConstant::NaN` come nodi first-class. Mancano `NegInfinity` e
+  `ComplexInfinity` per coprire integrali impropri direzionali (∫ da -∞)
+  e analisi poli su limite z → ∞ in C. Aggiungere i due enum value
+  richiederebbe aggiornare 76 switch in tutto il codebase con
+  `-Wswitch -Werror`: chiusura completa = multi-PR coordinato.
+- **Motivazione**: F7.0 Phase A4 ha priorità su cache-invalidation
+  (A4.1 CRITICAL) e debug canonical assert (A4.2). Extended-Real
+  expansion è add-on per parità HP Prime, non bug attivo.
+- **Fix corretto**: aggiungere `NegInfinity`, `ComplexInfinity` a
+  MathConstant; estendere `canonical_compare`, `expr_hash`,
+  `structural_equal`, simplify rules (`x + Inf → Inf`, `Inf + (-Inf) → NaN`,
+  `1/0 → ComplexInf` con `complex_branch_policy`), pretty-printer.
+- **STATO**: APERTO (deferito Fase 8 post-parità o pre-F7.4 corpus
+  se gap emerge).
+
 ### HC-F70-A33-POLL-COVERAGE — Cancellation poll-points coverage partial
 - **File**: `src/algebra/polynomial_gcd_multivariate*.cpp`,
   `src/algebra/polynomial_groebner_f4.cpp`, `src/algebra/polynomial_groebner_f5.cpp`,
