@@ -144,6 +144,49 @@ inline bool is_matrix_fn(const std::string& fn) {
            fn == "inverse" || fn == "rank" || fn == "eigenvalues";
 }
 
+// Evaluate solve(p, x) into a vector of root ExprPtrs. Handles inputs
+// `solve(poly, x)` and `solve(LHS = RHS, x)` by extracting LHS - RHS.
+// Returns Unimplemented if input is not a solve command or fails to parse.
+inline Result<std::vector<ExprPtr>> evaluate_cas_solve(
+    const std::string& input_str, symbolic::CASContext& ctx) {
+    auto cmd = parse_command(input_str);
+    if (cmd.fn != "solve" || cmd.arg_strs.size() != 2) {
+        return CASError{CASErrorKind::Unimplemented,
+                        "evaluate_cas_solve: not a solve(p, x) call",
+                        std::nullopt};
+    }
+    const std::string& eq_str = cmd.arg_strs[0];
+    // Split on top-level '=' (single = means equation in Maxima).
+    int depth = 0;
+    std::size_t eq_pos = std::string::npos;
+    for (std::size_t i = 0; i < eq_str.size(); ++i) {
+        char c = eq_str[i];
+        if (c == '(' || c == '[' || c == '{') ++depth;
+        else if (c == ')' || c == ']' || c == '}') --depth;
+        if (c == '=' && depth == 0) {
+            if (i + 1 < eq_str.size() && eq_str[i + 1] == '=') continue;
+            eq_pos = i;
+            break;
+        }
+    }
+    ExprPtr poly;
+    if (eq_pos == std::string::npos) {
+        auto p = parse_expr(eq_str, ctx);
+        if (!p.is_ok()) return p.error();
+        poly = p.value();
+    } else {
+        auto lhs = parse_expr(eq_str.substr(0, eq_pos), ctx);
+        if (!lhs.is_ok()) return lhs.error();
+        auto rhs = parse_expr(eq_str.substr(eq_pos + 1), ctx);
+        if (!rhs.is_ok()) return rhs.error();
+        poly = ctx.arena().make<Binary>(BinaryOp::Sub, lhs.value(), rhs.value());
+    }
+    Symbol var(cmd.arg_strs[1]);
+    auto roots = algebra::solve_polynomial(poly, var, ctx);
+    if (!roots.is_ok()) return roots.error();
+    return ok(std::move(roots.value()));
+}
+
 // Evaluate our CAS on the given input command string.
 // Returns an ExprPtr representing the result, or error.
 inline Result<ExprPtr> evaluate_cas(const std::string& input_str,

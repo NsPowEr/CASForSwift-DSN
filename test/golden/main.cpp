@@ -19,6 +19,7 @@
 
 #include "corpus_runner.hpp"
 #include "maxima_parser.hpp"
+#include "solve_set_equal.hpp"
 
 #include "cas/algebra.hpp"
 #include "cas/ast.hpp"
@@ -187,6 +188,66 @@ int main(int argc, char* argv[]) {
         // arena is intentionally reused — all prior ExprPtrs remain valid).
         ctx.clear_variables();
         ctx.clear_caches();
+
+        // --- Solve area: special set-equality path (F7.5.A1) ---
+        if (area == "solve") {
+            auto cas_solve = evaluate_cas_solve(input_str, ctx);
+            if (!cas_solve.is_ok()) {
+                ++stats.skip;
+                std::cout << "  SKIP [" << std::setw(3) << idx << "] "
+                          << input_str << " => " << cas_solve.error().message << "\n";
+                ++idx;
+                continue;
+            }
+            std::string maxima_out_path = maxima_dir + "/" + std::to_string(idx) + ".maxima.out";
+            std::string maxima_raw = read_file(maxima_out_path);
+            if (maxima_raw.empty()) {
+                ++stats.skip;
+                std::cout << "  SKIP [" << std::setw(3) << idx << "] "
+                          << input_str << " (no Maxima output)\n";
+                ++idx;
+                continue;
+            }
+            std::string last_line = extract_maxima_result_line(maxima_raw);
+            auto maxima_solve = parse_maxima_solve_list(last_line, ctx.arena());
+            if (!maxima_solve.is_ok()) {
+                ++stats.skip;
+                std::cout << "  SKIP [" << std::setw(3) << idx << "] "
+                          << input_str << " (Maxima parse: " << last_line << ")\n";
+                ++idx;
+                continue;
+            }
+            auto eq = compare_solve_sets(cas_solve.value(), maxima_solve.value(), ctx);
+            if (!eq.is_ok()) {
+                ++stats.skip;
+                std::cout << "  SKIP [" << std::setw(3) << idx << "] "
+                          << input_str << " (inconclusive solve compare)\n";
+            } else if (eq.value()) {
+                ++stats.pass;
+                std::cout << "  PASS [" << std::setw(3) << idx << "] " << input_str << "\n";
+            } else {
+                ++stats.fail;
+                std::ostringstream cas_s, max_s;
+                cas_s << "{";
+                for (std::size_t i = 0; i < cas_solve.value().size(); ++i) {
+                    if (i) cas_s << ", ";
+                    cas_s << format_expr(cas_solve.value()[i]);
+                }
+                cas_s << "}";
+                max_s << "{";
+                for (std::size_t i = 0; i < maxima_solve.value().size(); ++i) {
+                    if (i) max_s << ", ";
+                    max_s << format_expr(maxima_solve.value()[i]);
+                }
+                max_s << "}";
+                std::cout << "  FAIL [" << std::setw(3) << idx << "] "
+                          << input_str << "\n"
+                          << "       CAS:    " << cas_s.str() << "\n"
+                          << "       Maxima: " << max_s.str() << "\n";
+            }
+            ++idx;
+            continue;
+        }
 
         // --- Step 1: Evaluate our CAS ---
         Result<ExprPtr> cas_result = evaluate_cas(input_str, ctx);

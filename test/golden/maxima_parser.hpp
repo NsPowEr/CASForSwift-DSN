@@ -29,9 +29,11 @@
 #include "cas/result.hpp"
 #include "cas/symbolic.hpp"
 
+#include <cstddef>
 #include <sstream>
 #include <string>
 #include <regex>
+#include <vector>
 
 namespace cas::golden {
 
@@ -173,23 +175,82 @@ inline Result<ExprPtr> parse_maxima_expr(const std::string& normalised, AstArena
 //   (%o1) expr
 // We want the last non-blank, non-label-only line.
 inline std::string extract_maxima_result_line(const std::string& file_content) {
-    std::string last_expr;
-    std::istringstream ss(file_content);
-    std::string line;
-    while (std::getline(ss, line)) {
-        // Trim
-        while (!line.empty() && (line.front() == ' ' || line.front() == '\t'))
-            line.erase(line.begin());
-        while (!line.empty() && (line.back() == ' ' || line.back() == '\r'))
-            line.pop_back();
-        if (line.empty()) continue;
-        // Keep lines with output labels or pure expressions
-        if (line.rfind("(%o", 0) == 0 || (!line.empty() && line.front() != '('))
-            last_expr = line;
-        else if (line.rfind("(%o", 0) == 0)
-            last_expr = line;
+    // Two-pass scan:
+    //  1) collect candidate lines (skip blank/comment-style headers and
+    //     the input echo `display2d:false`);
+    //  2) join continuation lines belonging to the final expression.
+    //
+    // Maxima with display2d:false can wrap long list outputs across
+    // multiple lines without an explicit continuation marker, e.g.
+    //
+    //   solve([x^6-1],[x])
+    //   [x = (sqrt(3)*%i+1)/2,x = (sqrt(3)*%i-1)/2,x = -1,
+    //    x = -((sqrt(3)*%i+1)/2),x = -((sqrt(3)*%i-1)/2),x = 1]
+    //
+    // We need both lines as a single string.
+    std::vector<std::string> lines;
+    {
+        std::istringstream ss(file_content);
+        std::string line;
+        while (std::getline(ss, line)) {
+            while (!line.empty() && (line.front() == ' ' || line.front() == '\t'))
+                line.erase(line.begin());
+            while (!line.empty() && (line.back() == ' ' || line.back() == '\r'))
+                line.pop_back();
+            if (line.empty()) continue;
+            // Skip the display2d:false setting echo.
+            if (line == "display2d:false" || line == "display2d:false;" ||
+                line == "display2d:false$")
+                continue;
+            // Skip lines that are pure prompt labels like "(%i1)" without
+            // body, but keep "(%o1) expr".
+            lines.push_back(line);
+        }
     }
-    return last_expr;
+    if (lines.empty()) return "";
+
+    // Find the last line that starts an expression: it either starts with
+    // `(` (output label) or any other non-paren char, but we must NOT
+    // count input-echo lines (e.g. `solve([x^6-1],[x])` is the input
+    // echo, not the answer). Heuristic: when a multi-line list `[…]`
+    // straddles lines, the answer starts with `[` somewhere in the tail.
+    //
+    // Strategy:
+    //   - Walk from the end backwards.
+    //   - If the last line ends with `]` and contains the matching `[`
+    //     anchor on an earlier line, join from that anchor onward.
+    //   - Else: return the last single line (existing behaviour).
+    auto strip_label = [](std::string s) {
+        // Strip leading "(%oN)" prefix.
+        if (s.rfind("(%o", 0) == 0) {
+            auto rp = s.find(')');
+            if (rp != std::string::npos) {
+                s = s.substr(rp + 1);
+                while (!s.empty() && (s.front() == ' ' || s.front() == '\t'))
+                    s.erase(s.begin());
+            }
+        }
+        return s;
+    };
+
+    const std::string& last = lines.back();
+    if (!last.empty() && last.back() == ']') {
+        // Walk backwards to find the line starting the list.
+        std::ptrdiff_t i = static_cast<std::ptrdiff_t>(lines.size()) - 1;
+        for (; i >= 0; --i) {
+            std::string stripped = strip_label(lines[static_cast<std::size_t>(i)]);
+            if (!stripped.empty() && stripped.front() == '[') break;
+        }
+        if (i >= 0) {
+            std::string joined;
+            for (std::size_t k = static_cast<std::size_t>(i); k < lines.size(); ++k) {
+                joined += strip_label(lines[k]);
+            }
+            return joined;
+        }
+    }
+
+    return strip_label(lines.back());
 }
 
 } // namespace cas::golden
