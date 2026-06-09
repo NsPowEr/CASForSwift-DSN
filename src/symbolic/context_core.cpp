@@ -4,6 +4,7 @@
 #include "symbolic_internal.hpp"
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <functional>
 #include <utility>
 #include <vector>
@@ -559,6 +560,18 @@ Result<ExprPtr> CASContext::simplify(ExprPtr expr) {
     if (caching_enabled_ && !trace_enabled_ && result.is_ok()) {
         simplify_cache_.put(expr, result.value());
     }
+
+#ifndef NDEBUG
+    // F7.0-A4.2: debug-only canonical invariant check.
+    // Reports invariant violations on stderr without aborting — emits one
+    // warning per top-level simplify call. Helps catch invariant regressions
+    // close to their source during dev/test runs.
+    if (owns_operation && result.is_ok()
+        && !is_strictly_canonical(result.value())) {
+        std::fprintf(stderr,
+            "[F7.0-A4.2 WARN] simplify result is not strictly canonical\n");
+    }
+#endif
 
     return result;
 }

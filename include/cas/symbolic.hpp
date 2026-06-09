@@ -340,6 +340,21 @@ mutable std::uint64_t last_assumptions_revision_{0};
 };
 
 [[nodiscard]] int canonical_compare(ExprPtr lhs, ExprPtr rhs) noexcept;
+
+// F7.0-A4.2: post-simplify canonical-form invariant check.
+// Returns true if `expr` and every reachable sub-expression respect the
+// invariants that simplify() is supposed to maintain:
+//   - Sum::terms sorted by canonical_compare, no nested Sum, no exact-zero
+//     IntegerLit / RationalLit summand.
+//   - Product::factors sorted by canonical_compare, no nested Product, no
+//     exact-one IntegerLit / RationalLit factor.
+//   - All Sum/Product nodes have ≥ 2 operands (singletons collapsed).
+//
+// Used in DEBUG builds via an assert at the end of CASContext::simplify()
+// to catch invariant violations close to their source. In release builds
+// the function is still available for explicit verification but the assert
+// is compiled out.
+[[nodiscard]] bool is_strictly_canonical(ExprPtr expr) noexcept;
 [[nodiscard]] TermOrderRelation compare_rewrite_terms(ExprPtr lhs, ExprPtr rhs);
 [[nodiscard]] bool rewrite_rule_is_oriented(const RewriteRule& rule);
 [[nodiscard]] bool is_strongly_normalizing(const std::vector<RewriteRule>& rules);

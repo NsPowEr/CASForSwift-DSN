@@ -28,6 +28,73 @@ AsyncDepthScope::~AsyncDepthScope() noexcept {
     simplification_depth = prev_;
 }
 
+}  // namespace detail
+
+// F7.0-A4.2 — strict-canonical-form invariant check.
+namespace {
+
+[[nodiscard]] bool is_exact_zero_lit(ExprPtr e) noexcept {
+    if (const auto* il = expr_cast<IntegerLit>(e)) return il->value.is_zero();
+    if (const auto* rl = expr_cast<RationalLit>(e)) return rl->numerator.is_zero();
+    return false;
+}
+[[nodiscard]] bool is_exact_one_lit(ExprPtr e) noexcept {
+    if (const auto* il = expr_cast<IntegerLit>(e)) return il->value == BigInt(1);
+    if (const auto* rl = expr_cast<RationalLit>(e)) {
+        return rl->numerator == BigInt(1) && rl->denominator == BigInt(1);
+    }
+    return false;
+}
+
+}  // namespace
+
+bool is_strictly_canonical(ExprPtr expr) noexcept {
+    if (!expr) return true;
+    if (const auto* sum = expr_cast<Sum>(expr)) {
+        if (sum->terms.size() < 2U) return false;        // singleton not collapsed
+        for (std::size_t i = 0; i < sum->terms.size(); ++i) {
+            const ExprPtr t = sum->terms[i];
+            if (expr_is<Sum>(t)) return false;            // nested Sum
+            if (is_exact_zero_lit(t)) return false;       // zero summand
+            if (!is_strictly_canonical(t)) return false;
+            if (i > 0 && canonical_compare(sum->terms[i - 1], t) > 0) {
+                return false;                              // out-of-order
+            }
+        }
+        return true;
+    }
+    if (const auto* prod = expr_cast<Product>(expr)) {
+        if (prod->factors.size() < 2U) return false;
+        for (std::size_t i = 0; i < prod->factors.size(); ++i) {
+            const ExprPtr f = prod->factors[i];
+            if (expr_is<Product>(f)) return false;        // nested Product
+            if (is_exact_one_lit(f)) return false;        // one factor
+            if (!is_strictly_canonical(f)) return false;
+            if (i > 0 && canonical_compare(prod->factors[i - 1], f) > 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+    // Recurse into other node kinds via children. Conservative default true
+    // for leaves and structurally-trivial nodes.
+    if (const auto* bin = expr_cast<Binary>(expr)) {
+        return is_strictly_canonical(bin->left) && is_strictly_canonical(bin->right);
+    }
+    if (const auto* un = expr_cast<Unary>(expr)) {
+        return is_strictly_canonical(un->operand);
+    }
+    if (const auto* fc = expr_cast<FuncCall>(expr)) {
+        for (const auto& a : fc->args) {
+            if (!is_strictly_canonical(a)) return false;
+        }
+        return true;
+    }
+    return true;
+}
+
+namespace detail {
+
 [[nodiscard]] bool is_odd_parity_function(BuiltinOp op) {
     return op == BuiltinOp::Sin || op == BuiltinOp::Tan || op == BuiltinOp::Cot || op == BuiltinOp::Csc ||
            op == BuiltinOp::Sinh || op == BuiltinOp::Tanh || op == BuiltinOp::Coth;
