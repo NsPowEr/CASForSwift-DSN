@@ -111,6 +111,25 @@
 
 ## Voci aperte
 
+### HC-F75-A3-HARD-TIMEOUT — Cancellation token non copre tutti i path integrazione
+- **File**: `test/golden/runner_timeout.hpp` + tutti i path in `src/calculus/integrate_*` privi di poll-point.
+- **Categoria**: 1 (budget computazionali non configurabili — manca interrupt enforcement).
+- **Aperta da**: F7.5.A3 (2026-06-09).
+- **Sintomo**: `cas_golden_runner --per-entry-timeout 30` non ferma entry 61 bronstein `integrate(exp(x)*sin(2*x), x)`. SIGALRM scatta, `ctx.interrupt()` setta flag, ma il codice eseguito non polla `ctx.check_interrupt()` su quel cammino.
+- **Workaround corrente**: bronstein corpus completato solo per 61/90 entry; risultato F7.5.A3 partiale.
+- **Fix corretto**: opzione A — aggiungere poll-point in `integrate_byparts.cpp` / `integrate_substitution.cpp` / Hermite reduction prima di ogni iterazione (vincolato a `kInterruptPollInterval` configurabile in `CASContextParams`). Opzione B — process-fork hard isolation nel runner (child esegue una entry, parent kill su timeout). Opzione A preferita: poll-point in core copre anche uso interactive futuro.
+- **Acceptance**: bronstein 90/90 traversato; integrate corpus 140/140 (già OK).
+- **STATO**: APERTO
+
+### HC-F75-CYCLOTOMIC-ROOTOF — mathematically_equal non riconosce RootOf(cyclotomic) ↔ exp(2πik/n)
+- **File**: `src/algebra/algebraic_equal.cpp`.
+- **Categoria**: 8 (pattern matching a tabella chiusa — manca normalizzazione cyclotomic).
+- **Aperta da**: F7.5.A1 (2026-06-09).
+- **Sintomo**: corpus solve entry 72 `solve(x^5-32, x)` — CAS produce `{2, RootOf(x^4+2x^3+4x^2+8x+16, k=0..3)}`, Maxima `{2, 2*exp(2πi/5), 2*exp(4πi/5), …}`. Set matematicamente uguali, ma il confronto fallisce.
+- **Fix corretto**: helper in algebraic_equal che riconosce `RootOf(Φ_n(x))` (polinomi ciclotomici) e ne enumera le radici come `exp(2πik/n)` per k coprimo a n. Riusare `polynomial_cyclotomic.cpp` per detection. Confronto su forma esponenziale.
+- **Acceptance**: solve entry 72 → PASS; nessuna regressione su altre entry solve.
+- **STATO**: APERTO
+
 ### HC-F16-TRAGER-QI — Trager Q(α) factorization su `RootOf(y^2+1)` non riconosce isomorfismo con Q(i) — RISOLTA 2026-06-07
 - **File**: `src/algebra/polynomial_arithmetic.cpp` (expand_expr_impl leaf set).
 - **Root cause**: `expand_expr_impl` non aveva case ComplexLit nella leaf-pass-through, causando bail-out `Unimplemented "Tipo di espressione non supportato in expand"` quando `verify_product_equals_original` espandeva il prodotto Trager che conteneva ComplexLit canonici (post-F1.6).

@@ -20,6 +20,8 @@
 #include "corpus_runner.hpp"
 #include "maxima_parser.hpp"
 #include "solve_set_equal.hpp"
+#include "runner_timeout.hpp"
+#include "runner_format.hpp"
 
 #include "cas/algebra.hpp"
 #include "cas/ast.hpp"
@@ -105,16 +107,11 @@ static std::string json_escape(const std::string& s) {
 
 // ---------------------------------------------------------------------------
 // TextFormatter wrapper: format an ExprPtr as a string (for reporting only,
-// never used for mathematical comparison).
+// never used for mathematical comparison). Cap output size to keep the
+// summary table reachable on integrate-style multi-MB renderings.
 // ---------------------------------------------------------------------------
 static std::string format_expr(ExprPtr expr) {
-    if (!expr) return "<null>";
-    try {
-        formatter::TextFormatter fmt;
-        return fmt.format(expr);
-    } catch (...) {
-        return "<format error>";
-    }
+    return cas::golden::format_expr_capped(expr);
 }
 
 // ---------------------------------------------------------------------------
@@ -140,11 +137,14 @@ int main(int argc, char* argv[]) {
     const std::string corpus_path = argv[1];
     const std::string maxima_dir  = argv[2];
     std::string json_output_path;
+    unsigned int per_entry_timeout_sec = 30;
 
     for (int i = 3; i < argc; ++i) {
         std::string a(argv[i]);
         if (a == "--json" && i + 1 < argc) {
             json_output_path = argv[++i];
+        } else if (a == "--per-entry-timeout" && i + 1 < argc) {
+            per_entry_timeout_sec = static_cast<unsigned int>(std::stoul(argv[++i]));
         }
     }
 
@@ -165,6 +165,10 @@ int main(int argc, char* argv[]) {
     auto* ctx_ptr = new symbolic::CASContext();
     symbolic::CASContext& ctx = *ctx_ptr;
     ctx.set_caching_enabled(false);
+
+    // F7.5.A3: install SIGALRM handler + register ctx as interrupt target.
+    cas::golden::install_alarm_handler();
+    cas::golden::timeout_target().store(&ctx, std::memory_order_relaxed);
 
     std::string line;
     while (std::getline(corpus_file, line)) {
@@ -188,6 +192,9 @@ int main(int argc, char* argv[]) {
         // arena is intentionally reused — all prior ExprPtrs remain valid).
         ctx.clear_variables();
         ctx.clear_caches();
+
+        // F7.5.A3: arm per-entry timer. Handler will set interrupt flag.
+        cas::golden::start_entry_timer(per_entry_timeout_sec);
 
         // --- Solve area: special set-equality path (F7.5.A1) ---
         if (area == "solve") {
@@ -339,6 +346,10 @@ int main(int argc, char* argv[]) {
 
         ++idx;
     }
+
+    // F7.5.A3: disarm timer post-loop. Handler reset for cleanliness.
+    cas::golden::stop_entry_timer();
+    cas::golden::timeout_target().store(nullptr, std::memory_order_relaxed);
 
     // ---------------------------------------------------------------------------
     // Print summary table
