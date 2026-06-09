@@ -67,6 +67,20 @@ public:
     // Equivalent to private from_parts(limbs, false) [non-negative].
     [[nodiscard]] static BigInt from_limbs_le(std::vector<std::uint32_t> limbs) noexcept;
 
+    // F7.0-A3.6: hard cap on the number of 32-bit limbs a BigInt result is
+    // allowed to occupy. Enforced (pre-allocation) in multiply_magnitude.
+    // 0 = unlimited (default). Thread-local — each worker thread carries
+    // its own cap. When the bound would be exceeded, the operation
+    // produces BigInt(0) AND sets the "exhausted" flag the caller can
+    // poll via budget_exhausted().
+    //
+    // Use case: prevent factorial(10000), pow(2, 10^9), or pathological
+    // CRT accumulation from saturating RAM before the OS OOM-killer fires.
+    static void set_max_limbs(std::size_t n) noexcept;
+    [[nodiscard]] static std::size_t max_limbs() noexcept;
+    [[nodiscard]] static bool budget_exhausted() noexcept;
+    static void clear_budget_exhausted() noexcept;
+
 private:
     [[nodiscard]] Result<void> assign_decimal_checked(std::string decimal);
     void multiply_by_small(std::uint32_t value) noexcept;

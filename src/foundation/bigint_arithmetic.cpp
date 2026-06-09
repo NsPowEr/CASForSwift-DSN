@@ -171,8 +171,29 @@ BigInt BigInt::subtract_magnitude(const BigInt& lhs, const BigInt& rhs) {
     return from_parts(std::move(result), false);
 }
 
+// F7.0-A3.6: BigInt limb-allocation budget.
+namespace {
+thread_local std::size_t g_bigint_max_limbs = 0U;   // 0 = unlimited
+thread_local bool        g_bigint_exhausted = false;
+}  // namespace
+
+void BigInt::set_max_limbs(std::size_t n) noexcept {
+    g_bigint_max_limbs = n;
+    g_bigint_exhausted = false;
+}
+std::size_t BigInt::max_limbs() noexcept { return g_bigint_max_limbs; }
+bool BigInt::budget_exhausted() noexcept { return g_bigint_exhausted; }
+void BigInt::clear_budget_exhausted() noexcept { g_bigint_exhausted = false; }
+
 BigInt BigInt::multiply_magnitude(const BigInt& lhs, const BigInt& rhs) {
     if (lhs.is_zero() || rhs.is_zero()) {
+        return BigInt(0);
+    }
+
+    // F7.0-A3.6: pre-flight budget check. result limbs ≤ lhs.size + rhs.size.
+    if (g_bigint_max_limbs > 0U
+        && lhs.limbs_.size() + rhs.limbs_.size() > g_bigint_max_limbs) {
+        g_bigint_exhausted = true;
         return BigInt(0);
     }
 

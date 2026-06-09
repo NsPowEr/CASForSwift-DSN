@@ -587,6 +587,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/ast/test_arena_shard_locks.cpp
         test/unit/ast/test_arena_reset.cpp
         test/unit/ast/test_arena_memory_budget.cpp
+        test/unit/foundation/test_bigint_limb_budget.cpp
         test/unit/symbolic/test_async_depth_scope.cpp
         test/unit/symbolic/test_cancellation.cpp
         test/unit/symbolic/test_cache_assumption_invalidation.cpp
