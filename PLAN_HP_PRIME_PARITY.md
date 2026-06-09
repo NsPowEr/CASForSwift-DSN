@@ -553,6 +553,308 @@ CAD generale spostato a Fase 8 (post-parità). Complessità doppia esponenziale 
 
 ---
 
+## FASE 7.5 — CLOSURE GAP PASS-RATE (post-C1, target aggregato 85-88%)
+
+> Inserita 2026-06-09 post-misurazione C1 pilot (vedi
+> `F7_GOLDEN_CORPUS_REPORT_2026-06-09.md` + `F7_PARITY_SUMMARY_2026-06-09.md`).
+> Aggregato corrente: **77.6%** (512 PASS / 660 non-skip su 8 aree).
+> Obiettivo F7.5 onesto: **86-88%**. Non 95%: la chiusura di Risch
+> structure theorem full + hypergeometric `_pF_q` completo + Galois ≥5
+> resta `Aperta` permanente come dichiarato in QA REVIEW v2 §10.
+>
+> **Regola operativa F7.5**: ogni task qui sotto è bound da
+> `CLAUDE.md` REGOLA ZERO (niente shortcut), REGOLA 0.1 (spec read
+> first), REGOLA 0.2 (zero test disable), 500 LOC anti-monolito, BigInt
+> only, no `throw/catch`, `Result<T>` ovunque. Ogni hardcode-of-passage
+> → `HARDCODE_LEDGER.md`. Pass-rate goals per area sono **vincolanti**
+> per chiusura: se la misura non raggiunge il floor, il task resta
+> in_progress (no `completed` ottimistico).
+
+### Pass-rate target per area (binding)
+
+| Area | Oggi | Target F7.5 | Leva principale |
+|---|---:|---:|---|
+| factor       |  99.0% |  99.0% | freeze (no regression) |
+| gcd          | 100.0% | 100.0% | freeze |
+| simplify     |  92.0% |  95.0% | identità trig/log mancanti |
+| diff         |  82.5% |  92.0% | sech rewriter + asin/acos chain |
+| limit        |  82.1% |  88.0% | Gruntz §3.5 + nested log |
+| special_fn   |  64.9% |  82.0% | identità Γ/erf/Bessel canonicalization |
+| integrate    |  43.6% |  75.0% | Risch log-ext + transcendental case |
+| series       |  37.1% |  75.0% | Taylor canonical + ordine-aware diff |
+| solve        |  (gap) |  92.0% | adapter test + set-equality |
+| matrix       |  (gap) |  92.0% | adapter test |
+| bronstein    | (hang) |  70.0% | runner robustness + Risch overlap |
+
+**Aggregato pesato atteso**: ~86-88% (512+X / 1026, X = ~340 nuovi PASS).
+
+---
+
+### F7.5.A — Test infrastructure completion
+
+Lavoro su `test/golden/` e `corpus_runner`. Nessuna modifica al core
+simbolico. Effort: ~3 giorni T1-Sonnet.
+
+#### F7.5.A1 — Solve adapter (Maxima list → set ExprPtr)
+- **Spec**: `.APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Solve_Adapter.md` (DA SCRIVERE PRIMA — REGOLA 0.1).
+- **File**: `test/golden/maxima_parser.hpp` (estendere), nuovo
+  `test/golden/solve_set_equal.hpp`.
+- **Algoritmo**: parse `[x = r₁, x = r₂, …]` → `std::vector<ExprPtr>`
+  RHS; confronto via `mathematically_equal` su ogni coppia con
+  bijection check (Hopcroft-Karp su grafo bipartito di compatibilità).
+  Nessuna heuristic on cardinality matching.
+- **Acceptance**: corpus area `solve` (81 entry) → ≥ 90% PASS.
+- **No-shortcut**: vietato confrontare solo prima soluzione, ignorare
+  soluzioni complesse, troncare set ≥ N.
+
+#### F7.5.A2 — Matrix adapter (`[[…]]` → `MatrixLit` dispatch)
+- **Spec**: `.APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Matrix_Adapter.md`.
+- **File**: `test/golden/corpus_runner.hpp` (rimuovere skip lista
+  `det/trace/transpose/rank/inv/eigenvalues`), nuovo
+  `test/golden/matrix_parser.hpp`.
+- **Algoritmo**: parser `[[a,b],[c,d]]` → `MatrixLit`; dispatch via
+  `cas::linalg::determinant/trace/transpose/rank/inverse/eigenvalues`
+  già esistenti.
+- **Acceptance**: area `matrix` (79 entry) → ≥ 90% PASS. Eigenvalues
+  con caratteristico Bareiss su Z[x] esatto.
+
+#### F7.5.A3 — Runner robustness (per-entry timeout + output cap)
+- **File**: `test/golden/main.cpp`.
+- **Algoritmo**: `setitimer(ITIMER_REAL, …)` per-entry con SIGALRM
+  → entry SKIP con motivo "TIMEOUT N s"; cap output `format_expr` a
+  4 KB con sentinel `<truncated N bytes>`; CTest timeout 1800 s
+  globale.
+- **Acceptance**: bronstein corpus (90 entry) completato end-to-end;
+  integrate corpus 140/140 (non più 116/140).
+
+#### F7.5.A4 — Sech/Csch normalization in `algebraic_equal`
+- **Spec**: `.APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Sech_Csch_Identity.md`.
+- **File**: `src/algebra/algebraic_equal.cpp` (helper privato),
+  nuovo unit test `test/unit/algebra/test_sech_csch_normal.cpp`.
+- **Algoritmo**: traversal pre-confronto che riscrive `FuncCall("sech",
+  x) → 1/cosh(x)`, `FuncCall("csch", x) → 1/sinh(x)`, idem `coth →
+  cosh/sinh`, `tanh → sinh/cosh`. Applicato simmetricamente su lhs +
+  rhs prima di `polynomial_normal_form`.
+- **Acceptance**: corpus diff 80/80 entry produce 0 FAIL su mismatch
+  notazionale sech/csch/coth (oggi 2 FAIL). diff pass-rate → ≥ 90%.
+- **No-shortcut**: non aggiungere `BuiltinOp::Sech/Csch` (toccherebbe
+  76 switch enum — fuori scope F7.5; lavoro per Fase 8 con
+  Extended-Real migration).
+
+---
+
+### F7.5.B — Risch completion (integrate gap)
+
+Target integrate: 43.6% → 75%. Lavoro su Bronstein cap. 5-8 reali, no
+pattern matching tabellare. Effort: ~3-4 settimane T3-Opus.
+
+#### F7.5.B1 — `arctan/asin/acos` standalone integrali
+- **Spec**: `.APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Risch_Inverse_Trig.md`.
+- **File**: nuovo `src/calculus/integrate_inverse_trig.cpp`
+  (split anti-monolito da `integrate_core.cpp` se necessario).
+- **Algoritmo**: integration by parts come dispatcher generale (non
+  caso speciale), `∫f·g' = f·g - ∫f'·g`, con scelta `f = trig_inv(x)`,
+  `g' = poly(x)`. Coverage: `atan`, `asin`, `acos`, `atan2`, e
+  composizioni `x^n·trig_inv(x)` per n ≥ 1.
+- **Acceptance**: ≥ 30 entry corpus integrate che oggi falliscono
+  `INTEGRATE_NO_STRATEGY` su trig_inv passano. Pass-rate integrate
+  area → ≥ 60%.
+- **No-shortcut**: vietato pattern `if (is_atan(arg)) return x·atan(x) -
+  ½ln(1+x²)`; deve essere by-parts strutturale.
+
+#### F7.5.B2 — Bronstein cap. 5 (Hermite reduction completa)
+- **Spec**: `.APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Risch_Hermite_Cap5.md`.
+- **File**: `src/calculus/integrate_hermite.cpp` (già splittato in A1.1).
+- **Algoritmo**: completare Hermite reduction su denominatore
+  square-full (oggi parziale); LRT (Lazard-Rioboo-Trager) con RootSum
+  formale (presente, da estendere a campo `Q(α)` con α algebrico di
+  grado ≥ 3).
+- **Acceptance**: corpus `bronstein/integrals.jsonl` (90 entry) → ≥ 70%
+  PASS (era 0% per hang). 90 entry sono Bronstein book esempi
+  numerati, copertura misurabile entry-per-entry.
+
+#### F7.5.B3 — Risch transcendental case (Bronstein cap. 8)
+- **Spec**: `.APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Risch_Transcendental_Cap8.md`.
+- **File**: `src/calculus/integrate_rde.cpp` (presente, parziale),
+  `src/calculus/differential_field.cpp`.
+- **Algoritmo**: Risch differential equation generale per estensioni
+  `θ = log(u)` e `θ = exp(u)` con `u ∈ Q(x, …)`. Sostituire trial
+  constants hardcoded `{±1, ±1/2, ±2}` (ledger esistente, non chiuso)
+  con risoluzione formale residue field equation.
+- **Acceptance**: ≥ 20 integrali corpus che combinano `exp + log + poly`
+  passano. Pass-rate integrate → ≥ 75%.
+- **No-shortcut**: rimozione trial constants è obbligatoria (è già nel
+  ledger debiti).
+
+---
+
+### F7.5.C — Taylor canonical form (series gap)
+
+Target series: 37.1% → 75%. Effort: ~2 settimane T2-Sonnet-thinking.
+
+#### F7.5.C1 — Canonical truncated polynomial form
+- **Spec**: `.APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Taylor_Canonical.md`.
+- **File**: nuovo `src/calculus/series_canonical.cpp`,
+  `src/algebra/algebraic_equal.cpp` estensione.
+- **Algoritmo**: rappresentazione `(coefficients[0..n], order_remainder)`
+  per Taylor troncato; confronto pairwise coefficient + verifica
+  order_remainder compatibile (`O(x^min(n_lhs, n_rhs))`). Nessun
+  confronto via differenza simplify (causa dei FAIL attuali).
+- **Acceptance**: `mathematically_equal` su `(1 + x + x²/2 + O(x³),
+  1 + x + x²/2 + x³/6 + O(x⁴))` ritorna `true` (oggi `false`).
+  series pass-rate → ≥ 70%.
+
+#### F7.5.C2 — Padé completion (coeff Q senza vincolo)
+- **Spec**: `.APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Pade_Generic_Coeff.md`.
+- **File**: `src/calculus/pade.cpp` (presente, vincolo Q).
+- **Algoritmo**: estensione a `Q(π, e, sqrt(2), …)` via campo
+  algebrico generato dinamicamente. Riusare LLL già presente per
+  basis minimization.
+- **Acceptance**: 5 esempi Padé corpus con coefficienti irrazionali
+  passano.
+
+---
+
+### F7.5.D — Limit gap closure
+
+Target limit: 82.1% → 88%. Effort: ~1 settimana T2-Sonnet-thinking.
+
+#### F7.5.D1 — Gruntz §3.5 nested log tower
+- **Spec**: `.APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Gruntz_Nested_Log.md`.
+- **File**: `src/calculus/limit_mrv.cpp` (split A1.3 — moduli MRV).
+- **Algoritmo**: estensione Mrv set per torri `log(log(log(x)))` e
+  combinazioni `exp(log(x)^k)`. Algorithm Gruntz §3.5 reale, no
+  pattern matching su forma.
+- **Acceptance**: 8 entry corpus limit con torri nested log passano.
+  limit pass-rate → ≥ 88%.
+
+---
+
+### F7.5.E — Special functions canonicalization
+
+Target special_fn: 64.9% → 82%. Effort: ~1.5 settimane T2-Sonnet-thinking.
+
+#### F7.5.E1 — Identità Γ/B/ζ/erf canonical
+- **Spec**: `.APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Special_Fn_Identities.md`.
+- **File**: nuovo `src/symbolic/simplify_special_fn.cpp`,
+  estensione `src/algebra/algebraic_equal.cpp`.
+- **Algoritmo**: applicazione identità note (`Γ(n+1) = n!`,
+  `Γ(x)·Γ(1-x) = π/sin(πx)`, `B(x,y) = Γ(x)Γ(y)/Γ(x+y)`, `erf(0) = 0`,
+  `erf(-x) = -erf(x)`, `ζ(2) = π²/6`) come rewrite rules orientate
+  LPO. Nessun cataloghi chiusi.
+- **Acceptance**: special_fn pass-rate → ≥ 82%.
+
+#### F7.5.E2 — Bessel `J_n / Y_n / I_n / K_n` parser + simplify
+- **Spec**: `.APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Bessel_Identities.md`.
+- **File**: `include/cas/builtin_functions.hpp` (+ entries),
+  `src/symbolic/simplify_special_fn.cpp`.
+- **Algoritmo**: ricorrenze Bessel (`J_{n-1}(x) + J_{n+1}(x) =
+  (2n/x)·J_n(x)`) + valori speciali (`J_0(0) = 1`, `J_n(0) = 0` per
+  `n ≥ 1`).
+
+---
+
+### F7.5.F — Extended-Real AST migration (HC-F70-A43 close)
+
+Effort: ~1 settimana T1-Sonnet (lavoro meccanico, no creatività).
+
+#### F7.5.F1 — `MathConstant::NegInfinity / ComplexInfinity` propagation
+- **Spec**: `.APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Extended_Real_AST.md`.
+- **File**: `include/cas/ast.hpp` (enum extension), tutti i 76 switch
+  in `src/symbolic/*.cpp`, `src/algebra/*.cpp`, `src/calculus/*.cpp`,
+  `src/numeric/*.cpp` (script di scan automatico tramite
+  `scripts/find_constant_switch.sh` da scrivere).
+- **Acceptance**: build pulita con `-Wswitch -Werror`; nuovi unit test
+  in `test/unit/symbolic/test_extended_real.cpp` (≥ 15 casi:
+  `lim x→∞ x = +∞`, `1/0⁺ = +∞`, `log(0⁺) = -∞`, `(-∞) + ∞ =
+  indeterminate`, `0·∞ = indeterminate`, ecc.).
+- **Ledger**: chiude HC-F70-A43-EXTENDED-REAL.
+- **No-shortcut**: vietato `default: return Unimplemented` silenzioso;
+  ogni switch deve gestire NegInf/ComplexInf esplicitamente o
+  ritornare `Indeterminate` diagnostico.
+
+---
+
+### F7.5.G — Giac install + C2 benchmark
+
+Effort: ~2 giorni T1-Sonnet.
+
+#### F7.5.G1 — Build Giac da sorgente o Homebrew bottle
+- **File**: `scripts/install_giac.sh`, `scripts/giac_integrity.sh`,
+  `scripts/run_corpus_giac.sh` (analogo a `run_golden_maxima.sh`).
+- **Algoritmo**: priorità (a) `brew install giac`, fallback (b) build
+  sorgente con pin versione + sha256 manifest (analogo Maxima).
+- **Acceptance**: `giac --version` printa, `scripts/giac_integrity.sh`
+  verde, hash binario in `scripts/giac_X.Y.Z_manifest.sha256`.
+
+#### F7.5.G2 — Benchmark vs Giac come secondo oracolo
+- **File**: `test/golden/giac_parser.hpp` (analogo `maxima_parser.hpp`),
+  estensione `test/golden/main.cpp` con flag `--oracle giac|maxima`.
+- **Algoritmo**: identico runner, normalizzazione output Giac (`x^2`,
+  `*`, etc. — Giac syntax ≈ Maxima).
+- **Acceptance**: corpus 1026 entry eseguito contro Giac → tabella
+  pass-rate per area. Confronto delta con Maxima (entry su cui
+  divergono fra loro → SKIP scientifico, non FAIL).
+
+---
+
+### F7.5.H — Final re-measure + F7 declaration
+
+#### F7.5.H1 — Re-measure aggregato
+- Esecuzione `cas_golden_runner` su tutte le 11 aree post-A/B/C/D/E/F.
+- Output: `F7.5_FINAL_PARITY_REPORT_YYYY-MM-DD.md`.
+- **Acceptance**: pass-rate aggregato non-skip ≥ 86%. Se < 86%,
+  identificare aree sotto target binding (tabella sopra) e iterare il
+  task pertinente fino a raggiungere il floor. No `completed`
+  ottimistico.
+
+#### F7.5.H2 — Audit indipendente
+- Re-run audit equivalente a `AUDIT_CAS_vs_HP_Prime_2026-06-08.md`,
+  questa volta numerico (Maxima + Giac).
+- Sign-off utente come gate Fase 8.
+
+---
+
+### Vincoli F7.5 (binding)
+
+1. **Anti-monolito**: ogni nuovo file rispetta 500 LOC. Split
+   pre-emptive se l'algoritmo lo richiede.
+2. **No test disable** (REGOLA 0.2). Se un entry corpus passa pre-F7.5
+   e fallisce post-F7.5, regressione = blocking commit.
+3. **No hardcode-of-passage non documentato** (REGOLA ZERO). Ogni
+   costante numerica nuova → giustificazione matematica nel commit
+   message o entry ledger.
+4. **Spec read first** (REGOLA 0.1). Ogni task F7.5.X richiede il
+   file `.APROJECT_REFERENCES/MISSING_FEATURES_SPECS/<Spec>.md`
+   scritto **prima** del codice. Plan mode reply deve citare la spec.
+5. **Result<T>**, no `throw/catch`. **BigInt only**. **Structural
+   sharing**. **AstArena**.
+6. **Per-task ledger entries** se introducono `Unimplemented` per casi
+   fuori scope (es. inverse trig su campo non-reale).
+
+### Stima totale F7.5
+
+- T1-Sonnet (meccanico): ~6 giorni (A1, A2, A3, F1, G1, G2)
+- T2-Sonnet-thinking: ~4.5 settimane (A4, C1, C2, D1, E1, E2)
+- T3-Opus (research-grade): ~3-4 settimane (B1, B2, B3)
+- Totale calendario: **6-8 settimane** se sequenziale,
+  **4-5 settimane** con 2-3 task paralleli (dove indipendenti).
+
+### Exit gate F7.5
+
+- Aggregato corpus ≥ 86%
+- Bronstein book corpus 90 entry ≥ 70%
+- HC-F70-A43-EXTENDED-REAL chiuso
+- Solve + Matrix area ≥ 90%
+- Audit indipendente firmato
+- Nessun test disabilitato, nessun hardcode non ledgered, nessun file
+  > 500 LOC
+
+Post-F7.5 → Fase 8 (research target permanenti `Aperta`: Risch
+structure theorem full, Galois ≥6, CAD McCallum, hypergeometric `_pF_q`).
+
+---
+
 ## MODEL ROUTING — Orchestrator Opus + Subagent Tier
 
 **Setup obbligatorio**:
