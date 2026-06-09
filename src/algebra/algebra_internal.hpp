@@ -135,4 +135,10 @@ struct MultivariateSquareFreeFactor {
 [[nodiscard]] Result<void> append_integer_factor_component(Factorization& factorization, const IntPoly& component, unsigned int multiplicity, const Symbol& var, symbolic::CASContext& ctx);
 [[nodiscard]] BigInt select_factorization_prime(const IntPoly& f);
 
+// F7.5.A4 — Hyperbolic reciprocal/quotient normalisation.
+// Rewrites sech/csch/coth/tanh FuncCall nodes to canonical cosh/sinh
+// quotient form. Preserves structural sharing when no rewrite fires.
+// Spec: .APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Sech_Csch_Identity.md.
+[[nodiscard]] ExprPtr hyperbolic_normalize(ExprPtr expr, AstArena& arena);
+
 } // namespace cas::algebra

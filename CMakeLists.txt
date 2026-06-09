@@ -289,6 +289,7 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/polynomial_gcd_multivariate_linear.cpp
     src/algebra/polynomial_gcd_multivariate.cpp
     src/algebra/algebraic_equal.cpp
+    src/algebra/hyperbolic_normalize.cpp
     src/algebra/polynomial_integer.cpp
     src/algebra/polynomial_conversions.cpp
     src/algebra/polynomial_gcd_core.cpp

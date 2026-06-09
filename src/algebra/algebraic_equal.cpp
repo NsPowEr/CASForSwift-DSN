@@ -30,6 +30,20 @@ Result<bool> mathematically_equal(ExprPtr lhs, ExprPtr rhs, CASContext& context)
     auto rhs_s = context.simplify(rhs);
     if (rhs_s.is_error()) { finalize(); return fail<bool>(rhs_s.error()); }
 
+    // F7.5.A4: rewrite sech/csch/coth/tanh to canonical cosh/sinh quotients
+    // BEFORE structural / algebraic comparison so notational mismatches
+    // (CAS cosh(x)^-2 vs Maxima sech(x)^2 etc.) collapse.
+    {
+        auto lhs_h = algebra::hyperbolic_normalize(lhs_s.value(), context.arena());
+        auto rhs_h = algebra::hyperbolic_normalize(rhs_s.value(), context.arena());
+        if (lhs_h.get() != lhs_s.value().get() || rhs_h.get() != rhs_s.value().get()) {
+            auto lhs_h_s = context.simplify(lhs_h);
+            auto rhs_h_s = context.simplify(rhs_h);
+            if (lhs_h_s.is_ok()) lhs_s = lhs_h_s;
+            if (rhs_h_s.is_ok()) rhs_s = rhs_h_s;
+        }
+    }
+
     if (structural_equal(lhs_s.value(), rhs_s.value())) {
         finalize();
         return ok(true);
