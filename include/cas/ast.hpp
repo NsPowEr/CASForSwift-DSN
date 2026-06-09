@@ -81,6 +81,19 @@ public:
         return lhs.node_ != rhs.node_;
     }
 
+    // WARNING (F7.0-A2.3): pointer-based ordering, NOT mathematically canonical.
+    // ASLR randomizes addresses, so the ordering changes between runs.
+    //
+    // Use this operator ONLY for:
+    //   - hash maps / unordered_set keys (key identity only)
+    //   - internal set/map deduplication where iteration order is invisible
+    //     to the user
+    //
+    // For any user-facing output (factor lists, root lists, simplified sums/
+    // products, serialized AST, test goldens), sort with `canonical_compare`
+    // — see `include/cas/symbolic.hpp:307`. Existing call sites verified:
+    // normal_form.cpp:71,136; simplify_arithmetic.cpp:813; simplify_arithmetic_chain_*.cpp;
+    // integrate_substitution.cpp ExprLess; gaussian_factor.cpp sorts by mathematical norm.
     [[nodiscard]] friend constexpr bool operator<(ExprPtr lhs, ExprPtr rhs) noexcept {
         return lhs.node_ < rhs.node_;
     }
