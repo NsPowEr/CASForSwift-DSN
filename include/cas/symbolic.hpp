@@ -125,7 +125,20 @@ public:
 
     void update_roots(AstArena& target, std::unordered_map<ExprPtr, ExprPtr>& cache);
 
+    // F7.0-A4.1: monotonically increasing revision counter, incremented by
+    // every mutator (assume_*, assume()). Used by CASContext::simplify() to
+    // detect assumption changes since the last cache fill, and invalidate
+    // simplify_cache_ / integrate_cache_ on mismatch.
+    //
+    // Mathematical correctness: simplify(abs(x)) returns x when x is known
+    // positive, but -x when x is known negative — without cache invalidation
+    // on assumption change, a stale entry would corrupt the session.
+    [[nodiscard]] std::uint64_t revision() const noexcept { return revision_; }
+
 private:
+    // F7.0-A4.1: bump in every mutator above (assume_*, assume).
+    std::uint64_t revision_{0};
+
     [[nodiscard]] bool prove_relation(ExprPtr start, ExprPtr end, bool strict, std::unordered_set<const ExprNode*>& visited) const;
     [[nodiscard]] bool prove_positive_linear(ExprPtr expr) const;
     [[nodiscard]] bool prove_positive_product(const Product& prod) const;
@@ -318,6 +331,12 @@ struct IntegrateHash {
 CacheContainer<ExprPtr, ExprPtr, ExprHash, ExprEqual> simplify_cache_;
 CacheContainer<DiffKey, ExprPtr, DiffHash> diff_cache_;
 CacheContainer<IntegrateKey, ExprPtr, IntegrateHash> integrate_cache_;
+
+// F7.0-A4.1: last Assumptions::revision() observed by the cache layer.
+// On simplify(), if assumptions_.revision() != this, clear all caches and
+// update. Prevents stale-cache corruption when user changes assumptions
+// mid-session (e.g. assume(x>0); simplify(abs(x)); assume(x<0); ...).
+mutable std::uint64_t last_assumptions_revision_{0};
 };
 
 [[nodiscard]] int canonical_compare(ExprPtr lhs, ExprPtr rhs) noexcept;

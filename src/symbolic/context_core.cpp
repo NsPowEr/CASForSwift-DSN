@@ -512,6 +512,18 @@ CacheMetrics CASContext::get_integrate_metrics() const noexcept {
 Result<ExprPtr> CASContext::simplify(ExprPtr expr) {
     if (!expr) return fail<ExprPtr>(make_error(CASErrorKind::InvalidArgument, "Cannot simplify null expression"));
 
+    // F7.0-A4.1: invalidate caches if assumptions have changed since last fill.
+    // simplify(abs(x)) result depends on whether x is known positive/negative;
+    // a stale cache entry from a different assumption regime would corrupt
+    // the result. Cheap check: one std::uint64_t comparison per simplify call.
+    {
+        const std::uint64_t cur_rev = assumptions_.revision();
+        if (cur_rev != last_assumptions_revision_) {
+            clear_caches();
+            last_assumptions_revision_ = cur_rev;
+        }
+    }
+
     if (caching_enabled_ && !trace_enabled_) {
         if (auto cached = simplify_cache_.get(expr)) {
             return ok(*cached);

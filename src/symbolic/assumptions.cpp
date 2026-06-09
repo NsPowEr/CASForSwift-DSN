@@ -23,6 +23,7 @@ namespace cas::symbolic {
 }
 
 void Assumptions::assume_domain(const Symbol& symbol, Domain domain) {
+    ++revision_;  // F7.0-A4.1: signal change for cache invalidation
     symbol_domains_[symbol.name] = domain;
     switch (domain) {
         case Domain::Positive:
@@ -69,6 +70,7 @@ Domain Assumptions::get_domain(const Symbol& symbol) const {
 }
 
 void Assumptions::assume_positive(const Symbol& symbol) {
+    ++revision_;  // F7.0-A4.1
     real_symbols_.insert(symbol.name);
     positive_symbols_.insert(symbol.name);
     nonzero_symbols_.insert(symbol.name);
@@ -133,19 +135,23 @@ Result<void> Assumptions::check_consistency() const {
 }
 
 void Assumptions::assume_real(const Symbol& symbol) {
+    ++revision_;  // F7.0-A4.1
     real_symbols_.insert(symbol.name);
 }
 
 void Assumptions::assume_integer(const Symbol& symbol) {
+    ++revision_;  // F7.0-A4.1
     real_symbols_.insert(symbol.name);
     integer_symbols_.insert(symbol.name);
 }
 
 void Assumptions::assume_nonzero(const Symbol& symbol) {
+    ++revision_;  // F7.0-A4.1
     nonzero_symbols_.insert(symbol.name);
 }
 
 void Assumptions::assume_in_range(const Symbol& symbol, ExprPtr lower, ExprPtr upper) {
+    ++revision_;  // F7.0-A4.1
     real_symbols_.insert(symbol.name);
     range_symbols_[symbol.name] = RangeAssumption{
         .lower = lower,
@@ -154,6 +160,7 @@ void Assumptions::assume_in_range(const Symbol& symbol, ExprPtr lower, ExprPtr u
 }
 
 void Assumptions::assume_greater(ExprPtr lhs, ExprPtr rhs) {
+    ++revision_;  // F7.0-A4.1
     // lhs > rhs  =>  rhs < lhs
     ExprPtr r = is_zero_expr(rhs) ? nullptr : rhs;
     ExprPtr l = is_zero_expr(lhs) ? nullptr : lhs;
@@ -161,6 +168,7 @@ void Assumptions::assume_greater(ExprPtr lhs, ExprPtr rhs) {
 }
 
 void Assumptions::assume_greater_equal(ExprPtr lhs, ExprPtr rhs) {
+    ++revision_;  // F7.0-A4.1
     // lhs >= rhs  =>  rhs <= lhs
     ExprPtr r = is_zero_expr(rhs) ? nullptr : rhs;
     ExprPtr l = is_zero_expr(lhs) ? nullptr : lhs;
@@ -169,6 +177,8 @@ void Assumptions::assume_greater_equal(ExprPtr lhs, ExprPtr rhs) {
 
 void Assumptions::assume(ExprPtr condition) {
     if (!condition) return;
+    // Note: revision_ is bumped by the called assume_*/assume_greater_* mutators,
+    // so we don't double-bump here.
 
     if (const auto* fc = expr_cast<FuncCall>(condition)) {
         const std::string& name = fc->name;
