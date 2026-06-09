@@ -220,6 +220,40 @@ std::size_t AstArena::size() const noexcept {
     return total_nodes_;
 }
 
+void AstArena::reset() {
+    // F7.0-A3.1: lock everything in canonical order (shard → alloc).
+    // Acquire all shards first, then alloc_mutex_, matching the invariant
+    // documented in ast.hpp around intern_shards_ / alloc_mutex_.
+    for (auto& shard : intern_shards_) shard.lock();
+    std::lock_guard<std::mutex> alloc_lock(alloc_mutex_);
+
+    // Destroy every ExprNode (placement-new'd, so we must call destructors).
+    for (auto& chunk : node_chunks_) {
+        for (ExprNode* node : chunk) {
+            if (node != nullptr) destroy_node(node);
+        }
+    }
+    node_chunks_.clear();
+
+    // Release every bump-allocator block (frees underlying heap memory).
+    blocks_.clear();
+
+    // Drop interning tables (per-shard).
+    for (auto& table : intern_shard_tables_) table.clear();
+
+    // Reset hot caches (atomics, release-ordered to publish the null state).
+    for (auto& cell : interned_constants_) {
+        cell.store(ExprPtr{}, std::memory_order_release);
+    }
+    interned_zero_.store(ExprPtr{}, std::memory_order_release);
+    interned_one_.store(ExprPtr{}, std::memory_order_release);
+    interned_neg_one_.store(ExprPtr{}, std::memory_order_release);
+
+    total_nodes_ = 0U;
+
+    for (auto& shard : intern_shards_) shard.unlock();
+}
+
 ExprKind expr_kind(ExprPtr expr) noexcept {
     return expr ? expr->kind : ExprKind::Null;
 }

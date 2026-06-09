@@ -497,6 +497,24 @@ public:
 
     [[nodiscard]] std::size_t size() const noexcept;
 
+    // F7.0-A3.1: controlled reset for long-lived REPL/server processes.
+    // Destroys every node ever allocated, clears interning tables, releases
+    // all memory blocks, resets hot caches. Required to prevent unbounded
+    // AstArena growth in a REPL/web-server loop where each query allocates
+    // transient intermediate nodes.
+    //
+    // ⚠ INVALIDATION: every `ExprPtr` previously vended by this arena becomes
+    // a dangling pointer after `reset()`. The caller is responsible for
+    // discarding all stale `ExprPtr` values BEFORE calling reset.
+    //
+    // Thread-safety: acquires every shard mutex AND the alloc mutex (shard
+    // → alloc order). Concurrent `make<T>` calls will block until reset
+    // completes. NEVER call `reset()` while another thread is using the arena.
+    //
+    // Root migration (deep-copy preserve) is NOT provided here — see
+    // `migrate_into(...)` follow-up task (HC-F70-A31-MIGRATION-TODO).
+    void reset();
+
 private:
     template <typename T, typename... Args>
     [[nodiscard]] ExprPtr make_uncached(Args&&... args) {

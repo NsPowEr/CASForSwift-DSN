@@ -585,6 +585,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/foundation/test_rational_cf.cpp
         test/unit/symbolic/test_complex_qi.cpp
         test/unit/ast/test_arena_shard_locks.cpp
+        test/unit/ast/test_arena_reset.cpp
         test/unit/calculus/test_weierstrass_substitution.cpp
         test/unit/symbolic/test_complex_log_branch.cpp
         test/unit/numeric/test_float_contextual.cpp

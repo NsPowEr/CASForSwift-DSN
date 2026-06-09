@@ -15,6 +15,21 @@
 
 ---
 
+### HC-F70-A31-MIGRATION-TODO — AstArena reset without root migration
+- **File**: `include/cas/ast.hpp` (AstArena::reset declaration), `src/ast/ast.cpp` (impl)
+- **Categoria CLAUDE.md**: Cat 4 (boundary documentato)
+- **Descrizione**: `AstArena::reset()` distrugge ogni nodo e libera ogni blocco. Non è
+  presente una funzione `migrate_into(span<ExprPtr*>)` che esegue deep-copy dei root
+  forniti in un nuovo stato arena prima del reset, permettendo al chiamante di
+  conservare alcuni nodi attraverso il ciclo di REPL/server.
+- **Motivazione**: la migrazione richiede un visitor di deep-copy completo
+  attraverso tutti gli `ExprKind`. F7.0 Phase A privilegia chiusura sicurezza
+  resource — la migration è add-on non bloccante (REPL pattern: re-parse expressions
+  dopo reset).
+- **Fix corretto**: implementare `AstArena::migrate_into(std::span<ExprPtr*>)` o
+  helper free-function `deep_copy_into(ExprPtr, AstArena&)`. Ticket-in-place per Fase 8.
+- **STATO**: APERTO (post-parità ammesso).
+
 ### HC-F70-A21-NUMERIC-BOUNDARY — solve_inequality double boundary
 - **File**: `src/algebra/solve_inequality.cpp:96-115`
 - **Categoria CLAUDE.md**: Cat 4 (confine numerico/simbolico)
