@@ -333,6 +333,8 @@ set(CAS_NUMERIC_SOURCES
     src/statistics/regression.cpp
     src/statistics/discrete.cpp
     src/statistics/continuous.cpp
+    src/statistics/hypothesis_tests.cpp
+    src/statistics/multivariate_regression.cpp
     src/numeric/ode.cpp
     src/numeric/sampler.cpp
     src/numeric/bigfloat.cpp
@@ -590,6 +592,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/foundation/test_bigint_limb_budget.cpp
         test/unit/ast/test_arena_hash_dos.cpp
         test/unit/numeric/test_implicit_contour_vector.cpp
+        test/unit/statistics/test_hypothesis_tests.cpp
         test/unit/symbolic/test_async_depth_scope.cpp
         test/unit/symbolic/test_cancellation.cpp
         test/unit/symbolic/test_cache_assumption_invalidation.cpp

@@ -75,4 +75,55 @@ struct LinearRegressionResult {
 /// F-distribution CDF via the regularised incomplete Beta.
 [[nodiscard]] Result<double> f_cdf(double x, double d1, double d2);
 
+// ── F7.2-B2: Hypothesis testing ──────────────────────────────────────────
+
+/// Result struct shared by all hypothesis-test entry points.
+struct HypothesisTestResult {
+    double statistic;   // observed test statistic
+    double p_value;     // two-sided p-value (for symmetric tests)
+    double df;          // degrees of freedom (0 if N/A)
+    bool   reject_at_alpha_005;
+};
+
+/// One-sample z-test for the mean against the null mu0 with known sigma.
+/// Two-sided alternative; statistic z = (sample_mean - mu0) / (sigma/√n).
+[[nodiscard]] Result<HypothesisTestResult> z_test_one_sample(
+    const std::vector<double>& sample, double mu0, double sigma);
+
+/// One-sample t-test for the mean against mu0 with unknown variance.
+/// Two-sided; df = n - 1; uses sample standard deviation.
+[[nodiscard]] Result<HypothesisTestResult> t_test_one_sample(
+    const std::vector<double>& sample, double mu0);
+
+/// Welch's two-sample t-test (unequal variances).
+[[nodiscard]] Result<HypothesisTestResult> t_test_two_sample(
+    const std::vector<double>& s1, const std::vector<double>& s2);
+
+/// Chi-squared goodness-of-fit. Compares observed vs expected counts;
+/// df = bins - 1.
+[[nodiscard]] Result<HypothesisTestResult> chi_squared_goodness_of_fit(
+    const std::vector<double>& observed,
+    const std::vector<double>& expected);
+
+/// Two-sample F-test for variance ratio. statistic = s1² / s2².
+[[nodiscard]] Result<HypothesisTestResult> f_test_variance(
+    const std::vector<double>& s1, const std::vector<double>& s2);
+
+// ── F7.2-B2: Multivariate Ordinary Least Squares ─────────────────────────
+
+struct MultivariateOLSResult {
+    std::vector<double> coefficients;          // size p+1: [intercept, β_1, …, β_p]
+    std::vector<double> residuals;             // size n
+    double r_squared;
+    double residual_sum_of_squares;
+};
+
+/// y ≈ β_0 + Σ β_j · x_{·,j}.  X is n × p (rows = observations, cols = predictors).
+/// Uses the normal equations (X^T X) β = X^T y solved via Gauss-Jordan with
+/// partial pivoting on the augmented (p+1) × (p+2) system. Returns
+/// InvalidArgument on dimension mismatch or singular (X^T X).
+[[nodiscard]] Result<MultivariateOLSResult> multivariate_linear_regression(
+    const std::vector<std::vector<double>>& X,
+    const std::vector<double>& y);
+
 }  // namespace cas::statistics
