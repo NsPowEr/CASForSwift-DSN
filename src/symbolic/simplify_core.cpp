@@ -68,6 +68,16 @@ Simplifier::ScopedFrame::~ScopedFrame() {
 }
 
 Result<void> Simplifier::check_timeout() {
+    // F7.0-A3.3: poll cancellation flag FIRST, before allocation-based timeout.
+    // The interrupted_ atomic can be set asynchronously by an external
+    // controller (server, REPL signal handler, watchdog thread). Reported as
+    // Timeout with explicit message to avoid breaking ABI with a new
+    // CASErrorKind enumerator.
+    if (context_ != nullptr && context_->is_interrupted()) {
+        return Result<void>(make_error(
+            CASErrorKind::Timeout,
+            "Operation cancelled by interrupt request"));
+    }
     if (operation_started_at_ == nullptr || ops_count_ == nullptr) {
         return ok();
     }

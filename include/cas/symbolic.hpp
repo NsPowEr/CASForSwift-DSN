@@ -202,6 +202,22 @@ public:
     void clear_interrupt() noexcept { interrupted_ = false; }
     [[nodiscard]] bool is_interrupted() const noexcept { return interrupted_; }
 
+    // F7.0-A3.3: poll-point helper for heavy non-simplify loops
+    // (polynomial GCD, Groebner, factorization, matrix Bareiss, etc.).
+    // Returns a Timeout error with explicit "cancelled" message if the
+    // interrupt flag has been set asynchronously by an external controller.
+    // Cheap (atomic load + branch); call inside inner loops at safe points.
+    [[nodiscard]] Result<void> check_interrupt() const noexcept {
+        if (interrupted_) {
+            return Result<void>(CASError{
+                .kind = CASErrorKind::Timeout,
+                .message = "Operation cancelled by interrupt request",
+                .hint = std::nullopt,
+            });
+        }
+        return ok();
+    }
+
     [[nodiscard]] std::mt19937& rng() noexcept { return rng_; }
 
     [[nodiscard]] Result<ExprPtr> simplify(ExprPtr expr);

@@ -21,6 +21,11 @@ public:
         }
 
         ++context_.ops_count_;
+        // F7.0-A3.3: poll cancellation flag first (cheap, no interval gate).
+        if (context_.is_interrupted()) {
+            return fail<ExprPtr>(make_error(
+                CASErrorKind::Timeout, "Operation cancelled by interrupt request"));
+        }
         if ((context_.ops_count_ % context_.timeout_check_interval()) == 0U &&
             std::chrono::steady_clock::now() - context_.operation_started_at_ >= context_.timeout_) {
             return fail<ExprPtr>(make_error(CASErrorKind::Timeout, "Symbolic operation timed out"));

@@ -15,6 +15,25 @@
 
 ---
 
+### HC-F70-A33-POLL-COVERAGE — Cancellation poll-points coverage partial
+- **File**: `src/algebra/polynomial_gcd_multivariate*.cpp`,
+  `src/algebra/polynomial_groebner_f4.cpp`, `src/algebra/polynomial_groebner_f5.cpp`,
+  `src/algebra/factorization_polynomials*.cpp`, `src/algebra/factor_multivariate_*.cpp`,
+  `src/linalg/matrix_bareiss.cpp`, `src/calculus/integrate_*.cpp`,
+  `src/calculus/limit_*.cpp`
+- **Categoria CLAUDE.md**: Cat 1 (poll-point preventivo non disteso)
+- **Descrizione**: `ctx.interrupt()` ora viene rilevato in `Simplifier::check_timeout()`
+  e `Substituter::substitute_expr()` (covering the hottest paths). Algoritmi heavy in
+  algebra/calculus/linalg fanno proprie chiamate `simplify`/`substitute` quindi sono
+  parzialmente coperti, ma non chiamano `ctx.check_interrupt()` direttamente nei loop
+  interni puramente combinatori (es. Groebner S-pair processing, Cantor-Zassenhaus EDF,
+  Bareiss main pivot loop). Un loop puramente algebrico senza make<>/simplify intermedio
+  resta non-interruttibile.
+- **Fix corretto**: aggiungere `if (auto r = ctx.check_interrupt(); r.is_error()) return fail(r.error());`
+  nei loop hot di ciascun algoritmo (lista sopra). Stima ~15-30 inserzioni, no behavior change.
+- **STATO**: PARZIALMENTE CHIUSO — covering simplify+substitute paths (F7.0-A3.3).
+  Algorithm hot loops a coverage completa deferiti a Fase 8 / pre-corpus F7.4 se necessario.
+
 ### HC-F70-A31-MIGRATION-TODO — AstArena reset without root migration
 - **File**: `include/cas/ast.hpp` (AstArena::reset declaration), `src/ast/ast.cpp` (impl)
 - **Categoria CLAUDE.md**: Cat 4 (boundary documentato)
