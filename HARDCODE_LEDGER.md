@@ -111,6 +111,25 @@
 
 ## Voci aperte
 
+### HC-F75-A2-MATRIX-SCALAR-OP — Runner non gestisce scalar·matrix / matrix±matrix / matrix·matrix
+- **File**: `test/golden/main.cpp` (area "matrix" dispatch), `test/golden/matrix_adapter.hpp`.
+- **Categoria**: 4 (bail-out su tipo — adapter test, non engine).
+- **Aperta da**: F7.5.A2 (2026-06-09).
+- **Sintomo**: corpus matrix entry 8/9/10/18/36 (es. `2 * [[1,2],[3,4]]`, `[[1,2],[3,4]] * [[1,0],[0,1]]`) SKIP perché `parse_matrix_lit` cerca outer `[[…]]` mentre input ha scalar·matrix o matrix·matrix.
+- **Workaround corrente**: SKIP per ~7 entry su 79. Pass-rate 56/(56+0) = 100% non-skip, ma 56/79 = 70.9% sul totale corpus.
+- **Fix corretto**: estendere area="matrix" branch del runner con parser top-level che rileva `<expr> * <matrix>`, `<matrix> +/- <matrix>`, `<matrix> * <matrix>` → costruisce MatrixExpr via `cas::linalg::add/multiply/scalar_multiply`. Riusare `cas::linalg::multiply(a, b, ctx)` esistente.
+- **Acceptance**: matrix corpus → ≥ 90% sul totale (oggi 70.9%).
+- **STATO**: APERTO
+
+### HC-F75-A2-MAXIMA-MATTRACE — Maxima emette `mattrace(matrix(...))` non valutato su trace
+- **File**: `test/golden/main.cpp` area matrix scalar path.
+- **Categoria**: 4 (bail-out su forma Maxima non riconosciuta).
+- **Aperta da**: F7.5.A2 (2026-06-09).
+- **Sintomo**: 5 corpus entry trace SKIP perché Maxima lascia `mattrace(matrix([…]))` unevaluated. parse_maxima_expr non lo conosce.
+- **Fix corretto**: nel branch scalar del matrix dispatch, se `last_line` matcha `mattrace(matrix(...))`, parsare la matrice via `parse_maxima_matrix` ed eseguire `cas::linalg::trace` sul CAS, usando il risultato come "Maxima value". Documentare nella spec come transformer del oracle.
+- **Acceptance**: 5 entry trace ulteriori passano.
+- **STATO**: APERTO
+
 ### HC-F75-A3-HARD-TIMEOUT — Cancellation token non copre tutti i path integrazione
 - **File**: `test/golden/runner_timeout.hpp` + tutti i path in `src/calculus/integrate_*` privi di poll-point.
 - **Categoria**: 1 (budget computazionali non configurabili — manca interrupt enforcement).

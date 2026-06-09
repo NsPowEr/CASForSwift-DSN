@@ -20,6 +20,7 @@
 #include "corpus_runner.hpp"
 #include "maxima_parser.hpp"
 #include "solve_set_equal.hpp"
+#include "matrix_adapter.hpp"
 #include "runner_timeout.hpp"
 #include "runner_format.hpp"
 
@@ -195,6 +196,105 @@ int main(int argc, char* argv[]) {
 
         // F7.5.A3: arm per-entry timer. Handler will set interrupt flag.
         cas::golden::start_entry_timer(per_entry_timeout_sec);
+
+        // --- Matrix area: dispatch det/trace/transpose/rank/inverse/eigenvalues (F7.5.A2) ---
+        if (area == "matrix") {
+            auto cas_res = cas::golden::evaluate_cas_matrix(input_str, ctx);
+            if (!cas_res.is_ok()) {
+                ++stats.skip;
+                std::cout << "  SKIP [" << std::setw(3) << idx << "] "
+                          << input_str << " => " << cas_res.error().message << "\n";
+                ++idx;
+                continue;
+            }
+            std::string maxima_out_path = maxima_dir + "/" + std::to_string(idx) + ".maxima.out";
+            std::string maxima_raw = read_file(maxima_out_path);
+            if (maxima_raw.empty()) {
+                ++stats.skip;
+                std::cout << "  SKIP [" << std::setw(3) << idx << "] "
+                          << input_str << " (no Maxima output)\n";
+                ++idx;
+                continue;
+            }
+            std::string last_line = extract_maxima_result_line(maxima_raw);
+            auto& cas_v = cas_res.value();
+            using K = cas::golden::MatrixDispatchResult::Kind;
+            bool pass = false;
+            bool skip = false;
+            std::string skip_reason;
+            switch (cas_v.kind) {
+                case K::Scalar: {
+                    std::string norm = normalize_maxima_output(last_line);
+                    if (norm.empty()) {
+                        skip = true; skip_reason = "Maxima scalar empty";
+                        break;
+                    }
+                    auto me = cas::golden::parse_maxima_expr(norm, ctx.arena());
+                    if (!me.is_ok()) {
+                        skip = true; skip_reason = "Maxima parse: " + norm;
+                        break;
+                    }
+                    auto eq = cas::symbolic::mathematically_equal(cas_v.scalar, me.value(), ctx);
+                    if (!eq.is_ok()) { skip = true; skip_reason = "inconclusive"; break; }
+                    pass = eq.value();
+                    break;
+                }
+                case K::Matrix: {
+                    auto mm = cas::golden::parse_maxima_matrix(last_line, ctx);
+                    if (!mm.is_ok()) {
+                        skip = true; skip_reason = "Maxima matrix parse: " + last_line;
+                        break;
+                    }
+                    auto eq = cas::golden::compare_matrices(cas_v.matrix, mm.value(), ctx);
+                    if (!eq.is_ok()) { skip = true; skip_reason = "inconclusive"; break; }
+                    pass = eq.value();
+                    break;
+                }
+                case K::Eigenvalues: {
+                    // Maxima eigenvalues output: [[λ_1, …, λ_k], [m_1, …, m_k]]
+                    // — first sublist holds the eigenvalues, second the
+                    // multiplicities. split on top-level commas of the outer
+                    // list yields ["[λ_1,…]", "[m_1,…]"]; we want the raw
+                    // eigenvalues, so split the first element again.
+                    auto outer = cas::golden::split_maxima_list(last_line);
+                    if (outer.empty()) { skip = true; skip_reason = "Maxima eig empty"; break; }
+                    auto eig_strs = cas::golden::split_maxima_list(outer[0]);
+                    if (eig_strs.empty()) { skip = true; skip_reason = "Maxima eig inner empty"; break; }
+                    std::vector<ExprPtr> evals;
+                    evals.reserve(eig_strs.size());
+                    bool any_err = false;
+                    for (const auto& el : eig_strs) {
+                        auto n = normalize_maxima_output(el);
+                        if (n.empty()) { any_err = true; break; }
+                        auto p = cas::golden::parse_maxima_expr(n, ctx.arena());
+                        if (!p.is_ok()) { any_err = true; break; }
+                        evals.push_back(p.value());
+                    }
+                    if (any_err) { skip = true; skip_reason = "Maxima eig elem parse"; break; }
+                    auto eq = cas::golden::compare_solve_sets(
+                        cas_v.eigenvalues_list, evals, ctx);
+                    if (!eq.is_ok()) { skip = true; skip_reason = "inconclusive eig"; break; }
+                    pass = eq.value();
+                    break;
+                }
+                default:
+                    skip = true; skip_reason = "no dispatch kind";
+                    break;
+            }
+            if (skip) {
+                ++stats.skip;
+                std::cout << "  SKIP [" << std::setw(3) << idx << "] "
+                          << input_str << " (" << skip_reason << ")\n";
+            } else if (pass) {
+                ++stats.pass;
+                std::cout << "  PASS [" << std::setw(3) << idx << "] " << input_str << "\n";
+            } else {
+                ++stats.fail;
+                std::cout << "  FAIL [" << std::setw(3) << idx << "] " << input_str << "\n";
+            }
+            ++idx;
+            continue;
+        }
 
         // --- Solve area: special set-equality path (F7.5.A1) ---
         if (area == "solve") {
