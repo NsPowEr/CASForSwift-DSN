@@ -478,6 +478,13 @@ public:
             created = make_uncached<T>(std::move(candidate));
         }
 
+        // F7.0-A3.5: allocation may have been refused by the memory budget.
+        // Propagate the null ExprPtr without inserting into the interning
+        // table or hot caches.
+        if (!created) {
+            return created;
+        }
+
         // Update atomic hot caches (visible to fast-path without lock).
         if constexpr (std::is_same_v<T, Constant>) {
             const std::size_t idx = static_cast<std::size_t>(expr_ref<Constant>(created).value);
@@ -496,6 +503,21 @@ public:
     }
 
     [[nodiscard]] std::size_t size() const noexcept;
+
+    // F7.0-A3.5: total bytes allocated by append_block since last reset.
+    [[nodiscard]] std::size_t bytes_allocated() const noexcept;
+
+    // F7.0-A3.5: cap on total bytes allocated by this arena. 0 = unlimited
+    // (default). When the cap would be exceeded, append_block silently
+    // refuses to grow and subsequent allocations return nullptr (then
+    // ExprPtr() from make<>), which propagates through visit_expr as a
+    // null expression — caller wrapped in Result<> APIs sees the failure.
+    //
+    // This is a hard floor: the OS OOM-killer cannot reach a process that
+    // refuses to allocate first.
+    void set_max_memory_budget_bytes(std::size_t bytes) noexcept;
+    [[nodiscard]] std::size_t max_memory_budget_bytes() const noexcept;
+    [[nodiscard]] bool budget_exhausted() const noexcept;
 
     // F7.0-A3.1: controlled reset for long-lived REPL/server processes.
     // Destroys every node ever allocated, clears interning tables, releases
@@ -520,6 +542,12 @@ private:
     [[nodiscard]] ExprPtr make_uncached(Args&&... args) {
         // Caller holds alloc_mutex_.
         T* node = static_cast<T*>(allocate(sizeof(T), alignof(T)));
+        // F7.0-A3.5: allocate() returns nullptr when memory budget is
+        // exhausted. Propagate as a null ExprPtr instead of placement-new'ing
+        // on a null pointer (which is undefined behaviour).
+        if (node == nullptr) {
+            return ExprPtr{};
+        }
         node = ::new (node) T(std::forward<Args>(args)...);
 
         if (node_chunks_.empty() || node_chunks_.back().size() == CHUNK_SIZE) {
@@ -542,6 +570,11 @@ private:
 
     [[nodiscard]] void* allocate(std::size_t size, std::size_t alignment);
     void append_block(std::size_t minimum_bytes);
+
+    // F7.0-A3.5: memory budget bookkeeping (under alloc_mutex_).
+    std::size_t bytes_allocated_{0U};
+    std::size_t max_memory_budget_bytes_{0U};  // 0 = unlimited
+    bool        budget_exhausted_{false};
 
     // F1.3-NEW: bump allocator state protected by its own mutex.
     mutable std::mutex alloc_mutex_;

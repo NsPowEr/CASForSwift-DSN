@@ -183,8 +183,10 @@ AstArena::~AstArena() {
 }
 
 void* AstArena::allocate(std::size_t size, std::size_t alignment) {
+    if (budget_exhausted_) return nullptr;  // F7.0-A3.5
     if (blocks_.empty()) {
         append_block(size + alignment);
+        if (budget_exhausted_) return nullptr;
     }
 
     auto align_up = [](std::size_t value, std::size_t align) noexcept {
@@ -196,6 +198,7 @@ void* AstArena::allocate(std::size_t size, std::size_t alignment) {
     std::size_t offset = align_up(block->used, alignment);
     if (offset + size > block->capacity) {
         append_block(size + alignment);
+        if (budget_exhausted_) return nullptr;
         block = &blocks_.back();
         offset = align_up(block->used, alignment);
     }
@@ -207,11 +210,41 @@ void* AstArena::allocate(std::size_t size, std::size_t alignment) {
 
 void AstArena::append_block(std::size_t minimum_bytes) {
     const std::size_t capacity = minimum_bytes > DEFAULT_BLOCK_BYTES ? minimum_bytes : DEFAULT_BLOCK_BYTES;
+    // F7.0-A3.5: enforce memory budget before allocating new heap block.
+    if (max_memory_budget_bytes_ > 0
+        && bytes_allocated_ + capacity > max_memory_budget_bytes_) {
+        budget_exhausted_ = true;
+        return;
+    }
     blocks_.push_back(Block{
         .data = std::make_unique<std::byte[]>(capacity),
         .capacity = capacity,
         .used = 0U,
     });
+    bytes_allocated_ += capacity;
+}
+
+std::size_t AstArena::bytes_allocated() const noexcept {
+    std::lock_guard<std::mutex> lock(alloc_mutex_);
+    return bytes_allocated_;
+}
+
+void AstArena::set_max_memory_budget_bytes(std::size_t bytes) noexcept {
+    std::lock_guard<std::mutex> lock(alloc_mutex_);
+    max_memory_budget_bytes_ = bytes;
+    if (bytes == 0U || bytes_allocated_ <= bytes) {
+        budget_exhausted_ = false;
+    }
+}
+
+std::size_t AstArena::max_memory_budget_bytes() const noexcept {
+    std::lock_guard<std::mutex> lock(alloc_mutex_);
+    return max_memory_budget_bytes_;
+}
+
+bool AstArena::budget_exhausted() const noexcept {
+    std::lock_guard<std::mutex> lock(alloc_mutex_);
+    return budget_exhausted_;
 }
 
 std::size_t AstArena::size() const noexcept {
@@ -250,6 +283,9 @@ void AstArena::reset() {
     interned_neg_one_.store(ExprPtr{}, std::memory_order_release);
 
     total_nodes_ = 0U;
+    // F7.0-A3.5: reset budget bookkeeping (max budget itself is preserved).
+    bytes_allocated_ = 0U;
+    budget_exhausted_ = false;
 
     for (auto& shard : intern_shards_) shard.unlock();
 }
