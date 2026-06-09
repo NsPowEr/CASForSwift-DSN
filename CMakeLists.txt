@@ -589,6 +589,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/symbolic/test_async_depth_scope.cpp
         test/unit/symbolic/test_cancellation.cpp
         test/unit/symbolic/test_cache_assumption_invalidation.cpp
+        test/unit/algebra/test_swell_guard.cpp
         test/unit/calculus/test_weierstrass_substitution.cpp
         test/unit/symbolic/test_complex_log_branch.cpp
         test/unit/numeric/test_float_contextual.cpp

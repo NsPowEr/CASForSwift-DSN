@@ -453,6 +453,25 @@ struct CASContextParams {
         return max_bernoulli_index_bits_;
     }
 
+    // ── Swell Guard (F7.0-A3.4) ──────────────────────────────────────────────
+    // Maximum number of distinct monomials algebra::expand_power is allowed
+    // to produce. Triggers a structured BudgetExceeded-style error (reported
+    // as CASErrorKind::Overflow with explicit message) rather than letting
+    // the allocator drag the process into OOM-Killer territory.
+    //
+    // Default 100_000: typical CAS corpus stays well under (a 5-variable
+    // poly of degree 20 has C(24,4)=10626 monomials). User can raise for
+    // research workloads via set_max_expand_monomials.
+    //
+    // Estimation upper bound used: n^k for (s_1 + ... + s_n)^k. Conservative
+    // — actual distinct monomials = C(n+k-1, n-1).
+    void set_max_expand_monomials(std::uint64_t n) noexcept {
+        if (n > 0) max_expand_monomials_ = n;
+    }
+    [[nodiscard]] std::uint64_t max_expand_monomials() const noexcept {
+        return max_expand_monomials_;
+    }
+
     // ── solve_inequality (F6.4 / F7.0-A2.1) ──────────────────────────────────
     // Search window half-width used by the Sturm-based univariate inequality
     // solver. Acts as conservative Cauchy bound when the exact bound from
@@ -526,6 +545,7 @@ protected:
     unsigned int  max_zeilberger_cert_degree_{4U};    // F5.7
     long long     solve_inequality_search_half_width_{1000LL};       // F7.0-A2.1
     long long     solve_inequality_sturm_tolerance_inv_{1000000000LL}; // F7.0-A2.1
+    std::uint64_t max_expand_monomials_{100000ULL};                  // F7.0-A3.4 Swell Guard
 };
 
 }  // namespace cas::symbolic

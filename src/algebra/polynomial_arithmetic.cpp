@@ -151,6 +151,34 @@ void append_product_factors(std::vector<ExprPtr>& out, ExprPtr expr) {
         return expanded_base;
     }
 
+    // F7.0-A3.4 Swell Guard: pre-flight check for combinatorial explosion.
+    // For (s_1 + ... + s_n)^k, distinct monomials = C(n+k-1, n-1).
+    // We use the cheaper conservative upper bound n^k and compare against
+    // ctx.max_expand_monomials(). On overflow or breach we return Overflow
+    // (BudgetExceeded analogue) before allocating.
+    if (const auto* base_sum = expr_cast<Sum>(expanded_base.value())) {
+        const std::uint64_t n = static_cast<std::uint64_t>(base_sum->terms.size());
+        const std::uint64_t k = static_cast<std::uint64_t>(exponent.magnitude);
+        const std::uint64_t limit = ctx.max_expand_monomials();
+        // Safe iterative computation of n^k with overflow detection.
+        std::uint64_t pow = 1;
+        bool exceeded = false;
+        for (std::uint64_t i = 0; i < k; ++i) {
+            if (n != 0 && pow > limit / n + 1) { exceeded = true; break; }
+            pow *= n;
+            if (pow > limit) { exceeded = true; break; }
+        }
+        if (exceeded) {
+            return fail<ExprPtr>(make_error(
+                CASErrorKind::Overflow,
+                "expand budget exceeded: (sum of " + std::to_string(n)
+                + " terms)^" + std::to_string(k)
+                + " would exceed max_expand_monomials="
+                + std::to_string(limit)
+                + " (raise via ctx.set_max_expand_monomials)"));
+        }
+    }
+
     // Optimization: Multivariate Polynomial expansion for Sum^n
     if (expr_is<Sum>(expanded_base.value())) {
         auto poly_res = parse_multivariate_polynomial(expanded_base.value(), ctx);
