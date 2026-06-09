@@ -479,10 +479,10 @@ public:
         }
 
         // F7.0-A3.5: allocation may have been refused by the memory budget.
-        // Propagate the null ExprPtr without inserting into the interning
-        // table or hot caches.
-        if (!created) {
-            return created;
+        // F7.0-A3.7: same short-circuit if a previous insert detected a
+        // pathological hash-collision chain.
+        if (!created || hash_dos_detected_) {
+            return ExprPtr{};
         }
 
         // Update atomic hot caches (visible to fast-path without lock).
@@ -499,6 +499,11 @@ public:
         }
 
         shard_table.insert(created);
+        // F7.0-A3.7: detect pathological hash-collision chains.
+        const std::size_t bucket = shard_table.bucket(created);
+        if (shard_table.bucket_size(bucket) > MAX_COLLISION_CHAIN) {
+            hash_dos_detected_ = true;
+        }
         return created;
     }
 
@@ -506,6 +511,18 @@ public:
 
     // F7.0-A3.5: total bytes allocated by append_block since last reset.
     [[nodiscard]] std::size_t bytes_allocated() const noexcept;
+
+    // F7.0-A3.7: Hash-DoS defence. Max collision-chain length tolerated per
+    // interning shard bucket. Exceeding the cap sets `hash_dos_detected_`
+    // (sticky); the next make<T> short-circuits and returns ExprPtr{} so
+    // subsequent allocations cannot worsen the situation. Reset clears it.
+    //
+    // Default 128 — well above natural load_factor (~1.0) but below the
+    // O(N) degeneration that adversarial inputs (same-hash AST shapes)
+    // could trigger. Cf. CLAUDE.md / PLAN_HP_PRIME_PARITY F7.0 voice 14.
+    [[nodiscard]] bool hash_dos_detected() const noexcept;
+    void clear_hash_dos_flag() noexcept;
+    static constexpr std::size_t MAX_COLLISION_CHAIN = 128U;
 
     // F7.0-A3.5: cap on total bytes allocated by this arena. 0 = unlimited
     // (default). When the cap would be exceeded, append_block silently
@@ -575,6 +592,8 @@ private:
     std::size_t bytes_allocated_{0U};
     std::size_t max_memory_budget_bytes_{0U};  // 0 = unlimited
     bool        budget_exhausted_{false};
+    // F7.0-A3.7: Hash-DoS sticky flag (under alloc_mutex_).
+    bool        hash_dos_detected_{false};
 
     // F1.3-NEW: bump allocator state protected by its own mutex.
     mutable std::mutex alloc_mutex_;

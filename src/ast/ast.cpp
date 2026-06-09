@@ -247,6 +247,16 @@ bool AstArena::budget_exhausted() const noexcept {
     return budget_exhausted_;
 }
 
+bool AstArena::hash_dos_detected() const noexcept {
+    std::lock_guard<std::mutex> lock(alloc_mutex_);
+    return hash_dos_detected_;
+}
+
+void AstArena::clear_hash_dos_flag() noexcept {
+    std::lock_guard<std::mutex> lock(alloc_mutex_);
+    hash_dos_detected_ = false;
+}
+
 std::size_t AstArena::size() const noexcept {
     // F1.3-NEW: use alloc_mutex_ (total_nodes_ is modified under it).
     std::lock_guard<std::mutex> lock(alloc_mutex_);
@@ -283,9 +293,10 @@ void AstArena::reset() {
     interned_neg_one_.store(ExprPtr{}, std::memory_order_release);
 
     total_nodes_ = 0U;
-    // F7.0-A3.5: reset budget bookkeeping (max budget itself is preserved).
+    // F7.0-A3.5/A3.7: reset budget + hash-DoS flag (caps preserved).
     bytes_allocated_ = 0U;
     budget_exhausted_ = false;
+    hash_dos_detected_ = false;
 
     for (auto& shard : intern_shards_) shard.unlock();
 }
