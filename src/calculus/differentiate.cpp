@@ -304,7 +304,7 @@ private:
             }
 
             // d/dx[ln(abs(u))] = u'/u — must intercept before argument_derivative fails on abs(u)
-            if (func_id == BuiltinOp::Ln) {
+            if (func_id == BuiltinOp::Ln || func_id == BuiltinOp::Log) {
                 if (const auto* abs_call = expr_cast<FuncCall>(argument);
                     abs_call != nullptr && abs_call->func_id == BuiltinOp::Abs && abs_call->args.size() == 1U) {
                     ExprPtr inner = abs_call->args[0];
@@ -355,7 +355,7 @@ private:
                     }));
             } else if (func_id == BuiltinOp::Exp) {
                 outer = make_function(arena_, "exp", {argument});
-            } else if (func_id == BuiltinOp::Ln) {
+            } else if (func_id == BuiltinOp::Ln || func_id == BuiltinOp::Log) {
                 outer = make_binary(arena_, BinaryOp::Div, make_integer(arena_, 1), argument);
             } else if (func_id == BuiltinOp::Sqrt) {
                 outer = make_binary(
