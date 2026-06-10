@@ -658,6 +658,7 @@ test/unit/algebra/test_half_gcd.cpp
         test/unit/symbolic/test_complex_log.cpp
         test/unit/symbolic/test_symbolic.cpp
         test/unit/symbolic/test_linalg_integration.cpp
+        test/unit/golden/test_matrix_adapter_d2.cpp
         test/unit/linalg/test_matrix_basic.cpp
         test/unit/linalg/test_matrix_advanced.cpp
         test/unit/linalg/test_bareiss_vander.cpp
@@ -755,6 +756,7 @@ test/unit/algebra/test_half_gcd.cpp
     target_include_directories(cas_foundation_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}/GUI/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/test/golden
     )
 
     if(CAS_ENABLE_GUI)

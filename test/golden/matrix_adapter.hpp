@@ -178,11 +178,301 @@ struct MatrixDispatchResult {
 };
 
 // ---------------------------------------------------------------------------
+// HC-F75-A2-MATRIX-SCALAR-OP (F7.5.A2 closure):
+//
+// A recursive, precedence-aware top-level evaluator for expressions that
+// mix matrix literals `[[…]]` with scalar subexpressions, using the
+// existing CAS parser for scalar operands and `cas::linalg` for matrix
+// operations. No closed pattern table: any well-formed +/-/* tree is
+// handled uniformly, and unsupported operand combinations (e.g.
+// scalar + matrix) yield an explicit `Unimplemented` diagnostic — never
+// silent skips.
+// ---------------------------------------------------------------------------
+struct MatrixOrScalar {
+    bool is_matrix{false};
+    cas::linalg::MatrixExpr matrix{0, 0};
+    ExprPtr scalar{nullptr};
+};
+
+// Trim ASCII whitespace at both ends and strip a single matching outer
+// pair of parentheses if it brackets the whole string (depth-aware).
+inline std::string strip_outer_parens(std::string s) {
+    auto is_ws = [](char c) {
+        return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+    };
+    while (!s.empty() && is_ws(s.front())) s.erase(s.begin());
+    while (!s.empty() && is_ws(s.back())) s.pop_back();
+    while (s.size() >= 2 && s.front() == '(' && s.back() == ')') {
+        int depth = 0;
+        bool wraps_whole = true;
+        for (std::size_t i = 0; i < s.size(); ++i) {
+            char c = s[i];
+            if (c == '(' || c == '[' || c == '{') ++depth;
+            else if (c == ')' || c == ']' || c == '}') --depth;
+            if (depth == 0 && i + 1 < s.size()) { wraps_whole = false; break; }
+        }
+        if (!wraps_whole) break;
+        s = s.substr(1, s.size() - 2);
+        while (!s.empty() && is_ws(s.front())) s.erase(s.begin());
+        while (!s.empty() && is_ws(s.back())) s.pop_back();
+    }
+    return s;
+}
+
+// Scan `s` for the rightmost top-level operator of the lowest available
+// precedence. Precedence levels: +,- (lowest); *,/. Unary +/- (operator
+// at position 0 or immediately following another operator or an opening
+// bracket) is skipped — it belongs to the operand.
+//
+// Returns {op, idx} or nullopt if no top-level binary operator exists.
+struct TopBinop {
+    char op;
+    std::size_t pos;
+};
+
+inline std::optional<TopBinop> find_top_level_binop(const std::string& s) {
+    auto is_ws = [](char c) {
+        return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+    };
+    auto is_op = [](char c) {
+        return c == '+' || c == '-' || c == '*' || c == '/';
+    };
+    // Pass A: rightmost + or -.
+    // Pass B: rightmost * or /.
+    for (int precedence = 0; precedence < 2; ++precedence) {
+        std::optional<TopBinop> best;
+        int depth = 0;
+        char prev_nonws = '\0';
+        for (std::size_t i = 0; i < s.size(); ++i) {
+            char c = s[i];
+            if (c == '(' || c == '[' || c == '{') { ++depth; prev_nonws = c; continue; }
+            if (c == ')' || c == ']' || c == '}') { --depth; prev_nonws = c; continue; }
+            if (depth == 0 && is_op(c)) {
+                const bool is_low = (c == '+' || c == '-');
+                const bool match  = (precedence == 0 ? is_low : !is_low);
+                if (match) {
+                    // Unary check: if prev_nonws is empty, an operator, or
+                    // an opening bracket, treat as unary.
+                    const bool unary =
+                        prev_nonws == '\0' || is_op(prev_nonws) ||
+                        prev_nonws == '(' || prev_nonws == '[' ||
+                        prev_nonws == '{' || prev_nonws == ',';
+                    if (!unary) best = TopBinop{c, i};
+                }
+            }
+            if (!is_ws(c)) prev_nonws = c;
+        }
+        if (best.has_value()) return best;
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] Result<MatrixOrScalar> evaluate_matrix_expression(
+    const std::string& raw, cas::symbolic::CASContext& ctx);
+
+// Build a scalar*matrix product element-wise via CAS simplifier.
+inline Result<cas::linalg::MatrixExpr> matrix_scalar_multiply(
+    const cas::linalg::MatrixExpr& m, ExprPtr s,
+    cas::symbolic::CASContext& ctx) {
+    cas::linalg::MatrixExpr out(m.rows(), m.cols());
+    for (std::size_t i = 0; i < m.rows(); ++i) {
+        for (std::size_t j = 0; j < m.cols(); ++j) {
+            ExprPtr prod = ctx.arena().make<Product>(
+                std::vector<ExprPtr>{s, m(i, j)});
+            auto r = ctx.simplify(prod);
+            if (!r.is_ok()) return r.error();
+            out(i, j) = r.value();
+        }
+    }
+    return ok(std::move(out));
+}
+
+inline Result<MatrixOrScalar> evaluate_matrix_expression_impl(
+    const std::string& raw, cas::symbolic::CASContext& ctx) {
+    std::string s = strip_outer_parens(raw);
+    if (s.empty()) {
+        return CASError{CASErrorKind::Unimplemented,
+                        "evaluate_matrix_expression: empty input",
+                        std::nullopt};
+    }
+    // Binary split if a top-level binop exists.
+    if (auto op = find_top_level_binop(s); op.has_value()) {
+        std::string l_raw = s.substr(0, op->pos);
+        std::string r_raw = s.substr(op->pos + 1);
+        auto lhs = evaluate_matrix_expression(l_raw, ctx);
+        if (!lhs.is_ok()) return lhs.error();
+        auto rhs = evaluate_matrix_expression(r_raw, ctx);
+        if (!rhs.is_ok()) return rhs.error();
+        const auto& L = lhs.value();
+        const auto& R = rhs.value();
+        switch (op->op) {
+            case '+':
+            case '-': {
+                if (!L.is_matrix || !R.is_matrix) {
+                    if (!L.is_matrix && !R.is_matrix) {
+                        // Pure scalar; combine via Sum/Difference and simplify.
+                        ExprPtr neg_r = (op->op == '-')
+                            ? ctx.arena().make<Unary>(UnaryOp::Neg, R.scalar)
+                            : R.scalar;
+                        ExprPtr sum = ctx.arena().make<Sum>(
+                            std::vector<ExprPtr>{L.scalar, neg_r});
+                        auto si = ctx.simplify(sum);
+                        if (!si.is_ok()) return si.error();
+                        MatrixOrScalar out;
+                        out.is_matrix = false;
+                        out.scalar = si.value();
+                        return ok(std::move(out));
+                    }
+                    return CASError{CASErrorKind::Unimplemented,
+                        "evaluate_matrix_expression: scalar±matrix is undefined",
+                        std::nullopt};
+                }
+                auto r = (op->op == '+')
+                    ? cas::linalg::add(L.matrix, R.matrix, ctx)
+                    : cas::linalg::subtract(L.matrix, R.matrix, ctx);
+                if (!r.is_ok()) return r.error();
+                MatrixOrScalar out;
+                out.is_matrix = true;
+                out.matrix = r.value();
+                return ok(std::move(out));
+            }
+            case '*': {
+                if (L.is_matrix && R.is_matrix) {
+                    auto r = cas::linalg::multiply(L.matrix, R.matrix, ctx);
+                    if (!r.is_ok()) return r.error();
+                    MatrixOrScalar out;
+                    out.is_matrix = true;
+                    out.matrix = r.value();
+                    return ok(std::move(out));
+                }
+                if (L.is_matrix && !R.is_matrix) {
+                    auto r = matrix_scalar_multiply(L.matrix, R.scalar, ctx);
+                    if (!r.is_ok()) return r.error();
+                    MatrixOrScalar out;
+                    out.is_matrix = true;
+                    out.matrix = r.value();
+                    return ok(std::move(out));
+                }
+                if (!L.is_matrix && R.is_matrix) {
+                    auto r = matrix_scalar_multiply(R.matrix, L.scalar, ctx);
+                    if (!r.is_ok()) return r.error();
+                    MatrixOrScalar out;
+                    out.is_matrix = true;
+                    out.matrix = r.value();
+                    return ok(std::move(out));
+                }
+                // scalar * scalar — defer to CAS simplifier.
+                ExprPtr prod = ctx.arena().make<Product>(
+                    std::vector<ExprPtr>{L.scalar, R.scalar});
+                auto si = ctx.simplify(prod);
+                if (!si.is_ok()) return si.error();
+                MatrixOrScalar out;
+                out.is_matrix = false;
+                out.scalar = si.value();
+                return ok(std::move(out));
+            }
+            case '/': {
+                if (R.is_matrix) {
+                    return CASError{CASErrorKind::Unimplemented,
+                        "evaluate_matrix_expression: division by matrix is not "
+                        "supported in this adapter (use inverse() explicitly)",
+                        std::nullopt};
+                }
+                if (L.is_matrix) {
+                    ExprPtr inv = ctx.arena().make<Binary>(
+                        BinaryOp::Pow, R.scalar,
+                        ctx.arena().make<IntegerLit>(BigInt(-1)));
+                    auto inv_s = ctx.simplify(inv);
+                    if (!inv_s.is_ok()) return inv_s.error();
+                    auto r = matrix_scalar_multiply(L.matrix, inv_s.value(), ctx);
+                    if (!r.is_ok()) return r.error();
+                    MatrixOrScalar out;
+                    out.is_matrix = true;
+                    out.matrix = r.value();
+                    return ok(std::move(out));
+                }
+                // scalar / scalar.
+                ExprPtr div = ctx.arena().make<Binary>(
+                    BinaryOp::Div, L.scalar, R.scalar);
+                auto si = ctx.simplify(div);
+                if (!si.is_ok()) return si.error();
+                MatrixOrScalar out;
+                out.is_matrix = false;
+                out.scalar = si.value();
+                return ok(std::move(out));
+            }
+        }
+    }
+    // Unary +/- prefix (after strip_outer_parens leaves leading sign):
+    // recursively evaluate the rest and apply the sign at the result level
+    // so a `-[[…]]` form still produces a Matrix-tagged value.
+    if (s.front() == '+') {
+        return evaluate_matrix_expression(s.substr(1), ctx);
+    }
+    if (s.front() == '-') {
+        auto inner = evaluate_matrix_expression(s.substr(1), ctx);
+        if (!inner.is_ok()) return inner.error();
+        ExprPtr neg_one = ctx.arena().make<IntegerLit>(BigInt(-1));
+        if (inner.value().is_matrix) {
+            auto neg = matrix_scalar_multiply(inner.value().matrix, neg_one, ctx);
+            if (!neg.is_ok()) return neg.error();
+            MatrixOrScalar out;
+            out.is_matrix = true;
+            out.matrix = neg.value();
+            return ok(std::move(out));
+        }
+        ExprPtr negated = ctx.arena().make<Unary>(UnaryOp::Neg, inner.value().scalar);
+        auto si = ctx.simplify(negated);
+        if (!si.is_ok()) return si.error();
+        MatrixOrScalar out;
+        out.is_matrix = false;
+        out.scalar = si.value();
+        return ok(std::move(out));
+    }
+    // Leaf: either a `[[…]]` matrix literal or a scalar subexpression.
+    if (s.size() >= 2 && s.front() == '[' && s[1] == '[') {
+        auto m = parse_matrix_lit(s, ctx);
+        if (!m.is_ok()) return m.error();
+        MatrixOrScalar out;
+        out.is_matrix = true;
+        out.matrix = m.value();
+        return ok(std::move(out));
+    }
+    auto p = cas::golden::parse_expr(s, ctx);
+    if (!p.is_ok()) return p.error();
+    MatrixOrScalar out;
+    out.is_matrix = false;
+    out.scalar = p.value();
+    return ok(std::move(out));
+}
+
+inline Result<MatrixOrScalar> evaluate_matrix_expression(
+    const std::string& raw, cas::symbolic::CASContext& ctx) {
+    return evaluate_matrix_expression_impl(raw, ctx);
+}
+
+// ---------------------------------------------------------------------------
 // Dispatch a matrix command `fn([[…]])`. Returns the appropriate tag.
 // ---------------------------------------------------------------------------
 inline Result<MatrixDispatchResult> evaluate_cas_matrix(
     const std::string& input_str, cas::symbolic::CASContext& ctx) {
     auto cmd = cas::golden::parse_command(input_str);
+    // If parse_command did not recognize a function call wrapper, treat the
+    // whole input as a top-level expression mixing matrix literals and
+    // scalars (HC-F75-A2-MATRIX-SCALAR-OP).
+    if (cmd.fn.empty() || cmd.arg_strs.empty()) {
+        auto val = evaluate_matrix_expression(input_str, ctx);
+        if (!val.is_ok()) return val.error();
+        MatrixDispatchResult out;
+        if (val.value().is_matrix) {
+            out.kind = MatrixDispatchResult::Kind::Matrix;
+            out.matrix = val.value().matrix;
+        } else {
+            out.kind = MatrixDispatchResult::Kind::Scalar;
+            out.scalar = val.value().scalar;
+        }
+        return ok(std::move(out));
+    }
     if (cmd.arg_strs.size() != 1U) {
         return CASError{CASErrorKind::Unimplemented,
                         "evaluate_cas_matrix: expected 1 arg",

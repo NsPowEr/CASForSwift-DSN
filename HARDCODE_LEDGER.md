@@ -144,7 +144,8 @@
 - **Workaround corrente**: SKIP per ~7 entry su 79. Pass-rate 56/(56+0) = 100% non-skip, ma 56/79 = 70.9% sul totale corpus.
 - **Fix corretto**: estendere area="matrix" branch del runner con parser top-level che rileva `<expr> * <matrix>`, `<matrix> +/- <matrix>`, `<matrix> * <matrix>` → costruisce MatrixExpr via `cas::linalg::add/multiply/scalar_multiply`. Riusare `cas::linalg::multiply(a, b, ctx)` esistente.
 - **Acceptance**: matrix corpus → ≥ 90% sul totale (oggi 70.9%).
-- **STATO**: APERTO
+- **Fix applicato (2026-06-10)**: `test/golden/matrix_adapter.hpp` ora espone `evaluate_matrix_expression(raw, ctx)`, un evaluatore ricorsivo top-level precedence-aware (lowest +/-, then */, unary +/- come trasformazione prefix). Operandi rilevati come matrix literal `[[…]]` o sotto-espressione scalare; combinazione via `cas::linalg::add/subtract/multiply` e helper element-wise `matrix_scalar_multiply` (Product+simplify per ogni elemento). `evaluate_cas_matrix` ora invoca questo evaluatore quando `parse_command` non riconosce un function call wrapper, coprendo scalar·matrix, matrix·scalar, matrix·matrix, matrix±matrix, matrix/scalar e unary `-matrix`. Errori espliciti `Unimplemented` su scalar±matrix e division-by-matrix (no skip silenzioso). 15 unit test in `test/unit/golden/test_matrix_adapter_d2.cpp` validano la dispatch surface (no Maxima dependency). Suite quick 2250/2250 PASS. Misurazione corpus aggregato richiede refresh Maxima outputs e gira separata.
+- **STATO**: IMPL COMPLETA — misurazione corpus % pending refresh oracolo Maxima
 
 ### HC-F75-A2-MAXIMA-MATTRACE — Maxima emette `mattrace(matrix(...))` non valutato su trace
 - **File**: `test/golden/main.cpp` area matrix scalar path.
