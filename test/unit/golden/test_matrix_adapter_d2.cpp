@@ -147,6 +147,37 @@ TEST_F(MatrixAdapterD2Test, MatrixDividedByScalar) {
     EXPECT_TRUE(integer_value(v.matrix(1, 1), 4));
 }
 
+TEST_F(MatrixAdapterD2Test, MattraceWrapperEvaluatesTrace) {
+    // HC-F75-A2-MAXIMA-MATTRACE: Maxima leaves mattrace(matrix(...))
+    // unevaluated; helper must compute trace on the CAS side.
+    auto r = cas::golden::try_evaluate_mattrace_wrapper(
+        "mattrace(matrix([1,2],[3,4]))", ctx);
+    ASSERT_TRUE(r.has_value());
+    ASSERT_TRUE(r->is_ok()) << r->error().message;
+    EXPECT_TRUE(integer_value(r->value(), 5));
+}
+
+TEST_F(MatrixAdapterD2Test, MattraceWrapperWithWhitespaceAndTerminator) {
+    auto r = cas::golden::try_evaluate_mattrace_wrapper(
+        "  mattrace(matrix([7,0],[0,3])) ;", ctx);
+    ASSERT_TRUE(r.has_value());
+    ASSERT_TRUE(r->is_ok());
+    EXPECT_TRUE(integer_value(r->value(), 10));
+}
+
+TEST_F(MatrixAdapterD2Test, MattraceWrapperSkipsNonMattrace) {
+    auto r = cas::golden::try_evaluate_mattrace_wrapper(
+        "matrix([1,2],[3,4])", ctx);
+    EXPECT_FALSE(r.has_value());
+}
+
+TEST_F(MatrixAdapterD2Test, MattraceWrapperRejectsMalformed) {
+    auto r = cas::golden::try_evaluate_mattrace_wrapper(
+        "mattrace(not_a_matrix(1,2))", ctx);
+    ASSERT_TRUE(r.has_value());
+    EXPECT_FALSE(r->is_ok());
+}
+
 TEST_F(MatrixAdapterD2Test, NestedScalarExpression) {
     // (2+1)*[[1,1],[1,1]] = [[3,3],[3,3]]
     auto v = eval("(2+1)*[[1,1],[1,1]]");

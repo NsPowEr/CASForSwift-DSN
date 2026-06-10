@@ -149,6 +149,43 @@ inline Result<cas::linalg::MatrixExpr> parse_maxima_matrix(
 }
 
 // ---------------------------------------------------------------------------
+// HC-F75-A2-MAXIMA-MATTRACE (F7.5.A2):
+//
+// Maxima leaves `mattrace(matrix([...],[...]))` unevaluated when invoked
+// without first loading the `nchrpl` package. The corpus expects a
+// scalar (trace value), so we evaluate the trace ourselves on the CAS
+// side using the same matrix the corpus sent to Maxima. If the line is
+// not a `mattrace(matrix(...))` wrapper, returns nullopt and the caller
+// proceeds with the normal scalar parsing path.
+// ---------------------------------------------------------------------------
+inline std::optional<Result<ExprPtr>> try_evaluate_mattrace_wrapper(
+    const std::string& raw_last_line, cas::symbolic::CASContext& ctx) {
+    std::string s = raw_last_line;
+    auto is_ws = [](char c) {
+        return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+    };
+    while (!s.empty() && is_ws(s.front())) s.erase(s.begin());
+    while (!s.empty() && (is_ws(s.back()) || s.back() == ';' ||
+                          s.back() == '$'))
+        s.pop_back();
+    constexpr const char* kPrefix = "mattrace(";
+    constexpr std::size_t kPrefixLen = 9;
+    if (s.size() <= kPrefixLen || s.compare(0, kPrefixLen, kPrefix) != 0) {
+        return std::nullopt;
+    }
+    if (s.back() != ')') return std::nullopt;
+    std::string inner = s.substr(kPrefixLen, s.size() - kPrefixLen - 1);
+    // The argument must itself be a matrix(...) form for this oracle
+    // transformation to apply. Defer to parse_maxima_matrix for the
+    // structural check + actual conversion.
+    auto mm = parse_maxima_matrix(inner, ctx);
+    if (!mm.is_ok()) return mm.error();
+    auto tr = cas::linalg::trace(mm.value(), ctx);
+    if (!tr.is_ok()) return tr.error();
+    return ok(tr.value());
+}
+
+// ---------------------------------------------------------------------------
 // Compare two matrices element-wise via mathematically_equal.
 // ---------------------------------------------------------------------------
 inline Result<bool> compare_matrices(

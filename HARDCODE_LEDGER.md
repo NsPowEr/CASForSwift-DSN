@@ -154,7 +154,8 @@
 - **Sintomo**: 5 corpus entry trace SKIP perché Maxima lascia `mattrace(matrix([…]))` unevaluated. parse_maxima_expr non lo conosce.
 - **Fix corretto**: nel branch scalar del matrix dispatch, se `last_line` matcha `mattrace(matrix(...))`, parsare la matrice via `parse_maxima_matrix` ed eseguire `cas::linalg::trace` sul CAS, usando il risultato come "Maxima value". Documentare nella spec come transformer del oracle.
 - **Acceptance**: 5 entry trace ulteriori passano.
-- **STATO**: APERTO
+- **Fix applicato (2026-06-10)**: nuovo helper `try_evaluate_mattrace_wrapper(raw_last_line, ctx) -> optional<Result<ExprPtr>>` in `test/golden/matrix_adapter.hpp`. Trim whitespace + terminatori (`;`/`$`), match prefisso `mattrace(...)`, parse inner via `parse_maxima_matrix`, applica `cas::linalg::trace`. Restituisce `nullopt` se la riga non è wrapper (fallthrough alla scalar path normale); restituisce error esplicito su `mattrace(...)` mal-formato (no skip silenzioso). Hook nel matrix scalar dispatch di `test/golden/main.cpp` BEFORE `parse_maxima_expr`. 4 unit test in `test/unit/golden/test_matrix_adapter_d2.cpp` (positivo, whitespace+terminatore, non-mattrace skip, malformato).
+- **STATO**: IMPL COMPLETA — misurazione corpus % pending refresh oracolo Maxima
 
 ### HC-F75-A3-HARD-TIMEOUT — Cancellation token non copre tutti i path integrazione
 - **File**: `test/golden/runner_timeout.hpp` + tutti i path in `src/calculus/integrate_*` privi di poll-point.

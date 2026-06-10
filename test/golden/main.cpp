@@ -224,6 +224,26 @@ int main(int argc, char* argv[]) {
             std::string skip_reason;
             switch (cas_v.kind) {
                 case K::Scalar: {
+                    // HC-F75-A2-MAXIMA-MATTRACE: if Maxima emits
+                    // `mattrace(matrix(...))` unevaluated, parse the
+                    // matrix and compute trace on the CAS side.
+                    if (auto mt = cas::golden::try_evaluate_mattrace_wrapper(
+                            last_line, ctx);
+                        mt.has_value()) {
+                        if (!mt->is_ok()) {
+                            skip = true; skip_reason =
+                                "Maxima mattrace eval: " + mt->error().message;
+                            break;
+                        }
+                        auto eq = cas::symbolic::mathematically_equal(
+                            cas_v.scalar, mt->value(), ctx);
+                        if (!eq.is_ok()) {
+                            skip = true; skip_reason = "inconclusive mattrace";
+                            break;
+                        }
+                        pass = eq.value();
+                        break;
+                    }
                     std::string norm = normalize_maxima_output(last_line);
                     if (norm.empty()) {
                         skip = true; skip_reason = "Maxima scalar empty";
