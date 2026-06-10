@@ -125,10 +125,9 @@ std::pair<BigInt, BigInt> BigInt::divide_knuth_d(const BigInt& u_in, const BigIn
         }
 
         // Refine q̂: at most 2 iterations (Knuth Theorem B ensures 2 corrections suffice).
-        while (q_hat >= B || q_hat * vn2_norm > r_hat * B + u_jn2) {
+        while (r_hat < B && (q_hat >= B || q_hat * vn2_norm > r_hat * B + u_jn2)) {
             --q_hat;
             r_hat += vn1_norm;
-            if (r_hat >= B) break;  // r_hat overflow: no more refinement
         }
 
         // D4. Multiply-subtract: u[jj..jj+n] -= q_hat * v[0..n-1].

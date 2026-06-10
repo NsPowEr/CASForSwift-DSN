@@ -222,6 +222,15 @@ Result<ExprPtr> integrate_by_parts(
 
     ExprPtr vdu = arena.make<Product>(std::vector<ExprPtr>{v, du});
 
+    // HC-F75-B1-IBP-DOUBLE-APPLY fix: simplify the v·du Product before
+    // recursive integrate, otherwise patterns like ∫x·log(x)dx produce a
+    // sub-integrand (x²/2)·(1/x) which re-routes through integrate_by_parts
+    // (both factors algebraic, equal ILATE priority) instead of collapsing
+    // to (1/2)·x — leading to recursive by-parts expansion and a 4-term
+    // redundant Sum in the final result.
+    auto vdu_simp = context.simplify(vdu);
+    if (vdu_simp.is_ok()) vdu = vdu_simp.value();
+
     auto int_vdu_res = integrate(vdu, var, context);
     if (int_vdu_res.is_error()) {
         return int_vdu_res;
