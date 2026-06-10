@@ -8,6 +8,19 @@ Result<ExprPtr> Simplifier::simplify_funcall_special(
     ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr target_before) {
 
     if (op == BuiltinOp::Gamma && args.size() == 1U) {
+        // F7.5.E1: Γ(0) and Γ(-n) (n ∈ Z⁺) are poles → ComplexInfinity.
+        // Reference: Abramowitz & Stegun 6.1.7 (poles at non-positive integers).
+        if (const auto* il = expr_cast<IntegerLit>(args.front())) {
+            if (il->value.is_zero() || il->value.is_negative()) {
+                return ok(arena_.make<Constant>(MathConstant::ComplexInfinity));
+            }
+        }
+        // F7.5.E1: Γ(+∞) → +∞ (Stirling's growth).
+        if (const auto* c = expr_cast<Constant>(args.front())) {
+            if (c->value == MathConstant::Infinity) {
+                return ok(arena_.make<Constant>(MathConstant::Infinity));
+            }
+        }
         // Gamma(n) = (n-1)! for positive integer n >= 1
         if (const auto* il = expr_cast<IntegerLit>(args.front())) {
             if (il->value > BigInt(0)) {
@@ -315,10 +328,19 @@ Result<ExprPtr> Simplifier::simplify_funcall_special(
         }
     }
 
-    // Erf — odd function
+    // Erf — odd function + boundary values.
     if (op == BuiltinOp::Erf && args.size() == 1U) {
         if (is_zero_expr(args.front()))
             return traced_result(RuleId::SimplifyErfZero, target_before, make_integer(arena_, BigInt(0)));
+        // F7.5.E1: erf(±∞) = ±1 (Abramowitz-Stegun 7.1.16).
+        if (const auto* c = expr_cast<Constant>(args.front())) {
+            if (c->value == MathConstant::Infinity) {
+                return ok(make_integer(arena_, BigInt(1)));
+            }
+            if (c->value == MathConstant::NegInfinity) {
+                return ok(arena_.make<Unary>(UnaryOp::Neg, make_integer(arena_, BigInt(1))));
+            }
+        }
         if (const auto* un = expr_cast<Unary>(args.front()); un && un->op == UnaryOp::Neg) {
             ExprPtr inner_erf = arena_.make<FuncCall>(BuiltinOp::Erf, std::vector<ExprPtr>{un->operand});
             return simplify_expr(arena_.make<Unary>(UnaryOp::Neg, inner_erf));
@@ -331,6 +353,10 @@ Result<ExprPtr> Simplifier::simplify_funcall_special(
             const BigInt& n = il->value;
             if (n.is_zero())
                 return ok(arena_.make<RationalLit>(BigInt(-1), BigInt(2)));
+            // F7.5.E1: ζ(1) is the harmonic divergence — simple pole → ComplexInfinity.
+            // Reference: Abramowitz-Stegun 23.2.1 (Riemann zeta pole at s=1).
+            if (n == BigInt(1))
+                return ok(arena_.make<Constant>(MathConstant::ComplexInfinity));
             const unsigned int bernoulli_bits = (context_ != nullptr)
                 ? context_->max_bernoulli_index_bits() : 30U;
             if (n.is_negative()) {
@@ -389,100 +415,9 @@ Result<ExprPtr> Simplifier::simplify_funcall_special(
         }
     }
 
-    // Hypergeometric functions (F5.9 / Task #18).
-    //
-    //   0F1(;b;z),  1F1(a;b;z),  2F1(a,b;c;z).
-    //
-    // Identità riconosciute (Abramowitz-Stegun §15.1):
-    //   pFq(...; 0) = 1                          (valore base in z = 0)
-    //   1F1(a; a; z) = e^z                       (Kummer degenerate)
-    //   2F1(a, b; b; z) = (1 − z)^(−a)           (parametri degeneri)
-    //   2F1(1, 1; 2; -z) = ln(1 + z) / z         (log closed-form)
-    //
-    // Non riconosciute: lascia FuncCall opaca per consumi successivi.
-    if (op == BuiltinOp::Hypergeometric0F1 && args.size() == 2U) {
-        if (is_zero_expr(args[1])) return ok(make_integer(arena_, BigInt(1)));
-    }
-    // Helper inline: confronto strutturale (deep) per riconoscere
-    // identità parametriche pFq (a == b non basta pointer-equal).
-    auto symbols_equal = [](ExprPtr x, ExprPtr y) -> bool {
-        if (x == y) return true;
-        if (!x || !y) return false;
-        const auto* sx = expr_cast<Symbol>(x);
-        const auto* sy = expr_cast<Symbol>(y);
-        if (sx && sy) return sx->name == sy->name;
-        const auto* ix = expr_cast<IntegerLit>(x);
-        const auto* iy = expr_cast<IntegerLit>(y);
-        if (ix && iy) return ix->value == iy->value;
-        const auto* rx = expr_cast<RationalLit>(x);
-        const auto* ry = expr_cast<RationalLit>(y);
-        if (rx && ry) return rx->numerator == ry->numerator
-                            && rx->denominator == ry->denominator;
-        return false;
-    };
-    if (op == BuiltinOp::Hypergeometric1F1 && args.size() == 3U) {
-        if (is_zero_expr(args[2])) return ok(make_integer(arena_, BigInt(1)));
-        // 1F1(a; a; z) = e^z.
-        if (symbols_equal(args[0], args[1])) {
-            return simplify_expr(arena_.make<FuncCall>(BuiltinOp::Exp,
-                std::vector<ExprPtr>{args[2]}));
-        }
-    }
-    if (op == BuiltinOp::Hypergeometric2F1 && args.size() == 4U) {
-        if (is_zero_expr(args[3])) return ok(make_integer(arena_, BigInt(1)));
-        // 2F1(a, b; b; z) = (1 - z)^(-a).  Match b == c.
-        if (symbols_equal(args[1], args[2])) {
-            ExprPtr one_minus_z = arena_.make<Binary>(BinaryOp::Sub,
-                make_integer(arena_, BigInt(1)), args[3]);
-            ExprPtr neg_a = arena_.make<Unary>(UnaryOp::Neg, args[0]);
-            return simplify_expr(arena_.make<Binary>(BinaryOp::Pow,
-                one_minus_z, neg_a));
-        }
-        // 2F1(a, b; a; z) = (1 - z)^(-b).  Match a == c.
-        if (symbols_equal(args[0], args[2])) {
-            ExprPtr one_minus_z = arena_.make<Binary>(BinaryOp::Sub,
-                make_integer(arena_, BigInt(1)), args[3]);
-            ExprPtr neg_b = arena_.make<Unary>(UnaryOp::Neg, args[1]);
-            return simplify_expr(arena_.make<Binary>(BinaryOp::Pow,
-                one_minus_z, neg_b));
-        }
-    }
-
-    // Elliptic integrals (F5.9 / Task #20).
-    //
-    // Coppie axiomatic (Abramowitz-Stegun §17.4–§17.7):
-    //   K(0) = π/2,   E(0) = π/2,   E(1) = 1
-    //   F(φ, 0) = φ                       (incomplete primo tipo a k = 0)
-    //   Π(0, k) = K(k)                    (Π degenera in K se n = 0)
-    auto half = [&]() {
-        return arena_.make<Binary>(BinaryOp::Div,
-            arena_.make<Constant>(MathConstant::Pi),
-            make_integer(arena_, BigInt(2)));
-    };
-    if ((op == BuiltinOp::EllipticK || op == BuiltinOp::EllipticE)
-        && args.size() == 1U) {
-        if (is_zero_expr(args[0])) return ok(half());
-        if (op == BuiltinOp::EllipticE) {
-            if (const auto* il = expr_cast<IntegerLit>(args[0]);
-                il && il->value == BigInt(1)) {
-                return ok(make_integer(arena_, BigInt(1)));
-            }
-        }
-    }
-    if (op == BuiltinOp::EllipticF && args.size() == 2U) {
-        if (is_zero_expr(args[1])) return ok(args[0]);  // F(φ, 0) = φ
-    }
-    if (op == BuiltinOp::EllipticPi && args.size() == 2U) {
-        if (is_zero_expr(args[0])) {
-            // Π(0, k) = K(k).
-            return simplify_expr(arena_.make<FuncCall>(BuiltinOp::EllipticK,
-                std::vector<ExprPtr>{args[1]}));
-        }
-    }
-
-    const auto& orig_args = expr_ref<FuncCall>(original).args;
-    if (expr_ptr_sequence_identical(args, orig_args)) return ok(original);
-    return ok(arena_.make<FuncCall>(op, std::move(args)));
+    // Hypergeometric + elliptic identities are implemented in
+    // simplify_special_fn_hyper.cpp (F7.5.E1 anti-monolith split).
+    return simplify_funcall_hyper_elliptic(original, op, std::move(args), target_before);
 }
 
 } // namespace cas::symbolic::detail

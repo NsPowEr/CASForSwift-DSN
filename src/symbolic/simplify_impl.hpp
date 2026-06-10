@@ -221,6 +221,9 @@ private:
     [[nodiscard]] Result<ExprPtr> simplify_funcall_arc_trig(ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr target_before);
     [[nodiscard]] Result<ExprPtr> simplify_funcall_exp_log_sqrt(ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr target_before);
     [[nodiscard]] Result<ExprPtr> simplify_funcall_special(ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr target_before);
+    // F7.5.E1: hypergeometric/elliptic split out from simplify_funcall_special
+    // to keep simplify_special_fn.cpp under the 500-line anti-monolith limit.
+    [[nodiscard]] Result<ExprPtr> simplify_funcall_hyper_elliptic(ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr target_before);
     [[nodiscard]] Result<ExprPtr> simplify_funcall_bessel_orthogonal(ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr target_before);
     [[nodiscard]] Result<ExprPtr> simplify_funcall_complex(ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr target_before);
 
