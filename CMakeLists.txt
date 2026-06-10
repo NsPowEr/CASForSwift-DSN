@@ -203,6 +203,7 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/limit_mrv_set.cpp
     src/calculus/limit_mrv_leading.cpp
     src/calculus/limit_mrv_exp.cpp
+    src/calculus/limit_quotient_d2.cpp
     src/calculus/residue.cpp
     src/calculus/residue_theorem.cpp
     src/calculus/laurent_general.cpp

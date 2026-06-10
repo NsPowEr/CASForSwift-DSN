@@ -113,17 +113,17 @@ TEST_F(GruntzNestedLogTest, LogTimesLogLogOverLogSquared) {
     EXPECT_TRUE(is_zero(r));
 }
 
-// Case 6: lim x→∞ (log(x) + log(log(x))) / log(x) = 1
-// DEFERRED TO F7.5.D2: requires simplifier to handle ∞+∞ canonically via
-// extended-real arithmetic (Extended_Real_AST.md spec phase 2), OR limit
-// dispatcher to short-circuit ∞/∞ quotients via L'Hopital before eager
-// substitution. Currently the substitution x→∞ produces a Sum involving
-// log(∞)·... where intermediate factor evaluation hits 0·∞ which the
-// simplifier flags as Undefined.
+// Case 6 — F7.5.D2 closure: sum-termwise pre-MRV dispatch.
+TEST_F(GruntzNestedLogTest, LogPlusLogLogOverLogX) {
+    auto r = limit_at_pos_inf("(log(x) + log(log(x))) / log(x)");
+    EXPECT_TRUE(is_one(r));
+}
 
-// Case 7: lim x→∞ x * log(log(x)) / (x * log(x)) = 0
-// DEFERRED TO F7.5.D2: same root cause as Case 6 — needs L'Hopital or
-// upstream simplify rule x·f(x)/(x·g(x)) → f(x)/g(x) for x→∞.
+// Case 7 — F7.5.D2 closure: Product · Pow(Product, -1) cancellation pre-MRV.
+TEST_F(GruntzNestedLogTest, XLogLogOverXLogX) {
+    auto r = limit_at_pos_inf("x * log(log(x)) / (x * log(x))");
+    EXPECT_TRUE(is_zero(r));
+}
 
 // Case 8: lim x→∞ log(x + log(x)) / log(x) = 1
 TEST_F(GruntzNestedLogTest, LogXPlusLogXOverLogX) {

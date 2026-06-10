@@ -59,8 +59,20 @@ public:
             }
         }
 
+        // F7.5.D2: pre-MRV quotient cancellation (Product · Pow(Product, -1)).
+        // Resolves Gruntz Case 7 type expressions x·log(log(x))/(x·log(x))
+        // where simplify leaves Product([x, Pow(Product([x, log(x)]), -1), …]).
+        // Must run BEFORE extract_quotient_view + try_log_log_limit so the
+        // log-log helper sees the cancelled (canonical-quotient) form.
+        ExprPtr pre_mrv_expr = simplified_expr.value();
+        if (auto cancelled = try_cancel_product_pow_inverse(pre_mrv_expr, context_);
+            cancelled.has_value()) {
+            auto re_simp = context_.simplify(cancelled.value());
+            if (re_simp.is_ok()) pre_mrv_expr = re_simp.value();
+        }
+
         if (point_is_pos_inf || point_is_neg_inf) {
-            auto q_inf = extract_quotient_view(simplified_expr.value(), arena_);
+            auto q_inf = extract_quotient_view(pre_mrv_expr, arena_);
             if (q_inf.has_value()) {
                 LimitDirection inf_dir = point_is_pos_inf
                     ? LimitDirection::Right : LimitDirection::Left;
@@ -72,8 +84,18 @@ public:
             }
         }
 
+        // F7.5.D2: pre-MRV sum-termwise dispatch. Resolves Gruntz Case 6 type
+        // expressions where simplify yields Sum([finite-tending term, …]).
+        if ((point_is_pos_inf || point_is_neg_inf)) {
+            if (auto sum_res = try_limit_sum_termwise(
+                    pre_mrv_expr, var, simplified_point.value(), dir, context_);
+                sum_res.has_value()) {
+                return *sum_res;
+            }
+        }
+
         if (point_is_pos_inf || point_is_neg_inf) {
-            auto mrv_res = compute_limit_mrv(simplified_expr.value(), var, simplified_point.value(), context_);
+            auto mrv_res = compute_limit_mrv(pre_mrv_expr, var, simplified_point.value(), context_);
             if (mrv_res.is_ok()) {
                 return mrv_res;
             }
@@ -94,7 +116,7 @@ public:
             ExprPtr x_sub = point_is_pos_inf
                 ? one_over_t
                 : arena_.make<Unary>(UnaryOp::Neg, one_over_t);
-            auto expr_sub = context_.substitute(simplified_expr.value(), var, x_sub);
+            auto expr_sub = context_.substitute(pre_mrv_expr, var, x_sub);
             if (expr_sub.is_error()) return expr_sub;
             
             auto together_t = algebra::together(expr_sub.value(), context_);
@@ -117,7 +139,7 @@ public:
             }
         }
 
-        return compute_recursive(simplified_expr.value(), var, simplified_point.value(), dir, 0U);
+        return compute_recursive(pre_mrv_expr, var, simplified_point.value(), dir, 0U);
     }
 
 private:

@@ -353,6 +353,13 @@ using MRVSet = std::set<ExprPtr, MRVCompare>;
 [[nodiscard]] Result<ExprPtr> rewrite_mrv(ExprPtr e, const MRVSet& mrv, ExprPtr w, const Symbol& var, symbolic::CASContext& ctx);
 [[nodiscard]] Result<ExprPtr> compute_limit_mrv(ExprPtr expr, const Symbol& var, ExprPtr point, symbolic::CASContext& ctx);
 
+// F7.5.D2 — pre-MRV quotient/sum transformations.
+[[nodiscard]] std::optional<ExprPtr> try_cancel_product_pow_inverse(
+    ExprPtr expr, symbolic::CASContext& ctx);
+[[nodiscard]] std::optional<Result<ExprPtr>> try_limit_sum_termwise(
+    ExprPtr expr, const Symbol& var, ExprPtr point,
+    LimitDirection dir, symbolic::CASContext& ctx);
+
 // Bronstein Chapter 8 general variable-coefficient and parametric Risch DE solvers
 [[nodiscard]] Result<ExprPtr> solve_risch_de_general(
     ExprPtr f, ExprPtr g, const Symbol& var, const DifferentialField& field, symbolic::CASContext& ctx);
