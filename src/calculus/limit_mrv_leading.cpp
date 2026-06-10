@@ -180,15 +180,27 @@ namespace {
 
     if (const auto* call = expr_cast<FuncCall>(expr)) {
         std::vector<ExprPtr> args_coeffs;
+        bool any_arg_goes_to_zero = false;
         for (ExprPtr arg : call->args) {
             auto arg_leading = leading_power_w(arg, w_var, ctx);
             if (!arg_leading.has_value()) return std::nullopt;
             if (arg_leading->power < 0) return std::nullopt;
             if (arg_leading->power > 0) {
+                any_arg_goes_to_zero = true;
                 args_coeffs.push_back(limit_make_integer(arena, 0));
             } else {
                 args_coeffs.push_back(arg_leading->coefficient);
             }
+        }
+        // F7.5.D1: Bail out for functions singular at zero (log, 1/x dispatched via FuncCall).
+        // Substituting arg=0 into ctx.simplify(log(...)) triggers ComplexRational division
+        // by zero downstream and the caller has no way to recover. Returning nullopt
+        // forces the higher-level dispatcher to try alternate strategies (Gruntz §3.5
+        // requires a slowly-varying coefficient track which leading_power_w cannot
+        // express; see Gruntz_Nested_Log.md spec).
+        if (any_arg_goes_to_zero && call->args.size() == 1U &&
+            (call->func_id == BuiltinOp::Ln || call->func_id == BuiltinOp::Log)) {
+            return std::nullopt;
         }
         auto res_coeff = ctx.simplify(arena.make<FuncCall>(call->func_id, std::move(args_coeffs)));
         if (res_coeff.is_error()) return std::nullopt;

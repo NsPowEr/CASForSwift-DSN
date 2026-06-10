@@ -345,7 +345,7 @@ Result<ExprPtr> Simplifier::simplify_funcall_exp_log_sqrt(
         }
     }
 
-    if (op == BuiltinOp::Ln && args.size() == 1U) {
+    if ((op == BuiltinOp::Ln || op == BuiltinOp::Log) && args.size() == 1U) {
         if (is_zero_expr(args.front()))
             return fail<ExprPtr>(make_error(CASErrorKind::Undefined, "ln(0) is undefined"));
         if (is_one_expr(args.front()))

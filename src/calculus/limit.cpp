@@ -1,6 +1,5 @@
 #include "cas/calculus.hpp"
 #include "cas/algebra.hpp"
-#include <iostream>
 
 #include "calculus_internal.hpp"
 #include "cas/error.hpp"
@@ -24,7 +23,6 @@ public:
     explicit LimitEngine(symbolic::CASContext& context) noexcept : context_(context), arena_(context.arena()) {}
 
     [[nodiscard]] Result<ExprPtr> compute(ExprPtr expr, const Symbol& var, ExprPtr point, LimitDirection dir) {
-        std::cerr << "[DEBUG] Entering LimitEngine::compute" << std::endl;
         // Adaptive recursion bound (Gruntz §3.5): the legitimate recursion
         // depth is bounded by the comparability-tower height of the input,
         // not by a fixed constant. We estimate the height via a cheap
@@ -105,7 +103,16 @@ public:
 
             ExprPtr zero_pt = limit_make_integer(arena_, 0);
             auto res = compute_recursive(expr_t.value(), t_var, zero_pt, LimitDirection::Right, 0U);
-            if (res.is_ok() || res.error().kind != CASErrorKind::Unimplemented) {
+            if (res.is_ok()) return res;
+            // F7.5.D1: do not propagate ComplexRational/BigInt division-by-zero
+            // from eager substitution in the x→1/t transform; those are artifacts
+            // of substituting t=0 into a log expression and the limit may still
+            // be computable by other strategies. Convert to Unimplemented so the
+            // outer dispatcher continues to try compute_recursive fallback.
+            const auto kind = res.error().kind;
+            if (kind != CASErrorKind::Unimplemented &&
+                kind != CASErrorKind::Undefined &&
+                kind != CASErrorKind::DivisionByZero) {
                 return res;
             }
         }

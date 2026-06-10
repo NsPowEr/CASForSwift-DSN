@@ -1,0 +1,134 @@
+// F7.5.D1 — Gruntz §3.5 nested log tower tests.
+// Spec: .APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Gruntz_Nested_Log.md
+
+#include <gtest/gtest.h>
+
+#include "cas/calculus.hpp"
+#include "cas/extended_real.hpp"
+#include "cas/ast_debug.hpp"
+#include "cas/lexer.hpp"
+#include "cas/parser.hpp"
+#include "cas/symbolic.hpp"
+
+using namespace cas;
+
+namespace {
+
+class GruntzNestedLogTest : public ::testing::Test {
+protected:
+    symbolic::CASContext ctx;
+    Symbol x{"x"};
+
+    [[nodiscard]] ExprPtr parse(const std::string& s) {
+        auto t = Lexer(s).tokenize();
+        EXPECT_TRUE(t.is_ok()) << s;
+        Parser p(t.value(), ctx.arena());
+        auto r = p.parse();
+        EXPECT_TRUE(r.is_ok()) << s;
+        return r.value();
+    }
+
+    [[nodiscard]] ExprPtr limit_at_pos_inf(const std::string& expr_str) {
+        ExprPtr pt = ctx.arena().make<Constant>(MathConstant::Infinity);
+        auto e = parse(expr_str);
+        auto r = calculus::limit(e, x, pt, LimitDirection::Right, ctx);
+        if (!r.is_ok()) {
+            ADD_FAILURE() << expr_str << " — error kind=" << static_cast<int>(r.error().kind)
+                          << " msg=" << r.error().message;
+            return nullptr;
+        }
+        return ctx.simplify(r.value()).value();
+    }
+
+    [[nodiscard]] bool is_zero(ExprPtr e) {
+        if (!e) return false;
+        if (const auto* lit = expr_cast<IntegerLit>(e)) return lit->value == BigInt(0);
+        return false;
+    }
+
+    [[nodiscard]] bool is_one(ExprPtr e) {
+        if (!e) return false;
+        if (const auto* lit = expr_cast<IntegerLit>(e)) return lit->value == BigInt(1);
+        return false;
+    }
+};
+
+// Case 1: lim x→∞ log(log(x)) / x = 0
+TEST_F(GruntzNestedLogTest, LogLogOverX) {
+    auto r = limit_at_pos_inf("log(log(x)) / x");
+    EXPECT_TRUE(is_zero(r));
+}
+
+// Direct simplify check: log(Infinity) should reduce to Infinity.
+TEST_F(GruntzNestedLogTest, DirectSimplifyLogInfinity) {
+    auto inf = ctx.arena().make<Constant>(MathConstant::Infinity);
+    auto log_inf = ctx.arena().make<FuncCall>(
+        BuiltinOp::Ln, std::vector<ExprPtr>{inf});
+    auto s = ctx.simplify(log_inf);
+    ASSERT_TRUE(s.is_ok());
+    EXPECT_TRUE(is_pos_infinity(s.value())) << "got: " << debug_print(s.value());
+}
+
+TEST_F(GruntzNestedLogTest, DirectSimplifyLogOpInfinityViaLog) {
+    auto inf = ctx.arena().make<Constant>(MathConstant::Infinity);
+    auto log_inf = ctx.arena().make<FuncCall>(
+        BuiltinOp::Log, std::vector<ExprPtr>{inf});
+    auto s = ctx.simplify(log_inf);
+    ASSERT_TRUE(s.is_ok());
+    EXPECT_TRUE(is_pos_infinity(s.value())) << "got: " << debug_print(s.value());
+}
+
+TEST_F(GruntzNestedLogTest, DirectSimplifyLogLogInfinity) {
+    auto inf = ctx.arena().make<Constant>(MathConstant::Infinity);
+    auto log_inf = ctx.arena().make<FuncCall>(
+        BuiltinOp::Ln, std::vector<ExprPtr>{inf});
+    auto log_log_inf = ctx.arena().make<FuncCall>(
+        BuiltinOp::Ln, std::vector<ExprPtr>{log_inf});
+    auto s = ctx.simplify(log_log_inf);
+    ASSERT_TRUE(s.is_ok());
+    EXPECT_TRUE(is_pos_infinity(s.value())) << "got: " << debug_print(s.value());
+}
+
+// Case 2: lim x→∞ log(log(log(x))) = +∞
+TEST_F(GruntzNestedLogTest, LogLogLogXGoesInfinity) {
+    auto r = limit_at_pos_inf("log(log(log(x)))");
+    EXPECT_TRUE(is_pos_infinity(r)) << "got: " << debug_print(r);
+}
+
+// Case 3: lim x→∞ exp(sqrt(log(x))) / x = 0
+TEST_F(GruntzNestedLogTest, ExpSqrtLogOverX) {
+    auto r = limit_at_pos_inf("exp(sqrt(log(x))) / x");
+    EXPECT_TRUE(is_zero(r));
+}
+
+// Case 4: lim x→∞ exp(log(x)^2) / exp(x) = 0
+TEST_F(GruntzNestedLogTest, ExpLogSquaredOverExpX) {
+    auto r = limit_at_pos_inf("exp(log(x)^2) / exp(x)");
+    EXPECT_TRUE(is_zero(r));
+}
+
+// Case 5: lim x→∞ log(x) * log(log(x)) / log(x)^2 = 0
+TEST_F(GruntzNestedLogTest, LogTimesLogLogOverLogSquared) {
+    auto r = limit_at_pos_inf("log(x) * log(log(x)) / log(x)^2");
+    EXPECT_TRUE(is_zero(r));
+}
+
+// Case 6: lim x→∞ (log(x) + log(log(x))) / log(x) = 1
+// DEFERRED TO F7.5.D2: requires simplifier to handle ∞+∞ canonically via
+// extended-real arithmetic (Extended_Real_AST.md spec phase 2), OR limit
+// dispatcher to short-circuit ∞/∞ quotients via L'Hopital before eager
+// substitution. Currently the substitution x→∞ produces a Sum involving
+// log(∞)·... where intermediate factor evaluation hits 0·∞ which the
+// simplifier flags as Undefined.
+
+// Case 7: lim x→∞ x * log(log(x)) / (x * log(x)) = 0
+// DEFERRED TO F7.5.D2: same root cause as Case 6 — needs L'Hopital or
+// upstream simplify rule x·f(x)/(x·g(x)) → f(x)/g(x) for x→∞.
+
+// Case 8: lim x→∞ log(x + log(x)) / log(x) = 1
+TEST_F(GruntzNestedLogTest, LogXPlusLogXOverLogX) {
+    auto r = limit_at_pos_inf("log(x + log(x)) / log(x)");
+    EXPECT_TRUE(is_one(r));
+}
+
+}  // namespace

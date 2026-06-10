@@ -59,6 +59,7 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const FuncCall& node
 
     case BuiltinOp::Exp:
     case BuiltinOp::Ln:
+    case BuiltinOp::Log:
     case BuiltinOp::Sqrt:
         return simplify_funcall_exp_log_sqrt(original, op, std::move(args), target_before);
 
