@@ -15,6 +15,17 @@ thread_local std::size_t Integrator::depth_ = 0U;
 Integrator::Integrator(symbolic::CASContext& context) noexcept : context_(context), arena_(context.arena()) {}
 
 Result<ExprPtr> Integrator::integrate(ExprPtr expr, const Symbol& var) {
+    // HC-F75-A3-HARD-TIMEOUT: poll the interrupt flag at every recursive
+    // entry into the integrator. The check is a single atomic load + branch
+    // (CASContext::check_interrupt is inline noexcept), so the cost per
+    // integrate node is negligible compared to the simplify/algebraic work
+    // a single node typically triggers. Polling at the function head — both
+    // here and in integrate_once — gives the runner's per-entry SIGALRM
+    // handler a deterministic cancellation point even for heavy integrands
+    // whose downstream simplify path does not itself poll.
+    if (auto irq = context_.check_interrupt(); irq.is_error()) {
+        return fail<ExprPtr>(irq.error());
+    }
     if (depth_ >= context_.max_integration_depth()) {
         // F0.8-MIGRATED
         return make_unimplemented<ExprPtr>(
@@ -173,6 +184,13 @@ Result<ExprPtr> Integrator::integrate_rational(ExprPtr expr, const Symbol& var) 
 }
 
 Result<ExprPtr> Integrator::integrate_once(ExprPtr expr, const Symbol& var) {
+    // HC-F75-A3-HARD-TIMEOUT: see comment in integrate() above. integrate_once
+    // is the per-node recursive entry, so polling here guarantees that any
+    // sub-integrand a strategy (by-parts, substitution, Hermite, …) hands
+    // back to the dispatcher passes through the same cancellation check.
+    if (auto irq = context_.check_interrupt(); irq.is_error()) {
+        return fail<ExprPtr>(irq.error());
+    }
     if (!expr) {
         return fail<ExprPtr>(make_error(CASErrorKind::InvalidArgument, "Cannot integrate a null expression"));
     }

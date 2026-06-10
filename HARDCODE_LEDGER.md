@@ -165,7 +165,8 @@
 - **Workaround corrente**: bronstein corpus completato solo per 61/90 entry; risultato F7.5.A3 partiale.
 - **Fix corretto**: opzione A — aggiungere poll-point in `integrate_byparts.cpp` / `integrate_substitution.cpp` / Hermite reduction prima di ogni iterazione (vincolato a `kInterruptPollInterval` configurabile in `CASContextParams`). Opzione B — process-fork hard isolation nel runner (child esegue una entry, parent kill su timeout). Opzione A preferita: poll-point in core copre anche uso interactive futuro.
 - **Acceptance**: bronstein 90/90 traversato; integrate corpus 140/140 (già OK).
-- **STATO**: APERTO
+- **Fix applicato (2026-06-10)**: poll-point `context_.check_interrupt()` aggiunto all'entry di `Integrator::integrate` e `Integrator::integrate_once` in `src/calculus/integrate_core.cpp`. Polling alla testa di queste due funzioni copre TUTTE le strategie di integrazione (by-parts, substitution, Hermite, Risch DE, partial fractions, …) perché ogni sub-integrand passa attraverso `integrate_once` per il dispatch. `check_interrupt` è inline noexcept (single atomic load + branch), costo trascurabile vs il lavoro per-nodo. Restituisce `CASErrorKind::Timeout` con messaggio "Operation cancelled by interrupt request". 3 unit test in `test/unit/calculus/test_integrate_interrupt.cpp`: (1) pre-interrupt → Timeout, (2) clear_interrupt ripristina normale, (3) interrupt fra due chiamate integrate consecutive viene osservato.
+- **STATO**: IMPL COMPLETA — misurazione bronstein 90/90 pending rerun corpus con `--per-entry-timeout 30`
 
 ### HC-F75-CYCLOTOMIC-ROOTOF — mathematically_equal non riconosce RootOf(cyclotomic) ↔ exp(2πik/n)
 - **File**: `src/algebra/algebraic_equal.cpp`.

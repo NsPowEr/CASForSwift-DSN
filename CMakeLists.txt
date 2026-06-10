@@ -576,6 +576,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/calculus/test_differentiate_smoke.cpp
         test/unit/calculus/test_limit_smoke.cpp
         test/unit/calculus/test_limit_gruntz_nested_log.cpp
+        test/unit/calculus/test_integrate_interrupt.cpp
         test/unit/calculus/test_integrate_risch_smoke.cpp
         test/unit/calculus/test_integrate_substitution.cpp
         test/unit/algebra/test_polynomial_sparse_interpolation.cpp
