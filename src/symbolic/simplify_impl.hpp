@@ -225,6 +225,10 @@ private:
     // to keep simplify_special_fn.cpp under the 500-line anti-monolith limit.
     [[nodiscard]] Result<ExprPtr> simplify_funcall_hyper_elliptic(ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr target_before);
     [[nodiscard]] Result<ExprPtr> simplify_funcall_bessel_orthogonal(ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr target_before);
+    // F7.5.E2: orthogonal polynomial recurrences (Chebyshev, Hermite,
+    // Legendre, Laguerre, Jacobi) split out from simplify_bessel_orthogonal.cpp
+    // to keep that file under the 500-line anti-monolith limit.
+    [[nodiscard]] Result<ExprPtr> simplify_funcall_orthogonal_polys(ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr target_before);
     [[nodiscard]] Result<ExprPtr> simplify_funcall_complex(ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr target_before);
 
     // Monomial helpers

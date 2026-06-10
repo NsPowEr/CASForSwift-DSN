@@ -143,6 +143,7 @@ set(CAS_SYMBOLIC_SOURCES
     src/symbolic/simplify_exp_log.cpp
     src/symbolic/simplify_special_fn.cpp
     src/symbolic/simplify_special_fn_hyper.cpp
+    src/symbolic/simplify_orthogonal_polys.cpp
     src/symbolic/simplify_bessel_orthogonal.cpp
     src/symbolic/simplify_complex.cpp
     src/symbolic/simplify_utils.cpp
@@ -564,6 +565,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/symbolic/test_complex_simplification.cpp
         test/unit/symbolic/test_extended_real.cpp
         test/unit/symbolic/test_special_fn_e1_identities.cpp
+        test/unit/symbolic/test_bessel_e2_identities.cpp
         test/unit/symbolic/test_calculus_f4.cpp
         test/unit/symbolic/test_multiple_integral.cpp
         test/unit/symbolic/test_limit_tower_adaptive.cpp
