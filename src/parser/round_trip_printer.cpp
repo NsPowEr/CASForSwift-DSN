@@ -79,6 +79,12 @@ enum class ExprPrecedence : int {
         return ok(std::string("i"));
     case MathConstant::Infinity:
         return ok(std::string("inf"));
+    case MathConstant::NegInfinity:
+        return ok(std::string("-inf"));
+    case MathConstant::ComplexInfinity:
+        return ok(std::string("cinf"));
+    case MathConstant::Indeterminate:
+        return ok(std::string("undefined"));
     case MathConstant::NaN:
         return ok(std::string("nan"));
     case MathConstant::EulerGamma:

@@ -209,7 +209,10 @@ enum class MathConstant : std::uint8_t {
     Pi,
     E,
     I,
-    Infinity,
+    Infinity,         // +∞ (canonical positive infinity)
+    NegInfinity,      // -∞ (canonical signed negative infinity, F7.5.F1)
+    ComplexInfinity,  // ∞̃  unsigned/directionless infinity, e.g. 1/0, Γ(0) (F7.5.F1)
+    Indeterminate,    // 0·∞, ∞-∞, 0/0 indeterminate form (F7.5.F1)
     NaN,
     EulerGamma,
 };

@@ -174,6 +174,9 @@ std::string TextFormatter::format_internal(ExprPtr expr, std::unordered_map<Expr
                 case MathConstant::E: return "e";
                 case MathConstant::I: return "I";
                 case MathConstant::Infinity: return "inf";
+                case MathConstant::NegInfinity: return "-inf";
+                case MathConstant::ComplexInfinity: return "cinf";
+                case MathConstant::Indeterminate: return "undef";
                 case MathConstant::EulerGamma: return "EulerGamma";
                 default: return "const";
             }

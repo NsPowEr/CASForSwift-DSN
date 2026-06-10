@@ -45,6 +45,9 @@ Result<double> NumericEvaluator::evaluate(ExprPtr expr) {
                     case MathConstant::Pi: return ok(std::numbers::pi);
                     case MathConstant::E: return ok(std::numbers::e);
                     case MathConstant::Infinity: return ok(static_cast<double>(INFINITY));
+                    case MathConstant::NegInfinity: return ok(-static_cast<double>(INFINITY));
+                    case MathConstant::ComplexInfinity: return ok(static_cast<double>(NAN));
+                    case MathConstant::Indeterminate: return ok(static_cast<double>(NAN));
                     case MathConstant::EulerGamma: return ok(0.5772156649015328606);
                     default:
                         // F0.8-MIGRATED

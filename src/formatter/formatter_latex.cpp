@@ -26,6 +26,9 @@ std::string LaTeXFormatter::format(ExprPtr expr) {
                 case MathConstant::Pi: return "\\pi";
                 case MathConstant::E: return "e";
                 case MathConstant::Infinity: return "\\infty";
+                case MathConstant::NegInfinity: return "-\\infty";
+                case MathConstant::ComplexInfinity: return "\\tilde{\\infty}";
+                case MathConstant::Indeterminate: return "\\mathrm{undefined}";
                 default: return "const";
             }
         } else if constexpr (std::is_same_v<NodeT, Unary>) {

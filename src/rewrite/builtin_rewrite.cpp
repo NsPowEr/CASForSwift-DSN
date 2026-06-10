@@ -81,6 +81,9 @@ namespace {
             case MathConstant::EulerGamma:
             case MathConstant::Infinity:
                 return true;
+            case MathConstant::NegInfinity:
+            case MathConstant::ComplexInfinity:
+            case MathConstant::Indeterminate:
             case MathConstant::I:
             case MathConstant::NaN:
                 return false;

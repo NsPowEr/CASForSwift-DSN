@@ -57,6 +57,12 @@ namespace {
         return "I";
     case MathConstant::Infinity:
         return "Infinity";
+    case MathConstant::NegInfinity:
+        return "NegInfinity";
+    case MathConstant::ComplexInfinity:
+        return "ComplexInfinity";
+    case MathConstant::Indeterminate:
+        return "Indeterminate";
     case MathConstant::NaN:
         return "NaN";
     case MathConstant::EulerGamma:

@@ -273,8 +273,13 @@ namespace detail {
     case MathConstant::E:
     case MathConstant::EulerGamma:
     case MathConstant::Infinity: return true;
-    default: return false;
+    case MathConstant::NegInfinity:
+    case MathConstant::ComplexInfinity:
+    case MathConstant::Indeterminate:
+    case MathConstant::I:
+    case MathConstant::NaN: return false;
     }
+    return false;
 }
 
 [[nodiscard]] bool is_known_nonnegative_constant(MathConstant value) noexcept {

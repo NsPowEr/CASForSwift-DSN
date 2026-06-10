@@ -65,6 +65,15 @@ public:
                     case MathConstant::Infinity:
                         return fail<BigFloat>(make_error(CASErrorKind::Undefined,
                             "Infinity has no finite BigFloat representation"));
+                    case MathConstant::NegInfinity:
+                        return fail<BigFloat>(make_error(CASErrorKind::Undefined,
+                            "NegInfinity has no finite BigFloat representation"));
+                    case MathConstant::ComplexInfinity:
+                        return fail<BigFloat>(make_error(CASErrorKind::Undefined,
+                            "ComplexInfinity has no finite BigFloat representation"));
+                    case MathConstant::Indeterminate:
+                        return fail<BigFloat>(make_error(CASErrorKind::Undefined,
+                            "Indeterminate form has no numeric value"));
                     default:
                         // F0.8-MIGRATED
                         return make_unimplemented<BigFloat>(

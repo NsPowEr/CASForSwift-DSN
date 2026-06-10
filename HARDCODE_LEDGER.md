@@ -32,8 +32,22 @@
   MathConstant; estendere `canonical_compare`, `expr_hash`,
   `structural_equal`, simplify rules (`x + Inf → Inf`, `Inf + (-Inf) → NaN`,
   `1/0 → ComplexInf` con `complex_branch_policy`), pretty-printer.
-- **STATO**: APERTO (deferito Fase 8 post-parità o pre-F7.4 corpus
-  se gap emerge).
+- **STATO**: PARZIALMENTE CHIUSO (F7.5.F1, commit segue) — enum esteso
+  con `NegInfinity`, `ComplexInfinity`, `Indeterminate`; 8 switch sites
+  migrati (ast_debug, formatter_latex/text, bigfloat_eval, evaluator,
+  round_trip_printer, builtin_rewrite, simplify_utils); helper
+  `include/cas/extended_real.hpp` (predicati polymorphic legacy-aware:
+  `is_pos_infinity`, `is_neg_infinity`, `is_complex_infinity`,
+  `is_indeterminate`, factory `make_*_infinity`); 13 unit test
+  `test_extended_real.cpp` PASS; suite quick 2203/2203 PASS zero
+  regressioni. Fase 2 (migrazione creators a forma canonica
+  `Constant(NegInfinity)` invece di `Unary(Neg, Constant(Infinity))`)
+  deferita a Fase 8 — `is_neg_infinity` rimane polymorphic finché tutti
+  i creators usano forma canonica; rimuovere accept legacy in Fase 8.
+  Aritmetica extended-real (`+∞ + +∞`, `0·∞`, `1/0`, ecc.) deferita a
+  F7.5.D1 (Gruntz) e a Fase 8 — la spec
+  `.APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Extended_Real_AST.md`
+  documenta semantica completa.
 
 ### HC-F70-A33-POLL-COVERAGE — Cancellation poll-points coverage partial
 - **File**: `src/algebra/polynomial_gcd_multivariate*.cpp`,
