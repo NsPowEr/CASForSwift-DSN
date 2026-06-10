@@ -249,7 +249,14 @@ Result<std::vector<Token>> Lexer::tokenize() const {
                 }
             }
 
-            if (!is_float && position < input_.size() && input_[position] == '/') {
+            // F7.5.C1 lexer fix: combine N/M into a single Rational token
+            // ONLY when not preceded by Caret. Otherwise `x^5/120` tokenizes
+            // as [x, ^, 5/120] → Pow(x, 1/24), exposing exponent precedence
+            // bug that the parser cannot recover from.
+            bool prev_is_caret = !tokens.empty()
+                && tokens.back().kind == TokenKind::Caret;
+            if (!is_float && !prev_is_caret
+                && position < input_.size() && input_[position] == '/') {
                 std::size_t lookahead = position + 1U;
                 if (lookahead < input_.size() && std::isdigit(static_cast<unsigned char>(input_[lookahead])) != 0) {
                     while (lookahead < input_.size() && std::isdigit(static_cast<unsigned char>(input_[lookahead])) != 0) {
