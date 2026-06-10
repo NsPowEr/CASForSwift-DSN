@@ -111,6 +111,16 @@
 
 ## Voci aperte
 
+### HC-F75-B1-IBP-DOUBLE-APPLY — Integration by parts applica regola due volte su Product Log·Pow
+- **File**: `src/calculus/integrate_parts.cpp` + `simplify` su Product post-IBP.
+- **Categoria**: 2 (costanti magiche → in realtà falsa simmetria nel dispatch).
+- **Aperta da**: F7.5.B1 (2026-06-10).
+- **Sintomo**: `integrate(x*log(x), x)` produce output con 4 termini ridondanti che non si cancellano (`log(x)*½x² - ½x²·ln(abs(x)) - ln(abs(x))·½x² - ½·½x²`) invece di `½x²·log(x) - ¼x²`. Sembra che IBP re-applichi by-parts su un sub-integrale già risolto, possibilmente per il loop su `Sum` di `integrate_once` che ri-visita il termine `-∫(x²/2)·(1/x) dx`.
+- **Workaround**: nessuno (FAIL diretto).
+- **Fix corretto**: ispezionare `integrate_by_parts` per evitare ri-visita del termine post-sub. Il sub-integrale dopo riduzione (`-∫(x/2) dx`) dovrebbe risolversi via `integrate_power_direct` senza ulteriori chiamate by-parts. Verificare anche che ILATE non emetta `Sum`/`Product` con priorità sbagliata sul termine ridotto, causando dispatch infinito a se stesso.
+- **Acceptance**: `integrate(x*log(x), x)` → corretto `½x²·log(x) - ¼x²`. Idem entry 60 `x*log(x)^2`, entry 59 `log(x)^3`.
+- **STATO**: APERTO
+
 ### HC-F75-A2-MATRIX-SCALAR-OP — Runner non gestisce scalar·matrix / matrix±matrix / matrix·matrix
 - **File**: `test/golden/main.cpp` (area "matrix" dispatch), `test/golden/matrix_adapter.hpp`.
 - **Categoria**: 4 (bail-out su tipo — adapter test, non engine).

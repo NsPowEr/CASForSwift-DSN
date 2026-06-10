@@ -34,7 +34,14 @@ Result<ExprPtr> Integrator::integrate_function_direct(const std::string& name, E
     if (func_id == BuiltinOp::Cosh) {
         return ok(make_function(arena_, "sinh", {argument}));
     }
-    if (func_id == BuiltinOp::Ln) {
+    if (func_id == BuiltinOp::Tanh) {
+        // ∫tanh(x) dx = ln(cosh(x))
+        return ok(make_function(arena_, "ln",
+            {make_function(arena_, "cosh", {argument})}));
+    }
+    if (func_id == BuiltinOp::Ln || func_id == BuiltinOp::Log) {
+        // Both Ln and Log are natural log in this engine (see
+        // differentiate.cpp same fix). ∫ln(x) dx = x·ln(x) - x.
         ExprPtr x = argument;
         return ok(make_sum(arena_, {make_product(arena_, {x, make_function(arena_, "ln", {x})}), make_unary(arena_, UnaryOp::Neg, x)}));
     }
@@ -48,6 +55,97 @@ Result<ExprPtr> Integrator::integrate_function_direct(const std::string& name, E
                     make_binary(arena_, BinaryOp::Pow, x, make_integer(arena_, 2)),
                     make_integer(arena_, 1),
                 })}),
+            }),
+        }));
+    }
+    if (func_id == BuiltinOp::Asin) {
+        // ∫asin(x) dx = x·asin(x) + sqrt(1 - x²)
+        ExprPtr x = argument;
+        ExprPtr one_minus_x2 = make_sum(arena_, {
+            make_integer(arena_, 1),
+            make_unary(arena_, UnaryOp::Neg,
+                make_binary(arena_, BinaryOp::Pow, x, make_integer(arena_, 2))),
+        });
+        return ok(make_sum(arena_, {
+            make_product(arena_, {x, make_function(arena_, "arcsin", {x})}),
+            make_function(arena_, "sqrt", {one_minus_x2}),
+        }));
+    }
+    if (func_id == BuiltinOp::Acos) {
+        // ∫acos(x) dx = x·acos(x) - sqrt(1 - x²)
+        ExprPtr x = argument;
+        ExprPtr one_minus_x2 = make_sum(arena_, {
+            make_integer(arena_, 1),
+            make_unary(arena_, UnaryOp::Neg,
+                make_binary(arena_, BinaryOp::Pow, x, make_integer(arena_, 2))),
+        });
+        return ok(make_sum(arena_, {
+            make_product(arena_, {x, make_function(arena_, "arccos", {x})}),
+            make_unary(arena_, UnaryOp::Neg,
+                make_function(arena_, "sqrt", {one_minus_x2})),
+        }));
+    }
+    // F7.5.B1: inverse hyperbolic standalone integrals.
+    // These functions are not in BuiltinOp (would touch 76 switch
+    // statements under -Wswitch -Werror, deferred to Fase 8); they are
+    // parsed as FuncCall(name, …) with BuiltinOp::Custom. Match by
+    // canonical name (and 'arc' aliases Maxima sometimes emits).
+    auto matches_name = [&](std::initializer_list<const char*> names) {
+        for (auto* n : names) if (name == n) return true;
+        return false;
+    };
+    if (matches_name({"asinh", "arcsinh"})) {
+        // ∫asinh(x) dx = x·asinh(x) - sqrt(x² + 1)
+        ExprPtr x = argument;
+        ExprPtr x2_plus_1 = make_sum(arena_, {
+            make_binary(arena_, BinaryOp::Pow, x, make_integer(arena_, 2)),
+            make_integer(arena_, 1),
+        });
+        return ok(make_sum(arena_, {
+            make_product(arena_, {x, make_function(arena_, "asinh", {x})}),
+            make_unary(arena_, UnaryOp::Neg, make_function(arena_, "sqrt", {x2_plus_1})),
+        }));
+    }
+    if (matches_name({"acosh", "arccosh"})) {
+        // ∫acosh(x) dx = x·acosh(x) - sqrt(x² - 1)
+        ExprPtr x = argument;
+        ExprPtr x2_minus_1 = make_sum(arena_, {
+            make_binary(arena_, BinaryOp::Pow, x, make_integer(arena_, 2)),
+            make_integer(arena_, -1),
+        });
+        return ok(make_sum(arena_, {
+            make_product(arena_, {x, make_function(arena_, "acosh", {x})}),
+            make_unary(arena_, UnaryOp::Neg, make_function(arena_, "sqrt", {x2_minus_1})),
+        }));
+    }
+    if (matches_name({"atanh", "arctanh"})) {
+        // ∫atanh(x) dx = x·atanh(x) + ½·ln(1 - x²)
+        ExprPtr x = argument;
+        ExprPtr one_minus_x2 = make_sum(arena_, {
+            make_integer(arena_, 1),
+            make_unary(arena_, UnaryOp::Neg,
+                make_binary(arena_, BinaryOp::Pow, x, make_integer(arena_, 2))),
+        });
+        return ok(make_sum(arena_, {
+            make_product(arena_, {x, make_function(arena_, "atanh", {x})}),
+            make_product(arena_, {
+                make_rational(arena_, 1, 2),
+                make_function(arena_, "ln", {one_minus_x2}),
+            }),
+        }));
+    }
+    if (matches_name({"acoth", "arccoth"})) {
+        // ∫acoth(x) dx = x·acoth(x) + ½·ln(x² - 1)
+        ExprPtr x = argument;
+        ExprPtr x2_minus_1 = make_sum(arena_, {
+            make_binary(arena_, BinaryOp::Pow, x, make_integer(arena_, 2)),
+            make_integer(arena_, -1),
+        });
+        return ok(make_sum(arena_, {
+            make_product(arena_, {x, make_function(arena_, "acoth", {x})}),
+            make_product(arena_, {
+                make_rational(arena_, 1, 2),
+                make_function(arena_, "ln", {x2_minus_1}),
             }),
         }));
     }
@@ -84,7 +182,26 @@ Result<ExprPtr> Integrator::integrate_function(const FuncCall& call, const Symbo
     ExprPtr argument = call.args.front();
     BuiltinOp func_id = call.func_id;
     if (func_id == BuiltinOp::Sqrt) {
-        return integrate_sqrt_quadratic(argument, var);
+        // F7.5.B1: try quadratic argument first; fall back to power_direct
+        // for sqrt(affine in x) — `sqrt(x)` = x^(1/2), affine path scales.
+        auto quad = integrate_sqrt_quadratic(argument, var);
+        if (quad.is_ok()) return quad;
+        auto affine = extract_affine_argument(argument, var);
+        if (affine.has_value() && affine->coefficient.numerator() != BigInt(0)) {
+            // ∫sqrt(a·x + b) dx = (1/a) · (2/3) · (a·x + b)^(3/2)
+            auto primitive = integrate_power_direct(argument,
+                make_rational(arena_, 1, 2), var);
+            if (primitive.is_ok()) {
+                if (affine->coefficient == Rational(BigInt(1))) {
+                    return primitive;
+                }
+                return ok(make_product(arena_, {
+                    make_rational(arena_, Rational(BigInt(1)) / affine->coefficient),
+                    primitive.value(),
+                }));
+            }
+        }
+        return quad;  // propagate original failure
     }
 
     auto affine = extract_affine_argument(argument, var);

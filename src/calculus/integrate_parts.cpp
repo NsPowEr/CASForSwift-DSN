@@ -22,8 +22,8 @@ namespace {
         if (func_id == BuiltinOp::Asin || func_id == BuiltinOp::Acos || func_id == BuiltinOp::Atan) {
             return 1;
         }
-        // L: Logarithmic
-        if (func_id == BuiltinOp::Ln) {
+        // L: Logarithmic (Ln and Log are aliases — both natural log).
+        if (func_id == BuiltinOp::Ln || func_id == BuiltinOp::Log) {
             return 2;
         }
         // T: Trigonometric
