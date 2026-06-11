@@ -124,6 +124,17 @@ struct MonomialTerm {
 [[nodiscard]] bool is_zero_expr(ExprPtr expr);
 [[nodiscard]] bool is_one_expr(ExprPtr expr);
 [[nodiscard]] bool is_constant_expr(ExprPtr expr, MathConstant constant);
+
+// F7.5.F1 Phase 2 — extended-real arithmetic helpers.
+// Return std::nullopt when no operand is extended-real (±∞, ComplexInfinity,
+// Indeterminate). Return the propagated extended-real result otherwise.
+// Spec: .APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Extended_Real_AST.md
+[[nodiscard]] std::optional<ExprPtr> try_simplify_sum_extended_real(
+    const std::vector<ExprPtr>& terms, AstArena& arena);
+[[nodiscard]] std::optional<ExprPtr> try_simplify_product_extended_real(
+    const std::vector<ExprPtr>& factors, AstArena& arena);
+[[nodiscard]] std::optional<ExprPtr> try_simplify_pow_extended_real(
+    ExprPtr base, ExprPtr exponent, AstArena& arena);
 [[nodiscard]] Result<bool> try_get_exact_rational(ExprPtr expr, LiteralRational& out);
 [[nodiscard]] Result<bool> try_get_exact_complex(ExprPtr expr, LiteralComplex& out);
 [[nodiscard]] Rational decimal_to_rational(const DecimalLit& node);

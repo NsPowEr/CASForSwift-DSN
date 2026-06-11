@@ -90,6 +90,17 @@ Result<ExprPtr> Simplifier::simplify_product_factors(
         initial_factors.push_back(simplified.value());
     }
 
+    // F7.5.F1 Phase 2 — extended-real arithmetic propagation. Fires only
+    // when at least one operand is NegInfinity / ComplexInfinity /
+    // Indeterminate (the new enum values introduced by F7.5.F1). Pure
+    // legacy `0 * MathConstant::Infinity` is left untouched so the
+    // existing `CASErrorKind::Undefined` fallback observed by the limit
+    // engine (`as_infinity_if_undefined`) remains intact.
+    // Spec: .APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Extended_Real_AST.md
+    if (auto ext = try_simplify_product_extended_real(initial_factors, arena_); ext) {
+        return traced_result(RuleId::SimplifyMultiplyByZero, target_before, *ext);
+    }
+
     if (has_zero) {
         for (ExprPtr factor : initial_factors) {
             if (is_constant_expr(factor, MathConstant::Infinity))

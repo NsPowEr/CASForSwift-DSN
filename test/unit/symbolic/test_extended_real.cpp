@@ -3,11 +3,134 @@
 
 #include "cas/ast.hpp"
 #include "cas/extended_real.hpp"
+#include "cas/symbolic.hpp"
 
 #include <gtest/gtest.h>
 
 namespace cas {
 namespace {
+
+// ── Phase 2 arithmetic test fixture ─────────────────────────────────────
+// Drives the simplifier end-to-end and asserts that operations involving
+// the new extended-real constants (NegInfinity, ComplexInfinity,
+// Indeterminate) propagate per Extended_Real_AST.md §"Aritmetica
+// extended-real".
+class ExtendedRealArithmeticTest : public ::testing::Test {
+protected:
+    symbolic::CASContext ctx;
+
+    [[nodiscard]] ExprPtr pos_inf() { return ctx.arena().make<Constant>(MathConstant::Infinity); }
+    [[nodiscard]] ExprPtr neg_inf() { return ctx.arena().make<Constant>(MathConstant::NegInfinity); }
+    [[nodiscard]] ExprPtr cplx_inf() { return ctx.arena().make<Constant>(MathConstant::ComplexInfinity); }
+    [[nodiscard]] ExprPtr indet() { return ctx.arena().make<Constant>(MathConstant::Indeterminate); }
+    [[nodiscard]] ExprPtr lit(long long v) {
+        return ctx.arena().make<IntegerLit>(BigInt(v));
+    }
+
+    [[nodiscard]] ExprPtr simp(ExprPtr e) {
+        auto r = ctx.simplify(e);
+        if (!r.is_ok()) return nullptr;
+        return r.value();
+    }
+
+    [[nodiscard]] ExprPtr sum(std::vector<ExprPtr> terms) {
+        return ctx.arena().make<Sum>(std::move(terms));
+    }
+    [[nodiscard]] ExprPtr prod(std::vector<ExprPtr> factors) {
+        return ctx.arena().make<Product>(std::move(factors));
+    }
+    [[nodiscard]] ExprPtr pow(ExprPtr b, ExprPtr e) {
+        return ctx.arena().make<Binary>(BinaryOp::Pow, b, e);
+    }
+};
+
+TEST_F(ExtendedRealArithmeticTest, NegInfPlusNegInfYieldsNegInf) {
+    EXPECT_TRUE(is_neg_infinity(simp(sum({neg_inf(), neg_inf()}))));
+}
+
+TEST_F(ExtendedRealArithmeticTest, PosInfPlusNegInfIsIndeterminate) {
+    EXPECT_TRUE(is_indeterminate(simp(sum({pos_inf(), neg_inf()}))));
+}
+
+TEST_F(ExtendedRealArithmeticTest, ComplexInfPlusPosInfIsIndeterminate) {
+    EXPECT_TRUE(is_indeterminate(simp(sum({cplx_inf(), pos_inf()}))));
+}
+
+TEST_F(ExtendedRealArithmeticTest, ComplexInfPlusFiniteIsComplexInf) {
+    EXPECT_TRUE(is_complex_infinity(simp(sum({cplx_inf(), lit(7)}))));
+}
+
+TEST_F(ExtendedRealArithmeticTest, NegInfPlusFiniteIsNegInf) {
+    EXPECT_TRUE(is_neg_infinity(simp(sum({neg_inf(), lit(1000)}))));
+}
+
+TEST_F(ExtendedRealArithmeticTest, IndeterminateAbsorbsUnderAddition) {
+    EXPECT_TRUE(is_indeterminate(simp(sum({indet(), lit(5), pos_inf()}))));
+}
+
+TEST_F(ExtendedRealArithmeticTest, ZeroTimesNegInfIsIndeterminate) {
+    EXPECT_TRUE(is_indeterminate(simp(prod({lit(0), neg_inf()}))));
+}
+
+TEST_F(ExtendedRealArithmeticTest, ZeroTimesComplexInfIsIndeterminate) {
+    EXPECT_TRUE(is_indeterminate(simp(prod({lit(0), cplx_inf()}))));
+}
+
+TEST_F(ExtendedRealArithmeticTest, NegInfTimesNegInfIsPosInf) {
+    EXPECT_TRUE(is_pos_infinity(simp(prod({neg_inf(), neg_inf()}))));
+}
+
+TEST_F(ExtendedRealArithmeticTest, PosInfTimesNegInfIsNegInf) {
+    EXPECT_TRUE(is_neg_infinity(simp(prod({pos_inf(), neg_inf()}))));
+}
+
+TEST_F(ExtendedRealArithmeticTest, NegInfTimesNegativeLiteralIsPosInf) {
+    EXPECT_TRUE(is_pos_infinity(simp(prod({neg_inf(), lit(-3)}))));
+}
+
+TEST_F(ExtendedRealArithmeticTest, ComplexInfTimesNonzeroFiniteIsComplexInf) {
+    EXPECT_TRUE(is_complex_infinity(simp(prod({cplx_inf(), lit(5)}))));
+}
+
+TEST_F(ExtendedRealArithmeticTest, IndeterminateAbsorbsUnderProduct) {
+    EXPECT_TRUE(is_indeterminate(simp(prod({indet(), lit(2)}))));
+}
+
+TEST_F(ExtendedRealArithmeticTest, PowNegInfToPositiveOddIsNegInf) {
+    EXPECT_TRUE(is_neg_infinity(simp(pow(neg_inf(), lit(3)))));
+}
+
+TEST_F(ExtendedRealArithmeticTest, PowNegInfToPositiveEvenIsPosInf) {
+    EXPECT_TRUE(is_pos_infinity(simp(pow(neg_inf(), lit(4)))));
+}
+
+TEST_F(ExtendedRealArithmeticTest, PowNegInfToZeroIsIndeterminate) {
+    EXPECT_TRUE(is_indeterminate(simp(pow(neg_inf(), lit(0)))));
+}
+
+TEST_F(ExtendedRealArithmeticTest, PowComplexInfToPositiveIsComplexInf) {
+    EXPECT_TRUE(is_complex_infinity(simp(pow(cplx_inf(), lit(2)))));
+}
+
+TEST_F(ExtendedRealArithmeticTest, PowComplexInfToNegativeIsZero) {
+    ExprPtr r = simp(pow(cplx_inf(), lit(-1)));
+    ASSERT_NE(r, nullptr);
+    const auto* il = expr_cast<IntegerLit>(r);
+    ASSERT_NE(il, nullptr);
+    EXPECT_TRUE(il->value.is_zero());
+}
+
+TEST_F(ExtendedRealArithmeticTest, PowOneToComplexInfIsIndeterminate) {
+    EXPECT_TRUE(is_indeterminate(simp(pow(lit(1), cplx_inf()))));
+}
+
+TEST_F(ExtendedRealArithmeticTest, NegInfTimesZeroChainIsIndeterminate) {
+    // Verifies that the helper triggers even when one finite-zero operand
+    // is buried in a longer product factor list.
+    EXPECT_TRUE(is_indeterminate(simp(prod({lit(7), neg_inf(), lit(0)}))));
+}
+
+// ────────────────────────────────────────────────────────────────────────
 
 TEST(ExtendedRealAST, EnumValuesAreDistinct) {
     EXPECT_NE(static_cast<int>(MathConstant::Infinity),

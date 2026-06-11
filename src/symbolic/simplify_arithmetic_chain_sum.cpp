@@ -47,6 +47,12 @@ Result<ExprPtr> Simplifier::simplify_sum_terms(
         }
     }
 
+    // F7.5.F1 Phase 2 — extended-real arithmetic propagation.
+    // Spec: .APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Extended_Real_AST.md
+    if (auto ext = try_simplify_sum_extended_real(flat_terms, arena_); ext) {
+        return traced_result(RuleId::SimplifyAddZero, target_before, *ext);
+    }
+
     // Step 2: optional rewrite-provider pass.
     while (rewrite_provider_ != nullptr
         && flat_terms.size() >= 2U

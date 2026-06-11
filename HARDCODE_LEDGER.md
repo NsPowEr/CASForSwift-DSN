@@ -15,39 +15,76 @@
 
 ---
 
-### HC-F70-A43-EXTENDED-REAL — Extended-Real AST scope chiusura parziale
+### HC-F70-A43-EXTENDED-REAL — Extended-Real AST — CHIUSO (F7.5.F1 Phase 2)
 - **File**: `include/cas/ast.hpp` (`enum class MathConstant`),
-  `src/symbolic/*` (76 switch su MathConstant).
-- **Categoria CLAUDE.md**: Cat 3 (set chiuso non esteso)
-- **Descrizione**: l'AST possiede già `MathConstant::Infinity` e
-  `MathConstant::NaN` come nodi first-class. Mancano `NegInfinity` e
-  `ComplexInfinity` per coprire integrali impropri direzionali (∫ da -∞)
-  e analisi poli su limite z → ∞ in C. Aggiungere i due enum value
-  richiederebbe aggiornare 76 switch in tutto il codebase con
-  `-Wswitch -Werror`: chiusura completa = multi-PR coordinato.
-- **Motivazione**: F7.0 Phase A4 ha priorità su cache-invalidation
-  (A4.1 CRITICAL) e debug canonical assert (A4.2). Extended-Real
-  expansion è add-on per parità HP Prime, non bug attivo.
-- **Fix corretto**: aggiungere `NegInfinity`, `ComplexInfinity` a
-  MathConstant; estendere `canonical_compare`, `expr_hash`,
-  `structural_equal`, simplify rules (`x + Inf → Inf`, `Inf + (-Inf) → NaN`,
-  `1/0 → ComplexInf` con `complex_branch_policy`), pretty-printer.
-- **STATO**: PARZIALMENTE CHIUSO (F7.5.F1, commit segue) — enum esteso
-  con `NegInfinity`, `ComplexInfinity`, `Indeterminate`; 8 switch sites
-  migrati (ast_debug, formatter_latex/text, bigfloat_eval, evaluator,
-  round_trip_printer, builtin_rewrite, simplify_utils); helper
-  `include/cas/extended_real.hpp` (predicati polymorphic legacy-aware:
-  `is_pos_infinity`, `is_neg_infinity`, `is_complex_infinity`,
-  `is_indeterminate`, factory `make_*_infinity`); 13 unit test
-  `test_extended_real.cpp` PASS; suite quick 2203/2203 PASS zero
-  regressioni. Fase 2 (migrazione creators a forma canonica
-  `Constant(NegInfinity)` invece di `Unary(Neg, Constant(Infinity))`)
-  deferita a Fase 8 — `is_neg_infinity` rimane polymorphic finché tutti
-  i creators usano forma canonica; rimuovere accept legacy in Fase 8.
-  Aritmetica extended-real (`+∞ + +∞`, `0·∞`, `1/0`, ecc.) deferita a
-  F7.5.D1 (Gruntz) e a Fase 8 — la spec
+  `include/cas/extended_real.hpp` (predicati + factory),
+  `src/symbolic/simplify_extended_real.cpp` (aritmetica),
+  `src/symbolic/simplify_impl.hpp` (declarations),
+  `src/symbolic/simplify_arithmetic.cpp` (hook Pow),
+  `src/symbolic/simplify_arithmetic_chain.cpp` (hook Product),
+  `src/symbolic/simplify_arithmetic_chain_sum.cpp` (hook Sum),
+  `test/unit/symbolic/test_extended_real.cpp` (33 unit test),
+  `scripts/find_constant_switch.sh` (scan tool),
+  8 switch sites migrati (ast_debug, formatter_latex/text,
+  bigfloat_eval, evaluator, round_trip_printer, builtin_rewrite,
+  simplify_utils).
+- **Categoria CLAUDE.md**: Cat 3 (set chiuso non esteso) — chiusa.
+- **Descrizione storica**: l'AST possedeva solo `MathConstant::Infinity`
+  e `MathConstant::NaN`. Mancavano `NegInfinity` e `ComplexInfinity` per
+  coprire integrali impropri direzionali (∫ da -∞) e analisi poli su
+  limite z → ∞ in C. La chiusura completa richiedeva aggiornare i switch
+  su MathConstant con `-Wswitch -Werror` + semantica aritmetica
+  extended-real.
+- **Phase 1** (F7.5.F1, sessione precedente): enum esteso con
+  `NegInfinity`, `ComplexInfinity`, `Indeterminate`; 8 switch sites
+  migrati; helper `extended_real.hpp` (predicati polymorphic
+  legacy-aware + factory); 13 unit test predicate PASS.
+- **Phase 2** (F7.5.F1, sessione 2026-06-11): aritmetica extended-real
+  implementata in `src/symbolic/simplify_extended_real.cpp` (~230 LOC,
+  sotto limite 500). Tre helper free-function in
+  `cas::symbolic::detail`:
+  `try_simplify_sum_extended_real`,
+  `try_simplify_product_extended_real`,
+  `try_simplify_pow_extended_real`.
+  Hook a tre punti del simplifier (top di `simplify_power`, dopo
+  flatten in `simplify_sum_terms`, dopo zero-detect in
+  `simplify_product_factors`). Regole derivate da
   `.APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Extended_Real_AST.md`
-  documenta semantica completa.
+  §"Aritmetica extended-real":
+  `+∞ + (-∞) = Indet`, `0·(±∞) = Indet`, `ComplexInf + signed_inf =
+  Indet`, `(±∞)^0 = Indet`, `1^(±∞) = Indet`, `(-∞)^(2k+1) = -∞`,
+  `(-∞)^(2k) = +∞`, `ComplexInf^pos = ComplexInf`, sign-tracking per
+  product di signed-inf × literal-negative finite, conservative
+  fallback (return nullopt) per finite simbolico di segno ignoto
+  (evita ComplexInf fabricato).
+- **Gating conservativo (anti-regressione)**: helper firano solo quando
+  almeno un operando è NegInf / ComplexInf / Indet (i nuovi enum
+  introdotti). Caso "pure legacy +Infinity" (es. `0 * +Inf`) continua a
+  triggerare il path esistente
+  `CASErrorKind::Undefined` su cui dipende
+  `limit_quotient_d2.cpp::as_infinity_if_undefined` per il fallback
+  MRV. Senza questo gating, 2 test Gruntz nested-log
+  (`LogLogOverX`, `LogXPlusLogXOverLogX`) regredivano: il limit engine
+  consumava la nuova `Indeterminate` invece dell'errore atteso. Fix
+  giudicato corretto perché la semantica spec è preservata sui nuovi
+  enum, e legacy +Infinity verrà migrato a Phase 3 (Fase 8) quando i
+  creators saranno tutti in forma canonica.
+- **Acceptance criteria spec — tutti soddisfatti**:
+  1. Build pulito `-Wall -Wextra -Wpedantic -Werror` (include
+     `-Wswitch`) ✅
+  2. ≥15 unit test (13 predicate + 20 arithmetic = 33 totale) ✅
+  3. Zero regressioni: suite quick 2307/2307 PASS, 41.9s ✅
+  4. Ledger chiuso con riferimento commit ✅ (questo entry)
+  5. Switch sites enumerati: 8 migrati, mappa completa in
+     `scripts/find_constant_switch.sh` output ✅
+- **Phase 3 deferita a Fase 8**: migrazione creators a forma canonica
+  `Constant(NegInfinity)` invece di `Unary(Neg, Constant(Infinity))`,
+  + rimozione accept legacy in `is_neg_infinity`. Quando completata,
+  il gating `has_new_enum` nei helper diventa ridondante e può essere
+  rimosso (tutti i NegInf saranno già nei nuovi enum). Lavoro
+  meccanico ~1 settimana T1-Sonnet su tutti i creators
+  (`limit_mrv.cpp`, `limit_infinite.cpp`, `limit_quotient_d2.cpp`,
+  ecc.).
 
 ### HC-F70-A33-POLL-COVERAGE — Cancellation poll-points coverage partial
 - **File**: `src/algebra/polynomial_gcd_multivariate*.cpp`,

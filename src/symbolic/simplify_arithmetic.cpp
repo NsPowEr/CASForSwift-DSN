@@ -238,6 +238,13 @@ Result<ExprPtr> Simplifier::simplify_power(ExprPtr base, ExprPtr exponent, ExprP
         target_before = arena_.make<Binary>(BinaryOp::Pow, base, exponent);
     }
 
+    // F7.5.F1 Phase 2 — extended-real arithmetic propagation for Pow.
+    // Covers ±∞^n, ComplexInf^n, 0^0, 1^∞, Indeterminate^x, x^Indeterminate.
+    // Spec: .APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Extended_Real_AST.md
+    if (auto ext = try_simplify_pow_extended_real(base, exponent, arena_); ext) {
+        return traced_result(RuleId::SimplifyPowerOne, target_before, *ext);
+    }
+
     if (rewrite_provider_ != nullptr && may_rewrite_power(base, exponent)) {
         ExprPtr rewrite_target = target_before ? target_before : arena_.make<Binary>(BinaryOp::Pow, base, exponent);
         auto rewritten = rewrite_provider_->try_rewrite(rewrite_target, arena_, assumptions_, context_);
