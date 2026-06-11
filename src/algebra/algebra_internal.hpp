@@ -141,4 +141,9 @@ struct MultivariateSquareFreeFactor {
 // Spec: .APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Sech_Csch_Identity.md.
 [[nodiscard]] ExprPtr hyperbolic_normalize(ExprPtr expr, AstArena& arena);
 
+// F7.5.A1 — Geometric / cyclotomic RootOf expansion (closes
+// HC-F75-CYCLOTOMIC-ROOTOF). See src/algebra/algebraic_equal_cyclotomic.cpp.
+[[nodiscard]] std::optional<std::vector<ExprPtr>>
+enumerate_geometric_rootof(const RootOf& node, symbolic::CASContext& ctx);
+
 } // namespace cas::algebra

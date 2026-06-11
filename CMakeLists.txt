@@ -292,6 +292,7 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/polynomial_gcd_multivariate_linear.cpp
     src/algebra/polynomial_gcd_multivariate.cpp
     src/algebra/algebraic_equal.cpp
+    src/algebra/algebraic_equal_cyclotomic.cpp
     src/algebra/hyperbolic_normalize.cpp
     src/algebra/polynomial_integer.cpp
     src/algebra/polynomial_conversions.cpp
@@ -580,6 +581,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/calculus/test_integrate_risch_smoke.cpp
         test/unit/calculus/test_integrate_substitution.cpp
         test/unit/algebra/test_polynomial_sparse_interpolation.cpp
+        test/unit/algebra/test_cyclotomic_rootof_d2.cpp
         test/unit/algebra/test_csolve_linear.cpp
         test/unit/symbolic/test_summation_gosper.cpp
         test/unit/algebra/test_factorization_polynomials_smoke.cpp

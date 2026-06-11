@@ -175,7 +175,8 @@
 - **Sintomo**: corpus solve entry 72 `solve(x^5-32, x)` — CAS produce `{2, RootOf(x^4+2x^3+4x^2+8x+16, k=0..3)}`, Maxima `{2, 2*exp(2πi/5), 2*exp(4πi/5), …}`. Set matematicamente uguali, ma il confronto fallisce.
 - **Fix corretto**: helper in algebraic_equal che riconosce `RootOf(Φ_n(x))` (polinomi ciclotomici) e ne enumera le radici come `exp(2πik/n)` per k coprimo a n. Riusare `polynomial_cyclotomic.cpp` per detection. Confronto su forma esponenziale.
 - **Acceptance**: solve entry 72 → PASS; nessuna regressione su altre entry solve.
-- **STATO**: APERTO
+- **Fix applicato (2026-06-10)**: nuovo file `src/algebra/algebraic_equal_cyclotomic.cpp` con `enumerate_geometric_rootof(RootOf, ctx)` che riconosce il pattern `p(x) = sum_{i=0..d} c^i · x^(d-i) = (x^n - c^n)/(x - c)` con `n = d+1`. Detector usa `algebra::univariate_coefficients` (ascending), verifica monico + ratio costante + check `c^d == c_0`. Enumeratore emette `c · exp(2πi·m/n)` per `m = 1..d` usando `MathConstant::Pi` / `MathConstant::I` per matching canonico. Hook in `mathematically_equal` con guard XOR (un solo lato RootOf) per evitare false equality fra RootOf distinti di stesso polinomio. 6 unit test in `test/unit/algebra/test_cyclotomic_rootof_d2.cpp` coprono: match exp-form per tutti i 4 indici di `RootOf(x^4+2x^3+4x^2+8x+16)`, fallback su poly non-geometrico, rifiuto valore non-radice, enumerator direct (geometric/non-geometric/non-monic). Suite quick 2263/2263 PASS. Misurazione corpus solve entry 73 (`x^5-32`) pending refresh oracolo Maxima.
+- **STATO**: IMPL COMPLETA — misurazione solve entry 73 pending refresh oracolo Maxima
 
 ### HC-F16-TRAGER-QI — Trager Q(α) factorization su `RootOf(y^2+1)` non riconosce isomorfismo con Q(i) — RISOLTA 2026-06-07
 - **File**: `src/algebra/polynomial_arithmetic.cpp` (expand_expr_impl leaf set).
