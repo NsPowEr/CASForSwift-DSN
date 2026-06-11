@@ -126,6 +126,16 @@ translate_to_maxima() {
     # This sed handles one level of nesting
     out=$(echo "$out" | sed 's/\[\[/matrix([/g; s/\],\[/],[/g; s/\]\]/])/g')
 
+    # Our CAS syntax: A * B between matrices means matrix multiplication.
+    # Maxima * is element-wise (Hadamard); matrix multiplication is `.`.
+    # After the matrix-literal substitution above, the only places we still
+    # see `*` adjacent to `matrix(...)` are between two matrix expressions,
+    # so convert those occurrences to `.` (the dot product / matrix
+    # multiplication operator). The forms covered:
+    #   matrix(...) * matrix(...) -> matrix(...) . matrix(...)
+    #   ) * matrix(  (the same shape, generalised over whitespace)
+    out=$(echo "$out" | sed -E 's/\) *\* *matrix\(/) . matrix(/g')
+
     # det( -> determinant(
     out=$(echo "$out" | sed 's/det(/determinant(/g')
 

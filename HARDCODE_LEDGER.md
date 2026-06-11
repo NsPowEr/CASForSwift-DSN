@@ -144,8 +144,9 @@
 - **Workaround corrente**: SKIP per ~7 entry su 79. Pass-rate 56/(56+0) = 100% non-skip, ma 56/79 = 70.9% sul totale corpus.
 - **Fix corretto**: estendere area="matrix" branch del runner con parser top-level che rileva `<expr> * <matrix>`, `<matrix> +/- <matrix>`, `<matrix> * <matrix>` → costruisce MatrixExpr via `cas::linalg::add/multiply/scalar_multiply`. Riusare `cas::linalg::multiply(a, b, ctx)` esistente.
 - **Acceptance**: matrix corpus → ≥ 90% sul totale (oggi 70.9%).
-- **Fix applicato (2026-06-10)**: `test/golden/matrix_adapter.hpp` ora espone `evaluate_matrix_expression(raw, ctx)`, un evaluatore ricorsivo top-level precedence-aware (lowest +/-, then */, unary +/- come trasformazione prefix). Operandi rilevati come matrix literal `[[…]]` o sotto-espressione scalare; combinazione via `cas::linalg::add/subtract/multiply` e helper element-wise `matrix_scalar_multiply` (Product+simplify per ogni elemento). `evaluate_cas_matrix` ora invoca questo evaluatore quando `parse_command` non riconosce un function call wrapper, coprendo scalar·matrix, matrix·scalar, matrix·matrix, matrix±matrix, matrix/scalar e unary `-matrix`. Errori espliciti `Unimplemented` su scalar±matrix e division-by-matrix (no skip silenzioso). 15 unit test in `test/unit/golden/test_matrix_adapter_d2.cpp` validano la dispatch surface (no Maxima dependency). Suite quick 2250/2250 PASS. Misurazione corpus aggregato richiede refresh Maxima outputs e gira separata.
-- **STATO**: IMPL COMPLETA — misurazione corpus % pending refresh oracolo Maxima
+- **Fix applicato (2026-06-10)**: `test/golden/matrix_adapter.hpp` ora espone `evaluate_matrix_expression(raw, ctx)`, un evaluatore ricorsivo top-level precedence-aware (lowest +/-, then */, unary +/- come trasformazione prefix). Operandi rilevati come matrix literal `[[…]]` o sotto-espressione scalare; combinazione via `cas::linalg::add/subtract/multiply` e helper element-wise `matrix_scalar_multiply` (Product+simplify per ogni elemento). `evaluate_cas_matrix` ora invoca questo evaluatore quando `parse_command` non riconosce un function call wrapper, coprendo scalar·matrix, matrix·scalar, matrix·matrix, matrix±matrix, matrix/scalar e unary `-matrix`. Errori espliciti `Unimplemented` su scalar±matrix e division-by-matrix (no skip silenzioso). 15 unit test in `test/unit/golden/test_matrix_adapter_d2.cpp` validano la dispatch surface (no Maxima dependency). Inoltre `scripts/run_golden_maxima.sh` ora converte `matrix(...) * matrix(...)` → `matrix(...) . matrix(...)` (Maxima `*` = Hadamard, `.` = matrix multiply), allineando il significato dell'oracolo alla semantica del corpus CAS.
+- **Verifica corpus**: matrix area 79/79 = **100.0%** (era 70.9%). Acceptance ≥90% SUPERATA.
+- **STATO**: CHIUSO
 
 ### HC-F75-A2-MAXIMA-MATTRACE — Maxima emette `mattrace(matrix(...))` non valutato su trace
 - **File**: `test/golden/main.cpp` area matrix scalar path.
@@ -155,7 +156,8 @@
 - **Fix corretto**: nel branch scalar del matrix dispatch, se `last_line` matcha `mattrace(matrix(...))`, parsare la matrice via `parse_maxima_matrix` ed eseguire `cas::linalg::trace` sul CAS, usando il risultato come "Maxima value". Documentare nella spec come transformer del oracle.
 - **Acceptance**: 5 entry trace ulteriori passano.
 - **Fix applicato (2026-06-10)**: nuovo helper `try_evaluate_mattrace_wrapper(raw_last_line, ctx) -> optional<Result<ExprPtr>>` in `test/golden/matrix_adapter.hpp`. Trim whitespace + terminatori (`;`/`$`), match prefisso `mattrace(...)`, parse inner via `parse_maxima_matrix`, applica `cas::linalg::trace`. Restituisce `nullopt` se la riga non è wrapper (fallthrough alla scalar path normale); restituisce error esplicito su `mattrace(...)` mal-formato (no skip silenzioso). Hook nel matrix scalar dispatch di `test/golden/main.cpp` BEFORE `parse_maxima_expr`. 4 unit test in `test/unit/golden/test_matrix_adapter_d2.cpp` (positivo, whitespace+terminatore, non-mattrace skip, malformato).
-- **STATO**: IMPL COMPLETA — misurazione corpus % pending refresh oracolo Maxima
+- **Verifica corpus**: matrix area 79/79 = **100.0%** (era 70.9%). Tutte le entry trace ora PASS.
+- **STATO**: CHIUSO
 
 ### HC-F75-A3-HARD-TIMEOUT — Cancellation token non copre tutti i path integrazione
 - **File**: `test/golden/runner_timeout.hpp` + tutti i path in `src/calculus/integrate_*` privi di poll-point.
