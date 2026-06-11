@@ -122,6 +122,16 @@ inline std::string normalize_maxima_output(const std::string& raw) {
         // First handle e^(grouped): e^(expr) -> exp(expr)
         std::regex e_paren_re(R"(\be\^(\([^)]*\)))");
         s = std::regex_replace(s, e_paren_re, "exp$1");
+        // Handle e^name(args) (function call as exponent, e.g.
+        // `e^sin(x)`). The bare-token rule below would otherwise
+        // capture just `sin`, leaving `(x)` outside the exp and
+        // multiplying the result by x as a separate factor.
+        std::regex e_call_re(R"(\be\^([A-Za-z_][A-Za-z0-9_]*\([^)]*\)))");
+        s = std::regex_replace(s, e_call_re, "exp($1)");
+        // Same shape for negative-exponent function calls,
+        // e.g. `e^-sin(x)` -> `exp(-sin(x))`.
+        std::regex e_neg_call_re(R"(\be\^-([A-Za-z_][A-Za-z0-9_]*\([^)]*\)))");
+        s = std::regex_replace(s, e_neg_call_re, "exp(-$1)");
         // Then handle e^token (no parens): e^token -> exp(token)
         // token = word chars, digits, or ^-chain like x^2
         std::regex e_token_re(R"(\be\^([A-Za-z0-9_]+(?:\^[A-Za-z0-9_]+)*))");
