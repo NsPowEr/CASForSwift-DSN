@@ -84,6 +84,19 @@ inline std::string normalize_maxima_output(const std::string& raw) {
         s = std::regex_replace(s, minf_re, "-inf");
     }
 
+    // Maxima emits factorial via the `!` postfix operator (e.g. `5!`,
+    // `(2*n)!`). Our CAS parser uses the canonical `factorial(expr)`
+    // form, so rewrite both shapes before the rest of the
+    // post-processing runs. The order matters: handle the
+    // parenthesised form first so a postfix `!` immediately after a
+    // `)` is consumed in one step.
+    {
+        std::regex factorial_paren_re(R"((\([^)]*\))!)");
+        s = std::regex_replace(s, factorial_paren_re, "factorial$1");
+        std::regex factorial_token_re(R"(([A-Za-z0-9_]+)!)");
+        s = std::regex_replace(s, factorial_token_re, "factorial($1)");
+    }
+
     // Maxima outputs e^x (with bare 'e') instead of exp(x).
     // Convert: e^(...) -> exp(...) when 'e' is a standalone base.
     // Pattern: matches 'e^' followed by a simple token or parenthesised expr.
@@ -98,6 +111,14 @@ inline std::string normalize_maxima_output(const std::string& raw) {
         // subsequent rewrites see a uniform `exp(...)` form.
         std::regex e_neg_paren_re(R"(\be\^-(\([^)]*\)))");
         s = std::regex_replace(s, e_neg_paren_re, "exp(-$1)");
+        // Same shape for a bare negative-exponent token, e.g. `e^-1`
+        // emitted for limit((1-x)^(1/x), x, 0, plus) = e^-1. The token
+        // pattern mirrors the positive-exponent rule below, including
+        // the `^chain` extension, so that `e^-x^2` rewrites correctly
+        // to `exp(-x^2)` (instead of `exp(-x)^2` which would be
+        // mathematically distinct).
+        std::regex e_neg_token_re(R"(\be\^-([A-Za-z0-9_]+(?:\^[A-Za-z0-9_]+)*))");
+        s = std::regex_replace(s, e_neg_token_re, "exp(-$1)");
         // First handle e^(grouped): e^(expr) -> exp(expr)
         std::regex e_paren_re(R"(\be\^(\([^)]*\)))");
         s = std::regex_replace(s, e_paren_re, "exp$1");

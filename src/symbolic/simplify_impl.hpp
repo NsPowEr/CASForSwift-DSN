@@ -232,6 +232,8 @@ private:
     [[nodiscard]] Result<ExprPtr> simplify_funcall_complex(ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr target_before);
     // Exact-value identities for hyperbolic builtins (sinh/cosh/tanh/coth).
     [[nodiscard]] Result<ExprPtr> simplify_funcall_hyperbolic(ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr target_before);
+    // Combinatorial + erfc exact-value identities.
+    [[nodiscard]] Result<ExprPtr> simplify_funcall_combinatorial(ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr target_before);
 
     // Monomial helpers
     [[nodiscard]] static bool monomial_keys_equal(const MonomialKey& lhs, const MonomialKey& rhs);

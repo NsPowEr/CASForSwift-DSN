@@ -141,6 +141,7 @@ set(CAS_SYMBOLIC_SOURCES
     src/symbolic/simplify_trig.cpp
     src/symbolic/simplify_trig_inverse.cpp
     src/symbolic/simplify_hyperbolic.cpp
+    src/symbolic/simplify_combinatorial.cpp
     src/symbolic/simplify_exp_log.cpp
     src/symbolic/simplify_special_fn.cpp
     src/symbolic/simplify_special_fn_hyper.cpp
@@ -568,6 +569,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/symbolic/test_complex_simplification.cpp
         test/unit/symbolic/test_extended_real.cpp
         test/unit/symbolic/test_simplify_hyperbolic_zero.cpp
+        test/unit/symbolic/test_simplify_combinatorial.cpp
         test/unit/symbolic/test_special_fn_e1_identities.cpp
         test/unit/symbolic/test_bessel_e2_identities.cpp
         test/unit/symbolic/test_calculus_f4.cpp

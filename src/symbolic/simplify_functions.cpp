@@ -100,6 +100,11 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const FuncCall& node
     case BuiltinOp::Coth:
         return simplify_funcall_hyperbolic(original, op, std::move(args), target_before);
 
+    case BuiltinOp::Factorial:
+    case BuiltinOp::Binomial:
+    case BuiltinOp::Erfc:
+        return simplify_funcall_combinatorial(original, op, std::move(args), target_before);
+
     case BuiltinOp::Re:
     case BuiltinOp::Im:
     case BuiltinOp::Conj:

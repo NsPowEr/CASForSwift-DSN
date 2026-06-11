@@ -164,9 +164,13 @@ namespace {
     case BuiltinOp::Round:      return 39;
 
     // Combinatorial / discrete.
+    case BuiltinOp::Factorial:  return 38;
     case BuiltinOp::Binomial:   return 37;
     case BuiltinOp::Min:        return 36;
     case BuiltinOp::Max:        return 35;
+
+    // Complementary error function (paired with Erf above).
+    case BuiltinOp::Erfc:       return 82;
 
     // Matrix operators (semantically distinct domain).
     case BuiltinOp::Det:        return 33;

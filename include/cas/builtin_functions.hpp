@@ -75,6 +75,8 @@ enum class BuiltinOp : std::uint16_t {
     EllipticE,
     EllipticPi,
     EllipticF,
+    Factorial,
+    Erfc,
 };
 
 [[nodiscard]] constexpr BuiltinOp get_builtin_op(std::string_view name) noexcept {
@@ -102,6 +104,8 @@ enum class BuiltinOp : std::uint16_t {
     if (name == "gamma") return BuiltinOp::Gamma;
     if (name == "zeta") return BuiltinOp::Zeta;
     if (name == "erf") return BuiltinOp::Erf;
+    if (name == "erfc") return BuiltinOp::Erfc;
+    if (name == "factorial") return BuiltinOp::Factorial;
     if (name == "floor") return BuiltinOp::Floor;
     if (name == "ceil") return BuiltinOp::Ceil;
     if (name == "round") return BuiltinOp::Round;
@@ -220,6 +224,8 @@ enum class BuiltinOp : std::uint16_t {
         case BuiltinOp::EllipticE: return "EllipticE";
         case BuiltinOp::EllipticPi: return "EllipticPi";
         case BuiltinOp::EllipticF: return "EllipticF";
+        case BuiltinOp::Factorial: return "factorial";
+        case BuiltinOp::Erfc: return "erfc";
         case BuiltinOp::Unknown: return "unknown";
     }
     return "unknown";
