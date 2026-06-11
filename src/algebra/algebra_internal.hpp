@@ -146,4 +146,11 @@ struct MultivariateSquareFreeFactor {
 [[nodiscard]] std::optional<std::vector<ExprPtr>>
 enumerate_geometric_rootof(const RootOf& node, symbolic::CASContext& ctx);
 
+// Returns Some(bool) when the RootOf-specific dispatch (distinct-index
+// guard + geometric expansion) can decide the equality outright;
+// returns nullopt to fall through to the general mathematically_equal
+// pipeline.
+[[nodiscard]] std::optional<bool> try_rootof_decision(
+    ExprPtr lhs, ExprPtr rhs, symbolic::CASContext& ctx);
+
 } // namespace cas::algebra

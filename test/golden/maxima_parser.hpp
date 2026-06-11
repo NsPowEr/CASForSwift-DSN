@@ -90,6 +90,14 @@ inline std::string normalize_maxima_output(const std::string& raw) {
     // We do a simple iterative replacement: e^(expr) -> exp(expr)
     // and e^x (bare symbol/number) -> exp(x).
     {
+        // Maxima sometimes emits `e^-(expr)` when the exponent is a
+        // single negated parenthesised group (e.g. `2*%e^-((4*%i*%pi)/5)`
+        // for cyclotomic roots in (-π, 0)). The unary minus sits between
+        // `^` and `(` and would otherwise break the `e^(...)` rewrite
+        // below. Convert `e^-(expr)` -> `exp(-(expr))` first so the
+        // subsequent rewrites see a uniform `exp(...)` form.
+        std::regex e_neg_paren_re(R"(\be\^-(\([^)]*\)))");
+        s = std::regex_replace(s, e_neg_paren_re, "exp(-$1)");
         // First handle e^(grouped): e^(expr) -> exp(expr)
         std::regex e_paren_re(R"(\be\^(\([^)]*\)))");
         s = std::regex_replace(s, e_paren_re, "exp$1");

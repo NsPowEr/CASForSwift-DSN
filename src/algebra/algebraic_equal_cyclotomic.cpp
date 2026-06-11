@@ -113,12 +113,19 @@ enumerate_geometric_rootof(const RootOf& node, symbolic::CASContext& ctx) {
     ExprPtr pi = arena.make<Constant>(MathConstant::Pi);
     ExprPtr i = arena.make<Constant>(MathConstant::I);
 
-    std::vector<ExprPtr> roots;
-    roots.reserve(d);
-    for (std::size_t m = 1U; m <= d; ++m) {
-        ExprPtr m_expr = arena.make<IntegerLit>(BigInt(static_cast<long long>(m)));
-        ExprPtr n_expr = arena.make<IntegerLit>(BigInt(static_cast<long long>(n)));
-        // numerator = 2·m·pi·i
+    // Emit each root twice: once with the natural angle m * 2π/n in
+    // [0, 2π), and once with the symmetric angle (m - n) * 2π/n in
+    // (-2π, 0) which equals the same root modulo 2πi. Maxima
+    // canonicalises angles to (-π, π], so without the negative-angle
+    // variant the comparison would miss e.g.
+    //     2 * exp(-4πi/5)  (Maxima)  ≡  2 * exp(6πi/5)  (our positive form).
+    // mathematically_equal does not yet recognise the
+    // `exp(a) == exp(a - 2πi)` identity, so we make both representations
+    // available in the candidate set.
+    const long long n_signed = static_cast<long long>(n);
+    auto emit = [&](long long m_signed) -> ExprPtr {
+        ExprPtr m_expr = arena.make<IntegerLit>(BigInt(m_signed));
+        ExprPtr n_expr = arena.make<IntegerLit>(BigInt(n_signed));
         ExprPtr num = arena.make<Product>(
             std::vector<ExprPtr>{two, m_expr, pi, i});
         ExprPtr arg = arena.make<Binary>(BinaryOp::Div, num, n_expr);
@@ -126,11 +133,74 @@ enumerate_geometric_rootof(const RootOf& node, symbolic::CASContext& ctx) {
             BuiltinOp::Exp, std::vector<ExprPtr>{arg});
         ExprPtr root = arena.make<Product>(
             std::vector<ExprPtr>{c_expr, exp_term});
-        auto simp = ctx.simplify(root);
-        if (simp.is_ok()) roots.push_back(simp.value());
-        else              roots.push_back(root);
+        // Keep the unsimplified `c * exp(2πim/n)` form so the downstream
+        // mathematically_equal pipeline compares cyclotomic forms
+        // directly without simplify potentially routing through Ferrari
+        // closed-form radicals that diverge structurally from the Maxima
+        // exp-canonical output.
+        return root;
+    };
+
+    std::vector<ExprPtr> roots;
+    roots.reserve(2U * d);
+    for (std::size_t m = 1U; m <= d; ++m) {
+        const long long m_pos = static_cast<long long>(m);
+        const long long m_neg = m_pos - n_signed;
+        roots.push_back(emit(m_pos));
+        roots.push_back(emit(m_neg));
     }
     return roots;
+}
+
+}  // namespace cas::algebra
+
+namespace cas::symbolic {
+[[nodiscard]] Result<bool> mathematically_equal(
+    ExprPtr lhs, ExprPtr rhs, CASContext& context);
+}  // namespace cas::symbolic
+
+namespace cas::algebra {
+
+[[nodiscard]] std::optional<bool> try_rootof_decision(
+    ExprPtr lhs, ExprPtr rhs, symbolic::CASContext& ctx) {
+    const RootOf* lhs_root = expr_cast<RootOf>(lhs);
+    const RootOf* rhs_root = expr_cast<RootOf>(rhs);
+    if (lhs_root == nullptr && rhs_root == nullptr) return std::nullopt;
+
+    // Distinct indices on the same minimal polynomial → definitely
+    // different roots. Cuts off the polynomial_normal_form path which
+    // would otherwise normalise RootOf-RootOf differences to zero by
+    // treating both nodes as the same opaque algebraic generator.
+    if (lhs_root != nullptr && rhs_root != nullptr &&
+        lhs_root->root_index.has_value() &&
+        rhs_root->root_index.has_value() &&
+        *lhs_root->root_index != *rhs_root->root_index &&
+        lhs_root->variable.name == rhs_root->variable.name &&
+        structural_equal(lhs_root->polynomial, rhs_root->polynomial)) {
+        return false;
+    }
+
+    // Exactly-one-side RootOf with a geometric (cyclotomic) minimal
+    // polynomial: expand the d closed-form roots and accept iff some
+    // enumerated root matches the other side. The "both sides RootOf"
+    // case is intentionally NOT handled here — it falls through to the
+    // general comparison so set-level callers can still match
+    // RootOf(p, k) against another notation for the same root.
+    if ((lhs_root == nullptr) != (rhs_root == nullptr)) {
+        const RootOf* root = lhs_root != nullptr ? lhs_root : rhs_root;
+        ExprPtr other = lhs_root != nullptr ? rhs : lhs;
+        auto enumerated = enumerate_geometric_rootof(*root, ctx);
+        if (!enumerated.has_value()) return std::nullopt;
+        for (ExprPtr candidate : *enumerated) {
+            auto eq = symbolic::mathematically_equal(candidate, other, ctx);
+            if (eq.is_error()) continue;
+            if (eq.value()) return true;
+        }
+        // Polynomial was geometric but no enumerated root matched — the
+        // other side is definitively not a root of this polynomial.
+        return false;
+    }
+    return std::nullopt;
 }
 
 }  // namespace cas::algebra

@@ -11,6 +11,7 @@
 #include "cas/symbolic.hpp"
 
 #include "algebra/algebra_internal.hpp"
+#include "cas/ast_debug.hpp"
 
 using namespace cas;
 
@@ -108,7 +109,14 @@ TEST_F(CyclotomicRootOfTest, EnumeratorDirectGeometric) {
     RootOf node(poly, x, std::optional<std::size_t>{0});
     auto enumerated = cas::algebra::enumerate_geometric_rootof(node, ctx);
     ASSERT_TRUE(enumerated.has_value());
-    EXPECT_EQ(enumerated->size(), 4U);
+    // The enumerator emits both the positive-angle representative
+    // (m * 2π/n) and the symmetric negative-angle representative
+    // (m - n) * 2π/n for each of the d cyclotomic roots, so the
+    // candidate set holds 2 * d entries. The duplication is harmless
+    // for set-level matching and necessary to align with Maxima's
+    // canonical angle range (-π, π].
+    const std::size_t d = 4U;
+    EXPECT_EQ(enumerated->size(), 2U * d);
 }
 
 TEST_F(CyclotomicRootOfTest, EnumeratorDirectNonGeometric) {
@@ -116,6 +124,22 @@ TEST_F(CyclotomicRootOfTest, EnumeratorDirectNonGeometric) {
     RootOf node(poly, x, std::optional<std::size_t>{0});
     auto enumerated = cas::algebra::enumerate_geometric_rootof(node, ctx);
     EXPECT_FALSE(enumerated.has_value());
+}
+
+TEST_F(CyclotomicRootOfTest, DistinctRootOfIndicesCompareUnequal) {
+    // Two RootOf nodes that share the same minimal polynomial but
+    // carry distinct concrete indices represent distinct roots; the
+    // RootOf-specific dispatch must short-circuit the comparison to
+    // false before polynomial_normal_form treats both as the same
+    // opaque generator.
+    auto poly = parse("x^4 + 2*x^3 + 4*x^2 + 8*x + 16");
+    ExprPtr r0 = ctx.arena().make<RootOf>(
+        poly, x, std::optional<std::size_t>{0});
+    ExprPtr r1 = ctx.arena().make<RootOf>(
+        poly, x, std::optional<std::size_t>{1});
+    auto eq = cas::symbolic::mathematically_equal(r0, r1, ctx);
+    ASSERT_TRUE(eq.is_ok());
+    EXPECT_FALSE(eq.value());
 }
 
 TEST_F(CyclotomicRootOfTest, EnumeratorRejectsNonMonic) {

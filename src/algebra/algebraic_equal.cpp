@@ -49,41 +49,13 @@ Result<bool> mathematically_equal(ExprPtr lhs, ExprPtr rhs, CASContext& context)
         return ok(true);
     }
 
-    // F7.5.A1 / HC-F75-CYCLOTOMIC-ROOTOF: when exactly one side is a
-    // RootOf whose minimal polynomial matches the (x^n - c^n)/(x - c)
-    // geometric pattern, expand the RootOf into its set of d closed-form
-    // roots `c · exp(2πi·m/n)` (m = 1..d) and accept the comparison if
-    // ANY enumerated root matches the other side. The set-level matching
-    // is correct because higher-level callers (e.g. compare_solve_sets)
-    // run a bipartite assignment over the full root set, so a "this
-    // RootOf is somewhere in the cyclotomic family" answer composes
-    // consistently with the bipartite matcher. The guard
-    // `is_rootof(lhs) XOR is_rootof(rhs)` prevents the false positive
-    // where two distinct RootOf(p, k_i) with the same polynomial but
-    // different indices would both land in the enumerated set.
-    {
-        const RootOf* lhs_root = expr_cast<RootOf>(lhs_s.value());
-        const RootOf* rhs_root = expr_cast<RootOf>(rhs_s.value());
-        if ((lhs_root == nullptr) != (rhs_root == nullptr)) {
-            const RootOf* root = lhs_root != nullptr ? lhs_root : rhs_root;
-            ExprPtr other = lhs_root != nullptr ? rhs_s.value() : lhs_s.value();
-            if (auto enumerated =
-                    algebra::enumerate_geometric_rootof(*root, context);
-                enumerated.has_value()) {
-                for (ExprPtr candidate : *enumerated) {
-                    auto eq = mathematically_equal(candidate, other, context);
-                    if (eq.is_error()) continue;
-                    if (eq.value()) {
-                        finalize();
-                        return ok(true);
-                    }
-                }
-                // Polynomial was geometric but no enumerated root matched
-                // the other side — definitive inequality.
-                finalize();
-                return ok(false);
-            }
-        }
+    // F7.5.A1 / HC-F75-CYCLOTOMIC-ROOTOF: RootOf-specific decisions.
+    // See src/algebra/algebraic_equal_cyclotomic.cpp::try_rootof_decision.
+    if (auto rootof_dec = algebra::try_rootof_decision(
+            lhs_s.value(), rhs_s.value(), context);
+        rootof_dec.has_value()) {
+        finalize();
+        return ok(*rootof_dec);
     }
 
     // F1.6 bridge: Constant::I ↔ ComplexLit(0,1) (and other purely-imaginary
