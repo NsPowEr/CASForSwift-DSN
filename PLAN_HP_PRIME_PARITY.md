@@ -129,7 +129,7 @@ Senza foundation solido tutto sopra crolla. Nessun engine sopra L0 si tocca finc
 
 ### F1.1 — BigInt production-grade
 **Algoritmo**: limbs `uint32_t` array (già OK). Riferimento: GMP `mpn_*`, Knuth TAOCP Vol 2, Brent-Zimmermann "Modern Computer Arithmetic".
-- **Multiply**: schoolbook (n<32), Karatsuba (n<2048), Toom-3 (n<8192), Schönhage-Strassen FFT (n≥8192). Citare Granlund-Möller-Möller.
+- **Multiply**: schoolbook (n<32), Karatsuba (n<2048), Toom-3 (n<4096). Per n≥4096 fallback Karatsuba — Schönhage-Strassen FFT è **APERTA PERMANENTE** (HPP-F1.1-MUL in HARDCODE_LEDGER.md). Citare Granlund-Möller-Möller per Toom-3.
 - **Divide**: Knuth Algorithm D (long division per limb). Burnikel-Ziegler divide-and-conquer per n>1000 — APERTA PERMANENTE (HPP-023 in HARDCODE_LEDGER.md). Knuth D corretto per tutti n; BZ è ottimizzazione O(M(n)log n) vs O(n²) per n grande.
 - **GCD**: binary GCD (Stein), Lehmer GCD per integers large. No Euclidean naive.
 - **Modexp**: Montgomery reduction o Barrett.
@@ -145,7 +145,7 @@ Senza foundation solido tutto sopra crolla. Nessun engine sopra L0 si tocca finc
 
 **Anti-hardcode tests**: mul/div su n ∈ {32, 128, 512, 2048, 8192, 32768} limbs random. Fuzz 1000 input per ciascuno.
 
-**Exit (ricalibrato)**: mul ≥10× più veloce sul caso 4096 limbs rispetto a baseline attuale. Performance vs GMP: target onesto **30-50%** (non 80%). Schönhage-Strassen è dichiarato `Parziale avanzata` se raggiunge solo 20-30% GMP — accettabile, non shortcut a wrap GMP. La voce "FFT BigInt vs GMP competitiva" resta `Aperta` permanente come research-grade.
+**Exit (ricalibrato, post-audit 2026-06-11)**: mul ≥10× più veloce sul caso 2048 limbs rispetto a baseline pre-Toom-3. Performance vs GMP su 1024-4096 limbs: target onesto **30-50%** (non 80%). **Schönhage-Strassen NON è exit-gate F1**: è `Aperta permanente` (HPP-F1.1-MUL); pipeline F1 chiude su Karatsuba + Toom-3 + fallback Karatsuba per n≥4096. FFT BigInt resta `Aperta` permanente come research-grade.
 
 ### F1.2 — Rational
 - Normalizzazione canonica obbligatoria post-ogni-op (già OK)
@@ -204,7 +204,7 @@ I numeri complessi sottostanno polynomi su C, eigenvalues, branch cuts, residue.
 - `abs(re+im·i)² ≡ re²+im²` su Q[i]
 
 **Exit gate F1**:
-- BigInt benchmark ≥ 30-50% performance GMP su input random fino 10^4 cifre (ricalibrato onesto)
+- BigInt benchmark ≥ 30-50% performance GMP su input random fino 10^4 cifre (ricalibrato onesto, pipeline Karatsuba+Toom-3 — **SS escluso da F1 exit**, Aperta perm HPP-F1.1-MUL)
 - Tutti property test foundation passano
 - `assume()` inferenza algebrica copre 50 implicazioni canoniche
 - Hashconsing thread-safe sotto 4 thread benchmark senza contesa visibile
@@ -342,7 +342,7 @@ I numeri complessi sottostanno polynomi su C, eigenvalues, branch cuts, residue.
 ### F4.1 — Decomposizioni production
 - LU con **partial pivoting numerico** vero (oggi: first non-zero)
 - LU con **PivotScore** (oggi: header mente, codice no)
-- **Householder QR** (oggi: Gram-Schmidt classico instabile)
+- **QR via Modified Gram-Schmidt** (Trefethen-Bau §8) — sostituisce GS classico instabile. **Householder QR è APERTA PERMANENTE** (HPP-F4.1-QR-HOUSEHOLDER): AST explosion su Q simbolico per matrici ≥8×8 (vedi HC-F4-QR-SYMBOLIC-TIMEOUT chiuso 2026-05-XX ledger). MGS mantiene rational updates → no timeout. Householder require Trefethen-Bau §10 con riflettori `I - 2vv^T/v^Tv` che generano coefficienti razionali esplosivi in simbolico esatto.
 - **Cholesky LDL^T** per matrici simmetriche
 - Implementare Bareiss in UN file `matrix_determinant.cpp`; eliminare duplicato in `matrix_ops.cpp:243-249`
 
@@ -371,7 +371,7 @@ I numeri complessi sottostanno polynomi su C, eigenvalues, branch cuts, residue.
 **Certificatori**:
 - `A·inv(A) ≡ I` per A invertibile random 8×8 rationals
 - `LU(A) → L·U ≡ P·A`
-- `QR(A) → Q·R ≡ A ∧ Q^T·Q ≡ I`
+- `QR(A) → Q·R ≡ A ∧ Q^T·Q ≡ I` (verifica su MGS; Householder = Aperta perm)
 - `det(A) ≡ ∏ eigenvalues(A)` (counting molteplicità)
 - Jordan: `A ≡ P·J·P^{-1}` con J Jordan canonical
 - Smith: `U·A·V ≡ D` con D diagonale di invariant factors
@@ -925,7 +925,7 @@ Opus spawn T1-Sonnet "F4-block-A":
            Build incrementale dopo ogni edit. Test mirati. Report compatto."
 
 Opus spawn T2-Sonnet-thinking "F4-block-B" parallelo:
-  prompt: "Implementa Householder QR (sostituisce GS classico matrix_qr.cpp).
+  prompt: "Implementa Modified Gram-Schmidt QR (sostituisce GS classico matrix_qr.cpp; Householder = Aperta perm HPP-F4.1-QR-HOUSEHOLDER, AST explosion).
            Implementa Cholesky LDL^T (nuovo matrix_cholesky.cpp).
            Implementa Vandermonde + Toeplitz Levinson in matrix_structured_determinant.cpp.
            Implementa Smith Q[x] generalization (matrix_smith.cpp:125 Unimplemented).
@@ -951,7 +951,7 @@ Opus attende entrambi. Audit T3-Opus su risultati. Promote a Risolta solo se gat
 | F1 | 4-5 subagent (2 T1 + 2 T2 + 1 T3 audit) | ~800k | 60% Sonnet, 40% Opus |
 | F2 | 3 subagent (1 T1 + 2 T2) + 1 T3 audit | ~500k | 70% Sonnet, 30% Opus |
 | F3 | 5 subagent (1 T1 + 2 T2 + 2 T3 per Wang+Galois) + 2 T3 audit | ~1.5M | 40% Sonnet, 60% Opus |
-| F4 | 2-3 subagent T1+T2 paralleli + 1 audit | ~400k | 80% Sonnet, 20% Opus |
+| F4 | 2-3 subagent T1+T2 paralleli + 1 audit | ~400k | 80% Sonnet, 20% Opus (Householder escluso — Aperta perm) |
 | F5 | 6-8 subagent (Risch+Gruntz=T3, ODE+residue+transforms=T2, refactor=T1) + 2 audit | ~2M | 30% Sonnet, 70% Opus |
 | F6 | 3-4 subagent (CAD=T3, MPFR+branch=T2, units=T1) + 1 audit | ~700k | 50% Sonnet, 50% Opus |
 | F7 | 3 subagent T1+T2 + 1 audit final T3 | ~500k | 70% Sonnet, 30% Opus |
@@ -980,7 +980,7 @@ Esecuzione delegata a AI orchestrata da utente con gates di validazione. Timelin
 
 **Vantaggi AI vs human dev**:
 - Coding throughput 5-10× su task ben-specificati (Knuth Algorithm D, Karatsuba, Berlekamp, Bareiss, ecc.: algoritmi canonici con pseudo-codice in letteratura)
-- Parallelismo: agent paralleli per task indipendenti (es. Householder QR + Smith Q[x] + Hermite NF in parallelo)
+- Parallelismo: agent paralleli per task indipendenti (es. MGS QR + Smith Q[x] + Hermite NF in parallelo)
 - Test/property generation rapida
 - Refactor pervasivo (fresh-symbol, Bareiss collapse) in minuti
 - Documentazione/commit message zero-friction
@@ -1001,10 +1001,10 @@ Esecuzione delegata a AI orchestrata da utente con gates di validazione. Timelin
 | Fase | Effort AI realistico | Note |
 |---|---|---|
 | F0 sanitizzazione | **1-2 giorni** | T1-Sonnet (1 subagent). Lavoro meccanico: edit tracker, append ledger, setup gcov/rapidcheck/Maxima golden |
-| F1 L0 foundation | **2-3 settimane** | T1-Sonnet (BigInt Karatsuba/Toom/Knuth-D); T2-Sonnet-thinking (simplifier_trig generatore + assumption inference + normal_form positivity); T3-Opus (FFT Schönhage-Strassen, audit) |
+| F1 L0 foundation | **2-3 settimane** | T1-Sonnet (BigInt Karatsuba/Toom/Knuth-D); T2-Sonnet-thinking (simplifier_trig generatore + assumption inference + normal_form positivity); T3-Opus (audit). SS FFT escluso — Aperta perm HPP-F1.1-MUL |
 | F2 L1 poly univariati | **1-2 settimane** | T1-Sonnet (half-GCD, Berlekamp, Hensel quadratic); T2-Sonnet-thinking (vanHoeij knapsack); T3-Opus audit finale |
 | F3 L2 multivar + alg ext | **3-4 settimane** | T2-Sonnet-thinking (Brown GCD, Zippel, primitive element Trager, F5+FGLM); T3-Opus (Wang multivariate, Galois ≥5); T3-Opus audit |
-| F4 L2 linalg | **5-7 giorni** | T1-Sonnet (refactor pervasivo + Bareiss collapse + fresh-symbol); T2-Sonnet-thinking (Householder QR, Cholesky, Smith Q[x], Jordan routing); T3-Opus audit |
+| F4 L2 linalg | **5-7 giorni** | T1-Sonnet (refactor pervasivo + Bareiss collapse + fresh-symbol); T2-Sonnet-thinking (MGS QR, Cholesky, Smith Q[x], Jordan routing); T3-Opus audit. Householder QR escluso — Aperta perm HPP-F4.1-QR-HOUSEHOLDER |
 | F5 L2 calculus | **4-6 settimane** | T2-Sonnet-thinking (ODE classifier+Frobenius+Padé+transforms+Laurent); T3-Opus (Risch structure theorem, Gruntz §3.5, residue grado arbitrario, Zeilberger, hypergeometric); T3-Opus audit ogni 2 sett |
 | F6 L3 numerica+complex+CAD+units | **2-3 settimane** | T1-Sonnet (units SI, RootOf seed fix); T2-Sonnet-thinking (MPFR unified, branch cuts); T3-Opus (CAD McCallum); T3-Opus audit |
 | F7 plotting + stats + acceptance | **1-2 settimane** | T1-Sonnet (plot adaptive, stats distributions); T2-Sonnet-thinking (Gauss-Kronrod, spline); T3-Opus acceptance HP Prime corpus + bugfix |
@@ -1122,6 +1122,8 @@ Onestamente accettati come research target oltre F7. Parità HP Prime ≥95% non
 | Galois group deg ≥6 generale | Algoritmi research-grade (Cohen cap 6 + Magma papers) | F3.6 chiude deg ≤5; deg ≥6 = Fase 8 |
 | CAD McCallum generale multivar | Complessità doppia esponenziale, scope onesto incompatibile L3 | F6.4 chiude solo 1-var Sturm; CAD = Fase 8 |
 | FFT BigInt competitivo GMP (>50%) | GMP = 30 anni tuning low-level assembly | F1.1 chiude 30-50% GMP onesto; tuning oltre = Fase 8 |
+| Schönhage-Strassen BigInt FFT (HPP-F1.1-MUL) | n≥4096 limbs fallback Karatsuba; SS NTT richiede modular FFT prime-finding + bit-reversal stable in BigInt esatto, multi-mese effort | F1 chiude su Karatsuba+Toom-3; SS = Fase 8 research |
+| Householder QR simbolico (HPP-F4.1-QR-HOUSEHOLDER) | Riflettori `I - 2vv^T/v^Tv` esplodono coefficienti razionali AST per matrici ≥8×8 simboliche; Modified Gram-Schmidt è la scelta corretta per CAS esatto | F4 chiude su MGS (Trefethen-Bau §8); Householder numerico = Fase 8 con AlgebraicNumber tower stabile |
 | Hypergeometric `_pF_q` recognition completo | Tabelle Wilf-Zeilberger vaste, knowledge-heavy | F5.9 chiude Gauss 2F1, Saalschütz, casi closed-form noti; recognition completo = Fase 8 |
 | Multi-sheet Riemann surface complex | Modello AST single-valued incompatibile | F6.2 chiude branch principale; multi-sheet = Fase 9 ricerca |
 

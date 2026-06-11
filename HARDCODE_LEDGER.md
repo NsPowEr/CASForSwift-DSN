@@ -821,6 +821,25 @@
 
 ---
 
+### HPP-F4.1-QR-HOUSEHOLDER — Householder QR simbolico — APERTA PERMANENTE
+
+- **File**: `src/linalg/matrix_qr.cpp:1` — header dichiara "QR decomposition via Modified Gram-Schmidt (symbolic)".
+- **Categoria CLAUDE.md**: Categoria 4 (bail-out su tipo/dominio per scelta architetturale) + Eccezione legittima 3 (dominio simbolico esatto incompatibile con algoritmo numerico).
+- **Descrizione**: PLAN_HP_PRIME_PARITY.md F4.1 originariamente citava "Householder QR (oggi: Gram-Schmidt classico instabile)" come target. Implementazione attuale usa **Modified Gram-Schmidt** (Trefethen-Bau §8), non Householder.
+  Motivazione tecnica: i riflettori di Householder `H_k = I - 2 v_k v_k^T / (v_k^T v_k)` producono, su matrici simboliche Q ≥ 8×8, AST con `sqrt(Σ x_i²)` distribuiti su tutta la diagonale di R + denominatori `v_k^T v_k = Σ x_i²` non semplificabili. Cascade `simplify(2·sqrt(p/q)·x_0)` triggerava factorization trial-division O(√n) → timeout 80s (vedi HC-F4-QR-SYMBOLIC-TIMEOUT chiuso via riscrittura MGS).
+  MGS evita riflettori: aggiornamento `V[:, j] -= (dot/N_k)·V[:, k]` mantiene entry razionali pure, sqrt confinato a R(k,k). Trefethen-Bau §8 dimostra stabilità numerica MGS comparabile a Householder per matrici well-conditioned.
+- **Stato corrente (F4.6)**: MGS riscritto e certificato. `F4StressTest.Householder_QR_8x8_RandomQ_CorrectAndTimed` PASS 7.4s (era 80s timeout). Cert `Q^T·Q ≡ I` e `Q·R ≡ A` PASS via simplifier Step 6.5.
+- **Fix corretto (futuro Fase 8)**: Householder simbolico stabile richiede:
+  1. AlgebraicNumber tower esteso che rappresenti `sqrt(Σ x_i²)` come elemento di campo algebrico Q(α) con minimo polinomio `α² - Σ x_i² = 0`, evitando esplosione AST.
+  2. Simplifier branch-cut aware per `sqrt` su quantità non strutturalmente positive.
+  3. Pivoting selection con `make_pivot_score` per riflettore-vs-MGS dispatcher contestuale.
+  Effort stimato: 2-3 settimane T3-Opus + audit Trefethen-Bau §10 conformance.
+- **Blocking dependency**: Aperta permanente — Fase 8 post-parità. F4 chiusa su MGS.
+- **Test di regressione**: `QRTest.SymbolicQR_DefaultSignConvention_2x2`, `F4StressTest.Householder_QR_8x8_RandomQ_CorrectAndTimed`.
+- **Riferimento storico**: HC-F4-QR-SYMBOLIC-TIMEOUT (chiuso, ledger §HC-F4-QR-SYMBOLIC-TIMEOUT) contiene la riscrittura.
+
+---
+
 ### KNOWN-DEBT-001 — `-Werror` disabilitato (CMakeLists.txt:21) — RISOLTO 2026-05-20
 - **Stato pre-fix**: ~9 warning preesistenti impedivano build con `-Werror`.
 - **Fix applicato**:
