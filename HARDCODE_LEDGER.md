@@ -858,6 +858,76 @@
 
 ---
 
+### HC-F8-MONOLITH-WAIVER — Anti-monolith 28 file >500 LOC — APERTA Fase 8
+
+- **File**: 28 file in `src/` + `include/` documentati in
+  `ANTI_MONOLITHIC_REPORT.md` (vedi tabella tier-1 + tier-2).
+- **Categoria CLAUDE.md**: violazione formale di "STANDARD TECNICI E
+  ANTI-DEBITO" — limite 500 LOC per file sorgente.
+- **Descrizione**: l'audit T3-Opus F7.5.H2 (2026-06-11) ha enumerato
+  28 file che superano il limite 500 LOC: 14 file >600 LOC (tier-1)
+  + 14 file 500-600 LOC (tier-2). Il limite è dichiarato in
+  CLAUDE.md come standard di qualità non negoziabile.
+- **Motivazione waiver F7.5**: split prematuro durante F7.5.B/C/D in
+  corso introdurrebbe merge conflict massicci. F7.5 prioritizza
+  chiusura aggregato corpus (94.5% raggiunto) + HC-F70-A43
+  EXTENDED-REAL Phase 2 (chiuso). Split organico richiede analisi
+  semantica per cohesion-based decomposition (evitare circular
+  include + duplicazione internal declarations) — meglio gestito
+  come blocco F8.0 prerequisite (T1-Sonnet meccanico, 3-5 giorni
+  tier-1, 1-2 settimane tier-2 spalmate).
+- **Plan split**: cohesion-based per ciascuno dei 28 file dettagliato
+  in `ANTI_MONOLITHIC_REPORT.md` tier-1 + tier-2 tabella. Strategia:
+  estrarre moduli coesi (Pow expansion, FuncCall dispatch, Trager
+  shift, ecc.) preservando ABI pubblica.
+- **Fix corretto (Fase 8.0 prerequisite)**: split tier-1 (14 file
+  >600 LOC) obbligatorio prima di qualsiasi PR research-grade Fase 8
+  (Risch structure theorem, Galois ≥6, CAD, Hensel multivariato).
+  Tier-2 (500-600 LOC) tollerato durante Fase 8 mainstream, chiusura
+  entro fine Fase 8.
+- **Enforcement**: `scripts/check_file_size.sh` whitelist tier-1+tier-2
+  documentata; tutti gli altri file devono passare ≤500 LOC. Nuove
+  violazioni post 2026-06-11 vietate senza ledger entry esplicita.
+- **STATO**: APERTA Fase 8 (waiver formale F7.5 sign-off).
+  Condition C1 audit AUDIT_CAS_F7.5_2026-06-11.md risolta come
+  waiver path B (riga 261-263 audit).
+
+---
+
+### HPP-F75-AUDIT-CYCLE-GUARD-1 — `kMaxAppendDepth=1024` (limit_mrv_exp.cpp:38) — APERTA cycle-guard
+
+- **File**: `src/calculus/limit_mrv_exp.cpp:38` — `constexpr unsigned int kMaxAppendDepth = 1024U;`
+- **Categoria CLAUDE.md**: Categoria 1 (budget computazionale non configurabile) + Eccezione legittima 4 (limite di sicurezza hardware).
+- **Descrizione**: cap profondità ricorsione su `try_append_exponential_factor` per evitare stack overflow su AST patologici / self-referential. Non produce risultato matematicamente sbagliato — failure mode è `false` return → caller bail-out diagnostico.
+- **Motivazione non-bloccante**: 1024 è abbondante per casi reali (MRV set ricorsioni 5-10 in pratica). Esporre in `CASContext` aggiungerebbe complessità API senza beneficio osservabile.
+- **Fix corretto (Fase 8)**: parametro `ctx.mrv_append_max_depth()` con default 1024, audit chiamate per validare bound.
+- **Blocking dependency**: Aperta cycle-guard — non blocca task corrente.
+- **Test di regressione**: suite Gruntz nested-log (11 test) PASS dimostra che 1024 mai raggiunto in workload reale.
+
+---
+
+### HPP-F75-AUDIT-CYCLE-GUARD-2 — `kVisitRecursiveMaxDepth=4096` (differential_field.cpp:21) — APERTA cycle-guard
+
+- **File**: `src/calculus/differential_field.cpp:21` — `constexpr unsigned int kVisitRecursiveMaxDepth = 4096U;`
+- **Categoria CLAUDE.md**: Categoria 1 + Eccezione legittima 4.
+- **Descrizione**: cap profondità visitor template `visit_recursive_impl` per AST non semplificati. Beyond → `Result<void>` Unimplemented diagnostico (no silent fail).
+- **Motivazione non-bloccante**: 4096 ≫ profondità AST realistica (parser produce 10-50 normalmente, simplifier flatten a ≤300 ctx-limited). Esposizione in CASContext non motivata.
+- **Fix corretto (Fase 8)**: `ctx.differential_field_visit_max_depth()`.
+- **Blocking dependency**: Aperta cycle-guard.
+
+---
+
+### HPP-F75-AUDIT-CYCLE-GUARD-3 — `kGrowthRankMaxDepth=1024` (limit_mrv_compare.cpp:100) — APERTA cycle-guard
+
+- **File**: `src/calculus/limit_mrv_compare.cpp:100` — `constexpr int kGrowthRankMaxDepth = 1024;`
+- **Categoria CLAUDE.md**: Categoria 1 + Eccezione legittima 4.
+- **Descrizione**: cap profondità lambda `get_growth_rank_impl` per evitare stack overflow su torri trascendentali patologiche. Beyond → return 0 (= "unknown growth class") conservativo → forza bail-out chiamante.
+- **Motivazione non-bloccante**: 1024 abbondante; Gruntz torri reali ≤10 profondità. Conservatività garantita dal return 0.
+- **Fix corretto (Fase 8)**: `ctx.growth_rank_max_depth()`.
+- **Blocking dependency**: Aperta cycle-guard.
+
+---
+
 ### HPP-F4.1-QR-HOUSEHOLDER — Householder QR simbolico — APERTA PERMANENTE
 
 - **File**: `src/linalg/matrix_qr.cpp:1` — header dichiara "QR decomposition via Modified Gram-Schmidt (symbolic)".

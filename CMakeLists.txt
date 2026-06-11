@@ -127,6 +127,7 @@ set(CAS_SYMBOLIC_SOURCES
     src/rewrite/discrimination_net.cpp
     src/symbolic/simplify_core.cpp
     src/symbolic/simplify_arithmetic.cpp
+    src/symbolic/simplify_arithmetic_power.cpp
     src/symbolic/simplify_arithmetic_chain_liketerm.cpp
     src/symbolic/summation_gosper.cpp
     src/symbolic/summation_zeilberger.cpp
