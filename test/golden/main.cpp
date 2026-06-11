@@ -21,6 +21,7 @@
 #include "maxima_parser.hpp"
 #include "solve_set_equal.hpp"
 #include "matrix_adapter.hpp"
+#include "integrate_equiv.hpp"
 #include "runner_timeout.hpp"
 #include "runner_format.hpp"
 
@@ -451,6 +452,30 @@ int main(int argc, char* argv[]) {
         } else if (eq.value()) {
             ++stats.pass;
             std::cout << "  PASS [" << std::setw(3) << idx << "] " << input_str << "\n";
+        } else if (area == "integrate" || area == "bronstein") {
+            // Antiderivative equivalence: two antiderivatives of the same
+            // integrand differ at most by a constant. Differentiate both
+            // and re-compare. Resolves the corpus mismatch between our
+            // rigorous `ln(abs(x))` and Maxima's optimistic `log(x)` for
+            // entries like integrate(1/x, x).
+            auto antieq = cas::golden::antiderivative_equivalent(
+                input_str, cas_result.value(), maxima_simplified.value(), ctx);
+            if (antieq.is_ok() && antieq.value()) {
+                ++stats.pass;
+                std::cout << "  PASS [" << std::setw(3) << idx << "] "
+                          << input_str << " (antideriv equiv)\n";
+            } else {
+                ++stats.fail;
+                std::string cas_str  = format_expr(cas_result.value());
+                std::string max_str  = format_expr(maxima_simplified.value());
+                std::string example  = input_str + " | CAS: " + cas_str + " | Maxima: " + max_str;
+                if (stats.fail_examples.size() < 5)
+                    stats.fail_examples.push_back(example);
+                std::cout << "  FAIL [" << std::setw(3) << idx << "] "
+                          << input_str << "\n"
+                          << "       CAS:    " << cas_str << "\n"
+                          << "       Maxima: " << max_str << "\n";
+            }
         } else {
             ++stats.fail;
             std::string cas_str  = format_expr(cas_result.value());
