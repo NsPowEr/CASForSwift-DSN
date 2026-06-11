@@ -230,6 +230,8 @@ private:
     // to keep that file under the 500-line anti-monolith limit.
     [[nodiscard]] Result<ExprPtr> simplify_funcall_orthogonal_polys(ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr target_before);
     [[nodiscard]] Result<ExprPtr> simplify_funcall_complex(ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr target_before);
+    // Exact-value identities for hyperbolic builtins (sinh/cosh/tanh/coth).
+    [[nodiscard]] Result<ExprPtr> simplify_funcall_hyperbolic(ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr target_before);
 
     // Monomial helpers
     [[nodiscard]] static bool monomial_keys_equal(const MonomialKey& lhs, const MonomialKey& rhs);

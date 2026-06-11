@@ -13,6 +13,22 @@ Result<ExprPtr> Simplifier::simplify_funcall_arc_trig(
     ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr /*target_before*/)
 {
     if (op == BuiltinOp::Asin && args.size() == 1U) {
+        // asin(0) = 0
+        if (is_zero_expr(args.front())) return ok(make_integer(arena_, BigInt(0)));
+        // asin(1) = π/2, asin(-1) = -π/2
+        if (const auto* il = expr_cast<IntegerLit>(args.front())) {
+            if (il->value == BigInt(1)) {
+                return ok(arena_.make<Binary>(BinaryOp::Div,
+                    arena_.make<Constant>(MathConstant::Pi),
+                    make_integer(arena_, BigInt(2))));
+            }
+            if (il->value == BigInt(-1)) {
+                return ok(arena_.make<Unary>(UnaryOp::Neg,
+                    arena_.make<Binary>(BinaryOp::Div,
+                        arena_.make<Constant>(MathConstant::Pi),
+                        make_integer(arena_, BigInt(2)))));
+            }
+        }
         // asin(sin(x)) -> x if -π/2 ≤ x ≤ π/2
         if (const auto* call = expr_cast<FuncCall>(args.front());
             call && call->func_id == BuiltinOp::Sin) {
@@ -28,6 +44,17 @@ Result<ExprPtr> Simplifier::simplify_funcall_arc_trig(
         }
     }
     if (op == BuiltinOp::Acos && args.size() == 1U) {
+        // acos(0) = π/2, acos(1) = 0, acos(-1) = π
+        if (is_zero_expr(args.front())) {
+            return ok(arena_.make<Binary>(BinaryOp::Div,
+                arena_.make<Constant>(MathConstant::Pi),
+                make_integer(arena_, BigInt(2))));
+        }
+        if (const auto* il = expr_cast<IntegerLit>(args.front())) {
+            if (il->value == BigInt(1)) return ok(make_integer(arena_, BigInt(0)));
+            if (il->value == BigInt(-1))
+                return ok(arena_.make<Constant>(MathConstant::Pi));
+        }
         // acos(cos(x)) -> x if 0 ≤ x ≤ π
         if (const auto* call = expr_cast<FuncCall>(args.front());
             call && call->func_id == BuiltinOp::Cos) {
@@ -42,6 +69,23 @@ Result<ExprPtr> Simplifier::simplify_funcall_arc_trig(
         }
     }
     if (op == BuiltinOp::Atan && args.size() == 1U) {
+        // atan(+∞) = π/2, atan(-∞) = -π/2 (canonical real-axis limits).
+        if (const auto* c = expr_cast<Constant>(args.front());
+            c != nullptr && c->value == MathConstant::Infinity) {
+            return ok(arena_.make<Binary>(BinaryOp::Div,
+                arena_.make<Constant>(MathConstant::Pi),
+                make_integer(arena_, BigInt(2))));
+        }
+        if (const auto* u = expr_cast<Unary>(args.front());
+            u != nullptr && u->op == UnaryOp::Neg) {
+            if (const auto* c = expr_cast<Constant>(u->operand);
+                c != nullptr && c->value == MathConstant::Infinity) {
+                return ok(arena_.make<Unary>(UnaryOp::Neg,
+                    arena_.make<Binary>(BinaryOp::Div,
+                        arena_.make<Constant>(MathConstant::Pi),
+                        make_integer(arena_, BigInt(2)))));
+            }
+        }
         // atan(tan(x)) -> x if -π/2 < x < π/2
         if (const auto* call = expr_cast<FuncCall>(args.front());
             call && call->func_id == BuiltinOp::Tan) {

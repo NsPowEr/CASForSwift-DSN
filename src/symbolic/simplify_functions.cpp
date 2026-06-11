@@ -94,6 +94,12 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const FuncCall& node
     case BuiltinOp::LegendreP:
         return simplify_funcall_bessel_orthogonal(original, op, std::move(args), target_before);
 
+    case BuiltinOp::Sinh:
+    case BuiltinOp::Cosh:
+    case BuiltinOp::Tanh:
+    case BuiltinOp::Coth:
+        return simplify_funcall_hyperbolic(original, op, std::move(args), target_before);
+
     case BuiltinOp::Re:
     case BuiltinOp::Im:
     case BuiltinOp::Conj:
