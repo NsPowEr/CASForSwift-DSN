@@ -96,6 +96,7 @@ set(CAS_FOUNDATION_SOURCES
     # F1.1 production-grade BigInt algorithms
     src/foundation/bigint_mul_toom3.cpp
     src/foundation/bigint_div_knuth_d.cpp
+    src/foundation/bigint_div_burnikel_ziegler.cpp
     src/foundation/bigint_gcd_lehmer.cpp
     src/foundation/bigint_numtheory.cpp
     src/foundation/bigint_factor_pollard.cpp

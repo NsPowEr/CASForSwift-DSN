@@ -829,13 +829,18 @@
 - **Risoluzione**: Esposto `ctx.max_log_log_limit_depth()` in `CASContextParams` (default 3). Guard ora `if (depth > context_.max_log_log_limit_depth()) return std::nullopt`. `LimitEngine` ha già `context_` field — wiring chirurgico.
 - **Verifica**: Build OK, regression OK.
 
-### HPP-023 — Burnikel-Ziegler divide-and-conquer not implemented — APERTA PERMANENTE
+### HPP-023 — Burnikel-Ziegler divide-and-conquer not implemented — CHIUSA (2026-06-12)
 
-- **File**: `src/foundation/bigint_div_knuth_d.cpp` (Knuth Algorithm D, correct, used for all sizes).
-- **Categoria CLAUDE.md**: performance gap (not correctness), Eccezione legittima.
-- **Descrizione**: Knuth Algorithm D is O(n²) for n-limb quotients. Burnikel-Ziegler (BZ, 1998) achieves O(M(n)·log n) where M(n) is multiplication cost. For n>1000 limbs (≈32000 bits), BZ is 2-10× faster. CAS Engine workloads rarely exceed 1000 limbs in BigInt division (polynomial coefficient GCD and factorization coefficients stay well below this), so Knuth D is adequate for current workloads. No wrong result is possible. PLAN_HP_PRIME_PARITY.md previously claimed "BZ implemented" — this is corrected to "Aperta permanente".
-- **Fix corretto**: Implement `bigint_div_burnikel_ziegler.cpp` — reference: C. Burnikel, J. Ziegler, "Fast Recursive Division", MPI Technical Report 1998, Algorithm 3. Requires recursive 2n÷n base case using the existing Knuth D as basecase for n<threshold. Dispatcher in `bigint_div_knuth_d.cpp` or new entry point.
-- **Blocking dependency**: Aperta permanente — F-perf milestone only.
+- **File**: `src/foundation/bigint_div_burnikel_ziegler.cpp` (new).
+- **Categoria CLAUDE.md**: performance gap (not correctness).
+- **Risoluzione**: Implementato Burnikel-Ziegler 1998 (Brent-Zimmermann §1.4.3) come dispatcher `BigInt::divide_burnikel_ziegler` con primitive private `bz_div_2by1` e `bz_div_3by2`. Algoritmo:
+  - `bz_div_3by2` (A ≤ 3n limb, B = 2n limb = B1·β^n + B0): caso standard divide top 2n limbi per B1 via `bz_div_2by1`; caso overflow (A2 ≥ B1) usa Q = β^n − 1 in closed form; correzione finale ≤ 2 iterazioni (BZ Lemma 2.2).
+  - `bz_div_2by1` (A ≤ 2n limb, B = n limb): split A in 4 blocchi da n/2 limbi, due chiamate ricorsive a `bz_div_3by2`. Base case n < kBzThreshold (64) o n dispari → Knuth-D.
+  - `divide_burnikel_ziegler`: normalizza v (top bit set), itera `bz_div_2by1` su blocchi di n limbi di u dall'alto verso il basso. Invariante R < v_norm garantisce A < v_norm·β^n a ogni passo.
+- **Dispatch**: `BigInt::divide_magnitude` ora usa BZ quando `divisor.limb_count() >= 64`, Knuth-D sotto soglia (e BigInt context-free conferma HPP-020 sibling).
+- **Test di copertura aggiunti** in `test/unit/foundation/test_bigint_production.cpp`: `BurnikelZiegler_TwoPow512MinusOne_Over_TwoPow256Plus3`, `BurnikelZiegler_CrossCheck_RandomSamples` (4 size variants 2200-5000 bit), `BurnikelZiegler_DividendSmallerThanDivisor`.
+- **Verifica**: 3/3 BZ test PASS + 2346 quick suite PASS (1 fail pre-esistente non correlato).
+- **Soglia kBzThreshold = 64**: HPP-020 sibling (BigInt context-free, threshold compile-time). Documentato in commento del modulo.
 
 ---
 

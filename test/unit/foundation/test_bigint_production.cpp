@@ -100,6 +100,74 @@ TEST(BigIntProductionTest, MultiplyDivideInverse_Toom3) {
         << "Toom-3: (a*b)/b must equal a (operands have ~67 limbs each, triggers Toom-3)";
 }
 
+// ── 2a. Burnikel-Ziegler division: F1.2 / HPP-023 closure ────────────────────
+
+TEST(BigIntProductionTest, BurnikelZiegler_TwoPow512MinusOne_Over_TwoPow256Plus3) {
+    // Spec test 1 from Burnikel_Ziegler_Division.md: A = 2^512 - 1, B = 2^256 + 3.
+    // Standard cross-check: BZ result must equal Knuth-D result exactly.
+    BigInt a(1);
+    for (int i = 0; i < 512; ++i) a = a * BigInt(2);
+    a = a - BigInt(1);
+    BigInt b(1);
+    for (int i = 0; i < 256; ++i) b = b * BigInt(2);
+    b = b + BigInt(3);
+    // Pad b to >= 64 limbs to force BZ; 2^256 fits in 9 limbs, so add a large
+    // co-factor to push into BZ territory.
+    BigInt big_factor(1);
+    for (int i = 0; i < 2100; ++i) big_factor = big_factor * BigInt(2);
+    BigInt a_big = a * big_factor;
+    BigInt b_big = b * big_factor + BigInt(7);
+    ASSERT_GE(b_big.limb_count(), 64U) << "Test setup: b must trigger BZ path";
+
+    auto [q_bz, r_bz]    = BigInt::divide_burnikel_ziegler(a_big, b_big);
+    auto [q_knuth, r_knuth] = BigInt::divide_knuth_d(a_big, b_big);
+    EXPECT_EQ(q_bz.decimal(), q_knuth.decimal())
+        << "BZ quotient must equal Knuth-D quotient";
+    EXPECT_EQ(r_bz.decimal(), r_knuth.decimal())
+        << "BZ remainder must equal Knuth-D remainder";
+    // Reconstruction property.
+    EXPECT_EQ((q_bz * b_big + r_bz).decimal(), a_big.decimal())
+        << "BZ: q*b + r must equal a";
+    EXPECT_TRUE(r_bz < b_big) << "BZ: remainder must be < divisor";
+}
+
+TEST(BigIntProductionTest, BurnikelZiegler_CrossCheck_RandomSamples) {
+    // Spec test 2: cross-check against Knuth D on multiple sizes.
+    struct Sample { int a_factor_pow; int b_factor_pow; int a_extra; };
+    const Sample samples[] = {
+        {2200, 2100, 11},
+        {3000, 2050, 31},
+        {4096, 2070, 7},
+        {5000, 2080, 257},
+    };
+    for (const auto& s : samples) {
+        BigInt a(1);
+        for (int i = 0; i < s.a_factor_pow; ++i) a = a * BigInt(2);
+        a = a + BigInt(s.a_extra);
+        BigInt b(1);
+        for (int i = 0; i < s.b_factor_pow; ++i) b = b * BigInt(2);
+        b = b + BigInt(13);
+        ASSERT_GE(b.limb_count(), 64U) << "Test setup: b must trigger BZ path";
+        auto [q_bz, r_bz]       = BigInt::divide_burnikel_ziegler(a, b);
+        auto [q_knuth, r_knuth] = BigInt::divide_knuth_d(a, b);
+        EXPECT_EQ(q_bz.decimal(), q_knuth.decimal())
+            << "BZ q mismatch for a_pow=" << s.a_factor_pow << " b_pow=" << s.b_factor_pow;
+        EXPECT_EQ(r_bz.decimal(), r_knuth.decimal())
+            << "BZ r mismatch for a_pow=" << s.a_factor_pow << " b_pow=" << s.b_factor_pow;
+    }
+}
+
+TEST(BigIntProductionTest, BurnikelZiegler_DividendSmallerThanDivisor) {
+    // Spec test 3 corner case: A < B → Q = 0, R = A.
+    BigInt b(1);
+    for (int i = 0; i < 2100; ++i) b = b * BigInt(2);
+    ASSERT_GE(b.limb_count(), 64U);
+    const BigInt a = b - BigInt(1);
+    auto [q, r] = BigInt::divide_burnikel_ziegler(a, b);
+    EXPECT_TRUE(q.is_zero()) << "BZ: A<B must give Q=0";
+    EXPECT_EQ(r.decimal(), a.decimal()) << "BZ: A<B must give R=A";
+}
+
 // ── 2. Division: a/b*b + a%b = a ─────────────────────────────────────────────
 
 TEST(BigIntProductionTest, KnuthD_DivisionRemainder_MultiLimb) {

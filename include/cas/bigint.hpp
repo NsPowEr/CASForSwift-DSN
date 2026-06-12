@@ -81,6 +81,14 @@ public:
     [[nodiscard]] static bool budget_exhausted() noexcept;
     static void clear_budget_exhausted() noexcept;
 
+    // Public access to the underlying division back-ends — required by the
+    // production test suite for cross-checking algorithms against each other.
+    // F1.1 Knuth Algorithm D (TAOCP Vol 2 §4.3.1).
+    [[nodiscard]] static std::pair<BigInt, BigInt> divide_knuth_d(const BigInt& u, const BigInt& v);
+    // F1.2 Burnikel-Ziegler recursive division (HPP-023 closure).
+    // Reference: Burnikel-Ziegler 1998, Brent-Zimmermann §1.4.3.
+    [[nodiscard]] static std::pair<BigInt, BigInt> divide_burnikel_ziegler(const BigInt& u, const BigInt& v);
+
 private:
     [[nodiscard]] Result<void> assign_decimal_checked(std::string decimal);
     void multiply_by_small(std::uint32_t value) noexcept;
@@ -98,9 +106,10 @@ private:
     // F1.1 Toom-3: used by multiply_magnitude for n in [kToom3Threshold, kFFTThreshold).
     // Reference: Brent-Zimmermann "Modern Computer Arithmetic" §1.3.3.
     [[nodiscard]] static BigInt multiply_magnitude_toom3(const BigInt& lhs, const BigInt& rhs);
-    // F1.1 Knuth Algorithm D: normalized long division.
-    // Reference: Knuth TAOCP Vol 2 §4.3.1 Algorithm D.
-    [[nodiscard]] static std::pair<BigInt, BigInt> divide_knuth_d(const BigInt& u, const BigInt& v);
+    // Internal Burnikel-Ziegler primitives (declared here so the implementation
+    // can call divide_knuth_d as base case via member-access).
+    [[nodiscard]] static std::pair<BigInt, BigInt> bz_div_2by1(const BigInt& A, const BigInt& B, std::size_t n);
+    [[nodiscard]] static std::pair<BigInt, BigInt> bz_div_3by2(const BigInt& A, const BigInt& B, std::size_t n);
     [[nodiscard]] static std::pair<BigInt, BigInt> divide_magnitude(const BigInt& dividend, const BigInt& divisor);
     [[nodiscard]] static std::pair<BigInt, BigInt> divide_with_remainder(const BigInt& dividend, const BigInt& divisor);
 

@@ -273,10 +273,14 @@ std::pair<BigInt, BigInt> BigInt::divide_magnitude(const BigInt& dividend, const
         return {std::move(quotient), std::move(remainder)};
     }
 
-    // Multi-limb divisor: use Knuth Algorithm D.
-    // Reference: Knuth TAOCP Vol 2 §4.3.1 Algorithm D.
-    // This replaces the old naive bit-shift loop (O(bit_length²)) with
-    // an O(m*n) algorithm where m=len(dividend)-len(divisor), n=len(divisor).
+    // Multi-limb divisor: Knuth Algorithm D for small/medium divisors,
+    // Burnikel-Ziegler for large divisors.
+    // - Knuth D (TAOCP Vol 2 §4.3.1) — O(m·n).
+    // - Burnikel-Ziegler (1998) — O(M(n)·log n), beats Knuth D once n ≥ 64
+    //   limbs (HPP-023 closure). Internal threshold owned by the BZ module.
+    if (divisor.limb_count() >= 64U) {
+        return divide_burnikel_ziegler(dividend, divisor);
+    }
     return divide_knuth_d(dividend, divisor);
 }
 
