@@ -427,6 +427,35 @@ Result<ExprPtr> Simplifier::simplify_funcall_exp_log_sqrt(
                 return ok(arena_.make<Sum>(std::move(terms)));
             }
         }
+        // ln(z1 / z2) -> ln(z1) - ln(z2) (or with corrections)
+        // F8.0-6.2 / Task 20 BC-3b (Branch_Cut_Propagation.md §2 rule 5):
+        //   ln(z1 / z2) = ln(z1) - ln(z2) - 2πi · K(ln(z1) - ln(z2))
+        if (const auto* div = expr_cast<Binary>(args.front());
+            div != nullptr && div->op == BinaryOp::Div) {
+            bool all_pos = is_known_positive(div->left) && is_known_positive(div->right);
+            if (all_pos) {
+                auto ln_a = simplify_expr(arena_.make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{div->left}));
+                if (ln_a.is_error()) return ln_a;
+                auto ln_b = simplify_expr(arena_.make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{div->right}));
+                if (ln_b.is_error()) return ln_b;
+                return simplify_expr(arena_.make<Binary>(BinaryOp::Sub, ln_a.value(), ln_b.value()));
+            }
+            const bool strict = (context_ != nullptr) && context_->strict_branch_cuts();
+            if (strict) {
+                ExprPtr ln_a = arena_.make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{div->left});
+                ExprPtr ln_b = arena_.make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{div->right});
+                ExprPtr diff = arena_.make<Binary>(BinaryOp::Sub, ln_a, ln_b);
+                ExprPtr correction = symbolic::branch_cut::make_log_quotient_correction(div->left, div->right, arena_);
+                return simplify_expr(arena_.make<Binary>(BinaryOp::Add, diff, correction));
+            }
+            // Legacy / non-strict default: ln(z1) - ln(z2)
+            auto ln_a = simplify_expr(arena_.make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{div->left}));
+            if (ln_a.is_error()) return ln_a;
+            auto ln_b = simplify_expr(arena_.make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{div->right}));
+            if (ln_b.is_error()) return ln_b;
+            return simplify_expr(arena_.make<Binary>(BinaryOp::Sub, ln_a.value(), ln_b.value()));
+        }
+
         // ln(sqrt(x)) = (1/2)*ln(x) — identità esatta
         if (const auto* sqrt_call = expr_cast<FuncCall>(args.front());
             sqrt_call != nullptr && sqrt_call->func_id == BuiltinOp::Sqrt

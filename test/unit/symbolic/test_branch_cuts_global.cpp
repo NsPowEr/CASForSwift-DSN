@@ -242,4 +242,67 @@ TEST(BranchCutsGlobalTest, SqrtOfSquare_LegacyMode_ComplexGeneric_EmitsAbs) {
     EXPECT_EQ(fc->func_id, BuiltinOp::Abs);
 }
 
+// F8.0-6.2 / Task 20 BC-3b — ln(z1/z2) unwinding correction under strict mode.
+TEST(BranchCutsGlobalTest, LnOfQuotient_StrictMode_ComplexGeneric_EmitsUnwindingCorrection) {
+    // ln(z1/z2) = ln(z1) - ln(z2) - 2πi·K(ln(z1)-ln(z2)) for complex generic z.
+    symbolic::CASContext ctx;
+    ctx.set_strict_branch_cuts(true);
+    ExprPtr z1 = ctx.arena().make<Symbol>("z1");
+    ExprPtr z2 = ctx.arena().make<Symbol>("z2");
+    ExprPtr div = ctx.arena().make<Binary>(BinaryOp::Div, z1, z2);
+    ExprPtr expr = ctx.arena().make<FuncCall>(BuiltinOp::Ln,
+        std::vector<ExprPtr>{div});
+    auto r = ctx.simplify(expr);
+    ASSERT_TRUE(r.is_ok());
+    bool found_K = false;
+    std::function<void(ExprPtr)> walk = [&](ExprPtr e) {
+        if (!e) return;
+        if (const auto* fc = expr_cast<FuncCall>(e);
+            fc && fc->func_id == BuiltinOp::UnwindingNumber) { found_K = true; return; }
+        if (const auto* bin = expr_cast<Binary>(e)) { walk(bin->left); walk(bin->right); }
+        if (const auto* un = expr_cast<Unary>(e)) walk(un->operand);
+        if (const auto* prod = expr_cast<Product>(e))
+            for (auto f : prod->factors) walk(f);
+        if (const auto* sum = expr_cast<Sum>(e))
+            for (auto t : sum->terms) walk(t);
+        if (const auto* fc = expr_cast<FuncCall>(e))
+            for (auto a : fc->args) walk(a);
+    };
+    walk(r.value());
+    EXPECT_TRUE(found_K)
+        << "strict mode must emit K(·) correction for ln(z1/z2) with complex generic z";
+}
+
+TEST(BranchCutsGlobalTest, LnOfQuotient_StrictMode_AllPositive_ReducesCleanly) {
+    symbolic::CASContext ctx;
+    ctx.set_strict_branch_cuts(true);
+    ExprPtr a = ctx.arena().make<Symbol>("a");
+    ExprPtr b = ctx.arena().make<Symbol>("b");
+    ctx.assumptions().assume_positive(*expr_cast<Symbol>(a));
+    ctx.assumptions().assume_positive(*expr_cast<Symbol>(b));
+    ExprPtr div = ctx.arena().make<Binary>(BinaryOp::Div, a, b);
+    ExprPtr expr = ctx.arena().make<FuncCall>(BuiltinOp::Ln,
+        std::vector<ExprPtr>{div});
+    auto r = ctx.simplify(expr);
+    ASSERT_TRUE(r.is_ok());
+    bool found_K = false;
+    std::function<void(ExprPtr)> walk = [&](ExprPtr e) {
+        if (!e) return;
+        if (const auto* fc = expr_cast<FuncCall>(e);
+            fc && fc->func_id == BuiltinOp::UnwindingNumber) { found_K = true; return; }
+        if (const auto* bin = expr_cast<Binary>(e)) { walk(bin->left); walk(bin->right); }
+        if (const auto* un = expr_cast<Unary>(e)) walk(un->operand);
+        if (const auto* prod = expr_cast<Product>(e))
+            for (auto f : prod->factors) walk(f);
+        if (const auto* sum = expr_cast<Sum>(e))
+            for (auto t : sum->terms) walk(t);
+        if (const auto* fc = expr_cast<FuncCall>(e))
+            for (auto a : fc->args) walk(a);
+    };
+    walk(r.value());
+    EXPECT_FALSE(found_K)
+        << "all-positive factors must not require K(·) correction in quotient";
+}
+
 }  // namespace
+
