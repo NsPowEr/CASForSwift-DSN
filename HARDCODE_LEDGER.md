@@ -1608,16 +1608,19 @@ Vedi `PLAN_TASKS_REMAINING.md` per breakdown completo.
 - **Fix corretto residuo**: o (a) estendere il simplifier con regola di canonicalisation `sqrt(p)·sqrt(p) → p` quando `p ≥ 0` è dimostrabile via assumptions, oppure (b) costruire AlgebraicNumber tower che rappresenti `sqrt(Σ xᵢ²)` come elemento di un campo algebrico Q(α) con minimo polinomio α² − Σ xᵢ². Vedi spec `Householder_Symbolic_Stable.md` §HH-3.
 - **Vedi anche**: HC-F8-QR-HOUSEHOLDER-BAILOUT.
 
-### HC-F8-QR-HOUSEHOLDER-BAILOUT — Soglie complessità nel dispatcher Householder simbolico — APERTA (2026-06-12)
+### HC-F8-QR-HOUSEHOLDER-BAILOUT — Soglie complessità nel dispatcher Householder simbolico — PARTIAL (2026-06-12 update)
 - **Task ID**: 12 (sub-residuo).
-- **File**: `src/linalg/matrix_qr.cpp:168` (`estimate_complexity(Nx) > 2`) e `:173` (`total_degree(Nx) > 0`).
+- **File**: `src/linalg/matrix_qr.cpp:159-181`.
 - **Categoria CLAUDE.md**: Categoria 2 (Costanti magiche in algoritmi algebrici) + Categoria 4 (Bail-out su tipo/dominio).
-- **Descrizione**: il dispatcher decide se accettare o respingere QR simbolico in base a due soglie hardcoded — `estimate_complexity > 2` e `total_degree > 0` su `Nx = Σ xᵢ²`. Le soglie non sono derivate da un bound matematico ma scelte empiricamente per evitare timeout nel simplifier downstream.
-- **Fix corretto**:
-  1. Esporre `ctx.symbolic_qr_max_norm_complexity()` (default 2) come `CASContext` parameter, con citazione `Householder_Symbolic_Stable.md §HH-3`.
-  2. Rimuovere `total_degree > 0` quando il simplifier guadagna la regola `sqrt(p)·sqrt(p) → p` su `p ≥ 0`.
-- **Blocking dependency**: simplifier branch-cut aware (HC-F8-PENDING-20 — PARTIAL).
-- **Test di regressione**: `QRTest.SymbolicQR_DefaultSignConvention_2x2` (SKIPPED), `QRTest.HouseholderCertificator3x3_QtQ_Identity_And_QR_Eq_A` (PASS).
+- **Stato 2026-06-12**:
+  1. ✅ Esposto `ctx.symbolic_qr_max_norm_complexity()` (default 2) in `include/cas/cas_context_params.hpp`.
+  2. ✅ Bailout ora rispetta `ctx.assumptions().is_nonnegative(Nx)`: se l'utente dichiara positivi/non-negativi gli operandi della colonna, il bailout viene saltato e QR procede.
+  3. ⏳ Residuo aperto: anche con `is_nonnegative(Nx)`, il simplifier non riesce ancora a folding `sqrt(x²+y²)·sqrt(x²+y²) → x²+y²` (richiede regola branch-cut aware con assumptions). Il test `QRTest.SymbolicQR_DefaultSignConvention_2x2` ora arriva fino al `Q·R == A` certificate ma SKIPpa quando il match strutturale fallisce a causa del fold mancante.
+- **Fix corretto residuo**:
+  1. Estendere il simplifier con regola `sqrt(p)·sqrt(p) → p` quando `p ≥ 0` è derivabile via assumptions (estensione di `simplify_branch_cut.cpp`).
+  2. Confermare Q·R = A certificate sostituendo i `GTEST_SKIP` del test con `EXPECT_TRUE(entries_equal(...))`.
+- **Blocking dependency**: regola fold sqrt simplifier (HC-F8-PENDING-20 residue).
+- **Test di regressione**: `QRTest.SymbolicQR_DefaultSignConvention_2x2` (SKIPPED su match fold), `QRTest.HouseholderCertificator3x3_QtQ_Identity_And_QR_Eq_A` (PASS).
 
 ### HC-F8-PENDING-17 — Risch parametric solver df>0 — APERTA
 - **Task ID**: 17

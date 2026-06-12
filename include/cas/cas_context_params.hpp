@@ -64,6 +64,25 @@ struct CASContextParams {
         return max_trig_power_reduction_;
     }
 
+    // ── Symbolic QR norm-complexity bailout threshold ───────────────────────
+    // Maximum estimate_complexity() of the column norm N_x = Σ xᵢ² above
+    // which symbolic QR (Householder) bails out with Unimplemented when N_x
+    // is NOT provably nonnegative.  When N_x is provably nonnegative (via
+    // assumptions), the bailout is skipped regardless of this threshold.
+    // Default 2 — matches the historical bailout introduced when MGS was the
+    // active QR backend.  Bound rationale: complexity ≤ 2 covers numeric
+    // entries (sqrt(5), sqrt(2)+1, …) where the simplifier reliably folds
+    // sqrt(p)·sqrt(p) → p; symbolic entries with deeper structure require
+    // the branch-cut-aware sqrt rule (HC-F8-PENDING-20 residue).
+    //   Spec: Householder_Symbolic_Stable.md §HH-3 + HARDCODE_LEDGER.md
+    //         HC-F8-QR-HOUSEHOLDER-BAILOUT.
+    void set_symbolic_qr_max_norm_complexity(long long n) noexcept {
+        symbolic_qr_max_norm_complexity_ = n;
+    }
+    [[nodiscard]] long long symbolic_qr_max_norm_complexity() const noexcept {
+        return symbolic_qr_max_norm_complexity_;
+    }
+
     // ── Exact trig evaluation ────────────────────────────────────────────────
     // Maximum denominator q for exact cos(p·π/q)/sin(p·π/q).
     // Default 100 (Disquisitiones §VII: Gauss constructibility criterion).
@@ -585,6 +604,7 @@ protected:
     unsigned int  numeric_precision_digits_{15U};
     bool          strict_branch_cuts_{false};
     long long     max_trig_power_reduction_{32LL};
+    long long     symbolic_qr_max_norm_complexity_{2LL};
     int           max_trig_exact_denom_{100};
     std::size_t   max_rootof_explicit_degree_{2U};
     std::size_t   max_gcd_recursion_depth_{16U};

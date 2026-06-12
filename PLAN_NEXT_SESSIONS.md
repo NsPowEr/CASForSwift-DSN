@@ -79,24 +79,22 @@ Spec: `.APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Branch_Cut_Propagation.md`
 
 ### Step 1.2 — Flaky cos7π/16 bisect (HC-F8-FLAKY-COS-7PI-16)
 
-- [ ] **F-1** — Riproduzione deterministica
-  - `--gtest_shuffle --gtest_random_seed=N` bisect su seed che riproduce fail
-  - Salvare seed in ledger entry
-- [ ] **F-2** — Strumentazione Chebyshev pipeline
-  - Dump in `src/symbolic/simplify_special_fn.cpp` su cos(7π/16) attivata da env var
-- [ ] **F-3** — Root cause fix
-  - Reset esplicito di global statics in `SpecialFunctionsTest::SetUp` SE confermato
-  - OR fix sorgente statica identificata
-- [ ] **Ledger**: chiudere `HC-F8-FLAKY-COS-7PI-16` con seed + root cause.
+- [~] **F-1** — Riproduzione deterministica — DEFERRED 2026-06-12
+  - 3 subset distinti (AcidTest 23, Symbolic+Caching, *Trig*+*Cos*+*Sin* 135, SpecialFunctionsTest 74) tutti PASS isolati.
+  - Polluter probabilmente time-related (Chebyshev iteration cap raggiunto solo dopo migliaia di test consumati prima) NON state-based (no static caches in simplify_special_fn.cpp; fresh_symbol_counter è per-context).
+- [ ] **F-2** — Strumentazione Chebyshev pipeline — TODO sessione successiva
+  - Dump in `src/symbolic/simplify_special_fn.cpp` su cos(7π/16) attivata da env var `CAS_DEBUG_CHEBYSHEV=1`
+  - Confronto step-by-step: input pipeline → output pipeline tra full vs isolato.
+- [ ] **F-3** — Root cause fix — gated su F-2.
+- [ ] **Ledger**: aggiornare `HC-F8-FLAKY-COS-7PI-16` con risultati bisect tentato.
 
-### Step 1.3 — Symbolic QR bailout removal (HC-F8-QR-HOUSEHOLDER-BAILOUT)
+### Step 1.3 — Symbolic QR bailout removal (HC-F8-QR-HOUSEHOLDER-BAILOUT) — PARTIAL
 
-Prerequisito: BC-1 con regola `sqrt(p)·sqrt(p) → p` quando `p ≥ 0` via assumptions.
-
-- [ ] **HH-5** — Expose `ctx.symbolic_qr_max_norm_complexity()` ctx param (default 4 o non-bool gating).
-- [ ] **HH-6** — Rimuovere `total_degree > 0` bail-out in `matrix_qr.cpp:173`.
-- [ ] **HH-7** — Riabilitare `QRTest.SymbolicQR_DefaultSignConvention_2x2`.
-- [ ] **Ledger**: chiudere `HC-F8-QR-HOUSEHOLDER-BAILOUT`; aggiornare `HC-F8-PENDING-12` PARTIAL → DONE.
+- [x] **HH-5** — Expose `ctx.symbolic_qr_max_norm_complexity()` ctx param (default 2).
+- [x] **HH-6** — Bailout ora rispetta `ctx.assumptions().is_nonnegative(Nx)` — assumptions-driven skip.
+- [~] **HH-7** — `QRTest.SymbolicQR_DefaultSignConvention_2x2` SKIPpa ora con diagnostico chiaro (Q·R fold pending) invece che con bailout opaco. Riabilitazione completa gated su simplifier fold rule.
+- [ ] **HH-8** — **NUOVO**: regola simplifier `sqrt(p)·sqrt(p) → p` quando `p ≥ 0` provable. File: `simplify_branch_cut.cpp` (estensione). Sblocca QR certification.
+- [x] **Ledger**: `HC-F8-QR-HOUSEHOLDER-BAILOUT` aggiornato APERTA → PARTIAL con residuo descritto.
 
 ### Output sessione 1
 

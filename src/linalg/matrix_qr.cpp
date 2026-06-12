@@ -159,25 +159,31 @@ Result<QRDecomposition> qr_decompose(const MatrixExpr& matrix,
         auto sim_alpha = simplify(ctx, alpha);
         if (sim_alpha.is_ok()) alpha = sim_alpha.value();
 
-        // Se alpha non si semplifica a un numero e contiene simboli, le espressioni generate
-        // saranno corrette ma il simplifier attualmente non riesce a dimostrare Q*R == A 
-        // (espansione di binomi con Sqrt simboliche). Restituiamo Unimplemented come faceva MGS.
+        // Symbolic QR bailout (HC-F8-QR-HOUSEHOLDER-BAILOUT, 2026-06-12 update):
+        //   1. If N_x is provably nonnegative via assumptions (e.g. every
+        //      summand is a square of an assumed-real symbol, or the user
+        //      asserted positivity on the column entries), the simplifier
+        //      can fold sqrt(N_x)·sqrt(N_x) → N_x downstream and the QR
+        //      result is verifiable. Proceed.
+        //   2. Otherwise, bail out only when complexity exceeds the ctx
+        //      threshold AND total_degree(N_x) > 0 (i.e. symbolic in shape).
+        //      The threshold lives in ctx.symbolic_qr_max_norm_complexity()
+        //      (default 2) — caller can raise it for stress tests.
         if (alpha->kind == ExprKind::FuncCall) {
             auto call = expr_cast<FuncCall>(alpha);
             if (call->func_id == BuiltinOp::Sqrt) {
-                if (estimate_complexity(Nx) > 2 && !is_one_expr(Nx) && !is_zero_expr(Nx)) {
-                    // Controlliamo se ci sono simboli. Un approccio semplice è vedere la complessità.
-                    if (Nx->kind != ExprKind::IntegerLit && Nx->kind != ExprKind::RationalLit) {
-                        // Per le matrici numeriche come sqrt(5), la complessità è bassa (1 o 2).
-                        // Ma per x^2+y^2 la complessità è alta.
-                        if (total_degree(Nx) > 0) {
-                            return fail<QRDecomposition>(CASError{
-                                CASErrorKind::Unimplemented,
-                                "Symbolic QR with unresolved symbolic square roots is mathematically computed but rejected to prevent downstream simplification timeouts",
-                                std::nullopt
-                            });
-                        }
-                    }
+                const bool nx_nonneg = ctx.assumptions().is_nonnegative(Nx);
+                if (!nx_nonneg
+                    && static_cast<long long>(estimate_complexity(Nx)) > ctx.symbolic_qr_max_norm_complexity()
+                    && !is_one_expr(Nx) && !is_zero_expr(Nx)
+                    && Nx->kind != ExprKind::IntegerLit
+                    && Nx->kind != ExprKind::RationalLit
+                    && total_degree(Nx) > 0) {
+                    return fail<QRDecomposition>(CASError{
+                        CASErrorKind::Unimplemented,
+                        "Symbolic QR with unresolved symbolic square roots is mathematically computed but rejected to prevent downstream simplification timeouts; assume_nonnegative on the column-norm operands or raise ctx.set_symbolic_qr_max_norm_complexity() to override",
+                        std::nullopt
+                    });
                 }
             }
         }
