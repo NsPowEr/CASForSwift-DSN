@@ -60,7 +60,11 @@ namespace {
     auto f_poly_res = algebra::parse_polynomial(f_new, t, ctx);
     auto g_poly_res = algebra::parse_polynomial(g_new, t, ctx);
     if (f_poly_res.is_error() || g_poly_res.is_error()) {
-        return make_unimplemented<ExprPtr>("calculus", "solve_risch_de_field", "f or g is not polynomial after denominator bound");
+        return make_unimplemented<ExprPtr>(
+            "calculus", "solve_risch_de_field",
+            "f or g is not polynomial after denominator bound",
+            cas::error::reason_codes::RISCH_NO_POLYNOMIAL_SOLUTION,
+            "Risch DE solver: make sure inputs are polynomials after bounding");
     }
     
     const auto& f_poly = f_poly_res.value();
@@ -102,9 +106,8 @@ namespace {
         ExprPtr f_ld = leading_coefficient(f_poly);
         for (int i = N; i >= 0; --i) {
             std::vector<ExprPtr> p_known_coeffs(p_coeffs.begin() + i + 1, p_coeffs.end());
-            // prepend zeroes to align degree
             p_known_coeffs.insert(p_known_coeffs.begin(), i + 1, arena.make<IntegerLit>(BigInt(0)));
-            PolyExpr p_known(p_known_coeffs);
+            algebra::PolyExpr p_known(p_known_coeffs);
             
             auto p_known_expr_res = algebra::polynomial_to_expr(p_known, t, ctx);
             if (p_known_expr_res.is_error()) return fail<ExprPtr>(p_known_expr_res.error());
@@ -130,7 +133,7 @@ namespace {
         }
         
         // Verify solution
-        PolyExpr p_sol(p_coeffs);
+        algebra::PolyExpr p_sol(p_coeffs);
         auto p_sol_expr_res = algebra::polynomial_to_expr(p_sol, t, ctx);
         if (p_sol_expr_res.is_error()) return fail<ExprPtr>(p_sol_expr_res.error());
         ExprPtr pk = p_sol_expr_res.value();
@@ -151,7 +154,11 @@ namespace {
         if (const auto* il = expr_cast<IntegerLit>(diff_simp)) verified = il->value.is_zero();
         
         if (!verified) {
-            return make_unimplemented<ExprPtr>("calculus", "solve_risch_de_field", "LHS != RHS in algebraic Risch DE solver");
+            return make_unimplemented<ExprPtr>(
+                "calculus", "solve_risch_de_field",
+                "LHS != RHS in algebraic Risch DE solver",
+                cas::error::reason_codes::RISCH_NO_POLYNOMIAL_SOLUTION,
+                "Risch DE solver: check algebraic coefficients verification");
         }
         
         ExprPtr p_expr = p_sol_expr_res.value();
@@ -213,7 +220,7 @@ namespace {
             }
         }
         
-        PolyExpr p_sol(p_coeffs);
+        algebra::PolyExpr p_sol(p_coeffs);
         auto p_sol_expr_res = algebra::polynomial_to_expr(p_sol, t, ctx);
         if (p_sol_expr_res.is_error()) return fail<ExprPtr>(p_sol_expr_res.error());
         
@@ -235,6 +242,7 @@ Result<ExprPtr> solve_risch_de_general(
     const Symbol& var,
     const DifferentialField& field,
     symbolic::CASContext& ctx) {
+    (void)var;
     return solve_risch_de_field(f, g, field.extensions().size(), field, ctx);
 }
 
@@ -301,7 +309,10 @@ Result<std::vector<ParametricRischDeQSolution>> solve_risch_de_parametric_field(
     auto f_poly_res = algebra::parse_polynomial(f_new, t, ctx);
     if (f_poly_res.is_error()) {
         return make_unimplemented<std::vector<ParametricRischDeQSolution>>(
-            "calculus", "solve_risch_de_parametric_field", "f_new is not polynomial");
+            "calculus", "solve_risch_de_parametric_field",
+            "f_new is not polynomial",
+            cas::error::reason_codes::RISCH_NO_POLYNOMIAL_SOLUTION,
+            "Risch DE solver: make sure f_new is polynomial");
     }
     const auto& f_poly = f_poly_res.value();
     
@@ -312,7 +323,10 @@ Result<std::vector<ParametricRischDeQSolution>> solve_risch_de_parametric_field(
         auto g_poly_res = algebra::parse_polynomial(g_new, t, ctx);
         if (g_poly_res.is_error()) {
             return make_unimplemented<std::vector<ParametricRischDeQSolution>>(
-                "calculus", "solve_risch_de_parametric_field", "g_new_i is not polynomial");
+                "calculus", "solve_risch_de_parametric_field",
+                "g_new_i is not polynomial",
+                cas::error::reason_codes::RISCH_NO_POLYNOMIAL_SOLUTION,
+                "Risch DE solver: make sure g_new_i is polynomial");
         }
         g_polys.push_back(g_poly_res.value());
         int dg = static_cast<int>(poly_degree(g_poly_res.value()));
@@ -347,7 +361,10 @@ Result<std::vector<ParametricRischDeQSolution>> solve_risch_de_parametric_field(
     // If df > 0: algebraic matching (fallback for algebraic towers)
     if (df > 0) {
         return make_unimplemented<std::vector<ParametricRischDeQSolution>>(
-            "calculus", "solve_risch_de_parametric_field", "df > 0 not implemented in parametric field solver");
+            "calculus", "solve_risch_de_parametric_field",
+            "df > 0 not implemented in parametric field solver",
+            cas::error::reason_codes::RISCH_NO_POLYNOMIAL_SOLUTION,
+            "Risch DE solver: parametric solver with df > 0 is unimplemented");
     }
     
     // df <= 0. f_new is f_0 in lower field.

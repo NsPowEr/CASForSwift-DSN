@@ -196,7 +196,10 @@ Result<ExprPtr> integrate_risch_poly_and_rational_part(
                                 ExprPtr du = du_res.value();
                                 ExprPtr f_expr = arena.make<Binary>(BinaryOp::Mul,
                                     arena.make<IntegerLit>(BigInt(static_cast<std::int64_t>(k))), du);
-                                auto y_res = solve_risch_de_q(f_expr, coeff, var, context);
+                                
+                                DifferentialField sub_field(field.base_var(), std::vector<DifferentialExtension>(
+                                    field.extensions().begin(), field.extensions().end() - 1U));
+                                auto y_res = solve_risch_de_general(f_expr, coeff, var, sub_field, context);
                                 if (y_res.is_ok()) {
                                     ExprPtr t_pow = (k == 1)
                                         ? arena.make<Symbol>(t_top)

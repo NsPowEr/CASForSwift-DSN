@@ -281,7 +281,9 @@ Result<ExprPtr> integrate_risch(ExprPtr expr, const Symbol& var, symbolic::CASCo
             if (g_simp.is_ok()) exp_arg = g_simp.value();
             auto g_prime = diff(exp_arg, var, 1U, context);
             if (g_prime.is_ok()) {
-                auto y_res = solve_risch_de_q(g_prime.value(), f_poly, var, context);
+                DifferentialField sub_field(field.base_var(), std::vector<DifferentialExtension>(
+                    field.extensions().begin(), field.extensions().end() - 1U));
+                auto y_res = solve_risch_de_general(g_prime.value(), f_poly, var, sub_field, context);
                 if (y_res.is_ok()) {
                     ExprPtr exp_g = arena.make<FuncCall>(BuiltinOp::Exp,
                         std::vector<ExprPtr>{exp_arg});

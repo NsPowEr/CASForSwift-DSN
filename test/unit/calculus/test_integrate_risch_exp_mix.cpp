@@ -72,14 +72,19 @@ TEST_F(IntegrateRischExpMixTest, IntegralOfXExpXSquared) {
 }
 
 TEST_F(IntegrateRischExpMixTest, AntiHardcodeHigherDegreeExpQuadratic) {
-    // ∫ (3x²+x)·exp(x²) dx, y satisfies y' + 2x·y = 3x²+x
-    // Anti-hardcode: anything > simple x·exp(x) needs the general solver.
+    // ∫ (3x³+x)·exp(x²) dx, y satisfies y' + 2x·y = 3x³+x
     auto e = parse("(3*x^3 + x) * exp(x^2)");
     auto r = calculus::integrate(e, x, ctx);
-    if (r.is_ok()) {
-        EXPECT_TRUE(verify_antider(r.value(), e));
-    }
-    // OK if Unimplemented — but if returns ok, must be correct.
+    ASSERT_TRUE(r.is_ok());
+    EXPECT_TRUE(verify_antider(r.value(), e));
+}
+
+TEST_F(IntegrateRischExpMixTest, IntegralOfErfTimesExp) {
+    // ∫ x·erf(x)·exp(x²) dx = 1/2 · erf(x)·exp(x²) − x/sqrt(pi)
+    auto e = parse("x * erf(x) * exp(x^2)");
+    auto r = calculus::integrate(e, x, ctx);
+    ASSERT_TRUE(r.is_ok()) << (r.is_error() ? r.error().message : "");
+    EXPECT_TRUE(verify_antider(r.value(), e));
 }
 
 }  // namespace
