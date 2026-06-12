@@ -326,6 +326,18 @@ struct CASContextParams {
         return simplify_sqrt_trial_division_bound_;
     }
 
+    // F8.0-6.2: when true, ln(exp(z)) reduces to z + 2πi·K(z) on z whose
+    // realness is not asserted by Assumptions; when false (default), the
+    // legacy reduction ln(exp(z)) → z applies regardless of branch. Opt-in
+    // because turning this on by default would change the canonical form
+    // of every existing log/exp simplification in the codebase.
+    void set_branch_cut_aware_logexp(bool on) noexcept {
+        branch_cut_aware_logexp_ = on;
+    }
+    [[nodiscard]] bool branch_cut_aware_logexp() const noexcept {
+        return branch_cut_aware_logexp_;
+    }
+
     // ── limit log/log fast-path recursion depth (HPP-022 closure) ──────────
     // Maximum recursion depth for try_log_log_limit (ln(a)/ln(b) fast-path).
     // Bound: max depth ≈ log_2(nesting depth of nested logs in input).
@@ -336,6 +348,21 @@ struct CASContextParams {
     }
     [[nodiscard]] unsigned int max_log_log_limit_depth() const noexcept {
         return max_log_log_limit_depth_;
+    }
+
+    // ── Bessel half-integer recurrence expansion bound (F7.5.E2) ───────────
+    // Max |numerator| of rational order p/2 (p odd) for which the half-integer
+    // recurrence J/Y/I/K(p/2, x) → elementary closed form is expanded directly.
+    // Beyond this bound an Unimplemented diagnostic is returned (no silent
+    // truncation). Recurrence base values: ±1/2; iteration linear in |p|.
+    // Default 64: covers all practical engineering uses while avoiding very
+    // deep nested expressions on adversarial inputs. Reference: spec
+    // Bessel_Identities.md §"Mezzi-interi".
+    void set_max_bessel_half_integer_order(unsigned int n) noexcept {
+        max_bessel_half_integer_order_ = n;
+    }
+    [[nodiscard]] unsigned int max_bessel_half_integer_order() const noexcept {
+        return max_bessel_half_integer_order_;
     }
 
     // ── Pollard Rho iteration budget (HPP-021 closure) ─────────────────────
@@ -493,6 +520,37 @@ struct CASContextParams {
         return solve_inequality_sturm_tolerance_inv_;
     }
 
+    // ── MRV cycle guards (HPP-F75-AUDIT-CYCLE-GUARD-1/2/3) ───────────────────
+    void set_mrv_max_append_depth(unsigned int depth) noexcept {
+        mrv_max_append_depth_ = depth;
+    }
+    [[nodiscard]] unsigned int mrv_max_append_depth() const noexcept {
+        return mrv_max_append_depth_;
+    }
+
+    void set_diff_field_max_visit_depth(unsigned int depth) noexcept {
+        diff_field_max_visit_depth_ = depth;
+    }
+    [[nodiscard]] unsigned int diff_field_max_visit_depth() const noexcept {
+        return diff_field_max_visit_depth_;
+    }
+
+    void set_mrv_growth_rank_max_depth(int depth) noexcept {
+        mrv_growth_rank_max_depth_ = depth;
+    }
+    [[nodiscard]] int mrv_growth_rank_max_depth() const noexcept {
+        return mrv_growth_rank_max_depth_;
+    }
+
+    void set_fsolve_tolerance_bits(unsigned int bits) noexcept {
+        fsolve_tolerance_bits_ = bits;
+    }
+    [[nodiscard]] unsigned int fsolve_tolerance_bits() const noexcept {
+        return fsolve_tolerance_bits_;
+    }
+
+
+
 protected:
     // All fields with their mathematically-derived or documented defaults.
     // Setters with clamping are CASContext out-of-line methods (context_core.cpp).
@@ -515,6 +573,7 @@ protected:
     std::size_t   max_gamma_recursion_{1024U};
     std::size_t   improper_leading_order_scan_{8U};
     bool          expand_bessel_recurrence_{false};
+    unsigned int  max_bessel_half_integer_order_{64U};  // F7.5.E2 half-int recurrence cap
     std::size_t   max_trager_tower_shift_attempts_{0U};
     std::size_t   max_wang_eval_radius_{0U};  // 0 = auto (nterms + main_deg + 4)
     std::size_t   f4_max_macaulay_rows_{512U};
@@ -531,6 +590,7 @@ protected:
     std::size_t   max_galois_frobenius_primes_{30U};
     std::size_t   smith_stabilization_multiplier_{64U};
     std::size_t   simplify_sqrt_trial_division_bound_{10000U};
+    bool          branch_cut_aware_logexp_{false}; // F8.0-6.2 opt-in
     std::size_t   sparse_interp_max_retries_{5U};
     bool          enable_f5_signature_pruning_{false};  // F3.3-F5-WIRE
     unsigned int  max_log_log_limit_depth_{3U};          // HPP-022 closure
@@ -546,6 +606,10 @@ protected:
     long long     solve_inequality_search_half_width_{1000LL};       // F7.0-A2.1
     long long     solve_inequality_sturm_tolerance_inv_{1000000000LL}; // F7.0-A2.1
     std::uint64_t max_expand_monomials_{100000ULL};                  // F7.0-A3.4 Swell Guard
+    unsigned int  mrv_max_append_depth_{1024U};                      // HPP-F75-AUDIT-CYCLE-GUARD-1
+    unsigned int  diff_field_max_visit_depth_{4096U};                // HPP-F75-AUDIT-CYCLE-GUARD-2
+    int           mrv_growth_rank_max_depth_{1024};                  // HPP-F75-AUDIT-CYCLE-GUARD-3
+    unsigned int  fsolve_tolerance_bits_{80U};                       // HPP-006 (Sturm fsolve tolerance)
 };
 
 }  // namespace cas::symbolic

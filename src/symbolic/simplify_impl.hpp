@@ -236,6 +236,10 @@ private:
     // to keep simplify_special_fn.cpp under the 500-line anti-monolith limit.
     [[nodiscard]] Result<ExprPtr> simplify_funcall_hyper_elliptic(ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr target_before);
     [[nodiscard]] Result<ExprPtr> simplify_funcall_bessel_orthogonal(ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr target_before);
+    // F7.5.E2: half-integer Bessel reduction via three-term recurrence from
+    // ±1/2 base values. Returns Unimplemented when |p_num|/2 exceeds the
+    // configured bound (ctx.max_bessel_half_integer_order()).
+    [[nodiscard]] Result<ExprPtr> bessel_half_integer_reduce(BuiltinOp op, const BigInt& p_num, ExprPtr x_arg);
     // F7.5.E2: orthogonal polynomial recurrences (Chebyshev, Hermite,
     // Legendre, Laguerre, Jacobi) split out from simplify_bessel_orthogonal.cpp
     // to keep that file under the 500-line anti-monolith limit.
