@@ -131,35 +131,19 @@ namespace cas::algebra {
     const std::size_t interpolation_degree_bound =
         std::min(degree_in_var(p, interpolation_var), degree_in_var(q, interpolation_var));
     const std::size_t required_samples = std::max<std::size_t>(interpolation_degree_bound + 1U, 2U);
-    // HPP-004 FIX 2026-05-28 (CLAUDE.md Cat 6 — no arbitrary constant).
-    //
-    // Schwartz-Zippel worst-case analysis:
-    //   D = interpolation_degree_bound.  The leading coefficient of the GCD in
-    //   interpolation_var is a polynomial of degree ≤ D.  A random evaluation point
-    //   is "unlucky" iff it zeros this polynomial.  At most D such points exist in
-    //   any infinite evaluation domain (Fundamental Theorem of Algebra).
-    //
-    //   With N = 2D + extra evaluation points, at most D are unlucky, leaving
-    //   N − D = D + extra lucky ones.  For the bucket-selection phase to succeed
-    //   we need: D + extra ≥ required_samples + 1 = (D+1) + 1, i.e., extra ≥ 2.
-    //
-    //   So extra = 2 is the mathematically minimum correct value.  We set:
-    //     extra = max(2, ceil(log2(required_samples + 1)))
-    //   This adds one additional bucket-guard bit per doubling of required_samples,
-    //   derived from the binary logarithm of the number of needed lucky points.
-    //   The formula grows O(log D) so it does NOT cause exponential fan-out blowup
-    //   in multi-variable recursion (unlike the previous O(log(1/δ)) formula that
-    //   was removed, comment preserved: "O(N^k) fan-out avoided").
-    //
-    //   For required_samples ≤ 3 (D ≤ 2): extra = max(2, ceil(log2(4))) = 2 → N=2D+2.
-    //   For required_samples ≤ 7 (D ≤ 6): extra = max(2, ceil(log2(8))) = 3 → N=2D+3.
-    //   For required_samples ≤ 15 (D ≤ 14): extra = 4, etc.
-    //   Default case (required_samples=2, D=0): N = 2*0+2 = 2 (correct).
-    const std::size_t log2_rs1 = (required_samples > 0U)
-        ? static_cast<std::size_t>(std::ceil(std::log2(static_cast<double>(required_samples + 1U))))
-        : std::size_t{1U};
-    const std::size_t extra_guard = std::max(std::size_t{2U}, log2_rs1);
-    const std::size_t max_samples = 2U * interpolation_degree_bound + extra_guard;
+
+    // Dynamic samples calculation via Schwartz-Zippel (ZP-1):
+    // k = ceil(log(delta) / log(p_fail)) with p_fail = d / S.
+    // We choose a conservative evaluation box of size S = 10000.
+    const double delta = ctx.zippel_error_probability();
+    const double S = 10000.0;
+    const double d = std::max(1.0, static_cast<double>(interpolation_degree_bound));
+    const double p_fail = std::min(0.5, d / S);
+    const std::size_t extra_samples = (delta > 0.0 && delta < 1.0)
+        ? static_cast<std::size_t>(std::ceil(std::log(delta) / std::log(p_fail)))
+        : 8U;
+
+    const std::size_t max_samples = required_samples + std::max<std::size_t>(2U, extra_samples);
 
     struct SamplePoint {
         BigInt value;

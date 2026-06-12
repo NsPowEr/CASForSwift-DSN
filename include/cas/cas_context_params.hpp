@@ -348,6 +348,22 @@ struct CASContextParams {
         return sparse_interp_max_retries_;
     }
 
+    // ── Zippel error probability (ZP-1) ──────────────────────────────────────
+    [[nodiscard]] double zippel_error_probability() const noexcept {
+        return zippel_error_probability_;
+    }
+    void set_zippel_error_probability(double prob) noexcept {
+        zippel_error_probability_ = prob;
+    }
+
+    // ── Zippel density threshold (ZP-3) ──────────────────────────────────────
+    [[nodiscard]] double zippel_density_threshold() const noexcept {
+        return zippel_density_threshold_;
+    }
+    void set_zippel_density_threshold(double t) noexcept {
+        zippel_density_threshold_ = t;
+    }
+
     // ── sqrt rational simplification ────────────────────────────────────────
     // Trial-division upper bound for perfect-square factor extraction in
     // simplify(sqrt(rational)). Without a bound the O(sqrt(n)) loop is
@@ -643,6 +659,8 @@ protected:
     std::size_t   max_wang_eval_radius_{0U};  // 0 = auto (nterms + main_deg + 4)
     std::size_t   max_hensel_lift_attempts_{8U};
     std::size_t   kronecker_max_degree_{8U};
+    double        zippel_error_probability_{1e-6};
+    double        zippel_density_threshold_{5.0};
     std::size_t   f4_max_macaulay_rows_{512U};
     std::size_t   f4_max_macaulay_monomials_{512U};
     std::size_t   f4_max_pending_monomials_{1024U};

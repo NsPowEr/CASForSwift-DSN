@@ -612,6 +612,7 @@ test/unit/algebra/test_cyclotomic_rootof_d2.cpp
         test/unit/symbolic/test_summation_gosper.cpp
         test/unit/algebra/test_factorization_polynomials_smoke.cpp
         test/unit/algebra/test_polynomial_gcd_multivariate_smoke.cpp
+        test/unit/algebra/test_zippel_sparse_gcd.cpp
         test/unit/parser/test_decimal_to_rational.cpp
         test/unit/symbolic/test_denesting_recursive.cpp
         test/unit/symbolic/test_rootof_auto_trigger.cpp

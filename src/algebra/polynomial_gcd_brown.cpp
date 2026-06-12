@@ -403,8 +403,32 @@ Result<MultivariatePolynomial> gcd_brown(
 Result<MultivariatePolynomial> gcd_zippel_sparse(
         const MultivariatePolynomial& P, const MultivariatePolynomial& Q,
         symbolic::CASContext& ctx) {
-    auto prony = gcd_zippel_prony(P, Q, ctx);
-    if (prony.is_ok()) return prony;
+    bool run_zippel = false;
+    std::vector<Symbol> vars = P.variables();
+    for (const auto& s : Q.variables()) {
+        if (std::none_of(vars.begin(), vars.end(), [&](const Symbol& v) { return v.name == s.name; })) {
+            vars.push_back(s);
+        }
+    }
+    if (vars.size() >= 2U) {
+        std::size_t n = vars.size();
+        std::size_t d = std::max(P.total_degree(), Q.total_degree());
+        auto bin_res = numtheory::binomial(BigInt(n + d), BigInt(d));
+        double M = 1.0;
+        if (bin_res.is_ok()) {
+            M = bin_res.value().to_double();
+        }
+        double actual_terms = static_cast<double>(std::max<std::size_t>(1U, std::max(P.terms().size(), Q.terms().size())));
+        double density_ratio = M / actual_terms;
+        if (density_ratio >= ctx.zippel_density_threshold()) {
+            run_zippel = true;
+        }
+    }
+
+    if (run_zippel) {
+        auto prony = gcd_zippel_prony(P, Q, ctx);
+        if (prony.is_ok()) return prony;
+    }
     auto modular = gcd_brown_modular(P, Q, ctx);
     if (modular.is_ok()) return modular;
     return gcd_eval_interp_z_impl(P, Q, ctx, 0U);
