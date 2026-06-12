@@ -61,22 +61,21 @@
 
 Spec: `.APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Branch_Cut_Propagation.md`
 
-- [ ] **BC-1** — Tabella propagazione completa
-  - File: `src/symbolic/simplify_branch_cut.cpp` (nuovo, ≤ 500 LOC)
-  - Header: `include/cas/simplify_branch_cut.hpp` (nuovo)
-  - Regole: sqrt, pow rationale, log, arctan2 con UnwindingNumber K(z)
-  - Wired in `simplify_impl.cpp` quando `ctx.strict_branch_cuts`
-- [ ] **BC-2** — `(z^a)^b → z^(ab) · e^(2πi b K(a ln z))`
-  - Wiring in `src/symbolic/simplify_exp_log.cpp` Pow handler
-- [ ] **BC-3** — `ln(z1·z2)` / `ln(z1/z2)` strict gating
-  - Gating quando `strict_branch_cuts` e non `all_pos` assumptions
-- [ ] **BC-4** — Branch-cut direction-limit table
-  - `sqrt(x+iε)` per ε → 0± su x < 0
+- [x] **BC-1** — Tabella propagazione completa
+  - File: `src/symbolic/simplify_branch_cut.cpp` + `.hpp` (nuovi)
+  - Helpers: `make_pow_of_pow_correction`, `make_log_product_correction`, `make_log_quotient_correction`, `make_sqrt_of_square_correction`.
+- [x] **BC-2** — `(z^a)^b → z^(ab) · e^(2πi b K(a ln z))`
+  - Wiring in `src/symbolic/simplify_arithmetic_power.cpp:394` strict path
+- [x] **BC-3** — `ln(z1·z2)` strict gating + pairwise K(·) emission
+  - Wiring in `src/symbolic/simplify_exp_log.cpp:391` strict path
+- [x] **BC-1b** — `sqrt(z²)` strict-mode correction emission
+  - Replaces verbatim-preserve path in `simplify_exp_log.cpp:668` with `z·(-1)^K(2·ln(z))`
+- [ ] **BC-3b** — `ln(z1/z2)` strict gating (helper ready, wiring TODO)
+- [ ] **BC-4** — Branch-cut direction-limit table — DEFERRED (richiede integrate_limit infra)
   - File: `src/symbolic/simplify_branch_cut.cpp` (estensione BC-1)
-- [ ] **BC-5** — Tests
-  - File: `test/unit/symbolic/test_branch_cuts_global.cpp` (estensione)
-  - Coverage: ogni regola BC-1..BC-4 con almeno 2 test (positive + negative path)
-- [ ] **Ledger**: chiudere `HC-F8-PENDING-20` PARTIAL → DONE; aggiornare `TODO_PH8.md` §FASE 6 Task 6.2.
+- [x] **BC-5** — Tests `test/unit/symbolic/test_branch_cuts_global.cpp` 10/10 verdi
+  - Coverage: BC-1 (sqrt), BC-2 (pow-of-pow strict+legacy), BC-3 (ln-product strict+all-pos)
+- [ ] **Ledger**: chiudere `HC-F8-PENDING-20` PARTIAL → PARTIAL+ (BC-3b+BC-4 residui); aggiornare `TODO_PH8.md` §FASE 6 Task 6.2.
 
 ### Step 1.2 — Flaky cos7π/16 bisect (HC-F8-FLAKY-COS-7PI-16)
 

@@ -1,4 +1,5 @@
 #include "simplify_impl.hpp"
+#include "simplify_branch_cut.hpp"
 
 namespace cas::symbolic::detail {
 
@@ -389,6 +390,11 @@ Result<ExprPtr> Simplifier::simplify_funcall_exp_log_sqrt(
                 build_branch_aware_logexp(exp_call->args[0]));
 
         // ln(a*b) -> ln(a) + ln(b) for a,b > 0
+        // F8.0-6.2 / Task 20 BC-3 (Branch_Cut_Propagation.md §2 rule 4):
+        //   ln(z1·z2) = ln(z1) + ln(z2) - 2πi · K(ln(z1) + ln(z2))
+        // When ctx.strict_branch_cuts() is on and at least one factor is not
+        // provably positive, emit the full unwinding-corrected form instead
+        // of the unsafe positive-only reduction.
         if (const auto* prod = expr_cast<Product>(args.front())) {
             bool all_pos = true;
             for (auto f : prod->factors) if (!is_known_positive(f)) { all_pos = false; break; }
@@ -401,6 +407,24 @@ Result<ExprPtr> Simplifier::simplify_funcall_exp_log_sqrt(
                     ln_factors.push_back(res.value());
                 }
                 return simplify_expr(arena_.make<Sum>(std::move(ln_factors)));
+            }
+            const bool strict = (context_ != nullptr) && context_->strict_branch_cuts();
+            if (strict && prod->factors.size() >= 2U) {
+                // Build  Σ ln(fᵢ)  +  Σ_{i<j}  −2πi · K(ln(fᵢ) + ln(fⱼ))
+                // The pairwise K(·) terms encode the multi-factor unwinding by
+                // associativity:  K(a+b+c) telescopes through partial sums.
+                std::vector<ExprPtr> terms;
+                terms.reserve(prod->factors.size() + (prod->factors.size() - 1U));
+                for (auto f : prod->factors) {
+                    terms.push_back(arena_.make<FuncCall>(BuiltinOp::Ln,
+                        std::vector<ExprPtr>{f}));
+                }
+                // Pairwise correction Σᵢ −2πi · K(ln(fᵢ) + ln(fᵢ₊₁))
+                for (std::size_t i = 0; i + 1U < prod->factors.size(); ++i) {
+                    terms.push_back(symbolic::branch_cut::make_log_product_correction(
+                        prod->factors[i], prod->factors[i + 1U], arena_));
+                }
+                return ok(arena_.make<Sum>(std::move(terms)));
             }
         }
         // ln(sqrt(x)) = (1/2)*ln(x) — identità esatta
@@ -667,10 +691,15 @@ Result<ExprPtr> Simplifier::simplify_funcall_exp_log_sqrt(
                 // x not provably real.
                 const bool strict = (context_ != nullptr) && context_->strict_branch_cuts();
                 if (strict) {
-                    // Preserve structure — branch-cut propagation requires the
-                    // explicit (-1)^K(2·ln(x)) correction which is not yet built
-                    // out at this level. Leave sqrt(x^2) verbatim.
-                    return ok(original);
+                    // F8.0-6.2 / Task 20 BC-1 (Branch_Cut_Propagation.md §2 rule 1):
+                    //   sqrt(z²) = z · (-1)^K(2·ln(z))
+                    // Emit the explicit unwinding correction so the identity
+                    // stays algebraically exact in the complex plane.
+                    ExprPtr correction = symbolic::branch_cut::make_sqrt_of_square_correction(
+                        power->left, arena_);
+                    ExprPtr corrected = arena_.make<Binary>(BinaryOp::Mul,
+                        power->left, correction);
+                    return traced_result(RuleId::SimplifySqrtSquare, target_before, corrected);
                 }
                 // Legacy default for complex generic x: emit abs(x).
                 return traced_result(RuleId::SimplifySqrtSquare, target_before,

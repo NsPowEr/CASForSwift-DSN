@@ -12,6 +12,7 @@
 // group della classe Simplifier.
 
 #include "simplify_impl.hpp"
+#include "simplify_branch_cut.hpp"
 #include "cas/extended_real.hpp"
 #include "cas/linalg/Matrix.hpp"
 #include "cas/algebra.hpp"
@@ -392,14 +393,38 @@ Result<ExprPtr> Simplifier::simplify_power(ExprPtr base, ExprPtr exponent, ExprP
                 }
             }
         } else {
-            // Fallback for literal rationals (already covers some cases)
+            // F8.0-6.2 / Task 20 BC-2 (Branch_Cut_Propagation.md §2 rule 3):
+            //   (z^a)^b = z^(a·b) · e^(2πi · b · K(a · ln(z)))
+            // When ctx.strict_branch_cuts() is active and the base is not
+            // provably positive, the legacy `(a^b)^c → a^(b·c)` flatten loses
+            // the unwinding correction. Emit the corrected product instead so
+            // the identity stays algebraically exact in the complex plane.
+            const bool strict = (context_ != nullptr) && context_->strict_branch_cuts();
+            if (strict) {
+                auto new_exp = simplify_expr(arena_.make<Binary>(BinaryOp::Mul, outer->right, exponent));
+                if (new_exp.is_ok()) {
+                    auto flattened = simplify_power(outer->left, new_exp.value());
+                    if (flattened.is_ok()) {
+                        ExprPtr correction = branch_cut::make_pow_of_pow_correction(
+                            outer->left, outer->right, exponent, arena_);
+                        ExprPtr corrected = arena_.make<Binary>(BinaryOp::Mul,
+                            flattened.value(), correction);
+                        append_trace(RuleId::SimplifyFlattenNestedPowers, target_before, corrected);
+                        return ok(corrected);
+                    }
+                }
+                // Strict mode: never silently drop the correction. If we can't
+                // build the flattened form, preserve the original (z^a)^b.
+                append_trace(RuleId::SimplifyFlattenNestedPowers, target_before, base);
+                return ok(arena_.make<Binary>(BinaryOp::Pow, base, exponent));
+            }
+            // Legacy fallback for literal rationals (already covers some cases)
             LiteralRational l_exp, r_exp;
             auto l_exact = try_get_exact_rational(outer->right, l_exp);
             auto r_exact = try_get_exact_rational(exponent, r_exp);
             if (l_exact.is_ok() && l_exact.value() && r_exact.is_ok() && r_exact.value()) {
-                // (a^b)^c where b, c are rational. Still needs a > 0 or specific conditions,
-                // but CAS often flattens these if they are literal rationals unless it's a very strict mode.
-                // For now, we keep the previous behavior for literal rationals but we could be more precise.
+                // (a^b)^c where b, c are rational. Legacy behaviour — strict
+                // mode handles the branch-cut-aware path above.
                 auto rewritten = simplify_power(outer->left, make_rational(arena_, l_exp.value * r_exp.value));
                 if (rewritten.is_ok()) {
                     append_trace(RuleId::SimplifyFlattenNestedPowers, target_before, rewritten.value());
