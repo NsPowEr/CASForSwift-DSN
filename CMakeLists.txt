@@ -349,6 +349,7 @@ set(CAS_NUMERIC_SOURCES
     src/numeric/aberth_root_isolator.cpp
     src/numeric/lipschitz.cpp
     src/numeric/integration.cpp
+    src/numeric/adaptive_integration.cpp
     src/numeric/interpolation.cpp
     src/statistics/normal.cpp
     src/statistics/regression.cpp

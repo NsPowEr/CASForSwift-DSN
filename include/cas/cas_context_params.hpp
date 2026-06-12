@@ -350,6 +350,31 @@ struct CASContextParams {
         return max_log_log_limit_depth_;
     }
 
+    // ── Adaptive Gauss-Kronrod numerical integration (F6.D) ────────────────
+    // Tolerances and resource caps for the priority-queue G7/K15 adaptive
+    // integrator (src/numeric/adaptive_integration.cpp). Convergence is
+    // declared when  estimated_error ≤ max(abs_tol, rel_tol·|integral|).
+    // No silent truncation: when max_intervals is reached without convergence
+    // the integrator returns success=false with the partial estimate.
+    void set_integration_abs_tol(double t) noexcept {
+        integration_abs_tol_ = t;
+    }
+    [[nodiscard]] double integration_abs_tol() const noexcept {
+        return integration_abs_tol_;
+    }
+    void set_integration_rel_tol(double t) noexcept {
+        integration_rel_tol_ = t;
+    }
+    [[nodiscard]] double integration_rel_tol() const noexcept {
+        return integration_rel_tol_;
+    }
+    void set_integration_max_intervals(std::size_t n) noexcept {
+        integration_max_intervals_ = n;
+    }
+    [[nodiscard]] std::size_t integration_max_intervals() const noexcept {
+        return integration_max_intervals_;
+    }
+
     // ── Bessel half-integer recurrence expansion bound (F7.5.E2) ───────────
     // Max |numerator| of rational order p/2 (p odd) for which the half-integer
     // recurrence J/Y/I/K(p/2, x) → elementary closed form is expanded directly.
@@ -574,6 +599,10 @@ protected:
     std::size_t   improper_leading_order_scan_{8U};
     bool          expand_bessel_recurrence_{false};
     unsigned int  max_bessel_half_integer_order_{64U};  // F7.5.E2 half-int recurrence cap
+    // F6.D adaptive G7/K15 integrator tolerances (no hardcode allowed in algo).
+    double        integration_abs_tol_{1e-10};
+    double        integration_rel_tol_{1e-8};
+    std::size_t   integration_max_intervals_{4096U};
     std::size_t   max_trager_tower_shift_attempts_{0U};
     std::size_t   max_wang_eval_radius_{0U};  // 0 = auto (nterms + main_deg + 4)
     std::size_t   f4_max_macaulay_rows_{512U};

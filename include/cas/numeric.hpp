@@ -114,6 +114,27 @@ struct MultiRootOptions {
     double high,
     double tol);
 
+// F8.0-5.4: rigorous isolating intervals for the real roots of a
+// rational polynomial. Same input contract as find_polynomial_roots_sturm,
+// but the output is the exact rational interval [low_i, high_i] s.t. each
+// interval contains exactly one real root of the squarefree part of `expr`.
+// Intervals are returned in ascending order of the contained root.
+//
+// Each (low_i, high_i) is a pair (BigInt num, BigInt den) for both endpoints,
+// enabling construction of RootOf nodes whose identity is decidable by
+// interval comparison alone (no need to recompute Sturm at evaluation time).
+[[nodiscard]] Result<std::vector<IsolatingBound>> find_polynomial_isolating_intervals(
+    ExprPtr expr,
+    const std::string& variable,
+    symbolic::CASContext& ctx,
+    double low,
+    double high,
+    double tol);
+
+// F8.0-5.3 — see include/cas/numeric_bigfloat.hpp for the MPFR-precision
+// Sturm refinement API. (Kept in a separate header to avoid pulling mpfr.h
+// into every translation unit that uses numeric.hpp.)
+
 // Lipschitz dyadic refinement (Hansen-style interval narrowing).
 // Robust root finder for *transcendental* univariate functions on a
 // compact interval [low, high] in which `f` is continuously differentiable.
@@ -148,6 +169,32 @@ struct IntegrationOptions {
     double a,
     double b,
     const IntegrationOptions& options = {});
+
+/**
+ * F6.D — Adaptive G7/K15 Gauss-Kronrod integration with priority-queue
+ * panel splitting (no recursion depth limit). Tolerances and resource
+ * caps are driven exclusively by CASContext fields:
+ *   - ctx.integration_abs_tol()
+ *   - ctx.integration_rel_tol()
+ *   - ctx.integration_max_intervals()
+ *
+ * Convergence rule (Burnikel-style monotone descent):
+ *   total_error ≤ max(abs_tol, rel_tol · |total_integral|)
+ *
+ * Reference: QUADPACK §4 (Piessens et al. 1983).
+ */
+struct GKIntegrationResult {
+    double value{0.0};
+    double error_estimate{0.0};
+    std::size_t interval_count{0U};
+    bool success{false};
+};
+
+[[nodiscard]] Result<GKIntegrationResult> integrate_gauss_kronrod_adaptive(
+    const std::function<Result<double>(double)>& f,
+    double a,
+    double b,
+    const symbolic::CASContext& ctx);
 
 /**
  * F7.3-T2 — Lagrange polynomial interpolation (barycentric form).

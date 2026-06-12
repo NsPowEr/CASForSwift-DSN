@@ -68,5 +68,63 @@ TEST_F(GaussKronrodTest, ConvergesFasterThanSimpsonOnOscillatory) {
     EXPECT_NEAR(res_s.value(), 2.0, 1e-8);
 }
 
+// ─── F6.D adaptive priority-queue G7/K15 ─────────────────────────────────────
+
+TEST_F(GaussKronrodTest, Adaptive_SinIntegral_FullPeriodIsZero) {
+    // ∫_0^{2π} sin(x) dx = 0.  Trivially smooth — one panel suffices.
+    auto f = [](double x) -> Result<double> { return ok(std::sin(x)); };
+    auto r = integrate_gauss_kronrod_adaptive(f, 0.0, 2.0 * std::numbers::pi, ctx);
+    ASSERT_TRUE(r.is_ok());
+    EXPECT_TRUE(r.value().success);
+    EXPECT_NEAR(r.value().value, 0.0, 1e-12);
+    EXPECT_LE(r.value().interval_count, 4U) << "smooth integrand should converge on a few panels";
+}
+
+TEST_F(GaussKronrodTest, Adaptive_Gaussian_OnZeroToFiveMatchesErfHalf) {
+    // ∫_0^5 e^{-x²} dx = (√π / 2) · erf(5) ≈ 0.8862269254527580...
+    auto f = [](double x) -> Result<double> { return ok(std::exp(-x * x)); };
+    auto r = integrate_gauss_kronrod_adaptive(f, 0.0, 5.0, ctx);
+    ASSERT_TRUE(r.is_ok());
+    EXPECT_TRUE(r.value().success);
+    const double expected = 0.5 * std::sqrt(std::numbers::pi) * std::erf(5.0);
+    EXPECT_NEAR(r.value().value, expected, 1e-9);
+}
+
+TEST_F(GaussKronrodTest, Adaptive_AtanIdentity_OneOverOnePlusXSquared) {
+    // ∫_0^1 1/(1+x²) dx = π/4 — smooth, analytically exact reference.
+    auto f = [](double x) -> Result<double> { return ok(1.0 / (1.0 + x * x)); };
+    ctx.set_integration_abs_tol(1e-12);
+    ctx.set_integration_rel_tol(1e-12);
+    auto r = integrate_gauss_kronrod_adaptive(f, 0.0, 1.0, ctx);
+    ASSERT_TRUE(r.is_ok());
+    EXPECT_TRUE(r.value().success);
+    EXPECT_NEAR(r.value().value, 0.25 * std::numbers::pi, 1e-12);
+}
+
+TEST_F(GaussKronrodTest, Adaptive_ResourceCapHonored_NonConvergent) {
+    // Pathological case: highly oscillatory 1/x integrand near a singularity
+    // with a very tight tolerance and a small interval cap. Must terminate
+    // with success=false rather than loop or silently return a wrong answer.
+    auto f = [](double x) -> Result<double> {
+        return ok(std::sin(1.0 / x));  // wildly oscillatory near 0
+    };
+    ctx.set_integration_abs_tol(1e-30);
+    ctx.set_integration_rel_tol(1e-30);
+    ctx.set_integration_max_intervals(64U);  // very small cap
+    auto r = integrate_gauss_kronrod_adaptive(f, 0.001, 1.0, ctx);
+    ASSERT_TRUE(r.is_ok());
+    EXPECT_FALSE(r.value().success) << "non-convergent path must report failure";
+    EXPECT_GE(r.value().interval_count, 64U);
+}
+
+TEST_F(GaussKronrodTest, Adaptive_ReversedLimits_NegatesResult) {
+    auto f = [](double x) -> Result<double> { return ok(x * x); };
+    auto forward = integrate_gauss_kronrod_adaptive(f, 0.0, 2.0, ctx);
+    auto reversed = integrate_gauss_kronrod_adaptive(f, 2.0, 0.0, ctx);
+    ASSERT_TRUE(forward.is_ok());
+    ASSERT_TRUE(reversed.is_ok());
+    EXPECT_NEAR(forward.value().value, -reversed.value().value, 1e-12);
+}
+
 }  // namespace
 }  // namespace cas::numeric
