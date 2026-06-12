@@ -8,6 +8,7 @@
 #include "cas/algebra.hpp"
 #include "cas/ast.hpp"
 #include "cas/calculus.hpp"
+#include "cas/extended_real.hpp"
 #include "cas/symbolic.hpp"
 
 #include <string>
@@ -21,18 +22,12 @@ namespace {
     return arena.make<IntegerLit>(BigInt(value));
 }
 
-[[nodiscard]] bool is_pos_infinity(ExprPtr expr) {
-    const auto* c = expr_cast<Constant>(expr);
-    return c != nullptr && c->value == MathConstant::Infinity;
-}
-
-[[nodiscard]] bool is_neg_infinity(ExprPtr expr) {
-    const auto* u = expr_cast<Unary>(expr);
-    return u != nullptr && u->op == UnaryOp::Neg && is_pos_infinity(u->operand);
-}
-
-[[nodiscard]] bool is_infinity(ExprPtr expr) {
-    return is_pos_infinity(expr) || is_neg_infinity(expr);
+// Adopt the canonical extended-real predicates from cas::; legacy local
+// copies missed Constant(NegInfinity).
+using cas::is_pos_infinity;
+using cas::is_neg_infinity;
+[[nodiscard]] inline bool is_infinity(ExprPtr expr) {
+    return cas::is_signed_infinity(expr);
 }
 
 [[nodiscard]] bool is_zero_literal(ExprPtr expr) {

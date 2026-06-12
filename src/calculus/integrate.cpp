@@ -1,6 +1,7 @@
 #include "cas/calculus.hpp"
 #include "cas/algebra.hpp"
 #include "cas/bigfloat.hpp"
+#include "cas/extended_real.hpp"
 #include "cas/rational.hpp"
 #include "integrate_definite_patterns.hpp"
 #include "integrate_engine.hpp"
@@ -12,15 +13,10 @@ namespace cas::calculus {
 
 namespace {
 
-[[nodiscard]] bool is_pos_infinity(ExprPtr expr) {
-    const auto* c = expr_cast<Constant>(expr);
-    return c != nullptr && c->value == MathConstant::Infinity;
-}
-
-[[nodiscard]] bool is_neg_infinity(ExprPtr expr) {
-    const auto* u = expr_cast<Unary>(expr);
-    return u != nullptr && u->op == UnaryOp::Neg && is_pos_infinity(u->operand);
-}
+// Adopt the canonical extended-real predicates; the local copies missed
+// Constant(NegInfinity) (only handled Unary(Neg, Constant(Infinity))).
+using cas::is_pos_infinity;
+using cas::is_neg_infinity;
 
 [[nodiscard]] std::optional<Rational> exact_rational_from_expr(ExprPtr expr) {
     if (const auto* integer = expr_cast<IntegerLit>(expr)) {

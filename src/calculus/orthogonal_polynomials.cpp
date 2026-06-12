@@ -15,6 +15,7 @@
 
 #include "cas/builtin_functions.hpp"
 #include "cas/error.hpp"
+#include "cas/extended_real.hpp"
 
 #include <optional>
 #include <type_traits>
@@ -43,15 +44,10 @@ void flatten_mul_factors(ExprPtr expr, std::vector<ExprPtr>& out) {
     out.push_back(expr);
 }
 
-[[nodiscard]] bool is_pos_infinity(ExprPtr expr) {
-    const auto* c = expr_cast<Constant>(expr);
-    return c != nullptr && c->value == MathConstant::Infinity;
-}
-
-[[nodiscard]] bool is_neg_infinity(ExprPtr expr) {
-    const auto* u = expr_cast<Unary>(expr);
-    return u != nullptr && u->op == UnaryOp::Neg && is_pos_infinity(u->operand);
-}
+// Adopt the canonical extended-real predicates from cas::; legacy local
+// copies missed Constant(NegInfinity).
+using cas::is_pos_infinity;
+using cas::is_neg_infinity;
 
 [[nodiscard]] bool depends_on_var(ExprPtr expr, const Symbol& var) {
     if (!expr) return false;

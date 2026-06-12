@@ -1,5 +1,6 @@
 #include "integrate_definite_patterns.hpp"
 
+#include "cas/extended_real.hpp"
 #include "cas/rational.hpp"
 #include "cas/residue_theorem.hpp"
 
@@ -9,15 +10,10 @@ namespace cas::calculus {
 
 namespace {
 
-[[nodiscard]] bool is_pos_infinity(ExprPtr expr) {
-    const auto* c = expr_cast<Constant>(expr);
-    return c != nullptr && c->value == MathConstant::Infinity;
-}
-
-[[nodiscard]] bool is_neg_infinity(ExprPtr expr) {
-    const auto* u = expr_cast<Unary>(expr);
-    return u != nullptr && u->op == UnaryOp::Neg && is_pos_infinity(u->operand);
-}
+// Adopt the canonical extended-real predicates from cas::; legacy local
+// copies missed Constant(NegInfinity).
+using cas::is_pos_infinity;
+using cas::is_neg_infinity;
 
 // Match exp(-a*x^2) for positive rational a.  Returns a.
 [[nodiscard]] std::optional<Rational> match_gaussian_exp(ExprPtr expr, const Symbol& var) {
