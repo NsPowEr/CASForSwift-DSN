@@ -218,6 +218,19 @@ void normalize_rational_coefficients(RatPoly& coefficients);
     const BigInt& p,
     std::size_t k);
 
+[[nodiscard]] Result<IntPoly> exact_divide_integer_poly(
+    const IntPoly& dividend,
+    const IntPoly& divisor,
+    symbolic::CASContext& ctx);
+
+[[nodiscard]] Result<std::vector<IntPoly>> factorize_univariate_hensel_or_kronecker(
+    const IntPoly& f,
+    symbolic::CASContext& ctx);
+
+[[nodiscard]] Result<std::vector<IntPoly>> factorize_kronecker(
+    const IntPoly& f,
+    symbolic::CASContext& ctx);
+
 // LLL and Lattice
 using LatticeVector = std::vector<Rational>;
 using LatticeMatrix = std::vector<LatticeVector>;

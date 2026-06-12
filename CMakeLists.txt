@@ -265,6 +265,8 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/polynomial_resultant.cpp
     src/algebra/polynomial_square_free.cpp
     src/algebra/factorization_integers.cpp
+    src/algebra/factorization_wang_eez.cpp
+    src/algebra/factorization_kronecker.cpp
     src/algebra/factorization_recombination.cpp
     src/algebra/van_hoeij_factor.cpp
     src/algebra/factorization_num_den.cpp
@@ -724,6 +726,7 @@ test/unit/algebra/test_half_gcd.cpp
         test/unit/algebra/test_f2_gate_benchmark.cpp
         test/unit/algebra/test_factorization_lll.cpp
         test/unit/algebra/test_van_hoeij.cpp
+        test/unit/algebra/test_wang_eez_kronecker.cpp
         test/unit/algebra/test_factorization_trager.cpp
         test/unit/algebra/test_factorization_tower.cpp
     test/unit/algebra/test_factorization_tower_n_f3.cpp
