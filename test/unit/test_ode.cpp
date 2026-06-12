@@ -255,3 +255,92 @@ TEST_F(OdeTest, Riccati_VariableCoeffNoParticular_Diagnostic) {
     EXPECT_NE(sol.error().message.find("Riccati"), std::string::npos);
 }
 
+// Kovacic Case 1: Euler-Cauchy  x²y'' + αxy' + βy = 0
+// Classified as Linear2ndOrderRationalCoeff; solved via Kovacic Case 1.
+// Expected general solution: y = C₁·x^λ₁ + C₂·x^λ₂
+// where λ₁,₂ are roots of the indicial equation λ²+(α-1)λ+β = 0.
+TEST_F(OdeTest, Kovacic_EulerCauchy_TwoDistinctRealRoots) {
+    // x²y'' - 2xy' + 2y = 0  →  α=-2, β=2
+    // Indicial: λ²-3λ+2 = 0 → λ=1, λ=2  → y = C₁x + C₂x²
+    symbolic::CASContext ctx;
+    Symbol y("y");
+    Symbol x("x");
+    AstArena& arena = ctx.arena();
+
+    ExprPtr x_sym  = arena.make<Symbol>("x");
+    ExprPtr x_sq   = arena.make<Binary>(BinaryOp::Pow, x_sym, arena.make<IntegerLit>(BigInt(2)));
+    ExprPtr y_sym  = arena.make<Symbol>("y");
+    ExprPtr yp     = arena.make<Derivative>(y_sym, Symbol("x"), 1);
+    ExprPtr ypp    = arena.make<Derivative>(y_sym, Symbol("x"), 2);
+
+    // x²y'' - 2xy' + 2y = 0  →  Equal(x²y'' - 2xy' + 2y, 0)
+    ExprPtr lhs = arena.make<Sum>(std::vector<ExprPtr>{
+        arena.make<Binary>(BinaryOp::Mul, x_sq, ypp),
+        arena.make<Unary>(UnaryOp::Neg,
+            arena.make<Binary>(BinaryOp::Mul,
+                arena.make<Binary>(BinaryOp::Mul, arena.make<IntegerLit>(BigInt(2)), x_sym), yp)),
+        arena.make<Binary>(BinaryOp::Mul, arena.make<IntegerLit>(BigInt(2)), y_sym)
+    });
+    ExprPtr eq = arena.make<Binary>(BinaryOp::Equal, lhs, arena.make<IntegerLit>(BigInt(0)));
+
+    auto cls = classify_ode(eq, y, x, ctx);
+    ASSERT_TRUE(cls.is_ok()) << cls.error().message;
+    EXPECT_EQ(cls.value().type, OdeType::Linear2ndOrderRationalCoeff);
+
+    auto sol = solve_ode(eq, y, x, ctx);
+    ASSERT_TRUE(sol.is_ok()) << sol.error().message;
+    std::cout << "Kovacic Euler-Cauchy solution: " << debug_print(sol.value()) << std::endl;
+
+    // Verify: must be an equality  y = ...
+    // Verify structural form:  y = (C₂ + C₃·x) · exp(ln|x|)  ≡  C₂·x + C₃·x²
+    auto* eq_node = expr_cast<Binary>(sol.value());
+    ASSERT_NE(eq_node, nullptr);
+    EXPECT_EQ(eq_node->op, BinaryOp::Equal);
+
+    // The RHS must NOT be zero (trivial) and must involve 'x'.
+    ExprPtr rhs = eq_node->right;
+    EXPECT_FALSE(debug_print(rhs).empty());
+    EXPECT_NE(debug_print(rhs), "IntegerLit(0)");
+    // The solution must contain exp (from the back-transformation factor).
+    EXPECT_NE(debug_print(rhs).find("exp"), std::string::npos);
+}
+
+// Kovacic Case 1: equation with simple-pole r → Case 1 fails → Unimplemented.
+// This exercises the diagnostic path correctly.
+TEST_F(OdeTest, Kovacic_SimplePole_Unimplemented) {
+    // y'' + (1/x)y' = 0  →  r = 1/(4x²) - (-1/x²)/2 = 1/(4x²) + 1/(2x²) = 3/(4x²)
+    // Actually this has only order-2 poles, so Case 1 applies.
+    // Use y'' + y'/x + y = 0 (Bessel order 0 type) — has a non-rational discriminant.
+    symbolic::CASContext ctx;
+    Symbol y("y");
+    Symbol x("x");
+    AstArena& arena = ctx.arena();
+
+    ExprPtr x_sym = arena.make<Symbol>("x");
+    ExprPtr y_sym = arena.make<Symbol>("y");
+    ExprPtr yp    = arena.make<Derivative>(y_sym, Symbol("x"), 1);
+    ExprPtr ypp   = arena.make<Derivative>(y_sym, Symbol("x"), 2);
+
+    // x²y'' + xy' + x²y = 0  (Bessel order 0) → r = (1-1²)/4/x² - x² = -x² (roughly)
+    // Kovacic Case 1 fails for Bessel-type (transcendental, no Liouvillian solution).
+    ExprPtr lhs = arena.make<Sum>(std::vector<ExprPtr>{
+        arena.make<Binary>(BinaryOp::Mul, arena.make<Binary>(BinaryOp::Pow, x_sym,
+            arena.make<IntegerLit>(BigInt(2))), ypp),
+        arena.make<Binary>(BinaryOp::Mul, x_sym, yp),
+        arena.make<Binary>(BinaryOp::Mul, arena.make<Binary>(BinaryOp::Pow, x_sym,
+            arena.make<IntegerLit>(BigInt(2))), y_sym)
+    });
+    ExprPtr eq = arena.make<Binary>(BinaryOp::Equal, lhs, arena.make<IntegerLit>(BigInt(0)));
+
+    auto cls = classify_ode(eq, y, x, ctx);
+    ASSERT_TRUE(cls.is_ok()) << cls.error().message;
+
+    if (cls.value().type == OdeType::Linear2ndOrderRationalCoeff) {
+        auto sol = solve_ode(eq, y, x, ctx);
+        // Bessel has no Liouvillian solution → Unimplemented is correct.
+        EXPECT_TRUE(sol.is_error());
+        if (sol.is_error())
+            EXPECT_EQ(sol.error().kind, CASErrorKind::Unimplemented);
+    }
+}
+

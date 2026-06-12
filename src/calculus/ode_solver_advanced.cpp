@@ -1,5 +1,6 @@
 #include "cas/ode.hpp"
 #include "calculus_internal.hpp"
+#include "ode_kovacic.hpp"
 #include "cas/algebra.hpp"
 #include "cas/ast_debug.hpp"
 #include "cas/calculus.hpp"
@@ -242,6 +243,10 @@ namespace cas::calculus {
     if (classification.type == OdeType::Linear2ndOrderConstantCoeff ||
         classification.type == OdeType::LinearNthOrderConstantCoeff) {
         return solve_linear_nth_order_constant_coeffs(classification, ctx);
+    }
+    
+    if (classification.type == OdeType::Linear2ndOrderRationalCoeff) {
+        return solve_ode_kovacic(classification, ctx);
     }
     
     // F0.8-MIGRATED
