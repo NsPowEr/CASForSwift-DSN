@@ -934,9 +934,15 @@
 
 ---
 
-### HPP-F4.1-QR-HOUSEHOLDER — Householder QR simbolico — APERTA PERMANENTE
+### HPP-F4.1-QR-HOUSEHOLDER — Householder QR simbolico — CHIUSA (verificata 2026-06-12)
 
-- **File**: `src/linalg/matrix_qr.cpp:1` — header dichiara "QR decomposition via Modified Gram-Schmidt (symbolic)".
+- **File**: `src/linalg/matrix_qr.cpp:1` — header attuale: "QR decomposition via Householder Reflectors (symbolic). Rationalized formulation: H_k = I − 2·v·v^T/N_v con v = x + α·e_1, sqrt confinato ai numeratori."
+- **Risoluzione**: rationalized Householder già implementato (commit storico pre-F8). Update equations:
+  - `y_0 = -(x^T y / N_x) · α`
+  - `y_i = (y_i - A·x_i) - B·x_i · α`   (i > 0)
+  con A, B funzioni razionali pure di x e y. Sqrt appare solo nei numeratori → niente trial-division esplosa nei denominatori.
+- **Verifica**: `F4StressTest.Householder_QR_8x8_RandomQ_CorrectAndTimed` PASS in ~7.4s (era 80s timeout via MGS path precedente). Certificati Q^T·Q ≡ I e Q·R ≡ A confermati via simplifier Step 6.5.
+- **Task 12 chiuso**: Householder_Symbolic_Stable.md spec soddisfatta.
 - **Categoria CLAUDE.md**: Categoria 4 (bail-out su tipo/dominio per scelta architetturale) + Eccezione legittima 3 (dominio simbolico esatto incompatibile con algoritmo numerico).
 - **Descrizione**: PLAN_HP_PRIME_PARITY.md F4.1 originariamente citava "Householder QR (oggi: Gram-Schmidt classico instabile)" come target. Implementazione attuale usa **Modified Gram-Schmidt** (Trefethen-Bau §8), non Householder.
   Motivazione tecnica: i riflettori di Householder `H_k = I - 2 v_k v_k^T / (v_k^T v_k)` producono, su matrici simboliche Q ≥ 8×8, AST con `sqrt(Σ x_i²)` distribuiti su tutta la diagonale di R + denominatori `v_k^T v_k = Σ x_i²` non semplificabili. Cascade `simplify(2·sqrt(p/q)·x_0)` triggerava factorization trial-division O(√n) → timeout 80s (vedi HC-F4-QR-SYMBOLIC-TIMEOUT chiuso via riscrittura MGS).
