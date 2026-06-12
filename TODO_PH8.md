@@ -66,6 +66,10 @@ salvataggio per i casi irrisolvibili.
 ---
 ## Log delle Sessioni
 
+### 2026-06-12 (sessione 1)
+- **Task 6.2 esteso ✅ BC-1..BC-3**: branch-cut corrections sotto strict mode. Nuovo TU `src/symbolic/simplify_branch_cut.{hpp,cpp}` con helpers `make_sqrt_of_square_correction` ((-1)^K(2·ln(z))), `make_pow_of_pow_correction` (e^(2πi·b·K(a·ln z))), `make_log_product_correction` (-2πi·K(ln z1 + ln z2)), `make_log_quotient_correction`. Wiring in `simplify_arithmetic_power.cpp` (BC-2 pow-of-pow strict path) e `simplify_exp_log.cpp` (BC-1b sqrt(z²) + BC-3 ln-of-product strict path). 4 nuovi test verdi (`PowOfPow_StrictMode_…`, `LnOfProduct_…`). Commit `c521b57`.
+- **Task 2.1 partial closure ✅**: symbolic QR bailout (matrix_qr.cpp) ora ctx-configurable + assumption-aware. Nuovo ctx param `symbolic_qr_max_norm_complexity` (default 2). Bailout salta quando `ctx.assumptions().is_nonnegative(Nx)`. Test `QRTest.SymbolicQR_DefaultSignConvention_2x2` skip-ladder ora diagnostico (3 punti precisi invece di un solo bailout opaco). Ledger `HC-F8-QR-HOUSEHOLDER-BAILOUT` APERTA → PARTIAL. Commit `80ca9fa`.
+
 ### 2026-06-11
 - **Task 1.1 ✅**: Creati `include/cas/ast_kinds.hpp`, `include/cas/ast_arena.hpp`, `include/cas/ast_nodes.hpp`.
   `ast.hpp` ora è un thin-umbrella che `#include` i tre sub-header (backward-compatible, zero breakage).

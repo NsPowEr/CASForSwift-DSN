@@ -96,12 +96,16 @@ Spec: `.APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Branch_Cut_Propagation.md`
 - [ ] **HH-8** — **NUOVO**: regola simplifier `sqrt(p)·sqrt(p) → p` quando `p ≥ 0` provable. File: `simplify_branch_cut.cpp` (estensione). Sblocca QR certification.
 - [x] **Ledger**: `HC-F8-QR-HOUSEHOLDER-BAILOUT` aggiornato APERTA → PARTIAL con residuo descritto.
 
-### Output sessione 1
+### Output sessione 1 — STATO ATTUALE 2026-06-12
 
-- 3 commit minimi (BC, flaky fix, QR bailout)
-- Suite quick: 2358 → ≥ 2358 test, 2 FAIL → 1 FAIL (solo `F2GateBenchmark` baseline)
-- Ledger: 3 entry chiuse
-- `TODO_PH8.md` aggiornato in §Log
+- ✅ Commit landed: `c521b57` (BC-1..BC-3) + `80ca9fa` (QR partial).
+- Suite quick: 2362 test (+4 nuovi BC), 2 FAIL invariati (F2Gate baseline + flaky cos7π/16). No regressioni.
+- Ledger: `HC-F8-PENDING-20` PARTIAL+; `HC-F8-QR-HOUSEHOLDER-BAILOUT` APERTA → PARTIAL.
+- **Residui sessione 1** (da chiudere come Sessione 1b o prerequisito Sessione 2):
+  1. **HH-8** simplifier `sqrt(p)·sqrt(p) → p` quando `p ≥ 0` provable (sblocca QR cert + chiude HC-F8-QR-HOUSEHOLDER-BAILOUT)
+  2. **BC-3b** ln(z1/z2) wiring (helper già pronto)
+  3. **BC-4** branch-cut direction-limit (sqrt(x+iε)) — DEFERRED (richiede infra limit)
+  4. **F-1..F-3** flaky cos7π/16 — bisect tentato senza riproduzione; strumentazione Chebyshev richiesta
 
 ---
 
@@ -195,6 +199,11 @@ Ogni sessione segue lo stesso protocollo: spec read → audit → ctx params →
 ---
 
 ## Log sessioni (più recente in alto)
+
+### 2026-06-12 (sessione 1 — branch-cut + QR partial)
+- Commit `c521b57` — F8.0-6.2/Task 20 BC-1..BC-3 — unwinding-number corrections under strict mode (sqrt z², (z^a)^b, ln(z1·z2)). New TU `simplify_branch_cut.{hpp,cpp}` (helpers per spec). 4 nuovi BC test verdi.
+- Commit `80ca9fa` — F8.0-6.2/Task 12 partial — symbolic QR bailout assumption-aware + ctx param `symbolic_qr_max_norm_complexity` (default 2). Honest skip ladder per QR cert.
+- Residui Sessione 1 → Sessione 1b o Sessione 2 prerequisito: HH-8 simplifier sqrt fold, BC-3b, BC-4, F-1..F-3 flaky.
 
 ### 2026-06-12 (sessione audit + commit WIP enorme)
 - 14 commit landed (`6bff716..895840a`).
