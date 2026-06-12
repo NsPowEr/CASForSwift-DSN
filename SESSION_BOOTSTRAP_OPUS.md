@@ -37,14 +37,22 @@ Se baseline diverge: investigare PRIMA di toccare nuovo codice.
 
 ## 2. Task selection algorithm
 
-Eseguire in ordine, fermarsi al primo che passa:
+**Sorgente autoritativa**: `PLAN_NEXT_SESSIONS.md` §"Sessione N (CURRENT)".
+
+Procedura:
+1. Apri `PLAN_NEXT_SESSIONS.md`, identifica la sessione marcata `CURRENT`.
+2. Esegui gli step in ordine (Step 1.1, 1.2, 1.3, ...).
+3. Ogni step ha checklist `- [ ]` → marca `- [x]` al completamento.
+4. Al termine sessione: sposta blocco intero sotto §"Log sessioni" (in alto), promuovi la sessione successiva a `CURRENT`.
+
+**Fallback**: se `PLAN_NEXT_SESSIONS.md` non esiste o sessione corrente è completata senza nuova promozione, consultare `PLAN_TASKS_REMAINING.md` §ordering come backup.
 
 ```
-For each task in PLAN_TASKS_REMAINING.md ordering section:
-  if task.status == completed in tasks dir: skip
-  if task.blockedBy contains non-completed task: skip
-  if task.effort > sessione budget (≥ 1 settimana T3): defer + ledger entry
-  else: select task → proceed
+For each step in PLAN_NEXT_SESSIONS.md §"Sessione CURRENT":
+  if step.status == [x]: skip
+  if step.blockedBy contains non-completed step: skip
+  if step.effort > budget rimasto: defer + nuovo sub-step in PLAN
+  else: select step → proceed
 ```
 
 **Budget sessione = 4-6 ore di lavoro produttivo**. Se task richiede > 1 giorno-uomo, suddividere in sub-task per sessione corrente. Non iniziare ciò che non si finisce nella sessione.
@@ -199,7 +207,9 @@ Types ammessi: `feat`, `fix`, `refactor`, `docs`, `test`, `perf`, `chore`, `ci`.
 
 ```
 .APROJECT_REFERENCES/MISSING_FEATURES_SPECS/   # spec formali (read first)
-PLAN_TASKS_REMAINING.md                        # roadmap pending
+PLAN_NEXT_SESSIONS.md                          # **AUTORITATIVO** — sessione corrente
+PLAN_TASKS_REMAINING.md                        # roadmap pending (legacy, fallback)
+TODO_PH8.md                                    # Phase 8 tracker (auto-update)
 HARDCODE_LEDGER.md                             # debiti tracciati
 CLAUDE.md                                      # legge suprema
 SESSION_BOOTSTRAP_OPUS.md                      # questo file
