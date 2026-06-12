@@ -1987,6 +1987,23 @@ TEST(SymbolicDepthTest, MaxDepthConfigurable) {
     EXPECT_EQ(default_ctx.max_simplification_depth(), 300);
 }
 
+TEST(SymbolicCycleGuardParamsTest, CycleGuardParamsConfigurable) {
+    CASContext default_ctx;
+    EXPECT_EQ(default_ctx.mrv_max_append_depth(), 1024U);
+    EXPECT_EQ(default_ctx.diff_field_max_visit_depth(), 4096U);
+    EXPECT_EQ(default_ctx.mrv_growth_rank_max_depth(), 1024);
+
+    CASContext ctx;
+    ctx.set_mrv_max_append_depth(500U);
+    ctx.set_diff_field_max_visit_depth(2000U);
+    ctx.set_mrv_growth_rank_max_depth(300);
+
+    EXPECT_EQ(ctx.mrv_max_append_depth(), 500U);
+    EXPECT_EQ(ctx.diff_field_max_visit_depth(), 2000U);
+    EXPECT_EQ(ctx.mrv_growth_rank_max_depth(), 300);
+}
+
+
 TEST(SymbolicDepthTest, IncreasedDepthAllowsDeeperNesting) {
     // L0-12: increasing depth allows computation that would fail at 300
     CASContext ctx;

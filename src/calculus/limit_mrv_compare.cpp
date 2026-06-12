@@ -94,12 +94,12 @@ int compare_growth(ExprPtr a, ExprPtr b, const Symbol& var, symbolic::CASContext
     //
     // F2.1.a: depth bound derived from AST nesting. The recursion descends
     // strictly one AST level per call; an expression of N nodes can have
-    // recursion depth ≤ N. Cap at 1024 prevents stack overflow on
+    // recursion depth ≤ N. Cap prevents stack overflow on
     // pathological or self-referential trees (return 0 = "unknown growth
     // class" which is conservative and forces the caller to bail).
-    constexpr int kGrowthRankMaxDepth = 1024;
+    const int growth_rank_max_depth = ctx.mrv_growth_rank_max_depth();
     auto get_growth_rank_impl = [&](ExprPtr e, const auto& self, int depth) -> int {
-        if (depth >= kGrowthRankMaxDepth) return 0;
+        if (depth >= growth_rank_max_depth) return 0;
         if (!depends_on(e, var)) return 0;
         if (const auto* unary = expr_cast<Unary>(e)) {
             if (unary->op == UnaryOp::Neg) return self(unary->operand, self, depth + 1);

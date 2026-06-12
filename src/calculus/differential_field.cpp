@@ -12,17 +12,9 @@ namespace cas::calculus {
 
 namespace {
 
-// F2.1.b: recursion depth bound. AST descent is strictly one level per
-// call; an expression of N nodes has nesting depth ≤ N. Cap at 4096
-// matches the simplifier's MAX_SIMPLIFICATION_DEPTH (300) with margin
-// for AST trees that have not been simplified yet. Beyond this depth,
-// return Unimplemented so the caller can bail diagnostically rather
-// than blowing the stack.
-constexpr unsigned int kVisitRecursiveMaxDepth = 4096U;
-
 template <typename F>
-Result<void> visit_recursive_impl(ExprPtr expr, F&& f, unsigned int depth) {
-    if (depth >= kVisitRecursiveMaxDepth) {
+Result<void> visit_recursive_impl(ExprPtr expr, F&& f, unsigned int max_depth, unsigned int depth) {
+    if (depth >= max_depth) {
         return fail<void>(CASError{
             .kind = CASErrorKind::Unimplemented,
             .message = "Differential field visit recursion budget exceeded",
@@ -32,24 +24,24 @@ Result<void> visit_recursive_impl(ExprPtr expr, F&& f, unsigned int depth) {
     auto child_res = visit_expr(expr, [&](const auto& node) -> Result<void> {
         using T = std::decay_t<decltype(node)>;
         if constexpr (std::is_same_v<T, Unary>) {
-            return visit_recursive_impl(node.operand, f, depth + 1U);
+            return visit_recursive_impl(node.operand, f, max_depth, depth + 1U);
         } else if constexpr (std::is_same_v<T, Binary>) {
-            auto r1 = visit_recursive_impl(node.left, f, depth + 1U);
+            auto r1 = visit_recursive_impl(node.left, f, max_depth, depth + 1U);
             if (r1.is_error()) return r1;
-            return visit_recursive_impl(node.right, f, depth + 1U);
+            return visit_recursive_impl(node.right, f, max_depth, depth + 1U);
         } else if constexpr (std::is_same_v<T, FuncCall>) {
             for (ExprPtr arg : node.args) {
-                auto r = visit_recursive_impl(arg, f, depth + 1U);
+                auto r = visit_recursive_impl(arg, f, max_depth, depth + 1U);
                 if (r.is_error()) return r;
             }
         } else if constexpr (std::is_same_v<T, Sum>) {
             for (ExprPtr term : node.terms) {
-                auto r = visit_recursive_impl(term, f, depth + 1U);
+                auto r = visit_recursive_impl(term, f, max_depth, depth + 1U);
                 if (r.is_error()) return r;
             }
         } else if constexpr (std::is_same_v<T, Product>) {
             for (ExprPtr factor : node.factors) {
-                auto r = visit_recursive_impl(factor, f, depth + 1U);
+                auto r = visit_recursive_impl(factor, f, max_depth, depth + 1U);
                 if (r.is_error()) return r;
             }
         }
@@ -61,8 +53,8 @@ Result<void> visit_recursive_impl(ExprPtr expr, F&& f, unsigned int depth) {
 }
 
 template <typename F>
-Result<void> visit_recursive(ExprPtr expr, F&& f) {
-    return visit_recursive_impl(expr, std::forward<F>(f), 0U);
+Result<void> visit_recursive(ExprPtr expr, F&& f, unsigned int max_depth) {
+    return visit_recursive_impl(expr, std::forward<F>(f), max_depth, 0U);
 }
 
 ExprPtr substitute_pattern(ExprPtr expr, ExprPtr pattern, ExprPtr replacement, AstArena& arena) {
@@ -102,7 +94,7 @@ Result<DifferentialField> DifferentialField::build(ExprPtr expr, const Symbol& x
     return ok(field);
 }
 
-Result<void> DifferentialField::add_extension(ExprPtr expr, [[maybe_unused]] symbolic::CASContext& ctx) {
+Result<void> DifferentialField::add_extension(ExprPtr expr, symbolic::CASContext& ctx) {
     return visit_recursive(expr, [&](ExprPtr node) -> Result<void> {
         if (const auto* call = expr_cast<FuncCall>(node)) {
             ExtensionType type;
@@ -245,7 +237,7 @@ Result<void> DifferentialField::add_extension(ExprPtr expr, [[maybe_unused]] sym
             }
         }
         return ok();
-    });
+    }, ctx.diff_field_max_visit_depth());
 }
 
 Result<ExprPtr> DifferentialField::to_field_generators(ExprPtr expr, symbolic::CASContext& ctx) const {
@@ -313,6 +305,7 @@ static bool ho_reduce_step(
     ExprPtr V,
     const Symbol& x,
     ExprPtr& rational_part,        // accumulates rational contributions
+    const DifferentialField& field,
     symbolic::CASContext& ctx) {
 
     AstArena& arena = ctx.arena();
@@ -320,7 +313,7 @@ static bool ho_reduce_step(
     // V' as poly
     auto V_expr_res = algebra::polynomial_to_expr(V_poly, x, ctx);
     if (V_expr_res.is_error()) return false;
-    auto Vd_res = diff(V_expr_res.value(), x, 1U, ctx);
+    auto Vd_res = field.derive(V_expr_res.value(), ctx);
     if (Vd_res.is_error()) return false;
     auto Vd_poly_res = algebra::parse_polynomial(Vd_res.value(), x, ctx);
     if (Vd_poly_res.is_error()) return false;
@@ -370,19 +363,12 @@ static bool ho_reduce_step(
     ExprPtr contrib = arena.make<Binary>(BinaryOp::Div, A_expr, Vn1);
     rational_part = arena.make<Binary>(BinaryOp::Add, rational_part, contrib);
 
-    // Compute A' (polynomial derivative of A_poly)
-    algebra::PolyExpr A_prime_poly;
-    if (A_poly.size() > 1) {
-        A_prime_poly.resize(A_poly.size() - 1, nullptr);
-        for (std::size_t k = 1; k < A_poly.size(); ++k) {
-            ExprPtr coeff = A_poly[k];
-            if (!coeff) continue;
-            ExprPtr k_expr = algebra::poly_make_integer(arena, static_cast<long long>(k));
-            auto term = algebra::poly_simplify_expr(arena.make<Binary>(BinaryOp::Mul, k_expr, coeff), ctx);
-            if (term.is_ok()) A_prime_poly[k - 1] = term.value();
-        }
-        algebra::normalize_poly(A_prime_poly);
-    }
+    // Compute A' (polynomial derivative of A_poly via field derivation)
+    auto A_prime_res = field.derive(A_expr, ctx);
+    if (A_prime_res.is_error()) return false;
+    auto A_prime_poly_res = algebra::parse_polynomial(A_prime_res.value(), x, ctx);
+    if (A_prime_poly_res.is_error()) return false;
+    algebra::PolyExpr A_prime_poly = A_prime_poly_res.value();
 
     // New P = (P - A'*V + (n-1)*A*V') / V  (H-O standard formula)
     auto A_Vd_res = algebra::poly_multiply(A_poly, Vd_poly, ctx);
@@ -463,7 +449,7 @@ Result<HermiteReduction> hermite_reduce(
         const auto& V_poly = V_poly_res.value();
 
         for (unsigned int n = factor.multiplicity; n >= 2; --n) {
-            if (!ho_reduce_step(P_poly, V_poly, n, V, x, rational_part, ctx)) break;
+            if (!ho_reduce_step(P_poly, V_poly, n, V, x, rational_part, field, ctx)) break;
 
             // Remove one power of V from the denominator
             auto Q_poly_res = algebra::parse_polynomial(current_Q, x, ctx);
@@ -500,12 +486,11 @@ Result<HermiteReduction> hermite_reduce(
 }
 
 Result<ExprPtr> integrate_rothstein_trager(
-    ExprPtr P, ExprPtr Q, [[maybe_unused]] const Symbol& t_var, const DifferentialField& field, symbolic::CASContext& ctx) {
+    ExprPtr P, ExprPtr Q, const Symbol& t_var, const DifferentialField& field, symbolic::CASContext& ctx) {
 
     AstArena& arena = ctx.arena();
-    const Symbol& x = field.base_var();
 
-    auto dQ_res = diff(Q, x, 1U, ctx);
+    auto dQ_res = field.derive(Q, ctx);
     if (dQ_res.is_error()) return fail<ExprPtr>(dQ_res.error());
     ExprPtr dQ = dQ_res.value();
 
@@ -515,7 +500,7 @@ Result<ExprPtr> integrate_rothstein_trager(
     ExprPtr t_dQ = arena.make<Product>(std::vector<ExprPtr>{t_sym, dQ});
     ExprPtr A = arena.make<Binary>(BinaryOp::Sub, P, t_dQ);
 
-    auto R_res = compute_resultant(A, Q, x, ctx);
+    auto R_res = compute_resultant(A, Q, t_var, ctx);
     if (R_res.is_error()) return fail<ExprPtr>(R_res.error());
     ExprPtr R = R_res.value();
 
@@ -551,7 +536,7 @@ Result<ExprPtr> integrate_rothstein_trager(
         ExprPtr A_root = arena.make<Binary>(BinaryOp::Sub, P, root_dQ);
         { auto s = ctx.simplify(A_root); if (s.is_ok()) A_root = s.value(); }
 
-        auto v_res = algebra::polynomial_gcd(A_root, Q, x, ctx);
+        auto v_res = algebra::polynomial_gcd(A_root, Q, t_var, ctx);
         if (v_res.is_error()) continue;
         ExprPtr v = v_res.value();
 

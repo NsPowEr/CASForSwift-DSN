@@ -34,16 +34,16 @@ namespace {
     ExprPtr exponent,
     long long coefficient,
     AstArena& arena,
+    unsigned int max_depth,
     unsigned int depth = 0U) {
-    constexpr unsigned int kMaxAppendDepth = 1024U;
-    if (depth >= kMaxAppendDepth) return false;
+    if (depth >= max_depth) return false;
     if (coefficient == 0) return true;
 
     if (const auto* unary = expr_cast<Unary>(exponent)) {
         if (unary->op == UnaryOp::Neg) {
             if (coefficient == std::numeric_limits<long long>::min()) return false;
             return append_scaled_exponential_term(
-                terms, unary->operand, -coefficient, arena, depth + 1U);
+                terms, unary->operand, -coefficient, arena, max_depth, depth + 1U);
         }
     }
 
@@ -53,13 +53,13 @@ namespace {
                 long long scaled{};
                 if (!safe_mul_i64(coefficient, *lhs_coeff, scaled)) return false;
                 return append_scaled_exponential_term(
-                    terms, binary->right, scaled, arena, depth + 1U);
+                    terms, binary->right, scaled, arena, max_depth, depth + 1U);
             }
             if (auto rhs_coeff = integer_value(binary->right)) {
                 long long scaled{};
                 if (!safe_mul_i64(coefficient, *rhs_coeff, scaled)) return false;
                 return append_scaled_exponential_term(
-                    terms, binary->left, scaled, arena, depth + 1U);
+                    terms, binary->left, scaled, arena, max_depth, depth + 1U);
             }
         }
     }
@@ -85,7 +85,7 @@ namespace {
             return true;
         }
         return append_scaled_exponential_term(
-            terms, symbolic_exponent, scaled, arena, depth + 1U);
+            terms, symbolic_exponent, scaled, arena, max_depth, depth + 1U);
     }
 
     terms.push_back(ExponentialTerm{.exponent = exponent, .coefficient = coefficient});
@@ -97,7 +97,8 @@ namespace {
     const Symbol& var,
     long long multiplier,
     std::vector<ExponentialTerm>& terms,
-    AstArena& arena) {
+    AstArena& arena,
+    unsigned int max_depth) {
     if (multiplier == 0) return true;
     if (!expr) return false;
 
@@ -108,7 +109,7 @@ namespace {
     if (const auto* call = expr_cast<FuncCall>(expr)) {
         if (call->func_id == BuiltinOp::Exp && call->args.size() == 1U) {
             return append_scaled_exponential_term(
-                terms, call->args.front(), multiplier, arena);
+                terms, call->args.front(), multiplier, arena, max_depth);
         }
         return false;
     }
@@ -116,23 +117,23 @@ namespace {
     if (const auto* unary = expr_cast<Unary>(expr)) {
         if (unary->op != UnaryOp::Neg) return false;
         return collect_exponential_product_terms(
-            unary->operand, var, multiplier, terms, arena);
+            unary->operand, var, multiplier, terms, arena, max_depth);
     }
 
     if (const auto* binary = expr_cast<Binary>(expr)) {
         if (binary->op == BinaryOp::Mul) {
             return collect_exponential_product_terms(
-                       binary->left, var, multiplier, terms, arena) &&
+                       binary->left, var, multiplier, terms, arena, max_depth) &&
                    collect_exponential_product_terms(
-                       binary->right, var, multiplier, terms, arena);
+                       binary->right, var, multiplier, terms, arena, max_depth);
         }
         if (binary->op == BinaryOp::Div) {
             long long denominator_multiplier{};
             if (!safe_mul_i64(multiplier, -1LL, denominator_multiplier)) return false;
             return collect_exponential_product_terms(
-                       binary->left, var, multiplier, terms, arena) &&
+                       binary->left, var, multiplier, terms, arena, max_depth) &&
                    collect_exponential_product_terms(
-                       binary->right, var, denominator_multiplier, terms, arena);
+                       binary->right, var, denominator_multiplier, terms, arena, max_depth);
         }
         if (binary->op == BinaryOp::Pow) {
             const auto exponent = integer_value(binary->right);
@@ -140,14 +141,14 @@ namespace {
             long long scaled{};
             if (!safe_mul_i64(multiplier, *exponent, scaled)) return false;
             return collect_exponential_product_terms(
-                binary->left, var, scaled, terms, arena);
+                binary->left, var, scaled, terms, arena, max_depth);
         }
         return false;
     }
 
     if (const auto* product = expr_cast<Product>(expr)) {
         for (ExprPtr factor : product->factors) {
-            if (!collect_exponential_product_terms(factor, var, multiplier, terms, arena))
+            if (!collect_exponential_product_terms(factor, var, multiplier, terms, arena, max_depth))
                 return false;
         }
         return true;
@@ -162,7 +163,7 @@ namespace {
     AstArena& arena,
     symbolic::CASContext& ctx) {
     std::vector<ExponentialTerm> raw_terms;
-    if (!collect_exponential_product_terms(expr, var, 1LL, raw_terms, arena)
+    if (!collect_exponential_product_terms(expr, var, 1LL, raw_terms, arena, ctx.mrv_max_append_depth())
         || raw_terms.empty()) {
         return std::nullopt;
     }
