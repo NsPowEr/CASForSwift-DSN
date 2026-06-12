@@ -1,6 +1,15 @@
 #include "simplify_impl.hpp"
 #include "simplify_trig_chebyshev_impl.hpp"
 #include "simplify_trig_tables_impl.hpp"
+#include "cas/formatter.hpp"
+#include <cstdlib>
+#include <iostream>
+
+namespace cas::symbolic::detail {
+static bool is_debug_chebyshev() { static const char* v = std::getenv("CAS_DEBUG_CHEBYSHEV"); return v && std::string(v) == "1"; }
+}
+
+
 
 // F1.4c — Stack depth guard for try_angle_combination.
 // Uses a thread-local counter to prevent mutual recursion:
@@ -148,32 +157,33 @@ constexpr int kTrigCombinationMaxDepth = 3;
 
 // L2-10: Chebyshev T_p applied to cos(π/q) gives cos(p·π/q).
 [[nodiscard]] static ExprPtr cos_ref_value(Rational ref, AstArena& arena) {
-    if (ExprPtr direct = cos_ref_value_half_angle(ref, arena)) return direct;
-    const BigInt& p = ref.numerator();
-    const BigInt& q = ref.denominator();
+    const BigInt& p = ref.numerator(); const BigInt& q = ref.denominator();
+    if (is_debug_chebyshev()) std::cerr << "[CHEBYSHEV_DEBUG] cos_ref_value: ref = " << p.decimal() << "/" << q.decimal() << "\n";
+    if (ExprPtr direct = cos_ref_value_half_angle(ref, arena)) {
+        if (is_debug_chebyshev()) std::cerr << "  [DIRECT HALVING SUCCESS] ref = " << p.decimal() << "/" << q.decimal() << "\n";
+        return direct;
+    }
     if (p <= BigInt(1) || q <= BigInt(1)) {
-        // p=1 case not reachable by half-angle: try angle combination (e.g. cos(π/15)),
-        // then RootOf fallback for non-constructible denominators.
         if (p == BigInt(1) && q > BigInt(1)) {
-            // HPP-014c: per Fermat primes "non-banali" (17, 257, 65537) la formula
-            // chiusa Gauss-period non è ancora implementata. try_angle_combination
-            // produrrebbe un'espressione strutturalmente corretta ma esponenzialmente
-            // larga (Chebyshev T_p su RootOf annidato) che fa timeout il simplifier.
-            // Bypass: usa direttamente la rappresentazione RootOf canonica.
             if (q.bit_length() <= 16U) {
                 const auto q_u64 = q.to_u64();
                 if (q_u64 == 17U || q_u64 == 257U || q_u64 == 65537U) {
-                    if (q_u64 <= static_cast<std::uint64_t>(kCosPolyMaxQ))
+                    if (q_u64 <= static_cast<std::uint64_t>(kCosPolyMaxQ)) {
+                        if (is_debug_chebyshev()) std::cerr << "  [FERMAT PRIME ROOTOF] q = " << q_u64 << "\n";
                         return build_rootof_cos_pi_q(static_cast<int>(q_u64), arena);
+                    }
                 }
             }
-            if (ExprPtr combo = try_angle_combination(ref, BuiltinOp::Cos, arena))
+            if (ExprPtr combo = try_angle_combination(ref, BuiltinOp::Cos, arena)) {
+                if (is_debug_chebyshev()) std::cerr << "  [COMBO SUCCESS] ref = " << p.decimal() << "/" << q.decimal() << "\n";
                 return combo;
-            // F1.4b: non-constructible cos(π/q) → RootOf(Ψ_{2q}(t), t, 0) / 2.
+            }
             if (q.bit_length() <= 16U) {
                 const auto q_u64 = q.to_u64();
-                if (q_u64 >= 2U && q_u64 <= static_cast<std::uint64_t>(kCosPolyMaxQ))
+                if (q_u64 >= 2U && q_u64 <= static_cast<std::uint64_t>(kCosPolyMaxQ)) {
+                    if (is_debug_chebyshev()) std::cerr << "  [NON-CONSTRUCTIBLE ROOTOF] q = " << q_u64 << "\n";
                     return build_rootof_cos_pi_q(static_cast<int>(q_u64), arena);
+                }
             }
             return nullptr;
         }
@@ -183,33 +193,31 @@ constexpr int kTrigCombinationMaxDepth = 3;
     Rational one_over_q(BigInt(1), q);
     ExprPtr cos_q = cos_ref_value_half_angle(one_over_q, arena);
     if (cos_q == nullptr) {
-        // Base angle not in half-angle reachable set; try combination path.
-        if (ExprPtr combo = try_angle_combination(ref, BuiltinOp::Cos, arena))
+        if (ExprPtr combo = try_angle_combination(ref, BuiltinOp::Cos, arena)) {
+            if (is_debug_chebyshev()) std::cerr << "  [BASE COMBO SUCCESS] ref = " << p.decimal() << "/" << q.decimal() << "\n";
             return combo;
-        // F1.4b fallback: for non-constructible denominators q ≤ kCosPolyMaxQ,
-        // emit RootOf(Ψ_{2q}(t), t, 0) / 2 as the exact representation of
-        // cos(π/q).  Chebyshev T_p is then applied to this base via the loop
-        // below after returning from the p=1 early-return above.
-        // Only fires when q fits in a u64 (bit_length ≤ 16 already checked).
+        }
         {
             const auto q_u64 = q.to_u64();
             if (q_u64 >= 2U && q_u64 <= static_cast<std::uint64_t>(kCosPolyMaxQ)) {
+                if (is_debug_chebyshev()) std::cerr << "  [FALLBACK BASE ROOTOF] q = " << q_u64 << "\n";
                 cos_q = build_rootof_cos_pi_q(static_cast<int>(q_u64), arena);
             }
         }
         if (cos_q == nullptr) return nullptr;
     }
     const std::uint64_t p_u = p.to_u64();
+    if (is_debug_chebyshev()) std::cerr << "[CHEBYSHEV_DEBUG] Chebyshev loop: p = " << p_u << ", cos_q = " << formatter::TextFormatter{}.format(cos_q) << "\n";
     ExprPtr T_prev = make_integer(arena, BigInt(1));
     ExprPtr T_curr = cos_q;
     for (std::uint64_t k = 1U; k < p_u; ++k) {
-        ExprPtr two_x_Tk = arena.make<Product>(std::vector<ExprPtr>{
-            make_integer(arena, BigInt(2)), cos_q, T_curr});
+        ExprPtr two_x_Tk = arena.make<Product>(std::vector<ExprPtr>{make_integer(arena, BigInt(2)), cos_q, T_curr});
         ExprPtr neg_prev = arena.make<Unary>(UnaryOp::Neg, T_prev);
         ExprPtr next = arena.make<Sum>(std::vector<ExprPtr>{two_x_Tk, neg_prev});
-        T_prev = T_curr;
-        T_curr = next;
+        T_prev = T_curr; T_curr = next;
+        if (is_debug_chebyshev()) std::cerr << "  k = " << k << ", T_curr = " << formatter::TextFormatter{}.format(T_curr) << "\n";
     }
+    if (is_debug_chebyshev()) std::cerr << "[CHEBYSHEV_DEBUG] cos_ref_value result: " << formatter::TextFormatter{}.format(T_curr) << "\n";
     return T_curr;
 }
 
@@ -264,27 +272,15 @@ constexpr int kTrigCombinationMaxDepth = 3;
 constexpr int kBaseAngleMaxDenom = 120;
 
 [[nodiscard]] static ExprPtr try_angle_combination(Rational ref, BuiltinOp func, AstArena& arena) {
-    // F1.4c depth guard: bail out if mutual recursion exceeds kTrigCombinationMaxDepth.
-    // This prevents stack overflow for denominators q that are not reachable via
-    // half-angle recursion and have no direct subtraction path in kBaseAngleMaxDenom.
-    // On depth limit: return nullptr so the caller (cos_ref_value / sin_ref_value)
-    // falls through to the RootOf generator — a structurally sound Unimplemented.
-    if (s_trig_combination_depth >= kTrigCombinationMaxDepth) return nullptr;
-
+    if (is_debug_chebyshev()) std::cerr << "[CHEBYSHEV_DEBUG] try_angle_combination: ref = " << ref.numerator().decimal() << "/" << ref.denominator().decimal() << ", func = " << (func == BuiltinOp::Cos ? "Cos" : "Sin") << ", depth = " << s_trig_combination_depth << "\n";
+    if (s_trig_combination_depth >= kTrigCombinationMaxDepth) {
+        if (is_debug_chebyshev()) std::cerr << "  [DEPTH LIMIT HIT] depth = " << s_trig_combination_depth << "\n";
+        return nullptr;
+    }
     const TrigCombinationDepthGuard depth_guard;
-
     const Rational zero(BigInt(0));
     if (ref.denominator() < BigInt(3)) return nullptr;
-
-    // GCD helper for int (used in coprimality check).
-    auto igcd = [](int a, int b) -> int {
-        while (b) { a %= b; std::swap(a, b); } return a;
-    };
-
-    // Iterate all constructible base angles p1/q1 with 1 ≤ q1 ≤ kBaseAngleMaxDenom,
-    // 1 ≤ p1 < q1, gcd(p1,q1) = 1.  For each, check if cos_ref_value_half_angle
-    // can evaluate it (i.e. it is constructible).  If so and if r2 = r1 - ref
-    // has strictly smaller denominator than ref, apply the subtraction formula.
+    auto igcd = [](int a, int b) -> int { while (b) { a %= b; std::swap(a, b); } return a; };
     for (int q1 = 2; q1 <= kBaseAngleMaxDenom; ++q1) {
         for (int p1 = 1; p1 < q1; ++p1) {
             if (igcd(p1, q1) != 1) continue;
@@ -292,32 +288,23 @@ constexpr int kBaseAngleMaxDenom = 120;
             Rational r2 = r1 - ref;
             if (r2 <= zero) continue;
             if (r2.denominator() >= ref.denominator()) continue;
-
-            // Check that r1 is constructible: cos_ref_value_half_angle returns
-            // non-null exactly for the Gauss-constructible denominators.
-            // We only need cos/sin of r1 and r2, not r1's constructibility
-            // per se — but trig_exact_at_pi_multiple will return nullptr for
-            // non-constructible angles (correct: prevents infinite recursion).
             ExprPtr c1 = trig_exact_at_pi_multiple(BuiltinOp::Cos, r1, arena);
             ExprPtr s1 = trig_exact_at_pi_multiple(BuiltinOp::Sin, r1, arena);
             ExprPtr c2 = trig_exact_at_pi_multiple(BuiltinOp::Cos, r2, arena);
             ExprPtr s2 = trig_exact_at_pi_multiple(BuiltinOp::Sin, r2, arena);
             if (!c1 || !s1 || !c2 || !s2) continue;
-
             if (func == BuiltinOp::Cos) {
-                // cos((r1-r2)·π) = cos(r1·π)cos(r2·π) + sin(r1·π)sin(r2·π)
-                return arena.make<Sum>(std::vector<ExprPtr>{
-                    arena.make<Product>(std::vector<ExprPtr>{c1, c2}),
-                    arena.make<Product>(std::vector<ExprPtr>{s1, s2})});
+                ExprPtr res = arena.make<Sum>(std::vector<ExprPtr>{arena.make<Product>(std::vector<ExprPtr>{c1, c2}), arena.make<Product>(std::vector<ExprPtr>{s1, s2})});
+                if (is_debug_chebyshev()) std::cerr << "  [SUCCESS] found Cos combo: " << p1 << "/" << q1 << " - " << r2.numerator().decimal() << "/" << r2.denominator().decimal() << "\n";
+                return res;
             } else {
-                // sin((r1-r2)·π) = sin(r1·π)cos(r2·π) - cos(r1·π)sin(r2·π)
-                return arena.make<Sum>(std::vector<ExprPtr>{
-                    arena.make<Product>(std::vector<ExprPtr>{s1, c2}),
-                    arena.make<Unary>(UnaryOp::Neg,
-                        arena.make<Product>(std::vector<ExprPtr>{c1, s2}))});
+                ExprPtr res = arena.make<Sum>(std::vector<ExprPtr>{arena.make<Product>(std::vector<ExprPtr>{s1, c2}), arena.make<Unary>(UnaryOp::Neg, arena.make<Product>(std::vector<ExprPtr>{c1, s2}))});
+                if (is_debug_chebyshev()) std::cerr << "  [SUCCESS] found Sin combo: " << p1 << "/" << q1 << " - " << r2.numerator().decimal() << "/" << r2.denominator().decimal() << "\n";
+                return res;
             }
         }
     }
+    if (is_debug_chebyshev()) std::cerr << "  [FAILED] no combo found for ref = " << ref.numerator().decimal() << "/" << ref.denominator().decimal() << "\n";
     return nullptr;
 }
 
