@@ -21,6 +21,10 @@ Testing/
 # IDE and System files
 .DS_Store
 .vscode/
+
+# Graphify knowledge-graph artefacts (regenerated on demand via `graphify update .`)
+graphify-out/
+
 .idea/
 .cache/
 .claude/
