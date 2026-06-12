@@ -77,6 +77,9 @@ enum class BuiltinOp : std::uint16_t {
     EllipticF,
     Factorial,
     Erfc,
+    // F8.0-6.1: Unwinding number  K(z) = ⌈(Im(z) − π) / (2π)⌉.
+    // Encodes branch-cut information so that  ln(exp(z)) = z + 2πi·K(z).
+    UnwindingNumber,
 };
 
 [[nodiscard]] constexpr BuiltinOp get_builtin_op(std::string_view name) noexcept {
@@ -151,6 +154,7 @@ enum class BuiltinOp : std::uint16_t {
     if (name == "EllipticE" || name == "ellipticE") return BuiltinOp::EllipticE;
     if (name == "EllipticPi" || name == "ellipticPi") return BuiltinOp::EllipticPi;
     if (name == "EllipticF" || name == "ellipticF") return BuiltinOp::EllipticF;
+    if (name == "UnwindingNumber" || name == "K") return BuiltinOp::UnwindingNumber;
     return BuiltinOp::Unknown;
 }
 
@@ -226,6 +230,7 @@ enum class BuiltinOp : std::uint16_t {
         case BuiltinOp::EllipticF: return "EllipticF";
         case BuiltinOp::Factorial: return "factorial";
         case BuiltinOp::Erfc: return "erfc";
+        case BuiltinOp::UnwindingNumber: return "UnwindingNumber";
         case BuiltinOp::Unknown: return "unknown";
     }
     return "unknown";

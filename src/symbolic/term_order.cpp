@@ -172,6 +172,9 @@ namespace {
     // Complementary error function (paired with Erf above).
     case BuiltinOp::Erfc:       return 82;
 
+    // F8.0-6.1: branch-cut bookkeeping; arithmetic-neutral, low order.
+    case BuiltinOp::UnwindingNumber: return 81;
+
     // Matrix operators (semantically distinct domain).
     case BuiltinOp::Det:        return 33;
     case BuiltinOp::Rank:       return 32;
