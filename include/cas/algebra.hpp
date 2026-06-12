@@ -179,5 +179,25 @@ struct PolynomialDivMod {
     const std::vector<Symbol>& variables,
     symbolic::CASContext& ctx);
 
+// F8.0-5.4: construct a RootOf node carrying a rational isolating interval
+// for the i-th real root of `polynomial` (Sturm-sorted ascending). The
+// resulting node is fully self-identifying — its identity is decidable
+// from the (polynomial, variable, isolating_bound) triple without
+// recomputation. `search_low`/`search_high` bound the search domain.
+// Fails with Unimplemented if the polynomial has fewer than i+1 real
+// roots in the search interval.
+// Note on `tol`: the Sturm isolator internally converts `tol` to a Rational
+// via a 2^32-scaling. Values smaller than ~2^-32 ≈ 2.3e-10 round to zero
+// and degrade the isolation depth — keep tol ≥ 1e-9 unless the underlying
+// Rational scaling is generalised.
+[[nodiscard]] Result<ExprPtr> make_rootof_isolated(
+    ExprPtr polynomial,
+    const Symbol& variable,
+    std::size_t root_index,
+    symbolic::CASContext& ctx,
+    double search_low  = -1e9,
+    double search_high =  1e9,
+    double tol         =  1e-9);
+
 }  // namespace algebra
 }  // namespace cas

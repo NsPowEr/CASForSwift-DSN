@@ -18,6 +18,7 @@
 // for high-precision polish.
 
 #include "cas/numeric.hpp"
+#include "cas/numeric_bigfloat.hpp"
 #include "cas/symbolic.hpp"
 
 #include "../algebra/polynomial_internal.hpp"
@@ -251,6 +252,211 @@ Result<std::vector<double>> find_polynomial_roots_sturm(
         }
     }
     std::sort(roots.begin(), roots.end());
+    return ok(std::move(roots));
+}
+
+// F8.0-5.4: rigorous isolating intervals. Reuses the same Sturm-sequence
+// + squarefree pipeline as find_polynomial_roots_sturm, but returns the
+// exact rational endpoints instead of the Newton-polished doubles.
+Result<std::vector<IsolatingBound>> find_polynomial_isolating_intervals(
+    ExprPtr expr,
+    const std::string& variable,
+    symbolic::CASContext& ctx,
+    double low,
+    double high,
+    double tol) {
+
+    if (!expr) {
+        return fail<std::vector<IsolatingBound>>(make_error(
+            CASErrorKind::InvalidArgument,
+            "find_polynomial_isolating_intervals: null expr"));
+    }
+    if (low >= high) {
+        return ok(std::vector<IsolatingBound>{});
+    }
+
+    const Symbol var(variable);
+    auto poly_res = ::cas::algebra::parse_polynomial(expr, var, ctx);
+    if (poly_res.is_error())
+        return fail<std::vector<IsolatingBound>>(poly_res.error());
+    auto rat_res = ::cas::algebra::poly_to_rational_poly(poly_res.value());
+    if (rat_res.is_error())
+        return fail<std::vector<IsolatingBound>>(rat_res.error());
+    RatPoly f = std::move(rat_res.value());
+    if (f.is_zero() || f.size() <= 1U) {
+        return ok(std::vector<IsolatingBound>{});
+    }
+
+    // Squarefree part: f / gcd(f, f').
+    RatPoly fp = differentiate_rat_poly(f);
+    RatPoly f_sf = f;
+    if (!fp.is_zero()) {
+        auto [g, s, t] = ::cas::algebra::extended_gcd_rational_poly(f, fp);
+        (void)s; (void)t;
+        if (!g.is_zero() && g.size() > 1U) {
+            auto [q, r] = ::cas::algebra::div_rem_rational_poly(f, g);
+            if (r.is_zero() && !q.is_zero()) f_sf = std::move(q);
+        }
+    }
+    if (f_sf.is_zero() || f_sf.size() <= 1U) {
+        return ok(std::vector<IsolatingBound>{});
+    }
+
+    const std::vector<RatPoly> seq = sturm_sequence(f_sf);
+    if (seq.size() < 2U) {
+        return ok(std::vector<IsolatingBound>{});
+    }
+    std::vector<std::pair<Rational, Rational>> intervals;
+    const Rational a = double_to_rational(low);
+    const Rational b = double_to_rational(high);
+    const Rational rtol = double_to_rational(tol);
+    const double width_ratio = (high - low) / std::max(tol, 1e-300);
+    const unsigned int depth_bound = static_cast<unsigned int>(
+        std::ceil(std::log2(std::max(width_ratio, 2.0)))) + 4U;
+    isolate_recursive(seq, a, b, rtol, depth_bound, 0U, intervals);
+
+    // Sort by midpoint to mirror the ascending-root convention of the
+    // double-precision variant.
+    std::sort(intervals.begin(), intervals.end(),
+        [](const auto& l, const auto& r) {
+            return (l.first + l.second) < (r.first + r.second);
+        });
+
+    std::vector<IsolatingBound> bounds;
+    bounds.reserve(intervals.size());
+    for (const auto& [ia, ib] : intervals) {
+        bounds.push_back(IsolatingBound{
+            ia.numerator(), ia.denominator(),
+            ib.numerator(), ib.denominator()});
+    }
+    return ok(std::move(bounds));
+}
+
+// ─── F8.0-5.3: BigFloat Newton polish ─────────────────────────────────────────
+namespace {
+
+[[nodiscard]] BigFloat bigfloat_from_rational(const Rational& r, mpfr_prec_t p) {
+    return BigFloat::from_rational_parts(
+        r.numerator().decimal(),
+        r.denominator().decimal(),
+        p);
+}
+
+// Horner-style evaluation of a Rational-coefficient polynomial at a BigFloat.
+[[nodiscard]] BigFloat eval_ratpoly_bigfloat(const RatPoly& f,
+                                             const BigFloat& x,
+                                             mpfr_prec_t prec) {
+    const auto& coeffs = f.coefficients();
+    if (coeffs.empty()) return BigFloat::from_double(0.0, prec);
+    BigFloat acc = bigfloat_from_rational(coeffs.back(), prec);
+    for (auto it = coeffs.rbegin() + 1; it != coeffs.rend(); ++it) {
+        acc = acc * x + bigfloat_from_rational(*it, prec);
+    }
+    return acc;
+}
+
+// Newton polish in BigFloat. Returns the refined root or `initial` if the
+// iteration stalls (derivative ~0). Convergence is quadratic.
+[[nodiscard]] BigFloat newton_polish_bigfloat(const RatPoly& f,
+                                              const RatPoly& fp,
+                                              BigFloat initial,
+                                              const BigFloat& tol,
+                                              unsigned int max_iter,
+                                              mpfr_prec_t prec) {
+    BigFloat x = std::move(initial);
+    BigFloat tiny = BigFloat::from_double(1.0e-300, prec);
+    for (unsigned int i = 0; i < max_iter; ++i) {
+        BigFloat fx  = eval_ratpoly_bigfloat(f,  x, prec);
+        if (BigFloat::abs(fx) < tol) return x;
+        BigFloat fpx = eval_ratpoly_bigfloat(fp, x, prec);
+        if (BigFloat::abs(fpx) < tiny) return x;
+        BigFloat dx = fx / fpx;
+        x = x - dx;
+        if (BigFloat::abs(dx) < tol) return x;
+    }
+    return x;
+}
+
+} // namespace
+
+Result<std::vector<BigFloat>> find_polynomial_roots_sturm_bigfloat(
+    ExprPtr expr,
+    const std::string& variable,
+    symbolic::CASContext& ctx,
+    double low,
+    double high,
+    double tol,
+    mpfr_prec_t precision_bits) {
+
+    if (!expr) {
+        return fail<std::vector<BigFloat>>(make_error(
+            CASErrorKind::InvalidArgument,
+            "find_polynomial_roots_sturm_bigfloat: null expr"));
+    }
+    if (low >= high) {
+        return ok(std::vector<BigFloat>{});
+    }
+    if (precision_bits < BigFloat::MIN_PREC) {
+        return fail<std::vector<BigFloat>>(make_error(
+            CASErrorKind::InvalidArgument,
+            "find_polynomial_roots_sturm_bigfloat: precision_bits below MPFR minimum"));
+    }
+
+    const Symbol var(variable);
+    auto poly_res = ::cas::algebra::parse_polynomial(expr, var, ctx);
+    if (poly_res.is_error()) return fail<std::vector<BigFloat>>(poly_res.error());
+    auto rat_res = ::cas::algebra::poly_to_rational_poly(poly_res.value());
+    if (rat_res.is_error()) return fail<std::vector<BigFloat>>(rat_res.error());
+    RatPoly f = std::move(rat_res.value());
+    if (f.is_zero() || f.size() <= 1U) {
+        return ok(std::vector<BigFloat>{});
+    }
+
+    // Squarefree part for Sturm isolation.
+    RatPoly fp = differentiate_rat_poly(f);
+    RatPoly f_sf = f;
+    if (!fp.is_zero()) {
+        auto [g, s, t] = ::cas::algebra::extended_gcd_rational_poly(f, fp);
+        (void)s; (void)t;
+        if (!g.is_zero() && g.size() > 1U) {
+            auto [q, r] = ::cas::algebra::div_rem_rational_poly(f, g);
+            if (r.is_zero() && !q.is_zero()) f_sf = std::move(q);
+        }
+    }
+    if (f_sf.is_zero() || f_sf.size() <= 1U) {
+        return ok(std::vector<BigFloat>{});
+    }
+
+    const std::vector<RatPoly> seq = sturm_sequence(f_sf);
+    if (seq.size() < 2U) {
+        return ok(std::vector<BigFloat>{});
+    }
+    std::vector<std::pair<Rational, Rational>> intervals;
+    const Rational a = double_to_rational(low);
+    const Rational b = double_to_rational(high);
+    const Rational rtol = double_to_rational(tol);
+    const double width_ratio = (high - low) / std::max(tol, 1e-300);
+    const unsigned int depth_bound = static_cast<unsigned int>(
+        std::ceil(std::log2(std::max(width_ratio, 2.0)))) + 4U;
+    isolate_recursive(seq, a, b, rtol, depth_bound, 0U, intervals);
+
+    // BigFloat Newton polish on each isolated interval midpoint.
+    std::vector<BigFloat> roots;
+    roots.reserve(intervals.size());
+    const RatPoly f_full = std::move(f);
+    const RatPoly fp_full = differentiate_rat_poly(f_full);
+    const BigFloat half  = BigFloat::from_double(0.5, precision_bits);
+    const BigFloat tol_bf = BigFloat::from_double(tol, precision_bits);
+    constexpr unsigned int kNewtonMaxIter = 64U; // BigFloat tolerates more
+
+    for (const auto& [ia, ib] : intervals) {
+        BigFloat ia_bf = bigfloat_from_rational(ia, precision_bits);
+        BigFloat ib_bf = bigfloat_from_rational(ib, precision_bits);
+        BigFloat mid = (ia_bf + ib_bf) * half;
+        BigFloat root = newton_polish_bigfloat(
+            f_full, fp_full, std::move(mid), tol_bf, kNewtonMaxIter, precision_bits);
+        roots.push_back(std::move(root));
+    }
     return ok(std::move(roots));
 }
 

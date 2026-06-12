@@ -1,6 +1,7 @@
 #include "cas/algebra.hpp"
 #include "cas/calculus.hpp"
 #include "cas/numeric.hpp"
+#include "cas/numeric_bigfloat.hpp"
 #include "cas/symbolic.hpp"
 #include "cas/ast.hpp"
 
@@ -34,6 +35,18 @@ namespace {
     for (double r : roots) {
         // Represent each root as a DecimalLit (rounded to 10 significant digits)
         elems.push_back(arena.make<DecimalLit>(r));
+    }
+    return arena.make<Matrix>(static_cast<int>(roots.size()), 1, std::move(elems));
+}
+
+// Pack a list of BigFloat roots into an (n×1) Matrix of DecimalLit nodes.
+[[nodiscard]] ExprPtr roots_to_matrix(const std::vector<BigFloat>& roots, AstArena& arena, unsigned int precision_bits) {
+    std::vector<ExprPtr> elems;
+    elems.reserve(roots.size());
+    int decimal_digits = static_cast<int>(static_cast<double>(precision_bits) / 3.3219280948873626);
+    if (decimal_digits < 6) decimal_digits = 6;
+    for (const auto& r : roots) {
+        elems.push_back(arena.make<DecimalLit>(r.to_string(decimal_digits)));
     }
     return arena.make<Matrix>(static_cast<int>(roots.size()), 1, std::move(elems));
 }
@@ -73,17 +86,17 @@ Result<ExprPtr> fsolve(
     // Phase 2a: if `f` parses as a univariate polynomial over Q, use the
     // exact Sturm-sequence root isolation (Sturm 1829). This counts the
     // number of distinct real roots in [low, high] exactly and refines
-    // each within `tolerance`. Newton polish drives the final precision.
+    // each using BigFloat Newton iteration at the requested tolerance (HPP-006).
     constexpr double kTolerance = 1e-10;
     {
-        auto sturm_res = numeric::find_polynomial_roots_sturm(
-            f, var.name, ctx, search_low, search_high, kTolerance);
+        auto sturm_res = numeric::find_polynomial_roots_sturm_bigfloat(
+            f, var.name, ctx, search_low, search_high, kTolerance, ctx.fsolve_tolerance_bits());
         if (sturm_res.is_ok()) {
             const auto& roots = sturm_res.value();
             if (roots.empty()) {
                 return ok(ctx.arena().make<Matrix>(0, 1, std::vector<ExprPtr>{}));
             }
-            return ok(roots_to_matrix(roots, ctx.arena()));
+            return ok(roots_to_matrix(roots, ctx.arena(), ctx.fsolve_tolerance_bits()));
         }
         // fall through to grid scan if expr is not a rational polynomial
     }
