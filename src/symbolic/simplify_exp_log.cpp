@@ -355,15 +355,38 @@ Result<ExprPtr> Simplifier::simplify_funcall_exp_log_sqrt(
         if (is_constant_expr(args.front(), MathConstant::Infinity))
             return traced_result(RuleId::Unknown, target_before, make_constant(arena_, MathConstant::Infinity));
 
-        // ln(e^x) -> x
+        // F8.0-6.2: branch-cut bookkeeping for ln(exp(z)).
+        // Default (legacy):  ln(exp(z)) → z  unconditionally.
+        // When ctx.branch_cut_aware_logexp() == true AND z is not known real:
+        //   ln(exp(z)) → z + 2πi·K(z)
+        // K(z) is preserved verbatim by the simplifier (Task 6.1).
+        auto build_branch_aware_logexp = [&](ExprPtr z) -> ExprPtr {
+            const bool aware = context_ != nullptr
+                            && context_->branch_cut_aware_logexp();
+            if (!aware) return z;
+            const bool z_is_real = context_ != nullptr
+                                && context_->assumptions().is_real(z);
+            if (z_is_real) return z;
+            ExprPtr K_z = arena_.make<FuncCall>(BuiltinOp::UnwindingNumber,
+                std::vector<ExprPtr>{z});
+            ExprPtr two_pi_i = arena_.make<Product>(std::vector<ExprPtr>{
+                make_integer(arena_, BigInt(2)),
+                make_constant(arena_, MathConstant::Pi),
+                make_constant(arena_, MathConstant::I)});
+            ExprPtr offset = arena_.make<Binary>(BinaryOp::Mul, two_pi_i, K_z);
+            return arena_.make<Binary>(BinaryOp::Add, z, offset);
+        };
+        // ln(e^x) -> x   (or x + 2πi·K(x) when branch-aware)
         if (const auto* power = expr_cast<Binary>(args.front());
             power != nullptr && power->op == BinaryOp::Pow
             && is_constant_expr(power->left, MathConstant::E))
-            return traced_result(RuleId::SimplifyLnExp, target_before, power->right);
-        // ln(exp(x)) -> x
+            return traced_result(RuleId::SimplifyLnExp, target_before,
+                build_branch_aware_logexp(power->right));
+        // ln(exp(x)) -> x  (or x + 2πi·K(x) when branch-aware)
         if (const auto* exp_call = expr_cast<FuncCall>(args.front());
             exp_call && exp_call->func_id == BuiltinOp::Exp && exp_call->args.size() == 1U)
-            return traced_result(RuleId::SimplifyLnExp, target_before, exp_call->args[0]);
+            return traced_result(RuleId::SimplifyLnExp, target_before,
+                build_branch_aware_logexp(exp_call->args[0]));
 
         // ln(a*b) -> ln(a) + ln(b) for a,b > 0
         if (const auto* prod = expr_cast<Product>(args.front())) {
@@ -619,7 +642,12 @@ Result<ExprPtr> Simplifier::simplify_funcall_exp_log_sqrt(
                 }
             }
         }
-        // sqrt(x^2) = x (if x >= 0) or abs(x)
+        // sqrt(x^2) with branch-cut awareness (F4.K / Branch_Cut_Propagation.md):
+        //   x known nonneg     → x          (always safe)
+        //   x known real       → abs(x)     (real branch)
+        //   complex generic    : if ctx.strict_branch_cuts() → keep structural
+        //                        else                         → abs(x) (legacy)
+        // Reference: Kahan 1987; Corless-Davenport-Jeffrey 2000.
         if (const auto* power = expr_cast<Binary>(args.front());
             power != nullptr && power->op == BinaryOp::Pow) {
             if (auto exp = try_get_integer_exponent(power->right);
@@ -629,6 +657,22 @@ Result<ExprPtr> Simplifier::simplify_funcall_exp_log_sqrt(
                     return traced_result(RuleId::SimplifySqrtSquare,
                         target_before, power->left);
                 }
+                const bool x_is_real = (context_ != nullptr)
+                    && context_->assumptions().is_real(power->left);
+                if (x_is_real) {
+                    return traced_result(RuleId::SimplifySqrtSquare, target_before,
+                        arena_.make<FuncCall>(BuiltinOp::Abs,
+                            std::vector<ExprPtr>{power->left}));
+                }
+                // x not provably real.
+                const bool strict = (context_ != nullptr) && context_->strict_branch_cuts();
+                if (strict) {
+                    // Preserve structure — branch-cut propagation requires the
+                    // explicit (-1)^K(2·ln(x)) correction which is not yet built
+                    // out at this level. Leave sqrt(x^2) verbatim.
+                    return ok(original);
+                }
+                // Legacy default for complex generic x: emit abs(x).
                 return traced_result(RuleId::SimplifySqrtSquare, target_before,
                     arena_.make<FuncCall>(BuiltinOp::Abs,
                         std::vector<ExprPtr>{power->left}));
