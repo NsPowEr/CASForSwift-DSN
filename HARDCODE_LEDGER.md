@@ -900,37 +900,30 @@
 
 ---
 
-### HPP-F75-AUDIT-CYCLE-GUARD-1 — `kMaxAppendDepth=1024` (limit_mrv_exp.cpp:38) — APERTA cycle-guard
+### HPP-F75-AUDIT-CYCLE-GUARD-1 — `kMaxAppendDepth=1024` (limit_mrv_exp.cpp:38) — CHIUSA 2026-06-13
 
-- **File**: `src/calculus/limit_mrv_exp.cpp:38` — `constexpr unsigned int kMaxAppendDepth = 1024U;`
-- **Categoria CLAUDE.md**: Categoria 1 (budget computazionale non configurabile) + Eccezione legittima 4 (limite di sicurezza hardware).
-- **Descrizione**: cap profondità ricorsione su `try_append_exponential_factor` per evitare stack overflow su AST patologici / self-referential. Non produce risultato matematicamente sbagliato — failure mode è `false` return → caller bail-out diagnostico.
-- **Motivazione non-bloccante**: 1024 è abbondante per casi reali (MRV set ricorsioni 5-10 in pratica). Esporre in `CASContext` aggiungerebbe complessità API senza beneficio osservabile.
-- **Fix corretto (Fase 8)**: parametro `ctx.mrv_append_max_depth()` con default 1024, audit chiamate per validare bound.
-- **Blocking dependency**: Aperta cycle-guard — non blocca task corrente.
-- **Test di regressione**: suite Gruntz nested-log (11 test) PASS dimostra che 1024 mai raggiunto in workload reale.
+- **File**: `src/calculus/limit_mrv_exp.cpp:166` — sostituito hardcoded constexpr con `ctx.mrv_max_append_depth()`.
+- **CASContext param**: `cas_context_params.hpp:600-605` (`set_mrv_max_append_depth` / `mrv_max_append_depth`), default 1024U.
+- **Verifica**: 32/32 PASS su `*MRV*:*Gruntz*:*DifferentialField*:*Limit*Tower*`.
+- **Categoria CLAUDE.md**: Categoria 1 chiusa (parametro configurabile via CASContext).
 
 ---
 
-### HPP-F75-AUDIT-CYCLE-GUARD-2 — `kVisitRecursiveMaxDepth=4096` (differential_field.cpp:21) — APERTA cycle-guard
+### HPP-F75-AUDIT-CYCLE-GUARD-2 — `kVisitRecursiveMaxDepth=4096` (differential_field.cpp:21) — CHIUSA 2026-06-13
 
-- **File**: `src/calculus/differential_field.cpp:21` — `constexpr unsigned int kVisitRecursiveMaxDepth = 4096U;`
-- **Categoria CLAUDE.md**: Categoria 1 + Eccezione legittima 4.
-- **Descrizione**: cap profondità visitor template `visit_recursive_impl` per AST non semplificati. Beyond → `Result<void>` Unimplemented diagnostico (no silent fail).
-- **Motivazione non-bloccante**: 4096 ≫ profondità AST realistica (parser produce 10-50 normalmente, simplifier flatten a ≤300 ctx-limited). Esposizione in CASContext non motivata.
-- **Fix corretto (Fase 8)**: `ctx.differential_field_visit_max_depth()`.
-- **Blocking dependency**: Aperta cycle-guard.
+- **File**: `src/calculus/differential_field.cpp:240` — usa `ctx.diff_field_max_visit_depth()`.
+- **CASContext param**: `cas_context_params.hpp:607-612`, default 4096U.
+- **Verifica**: suite DifferentialField + Risch verde.
+- **Categoria CLAUDE.md**: Categoria 1 chiusa.
 
 ---
 
-### HPP-F75-AUDIT-CYCLE-GUARD-3 — `kGrowthRankMaxDepth=1024` (limit_mrv_compare.cpp:100) — APERTA cycle-guard
+### HPP-F75-AUDIT-CYCLE-GUARD-3 — `kGrowthRankMaxDepth=1024` (limit_mrv_compare.cpp:100) — CHIUSA 2026-06-13
 
-- **File**: `src/calculus/limit_mrv_compare.cpp:100` — `constexpr int kGrowthRankMaxDepth = 1024;`
-- **Categoria CLAUDE.md**: Categoria 1 + Eccezione legittima 4.
-- **Descrizione**: cap profondità lambda `get_growth_rank_impl` per evitare stack overflow su torri trascendentali patologiche. Beyond → return 0 (= "unknown growth class") conservativo → forza bail-out chiamante.
-- **Motivazione non-bloccante**: 1024 abbondante; Gruntz torri reali ≤10 profondità. Conservatività garantita dal return 0.
-- **Fix corretto (Fase 8)**: `ctx.growth_rank_max_depth()`.
-- **Blocking dependency**: Aperta cycle-guard.
+- **File**: `src/calculus/limit_mrv_compare.cpp:100-102` — usa `ctx.mrv_growth_rank_max_depth()`.
+- **CASContext param**: `cas_context_params.hpp:614-619`, default 1024 (int).
+- **Verifica**: Gruntz triple-exponential + nested-log verdi (6/6 LimitMrvTest).
+- **Categoria CLAUDE.md**: Categoria 1 chiusa.
 
 ---
 
