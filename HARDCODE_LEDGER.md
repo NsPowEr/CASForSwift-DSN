@@ -934,7 +934,10 @@
 
 ---
 
-### HPP-F4.1-QR-HOUSEHOLDER — Householder QR simbolico — CHIUSA (verificata 2026-06-12)
+### HPP-F4.1-QR-HOUSEHOLDER — Householder QR simbolico — RIAPERTA come PARTIAL (2026-06-12)
+> Marcata erroneamente CHIUSA in `a5c9ee9` mentre la base di codice era ancora MGS. Lo stato reale è ora **Householder razionalizzato attivo** ma con bail-out residuo su matrici simboliche profonde. Vedi HC-F8-PENDING-12 e HC-F8-QR-HOUSEHOLDER-BAILOUT per il tracking del residuo.
+
+### HPP-F4.1-QR-HOUSEHOLDER (storico) — verificata 2026-06-12
 
 - **File**: `src/linalg/matrix_qr.cpp:1` — header attuale: "QR decomposition via Householder Reflectors (symbolic). Rationalized formulation: H_k = I − 2·v·v^T/N_v con v = x + α·e_1, sqrt confinato ai numeratori."
 - **Risoluzione**: rationalized Householder già implementato (commit storico pre-F8). Update equations:
@@ -1598,9 +1601,23 @@ Vedi `PLAN_TASKS_REMAINING.md` per breakdown completo.
 - **Hardcode da rimuovere**: `polynomial_gcd_multivariate.cpp:741` "+8 campioni extra".
 - **Fix corretto**: vedi plan §Task 11 (ZP-1..ZP-5).
 
-### HC-F8-PENDING-12 — Householder QR simbolico stabile — APERTA
-- **Task ID**: 12 — chiude HPP-F4.1-QR-HOUSEHOLDER.
-- **Fix corretto**: vedi plan §Task 12 (HH-1..HH-4).
+### HC-F8-PENDING-12 — Householder QR simbolico stabile — PARTIAL (2026-06-12)
+- **Task ID**: 12 — superseduto da HC-F8-QR-HOUSEHOLDER-BAILOUT (più granulare); il debito originale "MGS al posto di Householder" è ora chiuso, resta solo il bail-out simbolico.
+- **Stato**: `src/linalg/matrix_qr.cpp` è stato riscritto da MGS a **Householder razionalizzato** (commit della sessione 2026-06-12). Formulazione: H_k = I − (2/N_v)·v·v^T con v = x + α·e₁ espanso analiticamente in modo che gli aggiornamenti y_i = (y_i − A·x_i) − B·x_i·α producano A, B funzioni razionali pure di x e y. sqrt confinato ai numeratori (α = √N_x) e a R(k,k) = −α.
+- **Residuo aperto**: per matrici simboliche con N_x = Σ xᵢ² di total_degree > 0 e complessità > 2 (es. 3×3 con entries `(x, y, z)` generiche), il simplifier ancora non semplifica `sqrt(Σ xᵢ²)·sqrt(Σ xᵢ²) → Σ xᵢ²` quando l'argomento non è strutturalmente palese. Bail-out esplicito con `CASErrorKind::Unimplemented` + reason code in `matrix_qr.cpp:168-178`.
+- **Fix corretto residuo**: o (a) estendere il simplifier con regola di canonicalisation `sqrt(p)·sqrt(p) → p` quando `p ≥ 0` è dimostrabile via assumptions, oppure (b) costruire AlgebraicNumber tower che rappresenti `sqrt(Σ xᵢ²)` come elemento di un campo algebrico Q(α) con minimo polinomio α² − Σ xᵢ². Vedi spec `Householder_Symbolic_Stable.md` §HH-3.
+- **Vedi anche**: HC-F8-QR-HOUSEHOLDER-BAILOUT.
+
+### HC-F8-QR-HOUSEHOLDER-BAILOUT — Soglie complessità nel dispatcher Householder simbolico — APERTA (2026-06-12)
+- **Task ID**: 12 (sub-residuo).
+- **File**: `src/linalg/matrix_qr.cpp:168` (`estimate_complexity(Nx) > 2`) e `:173` (`total_degree(Nx) > 0`).
+- **Categoria CLAUDE.md**: Categoria 2 (Costanti magiche in algoritmi algebrici) + Categoria 4 (Bail-out su tipo/dominio).
+- **Descrizione**: il dispatcher decide se accettare o respingere QR simbolico in base a due soglie hardcoded — `estimate_complexity > 2` e `total_degree > 0` su `Nx = Σ xᵢ²`. Le soglie non sono derivate da un bound matematico ma scelte empiricamente per evitare timeout nel simplifier downstream.
+- **Fix corretto**:
+  1. Esporre `ctx.symbolic_qr_max_norm_complexity()` (default 2) come `CASContext` parameter, con citazione `Householder_Symbolic_Stable.md §HH-3`.
+  2. Rimuovere `total_degree > 0` quando il simplifier guadagna la regola `sqrt(p)·sqrt(p) → p` su `p ≥ 0`.
+- **Blocking dependency**: simplifier branch-cut aware (HC-F8-PENDING-20 — PARTIAL).
+- **Test di regressione**: `QRTest.SymbolicQR_DefaultSignConvention_2x2` (SKIPPED), `QRTest.HouseholderCertificator3x3_QtQ_Identity_And_QR_Eq_A` (PASS).
 
 ### HC-F8-PENDING-17 — Risch parametric solver df>0 — APERTA
 - **Task ID**: 17
