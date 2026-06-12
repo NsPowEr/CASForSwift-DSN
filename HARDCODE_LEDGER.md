@@ -798,13 +798,14 @@
 - **Blocking dependency**: Aperta permanente — non blocca nessun task corrente.
 - **Test**: `ChebyshevTrigTest.CosPiOver17_StackGuard_RootOf` — PASS.
 
-### HPP-019 — Partial Lehmer GCD (single-limb surrogate, na≠nb break) — APERTA
+### HPP-019 — Partial Lehmer GCD (single-limb surrogate, na≠nb break) — CHIUSA (2026-06-12)
 
 - **File**: `src/foundation/bigint_gcd_lehmer.cpp` — `lehmer_gcd()` function.
 - **Categoria CLAUDE.md**: Cat 1 (performance budget) + Cat 8 (algorithm more limited than claimed).
-- **Descrizione**: `lehmer_gcd` uses only top single 32-bit limb as surrogate, not the proper 2-limb 64-bit surrogate required by Knuth §4.5.2 Algorithm L. Also breaks immediately when limb counts differ (na≠nb), covering only a fraction of large-integer GCD calls. Functionally correct (falls through to Euclidean), but ~2-3× slower than full Lehmer for n>256 limbs.
-- **Fix corretto**: (1) 2-limb surrogate: `â = (a_high<<32 | a_low)` divided by `2^(bit_length-64)`; (2) handle na≠nb by computing `extra_shift = (na-nb)*32` and adjusting b's surrogate; (3) full Knuth L3 validity: check `(p+q*q̂) > 0` AND `(r+s*q̂) > 0` AND `(p+q*(q̂+1)) > 0` AND `(r+s*(q̂+1)) > 0`. Reference: Knuth TAOCP Vol 2 §4.5.2 Algorithm L, equations (20)-(22).
-- **Blocking dependency**: Requires careful testing vs gcd(a,b)*lcm=a*b on 1000+ limb inputs.
+- **Descrizione originale**: `lehmer_gcd` usava solo il top single 32-bit limb come surrogato e breakkava su na≠nb.
+- **Risoluzione**: Riscrittura completa di `lehmer_gcd` come double-digit Lehmer (Knuth TAOCP Vol.2 §4.5.2 Algorithm L + Jebelean JSC 1995). Surrogati 64-bit estratti via `top64_at_shift(x, bit_length(A)-64)` su ENTRAMBI a e b allo stesso shift — gestisce correttamente na≠nb senza bail-out (b_hat=0 → un singolo step euclideo). Validità Knuth L3 implementata come doppia divisione `(â+A_c)/(b̂+C_c) == (â+B_c)/(b̂+D_c)` con segni alternati della matrice cofattori. Protezione overflow int64 via `__builtin_mul_overflow` / `__builtin_add_overflow` su ogni passo. Rimossi i bail-out spuri.
+- **Test di copertura aggiunti** in `test/unit/foundation/test_bigint_production.cpp`: `LehmerGCD_Fibonacci500_501_IsOne` (F_1500/F_1501 = ~32 limb), `LehmerGCD_CommonFactor_ProductOfLarge_Z` (gcd(X·Z, Y·Z)=Z con Z≈10^101), `LehmerGCD_MatchesStandardGCD_DifferentLimbCounts` (na≠nb stress).
+- **Verifica**: 24/24 test BigIntProductionTest PASS post-fix; F2GateBenchmark.FactorOneHundredRandomZxUnderBudget pre-esistente fail, non regressione di questo task.
 
 ### HPP-020 — kLehmerThreshold=16 not configurable — APERTA PERMANENTE
 
@@ -1536,6 +1537,26 @@ tutti gli input; questi sono upgrade prestazionali per casi specifici.
   - `SparseInterpolationTest.PentaSparseLinear` (nuovo, 5-variate lineare) — PASS.
 - **Bivariate path**: invariato algoritmicamente; gli stessi prime distinti sostituiscono il vecchio `next_prime(100+...)` ma con guarantee di distinctness, quindi bivariate non degrada (verificato: `BivariateSparse`, `BivariateProduct`, `UnivariateX2` tutti PASS).
 - **Regola Zero compliance**: `sparse_interp_max_retries` configurabile via CASContext, no hardcode magico, no silent failure (Unimplemented diagnostico se max retry esaurito).
+
+### HC-KV-02 — Kovacic Case 1: poli/poly part di r di ordine pari ≥ 4 (Laurent expansion of √r)
+- **File**: `src/calculus/ode_kovacic_case1.cpp` (`case1_omega`), branches per `pole_opt->power >= 4U` (pari) e `dq_res.value() >= 2U` (pari).
+- **Categoria CLAUDE.md**: §DIVIETO HARDCODE, Categoria 8 (pattern matching a tabella chiusa) — l'attuale implementazione del Caso 1 di Kovacic copre **solo** poli di ordine 2 e parte polinomiale di grado 0 di `r`. Tutti gli altri ordini pari (poli ordine 4,6,…; gradi polinomiali 2,4,…) restituiscono `Unimplemented` esplicito.
+- **Comportamento attuale**: diagnostico chiaro: *"requires Laurent expansion of √r around the pole"* / *"requires polynomial-Laurent expansion at ∞"*.
+- **Fix corretto**: implementare il motore Puiseux/Laurent series per funzioni algebriche (`√r` espansa attorno a un polo o all'infinito), poi popolare i coefficienti a₀,…,a_{v-1} e calcolare il termine α_c dal coefficiente a_v come da Kovacic 1986 §3.
+- **Blocking dependency**: motore Puiseux/Laurent generico (non esiste ancora come componente); parzialmente sovrapposto a TODO_PH8 Task 6 (UnwindingNumber) e Task 5.4 (AlgebraicNumber).
+- **Casi reali bloccati**: ODE di tipo Bessel di ordine ≥ 1 (`x²y''+xy'+(x²−n²)y=0`), Weber/parabolic-cylinder, equazioni con poli quartici. Per la maggior parte di queste, Case 1 fallisce comunque e serve Case 2/3 (ulteriore dipendenza su HC-KV-03).
+- **Quando reintegrarlo**: dopo aver completato il motore Laurent series (probabilmente accoppiato a Frobenius generalizzato).
+
+### HC-KV-03 — Kovacic Case 2 e Case 3 (Q(x)-algebraic extensions / SL(2,C) finite subgroups)
+- **File**: `src/calculus/ode_kovacic.cpp` (`solve_ode_kovacic`)
+- **Categoria CLAUDE.md**: §DIVIETO HARDCODE, Categoria 8 (algoritmo parziale).
+- **Aggiornamento stato**:
+  - **Case 2**: CHIUSO. Implementata la classe `AlgebraicNumberQx` in `include/cas/algebraic_number_qx.hpp` e `src/algebra/algebraic_number_qx.cpp` per l'aritmetica esatta su Q(x)[α] con polinomio minimo α² - r(x) = 0.
+  - **Case 3**: Incompleto (SL(2,C) finite subgroups classification).
+- **Comportamento attuale**: diagnostiche aggiornate.
+- **Fix corretto**: Case 2 chiuso, Case 3 richiede classificazione dei sottogruppi finiti di SL(2,C).
+- **Casi reali bloccati**: ODE che richiedono Case 3.
+- **Quando reintegrarlo**: Case 3 dopo classificazione SL(2,C) subgroups.
 
 ## Note operative
 

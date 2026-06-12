@@ -208,6 +208,62 @@ TEST(BigIntProductionTest, LehmerGCD_MatchesStandardGCD_LargeInputs) {
         << "Lehmer GCD must match standard GCD for large inputs";
 }
 
+// ── 3b. Lehmer GCD: spec cases from Lehmer_GCD_Multilimb.md §4.5.2 ────────────
+
+TEST(BigIntProductionTest, LehmerGCD_Fibonacci500_501_IsOne) {
+    // F_n and F_{n+1} are coprime for all n >= 1 (classical Fibonacci identity).
+    // F_500 has ~105 decimal digits = ~11 limbs; F_501 similar.
+    // To force Lehmer path use F_1500 and F_1501 (~314 digits = ~32 limbs each).
+    BigInt f_a(0), f_b(1);
+    for (int i = 0; i < 1500; ++i) {
+        BigInt tmp = f_a + f_b;
+        f_a = std::move(f_b);
+        f_b = std::move(tmp);
+    }
+    // Now f_a = F_1500, f_b = F_1501.
+    ASSERT_GE(f_a.limb_count(), 16U) << "Test setup: Fibonacci must trigger Lehmer path";
+    EXPECT_EQ(lehmer_gcd(f_a, f_b).decimal(), "1")
+        << "Lehmer GCD of consecutive Fibonacci numbers must be 1";
+    EXPECT_EQ(gcd(f_a, f_b).decimal(), "1")
+        << "gcd dispatcher must also return 1 for consecutive Fibonacci";
+}
+
+TEST(BigIntProductionTest, LehmerGCD_CommonFactor_ProductOfLarge_Z) {
+    // gcd(X·Z, Y·Z) == Z when gcd(X, Y) == 1, with Z >= 10^100 to force Lehmer path.
+    const BigInt z = parse_or_abort(
+        "1000000000000000000000000000000000000000000000000000"
+        "0000000000000000000000000000000000000000000000000007");  // ≈ 10^101
+    // Use coprime X, Y (consecutive Fibonacci-like coprimes).
+    const BigInt x = parse_or_abort("12345678901234567890123456789012345678901234567890");
+    const BigInt y = parse_or_abort("98765432109876543210987654321098765432109876543211");
+    // Confirm gcd(x, y) is some small d; we'll divide out below.
+    const BigInt d = gcd(x, y);
+    const BigInt x_red = x / d;
+    const BigInt y_red = y / d;
+    // Now gcd(x_red, y_red) == 1 by construction.
+    ASSERT_EQ(gcd(x_red, y_red).decimal(), "1");
+    const BigInt a = x_red * z;
+    const BigInt b = y_red * z;
+    ASSERT_GE(std::max(a.limb_count(), b.limb_count()), 16U)
+        << "Test setup: product must trigger Lehmer path";
+    EXPECT_EQ(lehmer_gcd(a, b).decimal(), z.decimal())
+        << "gcd(X·Z, Y·Z) must equal Z when gcd(X,Y)=1";
+}
+
+TEST(BigIntProductionTest, LehmerGCD_MatchesStandardGCD_DifferentLimbCounts) {
+    // Stress case: na != nb (current pre-Lehmer impl bailed out here).
+    // Verify the double-digit surrogate path handles size disparity correctly.
+    BigInt a = parse_or_abort("1");
+    for (int i = 0; i < 700; ++i) a = a * BigInt(7);  // ~592-bit number
+    BigInt b = parse_or_abort("1");
+    for (int i = 0; i < 300; ++i) b = b * BigInt(11);  // ~1037-bit / actually smaller
+    if (BigInt::compare_magnitude_pub(a, b) < 0) std::swap(a, b);
+    const BigInt g_binary   = binary_gcd(a, b);
+    const BigInt g_lehmer   = lehmer_gcd(a, b);
+    EXPECT_EQ(g_lehmer.decimal(), g_binary.decimal())
+        << "Lehmer with na != nb must match binary GCD";
+}
+
 // ── 4. Montgomery modexp ─────────────────────────────────────────────────────
 
 TEST(BigIntProductionTest, MontgomeryModexp_SmallValues) {
