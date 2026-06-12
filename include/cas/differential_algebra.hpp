@@ -26,6 +26,8 @@ struct DifferentialExtension {
 class DifferentialField {
 public:
     explicit DifferentialField(const Symbol& base_var) : base_var_(base_var) {}
+    DifferentialField(const Symbol& base_var, std::vector<DifferentialExtension> extensions)
+        : base_var_(base_var), extensions_(std::move(extensions)) {}
 
     /// Construct a tower from an expression, finding all logs and exps
     static Result<DifferentialField> build(ExprPtr expr, const Symbol& x, symbolic::CASContext& ctx);

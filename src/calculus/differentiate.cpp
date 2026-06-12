@@ -102,40 +102,35 @@ public:
     }
 
 private:
+    struct Visitor {
+        Differentiator& self;
+        const Symbol& var;
+
+        [[nodiscard]] Result<ExprPtr> operator()(const IntegerLit&) const { return ok(make_integer(self.arena_, 0)); }
+        [[nodiscard]] Result<ExprPtr> operator()(const RationalLit&) const { return ok(make_integer(self.arena_, 0)); }
+        [[nodiscard]] Result<ExprPtr> operator()(const Constant&) const { return ok(make_integer(self.arena_, 0)); }
+        [[nodiscard]] Result<ExprPtr> operator()(const DecimalLit&) const { return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Decimal literals are not supported in symbolic differentiation")); }
+        [[nodiscard]] Result<ExprPtr> operator()(const ComplexLit&) const { return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Complex literals differentiation not implemented")); }
+        [[nodiscard]] Result<ExprPtr> operator()(const Symbol& symbol) const { return ok(make_integer(self.arena_, symbol.name == var.name ? 1 : 0)); }
+        [[nodiscard]] Result<ExprPtr> operator()(const Unary& unary) const { return self.differentiate_unary(unary, var); }
+        [[nodiscard]] Result<ExprPtr> operator()(const Binary& binary) const { return self.differentiate_binary(binary, var); }
+        [[nodiscard]] Result<ExprPtr> operator()(const FuncCall& call) const { return self.differentiate_function(call, var); }
+        [[nodiscard]] Result<ExprPtr> operator()(const Sum& sum) const { return self.differentiate_sum(sum, var); }
+        [[nodiscard]] Result<ExprPtr> operator()(const Product& product) const { return self.differentiate_product(product, var); }
+        [[nodiscard]] Result<ExprPtr> operator()(const Derivative& derivative) const { return self.differentiate(derivative.expression, derivative.variable, derivative.order + 1U); }
+        [[nodiscard]] Result<ExprPtr> operator()(const Integral&) const { return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Differentiation of integral not implemented")); }
+        [[nodiscard]] Result<ExprPtr> operator()(const Limit&) const { return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Differentiation of limit not implemented")); }
+        [[nodiscard]] Result<ExprPtr> operator()(const RootOf&) const { return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Differentiation of RootOf not implemented")); }
+        [[nodiscard]] Result<ExprPtr> operator()(const Matrix&) const { return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Differentiation of matrix not implemented")); }
+        [[nodiscard]] Result<ExprPtr> operator()(const SeriesExp&) const { return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Differentiation of SeriesExp not implemented")); }
+        [[nodiscard]] Result<ExprPtr> operator()(const Quantity&) const { return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Differentiation of Quantity not implemented")); }
+    };
+
     [[nodiscard]] Result<ExprPtr> differentiate_once(ExprPtr expr, const Symbol& var) {
         if (!expr) {
             return fail<ExprPtr>(make_error(CASErrorKind::InvalidArgument, "Cannot differentiate a null expression"));
         }
-
-        if (expr_is<IntegerLit>(expr) || expr_is<RationalLit>(expr) || expr_is<Constant>(expr)) {
-            return ok(make_integer(arena_, 0));
-        }
-        if (expr_is<DecimalLit>(expr)) {
-            return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Decimal literals are not supported in symbolic differentiation"));
-        }
-        if (const auto* symbol = expr_cast<Symbol>(expr)) {
-            return ok(make_integer(arena_, symbol->name == var.name ? 1 : 0));
-        }
-        if (const auto* unary = expr_cast<Unary>(expr)) {
-            return differentiate_unary(*unary, var);
-        }
-        if (const auto* binary = expr_cast<Binary>(expr)) {
-            return differentiate_binary(*binary, var);
-        }
-        if (const auto* call = expr_cast<FuncCall>(expr)) {
-            return differentiate_function(*call, var);
-        }
-        if (const auto* sum = expr_cast<Sum>(expr)) {
-            return differentiate_sum(*sum, var);
-        }
-        if (const auto* product = expr_cast<Product>(expr)) {
-            return differentiate_product(*product, var);
-        }
-        if (const auto* derivative = expr_cast<Derivative>(expr)) {
-            return differentiate(derivative->expression, derivative->variable, derivative->order + 1U);
-        }
-
-        return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Differentiation is not implemented for this expression kind"));
+        return visit_expr(expr, Visitor{*this, var});
     }
 
     [[nodiscard]] Result<ExprPtr> differentiate_unary(const Unary& unary, const Symbol& var) {

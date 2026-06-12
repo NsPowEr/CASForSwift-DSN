@@ -57,8 +57,13 @@ bool is_strictly_canonical(ExprPtr expr) noexcept {
             if (expr_is<Sum>(t)) return false;            // nested Sum
             if (is_exact_zero_lit(t)) return false;       // zero summand
             if (!is_strictly_canonical(t)) return false;
-            if (i > 0 && canonical_compare(sum->terms[i - 1], t) > 0) {
-                return false;                              // out-of-order
+            if (i > 0) {
+                int prev_deg = detail::polynomial_degree(sum->terms[i - 1]);
+                int curr_deg = detail::polynomial_degree(t);
+                if (prev_deg < curr_deg) return false;
+                if (prev_deg == curr_deg && canonical_compare(sum->terms[i - 1], t) > 0) {
+                    return false;
+                }
             }
         }
         return true;

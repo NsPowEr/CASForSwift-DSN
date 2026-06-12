@@ -157,6 +157,22 @@ private:
 
 class Substituter;
 
+struct SimplifyHints {
+    bool fold_exp_products = false;
+};
+
+class CASContext;
+
+class [[nodiscard]] ScopedSimplifyHint {
+    CASContext& ctx_;
+    SimplifyHints old_hints_;
+public:
+    ScopedSimplifyHint(CASContext& ctx, SimplifyHints hints) noexcept;
+    ~ScopedSimplifyHint();
+    ScopedSimplifyHint(const ScopedSimplifyHint&) = delete;
+    ScopedSimplifyHint& operator=(const ScopedSimplifyHint&) = delete;
+};
+
 // CASContext inherits CASContextParams to expose all algorithm-tuning
 // getter/setter pairs directly on ctx without any call-site changes.
 // Simple inline setters/getters live in cas_context_params.hpp.
@@ -165,6 +181,10 @@ class Substituter;
 class CASContext : public CASContextParams {
 public:
     CASContext();
+
+    [[nodiscard]] SimplifyHints hints() const noexcept { return hints_; }
+    void set_hints(SimplifyHints hints) noexcept { hints_ = hints; }
+    [[nodiscard]] ScopedSimplifyHint with_hint(SimplifyHints hints) noexcept;
 
     void define(const Symbol& symbol, ExprPtr value);
     void clear_variables() noexcept;
@@ -337,15 +357,29 @@ CacheContainer<IntegrateKey, ExprPtr, IntegrateHash> integrate_cache_;
 // update. Prevents stale-cache corruption when user changes assumptions
 // mid-session (e.g. assume(x>0); simplify(abs(x)); assume(x<0); ...).
 mutable std::uint64_t last_assumptions_revision_{0};
+SimplifyHints hints_;
 };
+
+inline ScopedSimplifyHint::ScopedSimplifyHint(CASContext& ctx, SimplifyHints hints) noexcept
+    : ctx_(ctx), old_hints_(ctx.hints()) {
+    ctx.set_hints(hints);
+}
+
+inline ScopedSimplifyHint::~ScopedSimplifyHint() {
+    ctx_.set_hints(old_hints_);
+}
+
+inline ScopedSimplifyHint CASContext::with_hint(SimplifyHints hints) noexcept {
+    return ScopedSimplifyHint(*this, hints);
+}
 
 [[nodiscard]] int canonical_compare(ExprPtr lhs, ExprPtr rhs) noexcept;
 
 // F7.0-A4.2: post-simplify canonical-form invariant check.
 // Returns true if `expr` and every reachable sub-expression respect the
 // invariants that simplify() is supposed to maintain:
-//   - Sum::terms sorted by canonical_compare, no nested Sum, no exact-zero
-//     IntegerLit / RationalLit summand.
+//   - Sum::terms sorted by polynomial degree descending then canonical_compare,
+//     no nested Sum, no exact-zero IntegerLit / RationalLit summand.
 //   - Product::factors sorted by canonical_compare, no nested Product, no
 //     exact-one IntegerLit / RationalLit factor.
 //   - All Sum/Product nodes have ≥ 2 operands (singletons collapsed).
