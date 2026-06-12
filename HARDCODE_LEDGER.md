@@ -1638,6 +1638,28 @@ Vedi `PLAN_TASKS_REMAINING.md` per breakdown completo.
 - **Audit**: 28 file whitelisted in CMakeLists.txt anti-monolith scan.
 - **Fix corretto**: vedi plan §Task 25 (MS-1..MS-final).
 
+### HC-F8-FLAKY-COS-7PI-16 — `SpecialFunctionsTest.CosSevenPiOverSixteen_NonInert` order-dependent — APERTA (2026-06-12)
+- **Stato**: il test passa **isolato** (74/74 `SpecialFunctionsTest.*` verde, eseguibile diretto ~960 ms) ma fallisce nella suite quick completa con messaggio `cos(7π/16) stayed inert; got: FuncCall(cos, [Product([RationalLit(7, 16), Constant(Pi)])])`. Il test precedente `CosThreePiOverSeven_Chebyshev_NonInert` (in realtà cos(3π/16)) passa nella stessa sequenza.
+- **Bisezione tentata (2026-06-12)** senza riprodurre il fallimento in combinazioni più piccole:
+  - `AcidTest.* + cos7π/16` → PASS
+  - `SymbolicTest.* + CachingTest.* + cos7π/16` → PASS
+  - `SimplifyTest.* + cos7π/16` → PASS
+  - `*Trig* + *Cos* + *Sin* + cos7π/16` (135 test) → PASS
+  - `SpecialFunctionsTest.*` (74 test) → PASS
+  Il polluter è distribuito o dipende dalla coda di test globale; bisezione richiede strumento più sistematico (es. `--gtest_shuffle --gtest_random_seed=N` con bisect su seed).
+- **Ipotesi**:
+  1. Counter globale `make_fresh_symbol` o cache di simplification raggiunge una soglia di iterazione/profondità solo dopo migliaia di test consumati prima.
+  2. Cache di simplification ctx-scoped non collide perché ogni test ha CASContext locale; ma il **registro statico delle rewrite rules** o `BuiltinOp` priority table può degradare.
+  3. Allocazione `AstArena` raggiunge una soglia di rehash del set di interning che cambia l'ordine canonico di Product → Cos non riconosce la forma normale attesa dalla Chebyshev pipeline.
+- **Categoria CLAUDE.md**: Categoria 9 (Intervalli di Controllo e Polling Fissi) sospetto + Categoria 10 (Gerarchie statiche). Non confermato senza root-cause.
+- **Test impatto**: 1 fail in suite quick (2358 test). Non blocca AcidTest/SupremeTest. Pre-esisteva alla sessione 2026-06-12 (non introdotto dai commit di questa sessione: verificato suite ancora rossa anche dopo `revert temporaneo dei commit di sessione`).
+- **Fix corretto futuro**:
+  1. Strumentare `simplify_special_fn.cpp` con un dump della pipeline Chebyshev sul caso 7π/16 in full-suite vs isolato → confronto degli step.
+  2. Verificare che le tabelle di canonical_compare (term_order.cpp) non producano ordini diversi in funzione di counter globali.
+  3. Considerare reset esplicito di ogni global static all'inizio di SpecialFunctionsTest::SetUp.
+- **Blocking dependency**: nessuna — è bug di test/infrastruttura, non gating per feature.
+- **Test di regressione**: `SpecialFunctionsTest.CosSevenPiOverSixteen_NonInert` (full suite) + 73 sibling che passano in isolation.
+
 ### HC-F8-PENDING-26 — Cross-cutting CASContext params — PARTIAL
 - **Task ID**: 26 — tracker distribuito.
 - **Params già esposti** (sessione 2026-06-12): `max_bessel_half_integer_order`, `integration_abs_tol`, `integration_rel_tol`, `integration_max_intervals`.
