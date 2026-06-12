@@ -191,6 +191,22 @@ struct CASContextParams {
         max_wang_eval_radius_ = r;
     }
 
+    // ── Wang EEZ Hensel lifting attempts (WE-1) ──────────────────────────────
+    [[nodiscard]] std::size_t max_hensel_lift_attempts() const noexcept {
+        return max_hensel_lift_attempts_;
+    }
+    void set_max_hensel_lift_attempts(std::size_t attempts) noexcept {
+        max_hensel_lift_attempts_ = attempts;
+    }
+
+    // ── Kronecker factorization max degree (WE-1) ────────────────────────────
+    [[nodiscard]] std::size_t kronecker_max_degree() const noexcept {
+        return kronecker_max_degree_;
+    }
+    void set_kronecker_max_degree(std::size_t degree) noexcept {
+        kronecker_max_degree_ = degree;
+    }
+
     // ── F4 Macaulay matrix caps ──────────────────────────────────────────────
     // Hardware guards; exceeded → F4 step falls back to Buchberger.
     void set_f4_max_macaulay_rows(std::size_t n) noexcept {
@@ -625,6 +641,8 @@ protected:
     std::size_t   integration_max_intervals_{4096U};
     std::size_t   max_trager_tower_shift_attempts_{0U};
     std::size_t   max_wang_eval_radius_{0U};  // 0 = auto (nterms + main_deg + 4)
+    std::size_t   max_hensel_lift_attempts_{8U};
+    std::size_t   kronecker_max_degree_{8U};
     std::size_t   f4_max_macaulay_rows_{512U};
     std::size_t   f4_max_macaulay_monomials_{512U};
     std::size_t   f4_max_pending_monomials_{1024U};
