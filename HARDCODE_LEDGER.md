@@ -1563,6 +1563,63 @@ tutti gli input; questi sono upgrade prestazionali per casi specifici.
 - **Casi reali bloccati**: ODE che richiedono Case 3.
 - **Quando reintegrarlo**: Case 3 dopo classificazione SL(2,C) subgroups.
 
+## F8 — Task pending (deferred via plan, 2026-06-12)
+
+Vedi `PLAN_TASKS_REMAINING.md` per breakdown completo.
+
+### HC-F8-PENDING-04 — Schönhage-Strassen NTT — APERTA
+- **Task ID**: 4 — *F1.1 Schönhage-Strassen NTT BigInt multiplication*
+- **Categoria**: performance gap (Toom-3 attualmente sufficiente per n ≤ 4096 limb).
+- **Fix corretto**: vedi plan §Task 4 (SS-1..SS-5).
+- **Effort**: 2-3 settimane T3.
+
+### HC-F8-PENDING-07 — Primitive Element nested multi-β — APERTA
+- **Task ID**: 7 — *F3.D Primitive Element nested multi-β residuo*
+- **Stato**: residuo F3.4-DEBT-01.
+- **Fix corretto**: vedi plan §Task 7 (PE-1..PE-4).
+
+### HC-F8-PENDING-09 — Stauduhar Galois deg ≥ 6 — APERTA
+- **Task ID**: 9
+- **Fix corretto**: vedi plan §Task 9 (GA-1..GA-5).
+
+### HC-F8-PENDING-10 — Wang EEZ Kronecker fallback — APERTA
+- **Task ID**: 10
+- **File da creare**: `src/algebra/factorization_wang_eez.cpp`, `factorization_kronecker.cpp`.
+- **Fix corretto**: vedi plan §Task 10 (WE-1..WE-5).
+
+### HC-F8-PENDING-11 — Zippel sparse GCD — APERTA
+- **Task ID**: 11
+- **Hardcode da rimuovere**: `polynomial_gcd_multivariate.cpp:741` "+8 campioni extra".
+- **Fix corretto**: vedi plan §Task 11 (ZP-1..ZP-5).
+
+### HC-F8-PENDING-12 — Householder QR simbolico stabile — APERTA
+- **Task ID**: 12 — chiude HPP-F4.1-QR-HOUSEHOLDER.
+- **Fix corretto**: vedi plan §Task 12 (HH-1..HH-4).
+
+### HC-F8-PENDING-17 — Risch parametric solver df>0 — APERTA
+- **Task ID**: 17
+- **File**: `src/calculus/risch_rde_bronstein.cpp` `solve_risch_de_parametric_field`.
+- **Fix corretto**: vedi plan §Task 17 (RP-1..RP-4).
+
+### HC-F8-PENDING-20 — Branch-cut propagation completo — PARTIAL
+- **Task ID**: 20 — sqrt(x²) gating CHIUSO in commit `3ff0840`.
+- **Residuo**: ln(z1·z2)/ln(z1/z2) strict gating, (z^a)^b correction K, direction-limit table.
+- **Fix corretto**: vedi plan §Task 20 (BC-1..BC-5).
+
+### HC-F8-PENDING-22 — Slater pFq → Meijer G + Bailey — APERTA
+- **Task ID**: 22
+- **Fix corretto**: vedi plan §Task 22 (SL-1..SL-5).
+
+### HC-F8-PENDING-25 — Monolith split 28 file >500 LOC — APERTA
+- **Task ID**: 25
+- **Audit**: 28 file whitelisted in CMakeLists.txt anti-monolith scan.
+- **Fix corretto**: vedi plan §Task 25 (MS-1..MS-final).
+
+### HC-F8-PENDING-26 — Cross-cutting CASContext params — PARTIAL
+- **Task ID**: 26 — tracker distribuito.
+- **Params già esposti** (sessione 2026-06-12): `max_bessel_half_integer_order`, `integration_abs_tol`, `integration_rel_tol`, `integration_max_intervals`.
+- **Params pendenti**: vedi plan §Task 26 tabella (12 params associati a task pending).
+
 ## Note operative
 
 - **Cadenza revisione**: ad ogni nuova sessione, leggere questo file per primo
