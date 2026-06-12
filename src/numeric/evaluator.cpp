@@ -1,5 +1,6 @@
 #include "cas/numeric.hpp"
 #include "cas/error_helpers.hpp"
+#include "cas/rational.hpp"
 #include "cas/symbolic.hpp"
 #include <algorithm>
 #include <cmath>
@@ -158,23 +159,27 @@ Result<double> NumericEvaluator::evaluate(ExprPtr expr) {
                     "Add std:: dispatch for '" + node.name + "' in evaluator.cpp or extend FuncCall handler",
                     "F1.x");
             } else if constexpr (std::is_same_v<NodeT, RootOf>) {
-                // F6.5-T1: Use Sturm-isolated real roots indexed in ascending
-                // order.  The previous seed-scheme heuristic (1.0, -1.0, 2.0,
-                // ...) did not guarantee a unique mapping from `root_index` to
-                // a specific root — adjacent indices could converge to the
-                // same Newton attractor.  Sturm isolation gives the canonical
-                // i-th real root by ascending value, matching the AST contract.
+                // F8.0-5.4: when the node carries a rigorous isolating bound,
+                // the root is already pinned to a sub-interval of width set
+                // by the bound. Restrict the Sturm search to that interval
+                // and skip the full ±1e3 sweep — this also guarantees the
+                // returned double is the SAME root the bound identifies,
+                // not a sibling root drifting in from elsewhere.
                 const std::string& var_name = node.variable.name;
-
-                // find_polynomial_roots_sturm needs a CASContext.  We build a
-                // throwaway one because the evaluator is intentionally
-                // decoupled from the symbolic engine state.
                 cas::symbolic::CASContext local_ctx;
-                constexpr double kHalfWidth = 1.0e3;
-                constexpr double kTol       = 1.0e-9;
+                double search_low  = -1.0e3;
+                double search_high =  1.0e3;
+                constexpr double kTol = 1.0e-9;
+                if (node.isolating_bound.has_value()) {
+                    const auto& b = *node.isolating_bound;
+                    const Rational low_rat(b.low_num, b.low_den);
+                    const Rational high_rat(b.high_num, b.high_den);
+                    search_low  = low_rat.to_double();
+                    search_high = high_rat.to_double();
+                }
                 auto roots_res = cas::numeric::find_polynomial_roots_sturm(
                     node.polynomial, var_name, local_ctx,
-                    -kHalfWidth, kHalfWidth, kTol);
+                    search_low, search_high, kTol);
                 if (roots_res.is_error()) {
                     return fail<double>(roots_res.error());
                 }
@@ -186,6 +191,21 @@ Result<double> NumericEvaluator::evaluate(ExprPtr expr) {
                         "search window (±1e3)"));
                 }
                 std::sort(roots.begin(), roots.end());
+                // With an isolating bound the search window contains exactly
+                // one root by construction — return it directly. Without a
+                // bound, fall back to root_index-indexed selection over the
+                // full ±1e3 sweep.
+                if (node.isolating_bound.has_value()) {
+                    if (roots.size() != 1U) {
+                        return fail<double>(make_error(
+                            CASErrorKind::InternalError,
+                            "RootOf: isolating bound returned " +
+                            std::to_string(roots.size()) +
+                            " roots — bound is no longer isolating "
+                            "(polynomial may have been mutated)"));
+                    }
+                    return ok(roots[0]);
+                }
                 const std::size_t idx = node.root_index.value_or(0);
                 if (idx >= roots.size()) {
                     return fail<double>(make_error(

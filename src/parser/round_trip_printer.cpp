@@ -355,6 +355,20 @@ private:
         if (value.root_index.has_value()) {
             out << ',' << *value.root_index;
         }
+        // F8.0-5.4: when the isolating bound is present, emit four extra
+        // integer arguments after the (optional) index:
+        //   RootOf(poly, var, idx, low_num, low_den, high_num, high_den).
+        // This keeps the parser grammar unchanged (all args are ExprPtr).
+        // When no idx is set but a bound is, emit idx=0 as placeholder so
+        // the positional layout stays unambiguous.
+        if (value.isolating_bound.has_value()) {
+            const auto& b = *value.isolating_bound;
+            if (!value.root_index.has_value()) out << ",0";
+            out << ',' << b.low_num.decimal()
+                << ',' << b.low_den.decimal()
+                << ',' << b.high_num.decimal()
+                << ',' << b.high_den.decimal();
+        }
         out << ')';
         return ok(std::move(out).str());
     }

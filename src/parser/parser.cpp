@@ -159,8 +159,13 @@ Result<ExprPtr> Parser::parse_function_call(std::string name) {
     }
 
     if (name == "RootOf") {
-        if (args.size() < 2U || args.size() > 3U) {
-            return Result<ExprPtr>(make_parse_error(ParseError::MissingArgument, close.value(), "RootOf expects polynomial, variable, and optional index"));
+        // Accepted arities:
+        //   2 args: (polynomial, variable)
+        //   3 args: + index
+        //   7 args: + index + low_num,low_den,high_num,high_den (bound)
+        if (args.size() != 2U && args.size() != 3U && args.size() != 7U) {
+            return Result<ExprPtr>(make_parse_error(ParseError::MissingArgument, close.value(),
+                "RootOf expects (polynomial, variable [, index [, low_num, low_den, high_num, high_den]])"));
         }
 
         const auto* variable = expr_cast<Symbol>(args[1]);
@@ -169,16 +174,46 @@ Result<ExprPtr> Parser::parse_function_call(std::string name) {
         }
 
         std::optional<std::size_t> root_index;
-        if (args.size() == 3U) {
+        if (args.size() >= 3U) {
             const auto* index = expr_cast<IntegerLit>(args[2]);
             if (index == nullptr || index->value.is_negative()) {
                 return Result<ExprPtr>(make_parse_error(ParseError::InvalidNumber, close.value(), "RootOf index must be a non-negative integer"));
             }
-
             root_index = parser_internal::parse_unsigned_decimal<std::size_t>(index->value);
             if (!root_index.has_value()) {
                 return Result<ExprPtr>(make_parse_error(ParseError::InvalidNumber, close.value(), "RootOf index is out of range"));
             }
+        }
+
+        if (args.size() == 7U) {
+            // Extract isolating bound from args[3..7]. Each must be a signed
+            // integer literal (Unary(Neg, IntegerLit) is accepted to allow
+            // negative endpoints).
+            auto extract_bigint = [](ExprPtr e) -> std::optional<BigInt> {
+                if (const auto* lit = expr_cast<IntegerLit>(e)) return lit->value;
+                if (const auto* un = expr_cast<Unary>(e)) {
+                    if (un->op == UnaryOp::Neg) {
+                        if (const auto* lit = expr_cast<IntegerLit>(un->operand))
+                            return -lit->value;
+                    }
+                }
+                return std::nullopt;
+            };
+            auto low_num  = extract_bigint(args[3]);
+            auto low_den  = extract_bigint(args[4]);
+            auto high_num = extract_bigint(args[5]);
+            auto high_den = extract_bigint(args[6]);
+            if (!low_num || !low_den || !high_num || !high_den) {
+                return Result<ExprPtr>(make_parse_error(ParseError::InvalidNumber, close.value(),
+                    "RootOf bound endpoints must be signed integer literals"));
+            }
+            if (low_den->is_zero() || high_den->is_zero()) {
+                return Result<ExprPtr>(make_parse_error(ParseError::InvalidNumber, close.value(),
+                    "RootOf bound denominator must be non-zero"));
+            }
+            IsolatingBound bound{*low_num, *low_den, *high_num, *high_den};
+            return Result<ExprPtr>(arena_.make<RootOf>(
+                args[0], *variable, std::move(bound), root_index));
         }
 
         return Result<ExprPtr>(arena_.make<RootOf>(args[0], *variable, root_index));
