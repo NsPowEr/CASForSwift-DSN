@@ -316,6 +316,12 @@ Result<ExprPtr> Simplifier::simplify_product_factors(
         }
     }
 
+    // Step 5.5: Risch IBP exp-fold via SimplifyHints flag.
+    if (context_ != nullptr && context_->hints().fold_exp_products) {
+        auto exp_res = fold_exponential_products(symbolic, coefficient);
+        if (exp_res.is_error()) return fail<ExprPtr>(exp_res.error());
+    }
+
     // Step 6: L3-08 Quantity multiplication — combine Quantity^1 factors.
     {
         std::vector<std::size_t> qty_idx;

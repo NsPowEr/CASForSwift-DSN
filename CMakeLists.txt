@@ -106,7 +106,9 @@ set(CAS_FOUNDATION_SOURCES
 )
 
 set(CAS_AST_SOURCES
-    src/ast/ast.cpp
+    src/ast/ast.cpp          # AstArena lifecycle only (F8.0 split)
+    src/ast/ast_compare.cpp  # structural_equal, expr_hash, expr_kind_name (F8.0 split)
+    src/ast/ast_clone.cpp    # clone_into_arena (F8.0 split)
     src/ast/ast_debug.cpp
 )
 
@@ -136,6 +138,7 @@ set(CAS_SYMBOLIC_SOURCES
     src/symbolic/simplify_arithmetic_chain.cpp
     src/symbolic/simplify_arithmetic_chain_gamma.cpp
     src/symbolic/simplify_arithmetic_chain_sqrt.cpp
+    src/symbolic/simplify_arithmetic_chain_exp.cpp
     src/symbolic/simplify_extended_real.cpp
     src/symbolic/simplify_functions.cpp
     src/symbolic/simplify_trig_chebyshev.cpp
@@ -189,6 +192,7 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/integrate_risch_hermite.cpp
     src/calculus/risch_parametric.cpp
     src/calculus/risch_de_extensions.cpp
+    src/calculus/risch_rde_bronstein.cpp
     src/calculus/risch_log_expand.cpp
     src/calculus/risch_exp_expand.cpp
     src/calculus/z_transform.cpp
@@ -221,6 +225,9 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/ode_classifier_higher_order.cpp
     src/calculus/ode_solver_1st_order.cpp
     src/calculus/ode_solver_advanced.cpp
+    src/calculus/ode_kovacic_case1.cpp
+    src/calculus/ode_kovacic_laurent.cpp
+    src/calculus/ode_kovacic.cpp
     src/calculus/ode_solver_frobenius.cpp
     src/calculus/ode_solver_nonlinear.cpp
     src/calculus/asymptotes.cpp
@@ -241,6 +248,7 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/algebra_polynomial_api.cpp
     src/algebra/polynomial_sparse_interpolation.cpp
     src/algebra/algebraic_number.cpp
+    src/algebra/algebraic_number_qx.cpp
     src/algebra/algebraic_number_bridge.cpp
     src/algebra/algebraic_tower_bridge.cpp
     src/algebra/algebraic_tower_primitive.cpp
@@ -265,6 +273,7 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/factorization_tower.cpp
     src/algebra/factorization_tower_helpers.cpp
     src/algebra/factorization_tower_n.cpp
+    src/algebra/algebraic_number_rootof.cpp
     src/algebra/polynomial_groebner.cpp
     src/algebra/polynomial_groebner_f4.cpp
     src/algebra/polynomial_groebner_f4_buchberger.cpp
@@ -409,6 +418,9 @@ target_link_libraries(cas_symbolic PUBLIC cas_numtheory)
 
 add_library(cas_algebra STATIC ${CAS_ALGEBRA_SOURCES})
 target_include_directories(cas_algebra PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_include_directories(cas_algebra PRIVATE
+    ${MPFR_INCLUDE_DIR_EARLY}
+    ${GMP_INCLUDE_DIR_EARLY})
 target_link_libraries(cas_algebra PUBLIC cas_symbolic cas_ast cas_foundation cas_numtheory)
 target_compile_features(cas_algebra PUBLIC cxx_std_20)
 
@@ -568,6 +580,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/parser/test_parser.cpp
         test/unit/parser/test_parser_roundtrip.cpp
         test/unit/symbolic/test_calculus.cpp
+test/unit/symbolic/test_unwinding_number.cpp
         test/unit/symbolic/test_complex_simplification.cpp
         test/unit/symbolic/test_extended_real.cpp
         test/unit/symbolic/test_simplify_hyperbolic_zero.cpp
@@ -587,7 +600,8 @@ if(CAS_ENABLE_TESTING)
         test/unit/calculus/test_integrate_risch_smoke.cpp
         test/unit/calculus/test_integrate_substitution.cpp
         test/unit/algebra/test_polynomial_sparse_interpolation.cpp
-        test/unit/algebra/test_cyclotomic_rootof_d2.cpp
+        test/unit/algebra/test_algebraic_number_rootof.cpp
+test/unit/algebra/test_cyclotomic_rootof_d2.cpp
         test/unit/algebra/test_csolve_linear.cpp
         test/unit/symbolic/test_summation_gosper.cpp
         test/unit/algebra/test_factorization_polynomials_smoke.cpp
@@ -609,6 +623,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/calculus/test_special_closed_forms.cpp
         test/unit/calculus/test_elliptic_integrals.cpp
         test/unit/numeric/test_mpfr_foundation.cpp
+test/unit/numeric/test_sturm_bigfloat.cpp
         test/unit/algebra/test_gaussian_int.cpp
         test/unit/algebra/test_gaussian_factor.cpp
         test/unit/foundation/test_rational_cf.cpp
@@ -696,6 +711,7 @@ test/unit/algebra/test_half_gcd.cpp
         test/unit/algebra/test_factor_multivariate_f3.cpp
         test/unit/algebra/test_modular_crt.cpp
         test/unit/algebra/test_algebraic_number.cpp
+        test/unit/algebra/test_algebraic_number_qx.cpp
         test/unit/algebra/test_algebraic_tower_bridge.cpp
     test/unit/algebra/test_algebraic_number_bridge.cpp
         test/unit/algebra/test_algebraic_tower.cpp

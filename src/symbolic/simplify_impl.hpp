@@ -264,6 +264,12 @@ private:
         std::vector<std::pair<ExprPtr, BigInt>>& symbolic,
         ComplexRational& coefficient);
 
+    // Risch IBP exp-fold.
+    // Implementation in simplify_arithmetic_chain_exp.cpp.
+    [[nodiscard]] Result<void> fold_exponential_products(
+        std::vector<std::pair<ExprPtr, BigInt>>& symbolic,
+        ComplexRational& coefficient);
+
     AstArena& arena_;
     const Assumptions* assumptions_;
     const RewriteProvider* rewrite_provider_;

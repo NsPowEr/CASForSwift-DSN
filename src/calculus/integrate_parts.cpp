@@ -3,7 +3,6 @@
 #include "cas/error.hpp"
 
 #include <algorithm>
-#include <string>
 #include <vector>
 
 namespace cas::calculus {
@@ -18,8 +17,12 @@ namespace {
 
     if (const auto* call = expr_cast<FuncCall>(expr)) {
         const BuiltinOp func_id = call->func_id;
-        // I: Inverse Trig
-        if (func_id == BuiltinOp::Asin || func_id == BuiltinOp::Acos || func_id == BuiltinOp::Atan) {
+        // I: Inverse Trig + non-elementary special functions whose derivative
+        // collapses the integrand to an elementary form (Erf' = 2/√π·exp(-x²),
+        // Erfc' = -2/√π·exp(-x²)). Picking them as u in IBP is the only way
+        // to integrate e.g. ∫ x·erf(x)·exp(x²) dx in closed form.
+        if (func_id == BuiltinOp::Asin || func_id == BuiltinOp::Acos || func_id == BuiltinOp::Atan ||
+            func_id == BuiltinOp::Erf  || func_id == BuiltinOp::Erfc) {
             return 1;
         }
         // L: Logarithmic (Ln and Log are aliases — both natural log).
@@ -172,6 +175,8 @@ Result<ExprPtr> integrate_by_parts(
             .hint = "integrate_risch with Risch DE rational solver",
         });
     }
+
+    [[maybe_unused]] const auto hint_guard = context.with_hint(symbolic::SimplifyHints{ .fold_exp_products = true });
 
     IntegrationByPartsGuard guard(expr, context.max_integrate_by_parts_depth());
     auto guard_result = guard.enter();
