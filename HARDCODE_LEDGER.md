@@ -1584,15 +1584,20 @@ Vedi `PLAN_TASKS_REMAINING.md` per breakdown completo.
 - **Task ID**: 9
 - **Fix corretto**: vedi plan §Task 9 (GA-1..GA-5).
 
-### HC-F8-PENDING-10 — Wang EEZ Kronecker fallback — APERTA
+### HC-F8-PENDING-10 — Wang EEZ Kronecker fallback — CHIUSA 2026-06-13
 - **Task ID**: 10
-- **File da creare**: `src/algebra/factorization_wang_eez.cpp`, `factorization_kronecker.cpp`.
-- **Fix corretto**: vedi plan §Task 10 (WE-1..WE-5).
+- **File creati**: `src/algebra/factorization_wang_eez.cpp` (Hensel dispatcher + bad-prime rate counter), `src/algebra/factorization_kronecker.cpp` (Kronecker substitution n+1 evaluation, Knuth TAOCP §4.6.2).
+- **CASContext params**: `max_hensel_lift_attempts` (default 8U), `kronecker_max_degree` (default 8U) wired in `cas_context_params.hpp:194-207`. Used in `factorization_wang_eez.cpp:85, 173`.
+- **Test**: `test/unit/algebra/test_wang_eez_kronecker.cpp` — 6/6 PASS (HenselDispatcherNormalFactorization, HenselDispatcherFallbackToKronecker, HenselDispatcherBailoutOnLargeDegree, KroneckerFactorizationQuadratic, KroneckerFactorizationQuarticProductOfQuadratics, …).
+- **Commits**: `00a9f44` (WE-1 ctx params), `594f514`/`244ae0d` (dispatcher + Kronecker impl + tests).
 
-### HC-F8-PENDING-11 — Zippel sparse GCD — APERTA
+### HC-F8-PENDING-11 — Zippel sparse GCD — CHIUSA 2026-06-13
 - **Task ID**: 11
-- **Hardcode da rimuovere**: `polynomial_gcd_multivariate.cpp:741` "+8 campioni extra".
-- **Fix corretto**: vedi plan §Task 11 (ZP-1..ZP-5).
+- **Hardcode `+8` rimosso**: nessuna occorrenza `+8` in `polynomial_gcd_multivariate.cpp`.
+- **CASContext params**: `zippel_error_probability` (default 1e-6) wired in `cas_context_params.hpp:352-358`. Used at `polynomial_gcd_multivariate.cpp:138` (delta = ctx.zippel_error_probability()).
+- **File creato**: `src/algebra/polynomial_zippel_sparse.cpp` (Zippel 1979 sparse Newton interpolation).
+- **Test**: `test/unit/algebra/test_zippel_sparse_gcd.cpp` — 7/7 PASS.
+- **Commit**: `4264267` (ZP-3/4/5 density ratio + wiring + tests).
 
 ### HC-F8-PENDING-12 — Householder QR simbolico stabile — PARTIAL (2026-06-12)
 - **Task ID**: 12 — superseduto da HC-F8-QR-HOUSEHOLDER-BAILOUT (più granulare); il debito originale "MGS al posto di Householder" è ora chiuso, resta solo il bail-out simbolico.
