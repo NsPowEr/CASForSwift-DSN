@@ -103,7 +103,12 @@
 - **Fix corretto**: aggiungere `if (auto r = ctx.check_interrupt(); r.is_error()) return fail(r.error());`
   nei loop hot di ciascun algoritmo (lista sopra). Stima ~15-30 inserzioni, no behavior change.
 - **STATO**: PARZIALMENTE CHIUSO — covering simplify+substitute paths (F7.0-A3.3).
-  Algorithm hot loops a coverage completa deferiti a Fase 8 / pre-corpus F7.4 se necessario.
+  Aggiornato 2026-06-13/14: aggiunti poll-point a `matrix_bareiss` (outer pivot
+  loop), `polynomial_groebner_f4` (S-pair batch loop), `polynomial_modular`
+  (EDF outer while), `polynomial_groebner_fglm` (BFS frontier loop),
+  `factor_multivariate_hensel` (variable-lift outer loop). Loop ancora senza
+  copertura diretta: van Hoeij outer pass (signature lacks ctx), Cantor-
+  Zassenhaus inner recursion (covered transitively via outer).
 
 ### HC-F70-A31-MIGRATION-TODO — AstArena reset without root migration
 - **File**: `include/cas/ast.hpp` (AstArena::reset declaration), `src/ast/ast.cpp` (impl)

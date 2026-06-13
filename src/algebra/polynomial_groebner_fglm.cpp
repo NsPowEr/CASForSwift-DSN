@@ -482,6 +482,8 @@ Result<std::vector<PolyF4>> fglm_convert(
     // shape-lemma recovery then has no equation linking x to roots of the
     // pure-last polynomial).
     while (!lex_frontier.empty()) {
+        // HC-F70-A33: poll interrupt at FGLM BFS outer iteration.
+        if (ctx) { if (auto chk = ctx->check_interrupt(); chk.is_error()) return fail<std::vector<PolyF4>>(chk.error()); }
         Monomial t = *lex_frontier.begin();
         lex_frontier.erase(lex_frontier.begin());
 

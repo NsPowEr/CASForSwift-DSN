@@ -187,7 +187,6 @@ Result<std::vector<MPoly>> wang_multivariate_hensel(
     const std::vector<BigInt>& evaluation_point,
     const WangContext& wc,
     symbolic::CASContext& ctx) {
-    (void)ctx;
     const std::size_t r = univar_factors.size();
     const std::size_t n = wc.nvars();
     if (r == 0U) {
@@ -220,6 +219,8 @@ Result<std::vector<MPoly>> wang_multivariate_hensel(
 
     // Lift each remaining variable x_{vi} (vi = 1..n-1), one at a time.
     for (std::size_t vi = 1; vi < n; ++vi) {
+        // HC-F70-A33: poll interrupt at outer variable-lift iteration.
+        if (auto chk = ctx.check_interrupt(); chk.is_error()) return fail<std::vector<MPoly>>(chk.error());
         const BigInt a_vi = evaluation_point[vi - 1U];
         const unsigned int target_deg = mpoly_degree_in(a, vi);
 
