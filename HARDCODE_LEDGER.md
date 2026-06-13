@@ -137,28 +137,32 @@
 - **STATO**: PARZIALMENTE CHIUSO — confine documentato, search bound + tolerance
   configurabili (F7.0-A2.1). Completamento Rational-pure deferito a Fase 8 post-parità.
 
-### HPP-026 — integrate.cpp 1000 iteration limit
-- **File**: `src/calculus/integrate.cpp:172`
+### HPP-026 — integrate.cpp trig singularity scan k_bound cap — RISOLTA 2026-06-13
+- **File**: `src/calculus/integrate.cpp:136` (signature + caller @ line 210)
 - **Categoria CLAUDE.md**: Cat 1 (budget non configurabile)
-- **Descrizione**: Limite rigido di 1000 iterazioni per integrazione numerica/simbolica.
-- **Fix corretto**: Esporre `ctx.max_integration_steps()`.
-- **STATO**: APERTO
+- **Fix applicato**: aggiunto `ctx.integration_singularity_scan_max_k()` (default 1000) in `CASContextParams`. `trig_zero_in_interval` ora accetta `scan_max_k` come parametro, propagato dal caller via `ctx.integration_singularity_scan_max_k()`. Hardcode `1000U` rimosso.
+- **STATO**: ✅ RISOLTA
 
-
-### HPP-024 — fsolve kTolerance=1e-10 hardcoded
-- **File**: `src/algebra/fsolve.cpp:77`
+### HPP-024 — fsolve kTolerance=1e-10 hardcoded — RISOLTA 2026-06-13
+- **File**: `src/algebra/fsolve.cpp:90`
 - **Categoria CLAUDE.md**: Cat 1 (budget non configurabile)
-- **Descrizione**: Tolleranza di convergenza Newton-Raphson fissata a 1e-10.
-- **Fix corretto**: Esporre `ctx.fsolve_tolerance()` in `CASContextParams`.
-- **STATO**: APERTO
+- **Fix applicato**: aggiunto `ctx.fsolve_tolerance()` (double, default 1e-10) in `CASContextParams`. `constexpr double kTolerance = 1e-10` sostituito con `const double kTolerance = ctx.fsolve_tolerance()`.
+- **STATO**: ✅ RISOLTA
 
-### HPP-025 — matrix_ops score constants
-- **File**: `src/linalg/matrix_ops.cpp:242-255`
+### HPP-025 — matrix_ops score constants — RISOLTA (pre-esistente)
+- **File**: `src/linalg/matrix_ops.cpp` (oggi 167 LOC), `src/linalg/matrix_bareiss.cpp`
 - **Categoria CLAUDE.md**: Cat 2 (magic numbers)
-- **Descrizione**: Costanti 1000/500/400 per euristica pivot.
-- **Fix corretto**: Unificare euristica con `matrix_bareiss.cpp` via `PivotScore`.
-- **STATO**: APERTO
+- **Verifica 2026-06-13**: ricerca `grep -n "1000\|500\|400" matrix_ops.cpp` → zero match. `matrix_bareiss.cpp` usa `PivotScore::make_pivot_score(val, ctx)` strutturato (certainty/neg_total_degree). Ledger entry stale: euristica già unificata via `PivotScore` in qualche commit precedente non tracciato.
+- **STATO**: ✅ RISOLTA (stale entry chiusa)
 
+
+### HC-F8-SD3-VANHOEIJ-SLOW — VanHoeij SD3 Swinnerton-Dyer >400s
+- **File**: `test/unit/algebra/test_factorization_lll.cpp:551` (`VanHoeijFactorTest.AcceptanceGate_AG2_SwinnertonDyer_SD3_Irreducible`).
+- **Categoria CLAUDE.md**: nessuna (performance debt, non hardcode codice).
+- **Sintomo**: test hangs >400s su clean baseline (verificato 2026-06-13 via `git stash` + rerun) — quindi NON regressione di Phase A/B. SD3 esercita van Hoeij LLL su polinomio Swinnerton-Dyer di grado 9 (3 quadratiche irriducibili stack via field extension nesting).
+- **Fix corretto**: investigare costo LLL knapsack su densità SD3 specifica; possibile bound enumeration troppo largo, oppure profilo lattice mal-condizionato.
+- **Workaround applicato 2026-06-13**: aggiunto a `scripts/test_quick.sh` EXCLUDE list (linea 42). Test resta abilitato via `--slow` (cap 1800s) e nelle sessioni pre-commit.
+- **STATO**: APERTO (perf debt, non bloccante).
 
 ## Voci aperte
 

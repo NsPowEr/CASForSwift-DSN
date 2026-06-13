@@ -146,6 +146,8 @@ static std::vector<IntPoly> equal_degree_factorization(IntPoly f, std::size_t d,
     std::mt19937& rng = ctx ? ctx->rng() : local_rng;
     
     while (f.degree() > d) {
+        // HC-F70-A33: poll interrupt at outer EDF iteration.
+        if (ctx) { if (auto chk = ctx->check_interrupt(); chk.is_error()) return factors; }
         // Choose random a(x) with deg(a) < deg(f)
         IntPoly a;
         a.resize(f.degree());

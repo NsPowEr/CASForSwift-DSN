@@ -260,6 +260,8 @@ Result<std::vector<PolyF4>> f4_groebner(std::vector<PolyF4> G, MonomialOrder ord
     }
 
     while (!P.empty()) {
+        // HC-F70-A33: poll interrupt at outer S-pair batch iteration.
+        if (ctx) { if (auto chk = ctx->check_interrupt(); chk.is_error()) return fail<std::vector<PolyF4>>(chk.error()); }
         unsigned int min_deg = 0xFFFFFFFF;
         for (const auto& p : P) {
             unsigned int d = 0; for (unsigned int x : p.deg_lcm) d += x;

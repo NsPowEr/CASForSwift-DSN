@@ -26,6 +26,8 @@ Result<MatrixExpr> bareiss(const MatrixExpr& matrix, symbolic::CASContext& ctx) 
     ExprPtr prev_pivot = integer(ctx, 1);
 
     for (std::size_t c = 0; c < result.cols() && r < result.rows(); ++c) {
+        // HC-F70-A33: poll for external interrupt at outer pivot loop entry.
+        if (auto chk = ctx.check_interrupt(); chk.is_error()) return fail<MatrixExpr>(chk.error());
         std::size_t pivot_row = result.rows();
         std::optional<PivotScore> best_score;
 

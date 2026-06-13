@@ -87,7 +87,8 @@ Result<ExprPtr> fsolve(
     // exact Sturm-sequence root isolation (Sturm 1829). This counts the
     // number of distinct real roots in [low, high] exactly and refines
     // each using BigFloat Newton iteration at the requested tolerance (HPP-006).
-    constexpr double kTolerance = 1e-10;
+    // HPP-024: convergence tolerance now configurable via ctx.fsolve_tolerance().
+    const double kTolerance = ctx.fsolve_tolerance();
     {
         auto sturm_res = numeric::find_polynomial_roots_sturm_bigfloat(
             f, var.name, ctx, search_low, search_high, kTolerance, ctx.fsolve_tolerance_bits());

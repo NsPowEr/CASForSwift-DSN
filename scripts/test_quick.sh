@@ -39,6 +39,7 @@ EXCLUDE+=':VanHoeijDirect.Deg16_EightQuadratics_FindsRealFactor'
 EXCLUDE+=':FactorizationTowerNTest.SplitsX2Minus5_Over_Q_Sqrt2_Sqrt3_Sqrt5'
 EXCLUDE+=':PrimitiveElementTest.RedundantMixedTower_Sqrt2_Sqrt3_Sqrt5_Sqrt6'
 EXCLUDE+=':PrimitiveElementTest.DetectTowerNLevel_SqrtTwoSqrtThreeSqrtFive'
+EXCLUDE+=':VanHoeijFactorTest.AcceptanceGate_AG2_SwinnertonDyer_SD3_Irreducible'
 
 POSITIVE_FILTER=''
 CAP=600

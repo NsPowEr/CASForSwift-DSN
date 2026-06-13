@@ -625,6 +625,22 @@ struct CASContextParams {
         return fsolve_tolerance_bits_;
     }
 
+    // HPP-024: Newton/Sturm absolute convergence tolerance for fsolve.
+    void set_fsolve_tolerance(double tol) noexcept {
+        if (tol > 0.0) fsolve_tolerance_ = tol;
+    }
+    [[nodiscard]] double fsolve_tolerance() const noexcept {
+        return fsolve_tolerance_;
+    }
+
+    // HPP-026: max |k| range for trig singularity scan in definite integration.
+    void set_integration_singularity_scan_max_k(std::size_t k) noexcept {
+        integration_singularity_scan_max_k_ = k;
+    }
+    [[nodiscard]] std::size_t integration_singularity_scan_max_k() const noexcept {
+        return integration_singularity_scan_max_k_;
+    }
+
     // ── together() polynomial GCD content reduction (HC-F8-PENDING-20-RESIDUE) ──
     // See .APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Together_Polynomial_GCD_Reduction.md
     void set_together_gcd_enabled(bool enabled) noexcept {
@@ -715,6 +731,8 @@ protected:
     unsigned int  diff_field_max_visit_depth_{4096U};                // HPP-F75-AUDIT-CYCLE-GUARD-2
     int           mrv_growth_rank_max_depth_{1024};                  // HPP-F75-AUDIT-CYCLE-GUARD-3
     unsigned int  fsolve_tolerance_bits_{80U};                       // HPP-006 (Sturm fsolve tolerance)
+    double        fsolve_tolerance_{1e-10};                          // HPP-024 (Newton convergence tol)
+    std::size_t   integration_singularity_scan_max_k_{1000U};        // HPP-026 (trig zero scan)
     bool          together_gcd_enabled_{true};                       // HC-F8-PENDING-20-RESIDUE
     std::size_t   together_gcd_max_degree_{64U};                     // HC-F8-PENDING-20-RESIDUE perf guard
     std::size_t   together_gcd_max_symbols_{8U};                     // HC-F8-PENDING-20-RESIDUE perf guard

@@ -135,7 +135,8 @@ try_extract_linear(ExprPtr expr, const Symbol& var) {
 // We check integer k values covering the interval.
 [[nodiscard]] bool trig_zero_in_interval(
     BuiltinOp func, ExprPtr arg, const Symbol& var,
-    const Rational& a, const Rational& b) {
+    const Rational& a, const Rational& b,
+    std::size_t scan_max_k) {
     auto linear = try_extract_linear(arg, var);
     if (!linear || linear->first == Rational(BigInt(0))) return false;
     const Rational& c = linear->first;   // coefficient of var
@@ -165,7 +166,9 @@ try_extract_linear(ExprPtr expr, const Symbol& var) {
     // bound/3 + 2 as integer
     auto k_bound_bigint = bound_num.numerator() / bound_num.denominator() / BigInt(3) + BigInt(3);
     if (k_bound_bigint.bit_length() > 20) return false; // safety: don't scan huge range
-    const int64_t k_bound = k_bound_bigint.to_u64() > 1000U ? 1000 : (int64_t)k_bound_bigint.to_u64();
+    // HPP-026: cap configurable via ctx.integration_singularity_scan_max_k().
+    const std::size_t k_native = static_cast<std::size_t>(k_bound_bigint.to_u64());
+    const int64_t k_bound = static_cast<int64_t>(k_native > scan_max_k ? scan_max_k : k_native);
 
     // For each candidate k, compute tight bounds on the zero x using π ∈ (3, 22/7).
     // If both bounds are in [a,b], definitively in interval.
@@ -204,7 +207,8 @@ try_extract_linear(ExprPtr expr, const Symbol& var) {
     // FuncCall: sin, cos, sqrt
     if (const auto* fc = expr_cast<FuncCall>(denom); fc && fc->args.size() == 1U) {
         if (fc->func_id == BuiltinOp::Sin || fc->func_id == BuiltinOp::Cos)
-            return trig_zero_in_interval(fc->func_id, fc->args[0], var, a, b);
+            return trig_zero_in_interval(fc->func_id, fc->args[0], var, a, b,
+                                         ctx.integration_singularity_scan_max_k());
         if (fc->func_id == BuiltinOp::Sqrt) {
             // sqrt(f(x)) = 0 when f(x) = 0. Check if linear f has zero in [a,b].
             auto linear = try_extract_linear(fc->args[0], var);
