@@ -108,12 +108,14 @@ static IntPoly poly_pow_mod_poly(IntPoly base, BigInt exponent, const IntPoly& f
     return res;
 }
 
-std::vector<std::pair<IntPoly, std::size_t>> distinct_degree_factorization(IntPoly f, const BigInt& p) {
+std::vector<std::pair<IntPoly, std::size_t>> distinct_degree_factorization(IntPoly f, const BigInt& p, symbolic::CASContext* ctx) {
     std::vector<std::pair<IntPoly, std::size_t>> result;
     IntPoly x{std::vector<BigInt>{BigInt(0), BigInt(1)}};
     IntPoly w = x;
     std::size_t d = 1;
     while (f.degree() >= 2 * d) {
+        // HC-F70-A33: poll interrupt at outer DDF iteration (heavy w^p mod f).
+        if (ctx) { if (auto chk = ctx->check_interrupt(); chk.is_error()) return result; }
         // w = w^p mod f
         w = poly_pow_mod_poly(w, p, f, p);
         
@@ -213,7 +215,7 @@ Result<std::vector<IntPoly>> factor_polynomial_mod_p(IntPoly f, const BigInt& p,
     for (auto& c : f.coefficients()) c = mod_bigint(c * inv_lc, p);
     f.normalize([](const BigInt& v) { return v.is_zero(); });
 
-    auto ddf = distinct_degree_factorization(f, p);
+    auto ddf = distinct_degree_factorization(f, p, ctx);
     std::vector<IntPoly> all_factors;
     for (auto& [g, d] : ddf) {
         if (g.degree() == d) {
