@@ -102,13 +102,24 @@
   resta non-interruttibile.
 - **Fix corretto**: aggiungere `if (auto r = ctx.check_interrupt(); r.is_error()) return fail(r.error());`
   nei loop hot di ciascun algoritmo (lista sopra). Stima ~15-30 inserzioni, no behavior change.
-- **STATO**: PARZIALMENTE CHIUSO — covering simplify+substitute paths (F7.0-A3.3).
-  Aggiornato 2026-06-13/14: aggiunti poll-point a `matrix_bareiss` (outer pivot
-  loop), `polynomial_groebner_f4` (S-pair batch loop), `polynomial_modular`
-  (EDF outer while), `polynomial_groebner_fglm` (BFS frontier loop),
-  `factor_multivariate_hensel` (variable-lift outer loop). Loop ancora senza
-  copertura diretta: van Hoeij outer pass (signature lacks ctx), Cantor-
-  Zassenhaus inner recursion (covered transitively via outer).
+- **STATO**: CHIUSURA AVANZATA 2026-06-14 — covering simplify+substitute
+  paths (F7.0-A3.3) + poll-point diretti aggiunti in:
+  - `src/linalg/matrix_bareiss.cpp` (outer pivot column loop)
+  - `src/algebra/polynomial_groebner_f4.cpp` (S-pair batch while)
+  - `src/algebra/polynomial_modular.cpp:148` (equal_degree_factorization
+    outer while) + `:116` (distinct_degree_factorization outer while:
+    heavy w^p mod f exponentiation)
+  - `src/algebra/polynomial_groebner_fglm.cpp:484` (BFS frontier loop)
+  - `src/algebra/factor_multivariate_hensel.cpp:222` (variable-lift outer
+    for)
+  - `src/algebra/van_hoeij_factor.cpp:479` (LLL knapsack pass while);
+    signature esteso con optional `symbolic::CASContext* ctx = nullptr`,
+    propagato dal call-site Wang EEZ.
+
+  Residui: equal-degree factorization inner recursion (covered
+  transitively via outer while-loop poll); Smith normal form / Hermite
+  normal form ed alcuni loop pure-integer non ancora coperti — bassa
+  priorità (durata tipica < 1s su input osservati).
 
 ### HC-F70-A31-MIGRATION-TODO — AstArena reset without root migration
 - **File**: `include/cas/ast.hpp` (AstArena::reset declaration), `src/ast/ast.cpp` (impl)
