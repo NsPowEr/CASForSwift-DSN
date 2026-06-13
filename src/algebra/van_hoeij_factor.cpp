@@ -429,7 +429,8 @@ std::optional<IntPoly> van_hoeij_knapsack_factor(
     const std::vector<IntPoly>& modular_factors_in,
     const BigInt& pk,
     double delta_val,
-    std::size_t lll_threshold)
+    std::size_t lll_threshold,
+    symbolic::CASContext* ctx)
 {
     const std::size_t r = modular_factors_in.size();
     if (r == 0U || f.is_zero()) return std::nullopt;
@@ -476,6 +477,8 @@ std::optional<IntPoly> van_hoeij_knapsack_factor(
     std::size_t passes = 0U;
 
     while (passes < max_passes && t_cur <= t_max) {
+        // HC-F70-A33: poll interrupt at outer LLL-knapsack pass iteration.
+        if (ctx) { if (auto chk = ctx->check_interrupt(); chk.is_error()) return std::nullopt; }
         auto res = lll_knapsack_pass(f, factors, N, pk, t_cur, delta_val);
         if (res.has_value()) return res;
 

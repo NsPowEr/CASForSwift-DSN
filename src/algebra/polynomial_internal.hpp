@@ -267,7 +267,8 @@ void lll_reduction(LatticeMatrix& b, double delta = 0.75);
     const std::vector<IntPoly>& modular_factors,
     const BigInt& pk,
     double delta = 0.75,
-    std::size_t lll_threshold = 10U);
+    std::size_t lll_threshold = 10U,
+    symbolic::CASContext* ctx = nullptr);
 
 // Modular Factoring
 [[nodiscard]] Result<std::vector<IntPoly>> factor_polynomial_mod_p(IntPoly f, const BigInt& p, symbolic::CASContext* ctx = nullptr);

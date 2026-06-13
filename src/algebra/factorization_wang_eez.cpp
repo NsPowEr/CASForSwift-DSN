@@ -137,7 +137,7 @@ Result<std::vector<IntPoly>> factorize_univariate_hensel_or_kronecker(
         std::optional<IntPoly> found_factor;
         if (lifted.size() >= ctx.van_hoeij_threshold()) {
             found_factor = van_hoeij_knapsack_factor(
-                f, lifted, pk, ctx.lll_delta(), ctx.van_hoeij_lll_threshold());
+                f, lifted, pk, ctx.lll_delta(), ctx.van_hoeij_lll_threshold(), &ctx);
             if (!found_factor.has_value()) {
                 found_factor = find_factor_by_hensel_recombination(
                     f, mod_factors, p, k, f.degree() / 2U);
