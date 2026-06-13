@@ -1599,26 +1599,23 @@ Vedi `PLAN_TASKS_REMAINING.md` per breakdown completo.
 - **Test**: `test/unit/algebra/test_zippel_sparse_gcd.cpp` — 7/7 PASS.
 - **Commit**: `4264267` (ZP-3/4/5 density ratio + wiring + tests).
 
-### HC-F8-PENDING-12 — Householder QR simbolico stabile — PARTIAL (2026-06-12)
-- **Task ID**: 12 — superseduto da HC-F8-QR-HOUSEHOLDER-BAILOUT (più granulare); il debito originale "MGS al posto di Householder" è ora chiuso, resta solo il bail-out simbolico.
+### HC-F8-PENDING-12 — Householder QR simbolico stabile — ✅ CHIUSA (2026-06-13)
+- **Task ID**: 12 — superseduto da HC-F8-QR-HOUSEHOLDER-BAILOUT; il debito originale "MGS al posto di Householder" era già chiuso (rewrite razionalizzato 2026-06-12). Il sub-residuo di certificazione 2×2 è chiuso 2026-06-13 via riduzione GCD polinomiale in `together()` (vedi HC-F8-QR-HOUSEHOLDER-BAILOUT). Resta solo il perf-guard configurabile `symbolic_qr_max_norm_complexity` per N_x ad alta complessità — comportamento corretto, non debito.
 - **Stato**: `src/linalg/matrix_qr.cpp` è stato riscritto da MGS a **Householder razionalizzato** (commit della sessione 2026-06-12). Formulazione: H_k = I − (2/N_v)·v·v^T con v = x + α·e₁ espanso analiticamente in modo che gli aggiornamenti y_i = (y_i − A·x_i) − B·x_i·α producano A, B funzioni razionali pure di x e y. sqrt confinato ai numeratori (α = √N_x) e a R(k,k) = −α.
-- **Residuo aperto**: per matrici simboliche con N_x = Σ xᵢ² di total_degree > 0 e complessità > 2 (es. 3×3 con entries `(x, y, z)` generiche), il simplifier ancora non semplifica `sqrt(Σ xᵢ²)·sqrt(Σ xᵢ²) → Σ xᵢ²` quando l'argomento non è strutturalmente palese. Bail-out esplicito con `CASErrorKind::Unimplemented` + reason code in `matrix_qr.cpp:168-178`.
-- **Fix corretto residuo**: o (a) estendere il simplifier con regola di canonicalisation `sqrt(p)·sqrt(p) → p` quando `p ≥ 0` è dimostrabile via assumptions, oppure (b) costruire AlgebraicNumber tower che rappresenti `sqrt(Σ xᵢ²)` come elemento di un campo algebrico Q(α) con minimo polinomio α² − Σ xᵢ². Vedi spec `Householder_Symbolic_Stable.md` §HH-3.
-- **Vedi anche**: HC-F8-QR-HOUSEHOLDER-BAILOUT.
+- **Residuo aperto → ✅ CHIUSO (2026-06-13)**: la causa reale NON era il fold sqrt simplifier (vedi re-diagnosi in HC-F8-QR-HOUSEHOLDER-BAILOUT) ma la mancanza di riduzione GCD polinomiale in `together()`. Risolto a livello motore in `src/algebra/factorization_num_den.cpp`. La 2×2 default-sign certifica; la 3×3 generica `(x,y,z)` resta soggetta solo al perf-guard `symbolic_qr_max_norm_complexity` (configurabile, non gating).
+- **Vedi anche**: HC-F8-QR-HOUSEHOLDER-BAILOUT (chiusa 2026-06-13).
 
-### HC-F8-QR-HOUSEHOLDER-BAILOUT — Soglie complessità nel dispatcher Householder simbolico — PARTIAL (2026-06-12 update)
+### HC-F8-QR-HOUSEHOLDER-BAILOUT — Soglie complessità nel dispatcher Householder simbolico — ✅ CHIUSA (2026-06-13)
 - **Task ID**: 12 (sub-residuo).
 - **File**: `src/linalg/matrix_qr.cpp:159-181`.
 - **Categoria CLAUDE.md**: Categoria 2 (Costanti magiche in algoritmi algebrici) + Categoria 4 (Bail-out su tipo/dominio).
 - **Stato 2026-06-12**:
   1. ✅ Esposto `ctx.symbolic_qr_max_norm_complexity()` (default 2) in `include/cas/cas_context_params.hpp`.
   2. ✅ Bailout ora rispetta `ctx.assumptions().is_nonnegative(Nx)`: se l'utente dichiara positivi/non-negativi gli operandi della colonna, il bailout viene saltato e QR procede.
-  3. ⏳ Residuo aperto: anche con `is_nonnegative(Nx)`, il simplifier non riesce ancora a folding `sqrt(x²+y²)·sqrt(x²+y²) → x²+y²` (richiede regola branch-cut aware con assumptions). Il test `QRTest.SymbolicQR_DefaultSignConvention_2x2` ora arriva fino al `Q·R == A` certificate ma SKIPpa quando il match strutturale fallisce a causa del fold mancante.
-- **Fix corretto residuo**:
-  1. Estendere il simplifier con regola `sqrt(p)·sqrt(p) → p` quando `p ≥ 0` è derivabile via assumptions (estensione di `simplify_branch_cut.cpp`).
-  2. Confermare Q·R = A certificate sostituendo i `GTEST_SKIP` del test con `EXPECT_TRUE(entries_equal(...))`.
-- **Blocking dependency**: regola fold sqrt simplifier (HC-F8-PENDING-20 residue).
-- **Test di regressione**: `QRTest.SymbolicQR_DefaultSignConvention_2x2` (SKIPPED su match fold), `QRTest.HouseholderCertificator3x3_QtQ_Identity_And_QR_Eq_A` (PASS).
+- **Re-diagnosi 2026-06-13 (CAS_QR_DEBUG=1 instrumentation)**: l'ipotesi originale "fold `sqrt(p)·sqrt(p) → p` mancante" è risultata **FALSA**. Il trace empirico del delta `Q·R − A` per la 2×2 default-sign mostra che **nessun `sqrt` sopravvive** nel delta: il termine α² = N_x si annulla correttamente. Il vero blocker era in `together()`/`apart_num_den` (`src/algebra/factorization_num_den.cpp`): l'aggregazione Sum-of-fractions moltiplica i denominatori (`D₁·D₂`) senza ridurre per GCD polinomiale, lasciando forme equivalenti non unificate (es. `y⁴+x²y²` vs `(x²+y²)·y²`). Il delta era matematicamente 0 ma non collassava a `IntegerLit`.
+- **Fix applicato**: `together()` ora riduce la coppia (N, D) per `polynomial_gcd_multivariate` + `polynomial_exact_divide` sul main-var condiviso. Spec formale: `.APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Together_Polynomial_GCD_Reduction.md`. Gated da `ctx.together_gcd_enabled/max_degree/max_symbols`, fallback silenzioso (together resta totale).
+- **Cert confermato**: `QRTest.SymbolicQR_DefaultSignConvention_2x2` un-SKIPped → `EXPECT_TRUE(entries_equal(...))` PASS (1875 ms). Bailout euristico `symbolic_qr_max_norm_complexity` resta come perf-guard configurabile (non più causa di SKIP).
+- **Test di regressione**: `QRTest.*` (7/7 PASS), `TogetherGcdTest.*` (8/8 PASS), suite algebra+linalg+simplify mirata (260/260 PASS).
 
 ### HC-F8-PENDING-17 — Risch parametric solver df>0 — APERTA
 - **Task ID**: 17

@@ -1,13 +1,25 @@
 // factorization_num_den.cpp — split_num_den / apart_num_den / together helpers.
 // Extracted from factorization_polynomials.cpp (A1 anti-monolith split, F2 Block A).
+//
+// HC-F8-PENDING-20-RESIDUE (2026-06-13): `together()` now performs polynomial
+// GCD content reduction on the (N, D) pair returned by `apart_num_den` so that
+// equivalent denominator forms (e.g. y^4+x²·y² vs (x²+y²)·y²) are unified.
+// See .APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Together_Polynomial_GCD_Reduction.md
+// for the formal contract. Reduction is gated by CASContext params
+// `together_gcd_enabled` / `together_gcd_max_degree` / `together_gcd_max_symbols`
+// and falls back silently to the unreduced rational on any error path —
+// `together` remains total.
 
 #include "cas/algebra.hpp"
 #include "cas/ast_debug.hpp"
+#include "cas/ast_nodes.hpp"
 #include "cas/symbolic.hpp"
 #include "cas/rational.hpp"
 #include "algebra_internal.hpp"
 #include "polynomial_internal.hpp"
 #include <algorithm>
+#include <set>
+#include <string>
 #include <vector>
 
 namespace cas::algebra {
@@ -309,6 +321,90 @@ Result<RationalParts> split_num_den(ExprPtr expr, symbolic::CASContext& ctx) {
     return make_atomic_parts(expr, ctx);
 }
 
+// HC-F8-PENDING-20-RESIDUE: walk an ExprPtr and collect every Symbol name into
+// `out`. Used to drive `polynomial_exact_divide` (univariate-in-var) over the
+// shared indeterminate set of (N, D).
+static void collect_symbol_names(ExprPtr expr, std::set<std::string>& out) {
+    if (!expr) return;
+    if (const auto* s = expr_cast<Symbol>(expr)) {
+        out.insert(s->name);
+        return;
+    }
+    if (const auto* u = expr_cast<Unary>(expr)) {
+        collect_symbol_names(u->operand, out);
+        return;
+    }
+    if (const auto* b = expr_cast<Binary>(expr)) {
+        collect_symbol_names(b->left, out);
+        collect_symbol_names(b->right, out);
+        return;
+    }
+    if (const auto* sum = expr_cast<Sum>(expr)) {
+        for (ExprPtr t : sum->terms) collect_symbol_names(t, out);
+        return;
+    }
+    if (const auto* prod = expr_cast<Product>(expr)) {
+        for (ExprPtr f : prod->factors) collect_symbol_names(f, out);
+        return;
+    }
+    if (const auto* fc = expr_cast<FuncCall>(expr)) {
+        for (ExprPtr a : fc->args) collect_symbol_names(a, out);
+        return;
+    }
+}
+
+// HC-F8-PENDING-20-RESIDUE: reduce (N, D) by polynomial content GCD if the
+// engine can compute it. Returns the *unchanged* pair on any soft failure
+// (GCD unimplemented, exact-divide remainder non-zero, guard fired). Hard
+// errors are surfaced.
+struct ReducedRational {
+    ExprPtr numerator;
+    ExprPtr denominator;
+};
+static Result<ReducedRational> reduce_rational_by_gcd(
+    ExprPtr N, ExprPtr D, symbolic::CASContext& ctx)
+{
+    ReducedRational identity{N, D};
+    if (!ctx.together_gcd_enabled()) return ok(identity);
+    if (!N || !D) return ok(identity);
+    if (is_zero_expr(N) || is_one_expr(D) || is_one_expr(N)) return ok(identity);
+
+    // Guard: cap symbol count to avoid catastrophic GCD on wide expressions.
+    std::set<std::string> shared;
+    collect_symbol_names(N, shared);
+    std::set<std::string> dvars;
+    collect_symbol_names(D, dvars);
+    // Intersect → symbols common to both (potential cancellation indeterminates).
+    std::vector<std::string> common;
+    std::set_intersection(shared.begin(), shared.end(), dvars.begin(), dvars.end(),
+                          std::back_inserter(common));
+    if (common.empty()) return ok(identity);
+    if (common.size() > ctx.together_gcd_max_symbols()) return ok(identity);
+
+    // Compute the multivariate GCD; soft-fail to identity on any error.
+    auto g_res = polynomial_gcd_multivariate(N, D, ctx);
+    if (g_res.is_error()) return ok(identity);
+    ExprPtr g = g_res.value();
+    if (is_zero_expr(g) || is_one_expr(g)) return ok(identity);
+
+    // Pick the lexicographically-first shared symbol as the main variable for
+    // univariate exact-divide. Any var present in g works because g divides
+    // both N and D exactly; we deliberately choose deterministically.
+    Symbol main_var(common.front());
+
+    // Guard: skip reduction if degree in main_var blows up past the cap.
+    auto deg_g = polynomial_degree(g, main_var, ctx);
+    if (deg_g.is_error()) return ok(identity);
+    if (deg_g.value() > ctx.together_gcd_max_degree()) return ok(identity);
+
+    auto N_q = polynomial_exact_divide(N, g, main_var, ctx);
+    if (N_q.is_error()) return ok(identity);  // non-exact → fall back unreduced
+    auto D_q = polynomial_exact_divide(D, g, main_var, ctx);
+    if (D_q.is_error()) return ok(identity);
+
+    return ok(ReducedRational{N_q.value(), D_q.value()});
+}
+
 Result<ExprPtr> together(ExprPtr expr, symbolic::CASContext& ctx) {
     if (!expr) {
         return fail<ExprPtr>(make_error(CASErrorKind::InvalidArgument, "together richiede un'espressione non nulla"));
@@ -318,10 +414,21 @@ Result<ExprPtr> together(ExprPtr expr, symbolic::CASContext& ctx) {
     if (parts.is_error()) {
         return fail<ExprPtr>(parts.error());
     }
-    if (is_one_expr(parts.value().denominator)) {
-        return ok(parts.value().numerator);
+
+    ExprPtr N = parts.value().numerator;
+    ExprPtr D = parts.value().denominator;
+
+    // HC-F8-PENDING-20-RESIDUE: polynomial GCD content reduction on (N, D).
+    auto reduced = reduce_rational_by_gcd(N, D, ctx);
+    if (reduced.is_ok()) {
+        N = reduced.value().numerator;
+        D = reduced.value().denominator;
     }
-    return divide_exprs(parts.value().numerator, parts.value().denominator, ctx);
+
+    if (is_one_expr(D)) {
+        return ok(N);
+    }
+    return divide_exprs(N, D, ctx);
 }
 
 Result<RationalParts> apart_num_den(ExprPtr expr, symbolic::CASContext& ctx) {

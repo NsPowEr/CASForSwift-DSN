@@ -625,6 +625,26 @@ struct CASContextParams {
         return fsolve_tolerance_bits_;
     }
 
+    // ── together() polynomial GCD content reduction (HC-F8-PENDING-20-RESIDUE) ──
+    // See .APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Together_Polynomial_GCD_Reduction.md
+    void set_together_gcd_enabled(bool enabled) noexcept {
+        together_gcd_enabled_ = enabled;
+    }
+    [[nodiscard]] bool together_gcd_enabled() const noexcept {
+        return together_gcd_enabled_;
+    }
+    void set_together_gcd_max_degree(std::size_t deg) noexcept {
+        together_gcd_max_degree_ = deg;
+    }
+    [[nodiscard]] std::size_t together_gcd_max_degree() const noexcept {
+        return together_gcd_max_degree_;
+    }
+    void set_together_gcd_max_symbols(std::size_t n) noexcept {
+        together_gcd_max_symbols_ = n;
+    }
+    [[nodiscard]] std::size_t together_gcd_max_symbols() const noexcept {
+        return together_gcd_max_symbols_;
+    }
 
 
 protected:
@@ -695,6 +715,9 @@ protected:
     unsigned int  diff_field_max_visit_depth_{4096U};                // HPP-F75-AUDIT-CYCLE-GUARD-2
     int           mrv_growth_rank_max_depth_{1024};                  // HPP-F75-AUDIT-CYCLE-GUARD-3
     unsigned int  fsolve_tolerance_bits_{80U};                       // HPP-006 (Sturm fsolve tolerance)
+    bool          together_gcd_enabled_{true};                       // HC-F8-PENDING-20-RESIDUE
+    std::size_t   together_gcd_max_degree_{64U};                     // HC-F8-PENDING-20-RESIDUE perf guard
+    std::size_t   together_gcd_max_symbols_{8U};                     // HC-F8-PENDING-20-RESIDUE perf guard
 };
 
 }  // namespace cas::symbolic

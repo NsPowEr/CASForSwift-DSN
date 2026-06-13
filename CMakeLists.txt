@@ -709,6 +709,7 @@ test/unit/algebra/test_half_gcd.cpp
         test/unit/algebra/test_resultant.cpp
         test/unit/algebra/test_resultant_generic.cpp
         test/unit/algebra/test_algebra.cpp
+        test/unit/algebra/test_together_polynomial_gcd.cpp
         test/unit/algebra/test_root_of.cpp
         test/unit/algebra/test_groebner.cpp
         test/unit/algebra/test_groebner_f5_pruning_f3.cpp

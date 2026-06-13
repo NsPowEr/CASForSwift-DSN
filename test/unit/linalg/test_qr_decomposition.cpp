@@ -113,33 +113,14 @@ TEST_F(QRTest, SymbolicQR_DefaultSignConvention_2x2) {
     A(0, 0) = x; A(0, 1) = lit(1);
     A(1, 0) = y; A(1, 1) = lit(2);
 
-    // F8.0-6.2 / HC-F8-QR-HOUSEHOLDER-BAILOUT (2026-06-12, partial):
-    // The bailout now respects ctx.assumptions().is_nonnegative(Nx), so with
-    // assume_positive on x and y the QR pipeline proceeds. However the
-    // simplifier currently can't fold sqrt(x²+y²)·sqrt(x²+y²) → x²+y² without
-    // an explicit assumption on the *square root operand*; until that lands
-    // (HC-F8-PENDING-20 residue: sqrt(p)·sqrt(p) → p with p ≥ 0 via
-    // assumptions), the Q·R = A certification fails downstream. Keep SKIP
-    // for now with the updated diagnostic.
+    // HC-F8-QR-HOUSEHOLDER-BAILOUT / HC-F8-PENDING-20-RESIDUE (closed 2026-06-13):
+    // The Householder pipeline now produces a certifiable Q·R reconstruction
+    // because together() reduces (N, D) by polynomial GCD content (see
+    // .APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Together_Polynomial_GCD_Reduction.md).
     auto r = qr_decompose(A, ctx);
-    if (r.is_error()) {
-        GTEST_SKIP() << "Symbolic QR bailout still active: " << r.error().message;
-    }
+    ASSERT_TRUE(r.is_ok()) << "QR failed on symbolic default-sign 2x2";
     auto prod = multiply(r.value().Q, r.value().R, ctx);
-    if (prod.is_error()) {
-        GTEST_SKIP() << "Q·R multiplication failed downstream: " << prod.error().message;
-    }
-    bool all_match = true;
-    for (std::size_t i = 0; i < 2; ++i)
-        for (std::size_t j = 0; j < 2; ++j)
-            if (!entries_equal(prod.value()(i, j), A(i, j))) all_match = false;
-    if (!all_match) {
-        GTEST_SKIP() << "Q·R ≠ A: simplifier sqrt(p)·sqrt(p) fold pending "
-                     << "(HC-F8-PENDING-20 residue); QR result is mathematically "
-                     << "correct but not certifiable until the fold lands";
-    }
-    // From here the certificate genuinely holds — assert it.
-    ASSERT_TRUE(prod.is_ok());
+    ASSERT_TRUE(prod.is_ok()) << "Q·R multiplication failed downstream";
     for (std::size_t i = 0; i < 2; ++i)
         for (std::size_t j = 0; j < 2; ++j)
             EXPECT_TRUE(entries_equal(prod.value()(i, j), A(i, j)))
