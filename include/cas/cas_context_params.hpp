@@ -641,6 +641,24 @@ struct CASContextParams {
         return integration_singularity_scan_max_k_;
     }
 
+    // F4.K2 Kovacic Case 2 (Kovacic 1986 §3.2) — combinatorial cap on
+    // (e_c, e_∞) tuple search.  Default 1024.  Exceeded → Unimplemented.
+    void set_kovacic_case2_max_pole_combinations(std::size_t n) noexcept {
+        kovacic_case2_max_pole_combinations_ = n;
+    }
+    [[nodiscard]] std::size_t kovacic_case2_max_pole_combinations() const noexcept {
+        return kovacic_case2_max_pole_combinations_;
+    }
+
+    // F4.K2 Kovacic Case 2 — max degree d of polynomial P(x) searched at
+    // Step 6 of Kovacic 1986 §3.2.  Default 64.  Exceeded → Unimplemented.
+    void set_kovacic_case2_max_poly_degree(std::size_t d) noexcept {
+        kovacic_case2_max_poly_degree_ = d;
+    }
+    [[nodiscard]] std::size_t kovacic_case2_max_poly_degree() const noexcept {
+        return kovacic_case2_max_poly_degree_;
+    }
+
     // ── together() polynomial GCD content reduction (HC-F8-PENDING-20-RESIDUE) ──
     // See .APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Together_Polynomial_GCD_Reduction.md
     void set_together_gcd_enabled(bool enabled) noexcept {
@@ -733,6 +751,8 @@ protected:
     unsigned int  fsolve_tolerance_bits_{80U};                       // HPP-006 (Sturm fsolve tolerance)
     double        fsolve_tolerance_{1e-10};                          // HPP-024 (Newton convergence tol)
     std::size_t   integration_singularity_scan_max_k_{1000U};        // HPP-026 (trig zero scan)
+    std::size_t   kovacic_case2_max_pole_combinations_{1024U};       // F4.K2 (Kovacic 1986 §3.2)
+    std::size_t   kovacic_case2_max_poly_degree_{64U};               // F4.K2 (Kovacic 1986 §3.2)
     bool          together_gcd_enabled_{true};                       // HC-F8-PENDING-20-RESIDUE
     std::size_t   together_gcd_max_degree_{64U};                     // HC-F8-PENDING-20-RESIDUE perf guard
     std::size_t   together_gcd_max_symbols_{8U};                     // HC-F8-PENDING-20-RESIDUE perf guard
