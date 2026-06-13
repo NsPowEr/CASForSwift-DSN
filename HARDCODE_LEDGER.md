@@ -172,6 +172,23 @@
 - **STATO**: ✅ RISOLTA (stale entry chiusa)
 
 
+### HC-F8-F2GATE-BENCHMARK-FAIL — F2 exit-gate benchmark perf regression
+- **File**: `test/unit/algebra/test_f2_gate_benchmark.cpp:107`
+  (`F2GateBenchmark.FactorOneHundredRandomZxUnderBudget`).
+- **Categoria CLAUDE.md**: nessuna (performance debt, non hardcode codice).
+- **Sintomo**: factor 100 random Z[x] polynomials excede budget 30s
+  (osservato ~155s su clean baseline).  Pre-existing FAIL documentato in
+  `PLAN_TASKS_REMAINING.md:347` come "verified baseline... ignorare in
+  regression checks fino a fix dedicato".
+- **Fix corretto**: profilare collo di bottiglia (probabile van_hoeij su
+  random inputs di grado medio, oppure squarefree pre-pass) e portare il
+  totale sotto soglia.  Potenziale candidato: applicare Mignotte bound +
+  Hensel quadratic lifting precoce per ridurre LLL invocations.
+- **Workaround applicato 2026-06-14**: aggiunto a `scripts/test_quick.sh`
+  EXCLUDE list. Test resta abilitato via gtest_filter esplicito o tramite
+  invocazione dedicata di benchmark.
+- **STATO**: APERTO (perf debt, baseline pre-esistente, non bloccante).
+
 ### HC-F8-SD3-VANHOEIJ-SLOW — VanHoeij SD3 Swinnerton-Dyer >400s
 - **File**: `test/unit/algebra/test_factorization_lll.cpp:551` (`VanHoeijFactorTest.AcceptanceGate_AG2_SwinnertonDyer_SD3_Irreducible`).
 - **Categoria CLAUDE.md**: nessuna (performance debt, non hardcode codice).
