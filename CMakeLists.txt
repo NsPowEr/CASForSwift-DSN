@@ -195,6 +195,7 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/risch_parametric.cpp
     src/calculus/risch_de_extensions.cpp
     src/calculus/risch_rde_bronstein.cpp
+    src/calculus/risch_rde_bronstein_hermite.cpp
     src/calculus/risch_log_expand.cpp
     src/calculus/risch_exp_expand.cpp
     src/calculus/z_transform.cpp

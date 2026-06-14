@@ -1742,10 +1742,37 @@ Vedi `PLAN_TASKS_REMAINING.md` per breakdown completo.
 - **Cert confermato**: `QRTest.SymbolicQR_DefaultSignConvention_2x2` un-SKIPped → `EXPECT_TRUE(entries_equal(...))` PASS (1875 ms). Bailout euristico `symbolic_qr_max_norm_complexity` resta come perf-guard configurabile (non più causa di SKIP).
 - **Test di regressione**: `QRTest.*` (7/7 PASS), `TogetherGcdTest.*` (8/8 PASS), suite algebra+linalg+simplify mirata (260/260 PASS).
 
-### HC-F8-PENDING-17 — Risch parametric solver df>0 — APERTA
+### HC-F8-PENDING-17 — Risch parametric solver df>0 — SCAFFOLD (2026-06-14)
 - **Task ID**: 17
-- **File**: `src/calculus/risch_rde_bronstein.cpp` `solve_risch_de_parametric_field`.
-- **Fix corretto**: vedi plan §Task 17 (RP-1..RP-4).
+- **File**: `src/calculus/risch_rde_bronstein.cpp`
+  (`solve_risch_de_parametric_field` existing trial-constant path),
+  `src/calculus/risch_rde_bronstein_hermite.cpp` (NEW — scaffold entry
+  point for RP-2 Hermite parametric reduction).
+- **Categoria CLAUDE.md**: Cat 8 (algoritmo non implementato; diagnostic
+  esplicito invece di silent dispatch).
+- **Stato**: scaffold-only (commit 2026-06-14).
+  `risch_rde_hermite_parametric_stub(ctx)` ritorna sempre
+  `Unimplemented("Risch RDE parametric Hermite reduction (RP-2) not yet
+  implemented...")` con riferimento esplicito a HC-F8-PENDING-17 +
+  spec `.APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Risch_Transcendental_Cap8.md`.
+  Lo scaffold NON è ancora wirato in `solve_risch_de_parametric_field`
+  per evitare regressioni sul path trial-constant attuale; wiring
+  scheduled in RP-3 sub-step quando RP-2 algoritmico landa.
+- **Fix corretto**: implementare RP-1..RP-3 di PLAN_NEXT_SESSIONS.md §3.1:
+  - RP-1: Bound grado esplicito Bronstein 6.5 PolyRischDE;
+  - RP-2: Hermite reduction parametrica (risoluzione coefficienti via
+    sistemi lineari parametrici su base algebrica del campo costanti);
+  - RP-3: Wiring + corpus Bronstein cap 6-8 (coverage 0% → ≥60%).
+- **Effort**: T3-Opus ~2-3 wk impl + 1 wk test corpus.
+- **Acceptance**: ≥20 nuovi PASS sul corpus Bronstein integrate, chiusura
+  ledger `HC-F75-B-TRIAL-CONSTANTS` (rimozione `{±1, ±1/2, ±2}` trial
+  ansatz in `risch_rde_bronstein.cpp`).
+- **Dipendenze prerequisite chiuse**:
+  - F5.4 RootOf isolating-bound (commit `fce977a`)
+  - `solve_risch_de_field` esistente in `risch_rde_bronstein.cpp`
+  - ctx param `max_risch_rational_ansatz_degree` (default 32) esistente
+- **STATO**: SCAFFOLD (Unimplemented esplicito + entry point reservato,
+  NON silent wrong-answer).
 
 ### HC-F8-PENDING-20 — Branch-cut propagation completo — PARTIAL
 - **Task ID**: 20 — sqrt(x²) gating CHIUSO in commit `3ff0840`.
