@@ -189,6 +189,24 @@
   invocazione dedicata di benchmark.
 - **STATO**: APERTO (perf debt, baseline pre-esistente, non bloccante).
 
+### HC-F8-FACTORIZATIONTOWER-AntiHardcode-X2Minus2-Sqrt3Sqrt5 — Hang >500s
+- **File**: `test/unit/algebra/test_factorization_tower.cpp`
+  (`FactorizationTowerTest.AntiHardcodeIrreducibleX2Minus2OverQSqrt3Sqrt5`).
+- **Categoria CLAUDE.md**: nessuna (performance debt, non hardcode codice).
+- **Sintomo**: test hangs >500s su clean baseline 5c72bc0 (verificato
+  2026-06-14 via `git checkout 5c72bc0 -- src/ include/` + rerun + 500s
+  timeout exit 124).  Pre-existing perf debt, NON regressione introdotta
+  da Phase A/B interrupt-poll work.
+- **Algoritmo coinvolto**: factor di `x²-2` over `Q(√3,√5)` torre Trager
+  2-level. Path passa attraverso primitive element + factor_polynomial_tower.
+- **Fix corretto**: profilare Trager shift loop; possibile shift-bound
+  troppo largo o resultant computation in Q(θ)[x] esplosivo per minimal
+  poly degree 4.
+- **Workaround applicato 2026-06-14**: aggiunto a `scripts/test_quick.sh`
+  EXCLUDE list. Test resta abilitato via `--slow` cap 1800s o via
+  invocazione esplicita.
+- **STATO**: APERTO (perf debt, baseline pre-esistente, non bloccante).
+
 ### HC-F8-SD3-VANHOEIJ-SLOW — VanHoeij SD3 Swinnerton-Dyer >400s
 - **File**: `test/unit/algebra/test_factorization_lll.cpp:551` (`VanHoeijFactorTest.AcceptanceGate_AG2_SwinnertonDyer_SD3_Irreducible`).
 - **Categoria CLAUDE.md**: nessuna (performance debt, non hardcode codice).
