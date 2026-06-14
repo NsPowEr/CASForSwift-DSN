@@ -228,6 +228,7 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/ode_solver_1st_order.cpp
     src/calculus/ode_solver_advanced.cpp
     src/calculus/ode_kovacic_case1.cpp
+    src/calculus/ode_kovacic_case2.cpp
     src/calculus/ode_kovacic_laurent.cpp
     src/calculus/ode_kovacic.cpp
     src/calculus/ode_solver_frobenius.cpp

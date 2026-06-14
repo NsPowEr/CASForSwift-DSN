@@ -33,6 +33,19 @@ struct OmegaPair {
 [[nodiscard]] Result<OmegaPair> case1_omega(
     ExprPtr r, const Symbol& x, symbolic::CASContext& ctx);
 
+// F4.K2 — Kovacic Case 2 (dihedral D∞ subgroup) — SCAFFOLD ONLY.
+// Algorithm body NOT YET implemented; returns Unimplemented with explicit
+// diagnostic referencing HC-KV-03 ledger and Kovacic_Case2.md spec.
+//
+// Entry point reserved so solve_ode_kovacic can route through Case 2
+// before final dispatch.  No algorithmic computation performed; no
+// silent wrong-answer possible.  See:
+//   - Kovacic 1986 §3.2
+//   - .APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Kovacic_Case2.md
+//   - HARDCODE_LEDGER.md HC-KV-03
+[[nodiscard]] Result<OmegaPair> case2_omega(
+    ExprPtr r, const Symbol& x, symbolic::CASContext& ctx);
+
 // Arithmetic short-hands used by both translation units.
 [[nodiscard]] inline ExprPtr kv_int(AstArena& a, long long v) {
     return a.make<IntegerLit>(BigInt(v));

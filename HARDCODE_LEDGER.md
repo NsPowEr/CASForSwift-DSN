@@ -172,6 +172,40 @@
 - **STATO**: ✅ RISOLTA (stale entry chiusa)
 
 
+### HC-KV-03 — Kovacic Case 2 (dihedral D∞) — SCAFFOLD ONLY (2026-06-14)
+- **File**: `src/calculus/ode_kovacic_case2.cpp` (entry point scaffold),
+  `src/calculus/ode_kovacic.cpp` (dispatcher routes Case 1 failure
+  through `case2_omega`), `src/calculus/ode_kovacic_internal.hpp`
+  (forward decl).
+- **Categoria CLAUDE.md**: Cat 8 (algoritmo non implementato; diagnostic
+  esplicito invece di silent dispatch).
+- **Stato**: scaffold-only. `case2_omega` ritorna sempre
+  `Unimplemented("Kovacic Case 2 not yet implemented...")` con riferimento
+  esplicito a HC-KV-03 + spec
+  `.APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Kovacic_Case2.md`.
+- **Fix corretto**: implementare Steps 1-7 di Kovacic 1986 §3.2:
+  - Step 1: condizioni necessarie su ordini poli (verifica formula
+    esatta contro paper);
+  - Step 2-3: costruzione E_c e E_∞;
+  - Step 4: enumerazione combinatoria (e_c, e_∞) con
+    `ctx.kovacic_case2_max_pole_combinations` cap;
+  - Step 5: costruzione θ = (1/2)·Σ e_c/(x-c);
+  - Step 6: ricerca P monico grado d soddisfacente
+    `P'' + 3θP' + (3θ² + 3θ' - 4r)P = 0` (verifica formula contro paper)
+    via `csolve` su sistema lineare in (a_{d-1}, ..., a_0);
+  - Step 7: ω da quadratica `ω² - φω + (1/2)·(φ' + φ² - 2r) = 0`
+    con φ = 2θ + P'/P.
+- **Effort**: T2-Sonnet ~5-7 gg impl + 2 gg test corpus.
+- **Acceptance**: ≥4 unit test PASS (Bessel half-int, rejection Airy,
+  Mathieu, certificate algebrico `y₁'' - r·y₁ ≡ 0`).
+- **Dipendenze prerequisite chiuse**:
+  - F5.4 `RootOf` isolating-bound (commit `fce977a`)
+  - `compute_r` / `case1_omega` esistenti
+  - `compute_taylor_rational` / `compute_laurent_sqrt` esistenti
+  - ctx params `kovacic_case2_max_pole_combinations`,
+    `kovacic_case2_max_poly_degree` (commit `c6ee9e5`)
+- **STATO**: SCAFFOLD (Unimplemented esplicito, NON silent wrong-answer).
+
 ### HC-F8-F2GATE-BENCHMARK-FAIL — F2 exit-gate benchmark perf regression
 - **File**: `test/unit/algebra/test_f2_gate_benchmark.cpp:107`
   (`F2GateBenchmark.FactorOneHundredRandomZxUnderBudget`).

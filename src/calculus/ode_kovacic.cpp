@@ -102,7 +102,21 @@ using namespace kovacic_impl;
 
     // Step 2: Case 1 — find rational ω₊, ω₋.
     auto omega_res = case1_omega(r_res.value(), x, ctx);
-    if (omega_res.is_error()) return fail<ExprPtr>(omega_res.error());
+    if (omega_res.is_error()) {
+        // Case 1 failed — route through Case 2 (dihedral D∞ subgroup).
+        // Currently SCAFFOLD: case2_omega returns Unimplemented with
+        // explicit diagnostic (see ode_kovacic_case2.cpp, HC-KV-03).
+        // When Case 2 implementation lands, this branch will return
+        // its OmegaPair on success and continue to the downstream
+        // back-transform pipeline.  On Case 2 failure the original
+        // Case 1 error is surfaced (preserves the most-specific
+        // diagnostic for users running on Case-1-friendly inputs).
+        auto case2_res = case2_omega(r_res.value(), x, ctx);
+        if (case2_res.is_error()) {
+            return fail<ExprPtr>(omega_res.error());
+        }
+        omega_res = case2_res;
+    }
 
     ExprPtr op = omega_res.value().plus;
     ExprPtr om = omega_res.value().minus;
