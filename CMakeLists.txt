@@ -230,6 +230,10 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/ode_solver_advanced.cpp
     src/calculus/ode_kovacic_case1.cpp
     src/calculus/ode_kovacic_case2.cpp
+    src/calculus/ode_kovacic_case2_helpers.cpp
+    src/calculus/ode_kovacic_case3.cpp
+    src/calculus/ode_kovacic_case3_helpers.cpp
+    src/calculus/ode_kovacic_pf_helpers.cpp
     src/calculus/ode_kovacic_laurent.cpp
     src/calculus/ode_kovacic.cpp
     src/calculus/ode_solver_frobenius.cpp
@@ -312,6 +316,7 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/polynomial_gcd_multivariate.cpp
     src/algebra/algebraic_equal.cpp
     src/algebra/algebraic_equal_cyclotomic.cpp
+    src/algebra/algebraic_equal_weierstrass.cpp
     src/algebra/hyperbolic_normalize.cpp
     src/algebra/polynomial_integer.cpp
     src/algebra/polynomial_conversions.cpp
@@ -774,6 +779,9 @@ test/unit/algebra/test_half_gcd.cpp
         test/unit/test_supreme.cpp
         test/unit/test_hpprime_acid.cpp
         test/unit/test_ode.cpp
+        test/unit/calculus/test_ode_kovacic_case2.cpp
+        test/unit/calculus/test_ode_kovacic_case3.cpp
+        test/unit/calculus/test_integrate_inverse_trig.cpp
         test/unit/test_ode_critical.cpp
         test/unit/test_ode_class_f5.cpp
         test/unit/test_ode_solv_f5.cpp

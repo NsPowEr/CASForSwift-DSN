@@ -56,8 +56,23 @@ namespace cas::golden {
     auto ms = ctx.simplify(d_max.value());
     if (!ms.is_ok()) return ok(false);
     auto eq = cas::symbolic::mathematically_equal(cs.value(), ms.value(), ctx);
-    if (!eq.is_ok()) return ok(false);
-    return ok(eq.value());
+    if (eq.is_ok() && eq.value()) return ok(true);
+    // Fallback: simplify(d_cas - d_max) → 0 catches cases where the two
+    // derivative forms are mathematically equal but the canonicaliser does
+    // not bring them to a common shape (e.g. Weierstrass-collapsible trig
+    // rationals like `2(cos+1)/(sin+cos+1)^2` vs `1/(1+sin)`).
+    {
+        cas::ExprPtr diff = ctx.arena().make<cas::Binary>(
+            cas::BinaryOp::Sub, cs.value(), ms.value());
+        auto ds = ctx.simplify(diff);
+        if (ds.is_ok()) {
+            if (const auto* il = cas::expr_cast<cas::IntegerLit>(ds.value())) {
+                if (il->value.is_zero()) return ok(true);
+            }
+        }
+    }
+    if (eq.is_ok()) return ok(eq.value());
+    return ok(false);
 }
 
 }  // namespace cas::golden

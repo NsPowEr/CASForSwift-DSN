@@ -12,6 +12,9 @@
 
 namespace cas::symbolic {
 
+// Implemented in algebraic_equal_weierstrass.cpp.
+[[nodiscard]] bool weierstrass_zero_diff(ExprPtr diff_expr, CASContext& ctx);
+
 Result<bool> mathematically_equal(ExprPtr lhs, ExprPtr rhs, CASContext& context) {
     const bool owns_operation = !context.operation_active_;
     if (owns_operation) {
@@ -92,6 +95,15 @@ Result<bool> mathematically_equal(ExprPtr lhs, ExprPtr rhs, CASContext& context)
             finalize();
             return ok(true);
         }
+    }
+
+    // F7.5 Weierstrass equivalence: when diff depends only on sin/cos of a
+    // single var, substitute t = tan(v/2) and check if numerator collapses
+    // to 0 as rational(t). Catches `1/(1+sin x)` vs `sin/(cos+1)+1` forms
+    // and the wider trig-rational family the linear simplifier can't unify.
+    if (weierstrass_zero_diff(diff_expr, context)) {
+        finalize();
+        return ok(true);
     }
 
     auto lhs_parts = algebra::split_num_den(lhs_s.value(), context);
