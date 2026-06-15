@@ -293,7 +293,14 @@ Result<ExprPtr> integrate_rational_lrt(ExprPtr P_expr, ExprPtr Q_expr, const Sym
     
     PolyExpr P = P_poly_res.value();
     PolyExpr Q = Q_poly_res.value();
-    
+
+    // Short-circuit: 0/Q integrates to 0. Without this guard, the resultant
+    // Res(Q, P - z·Q') reduces to ±z·Res(Q, Q')^… ≠ 0, factors give a non-
+    // empty root set, and rioboo_conversion emits a spurious log(Q) term.
+    // (Hermite reduction frequently leaves remaining_P = 0 after fully
+    //  absorbing the integrand into the rational part — e.g. ∫2/(t+1)² dt.)
+    if (is_zero_poly(P)) return ok(make_integer(ctx.arena(), 0));
+
     auto Q_prime_res = poly_derivative_lrt(Q, ctx);
     if (Q_prime_res.is_error()) return fail<ExprPtr>(Q_prime_res.error());
     PolyExpr Q_prime = Q_prime_res.value();

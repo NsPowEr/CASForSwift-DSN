@@ -73,7 +73,11 @@ Result<ExprPtr> Parser::parse_expr(int min_precedence) {
 
 Result<ExprPtr> Parser::parse_prefix() {
     if (match(TokenKind::Minus)) {
-        auto operand = parse_expr(40);
+        // Unary minus binds looser than `^` (precedence 30) so that `-x^2`
+        // parses as `-(x^2)`, matching standard math / Maxima / Python
+        // conventions. Min-prec 25 lets the operand absorb `^` (30) while
+        // still rejecting `*` (20) so `-2*x` stays `(-2)*x`.
+        auto operand = parse_expr(25);
         if (operand.is_error()) {
             return operand;
         }
