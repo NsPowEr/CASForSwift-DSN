@@ -1,4 +1,5 @@
 #include "integrate_engine.hpp"
+#include "cas/algebra.hpp"
 
 #include <string>
 #include <utility>
@@ -234,11 +235,20 @@ Result<ExprPtr> Integrator::integrate_function(const FuncCall& call, const Symbo
                         std::vector<ExprPtr>{argument});
                     ExprPtr delta = arena_.make<Binary>(BinaryOp::Sub,
                         D_res.value(), orig);
+                    auto check_zero_e = [&](ExprPtr e) {
+                        return expr_is<IntegerLit>(e)
+                            && expr_ref<IntegerLit>(e).value.is_zero();
+                    };
                     auto delta_simp = context_.simplify(delta);
-                    bool ok_zero = delta_simp.is_ok()
-                        && expr_is<IntegerLit>(delta_simp.value())
-                        && expr_ref<IntegerLit>(delta_simp.value()).value.is_zero();
-                    if (ok_zero) return ok(candidate);
+                    if (delta_simp.is_ok() && check_zero_e(delta_simp.value()))
+                        return ok(candidate);
+                    // Fallback: combine fractions then re-simplify; covers the
+                    // common log(p(x)) IBP shape where the delta is a sum of
+                    // rational terms whose numerator collapses to zero but the
+                    // canonicaliser does not group them automatically.
+                    if (auto tg = algebra::together(delta, context_); tg.is_ok())
+                        if (auto ts = context_.simplify(tg.value()); ts.is_ok())
+                            if (check_zero_e(ts.value())) return ok(candidate);
                 }
             }
         }
