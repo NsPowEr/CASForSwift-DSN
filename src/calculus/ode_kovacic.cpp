@@ -103,19 +103,26 @@ using namespace kovacic_impl;
     // Step 2: Case 1 — find rational ω₊, ω₋.
     auto omega_res = case1_omega(r_res.value(), x, ctx);
     if (omega_res.is_error()) {
+        CASError case1_err = omega_res.error();
         // Case 1 failed — route through Case 2 (dihedral D∞ subgroup).
-        // Currently SCAFFOLD: case2_omega returns Unimplemented with
-        // explicit diagnostic (see ode_kovacic_case2.cpp, HC-KV-03).
-        // When Case 2 implementation lands, this branch will return
-        // its OmegaPair on success and continue to the downstream
-        // back-transform pipeline.  On Case 2 failure the original
-        // Case 1 error is surfaced (preserves the most-specific
-        // diagnostic for users running on Case-1-friendly inputs).
+        // case2_omega implements Kovacic 1986 §4 Steps 1-4 with Riccati
+        // algebraic certificate (HC-KV-03 CHIUSO).
         auto case2_res = case2_omega(r_res.value(), x, ctx);
-        if (case2_res.is_error()) {
-            return fail<ExprPtr>(omega_res.error());
+        if (case2_res.is_ok()) {
+            omega_res = case2_res;
+        } else {
+            // Case 2 failed too — try Case 3 (SL(2,C) finite subgroups).
+            // case3_omega implements Kovacic 1986 §5 with n ∈ {4, 6, 12}.
+            auto case3_res = case3_omega(r_res.value(), x, ctx);
+            if (case3_res.is_error()) {
+                // Surface original Case 1 diagnostic — most specific for
+                // Case-1-friendly inputs.  Case 2/3 errors are also
+                // Unimplemented per spec; preserving Case 1 message helps
+                // typical users debug.
+                return fail<ExprPtr>(case1_err);
+            }
+            omega_res = case3_res;
         }
-        omega_res = case2_res;
     }
 
     ExprPtr op = omega_res.value().plus;

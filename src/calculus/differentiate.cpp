@@ -404,6 +404,30 @@ private:
                         CASErrorKind::Unimplemented,
                         "Differentiation of abs requires a nonzero assumption on the direct symbolic argument"));
                 }
+            } else if (call.name == "asinh" || call.name == "arcsinh") {
+                // F7.5.B1: d/dx asinh(x) = 1/√(x² + 1).
+                outer = make_binary(arena_, BinaryOp::Div, make_integer(arena_, 1),
+                    make_function(arena_, "sqrt",
+                        {make_sum(arena_, {
+                            make_power(arena_, argument, make_integer(arena_, 2)),
+                            make_integer(arena_, 1)})}));
+            } else if (call.name == "acosh" || call.name == "arccosh") {
+                // F7.5.B1: d/dx acosh(x) = 1/√(x² − 1).
+                outer = make_binary(arena_, BinaryOp::Div, make_integer(arena_, 1),
+                    make_function(arena_, "sqrt",
+                        {make_sum(arena_, {
+                            make_power(arena_, argument, make_integer(arena_, 2)),
+                            make_integer(arena_, -1)})}));
+            } else if (call.name == "atanh" || call.name == "arctanh"
+                       || call.name == "acoth" || call.name == "arccoth") {
+                // F7.5.B1: d/dx atanh(x) = d/dx acoth(x) = 1/(1 − x²).
+                // Distinct domains (|x|<1 vs |x|>1) share the same formal
+                // derivative.
+                outer = make_binary(arena_, BinaryOp::Div, make_integer(arena_, 1),
+                    make_sum(arena_, {
+                        make_integer(arena_, 1),
+                        make_unary(arena_, UnaryOp::Neg,
+                            make_power(arena_, argument, make_integer(arena_, 2)))}));
             } else {
                 return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Differentiation is not implemented for function '" + call.name + "'"));
             }

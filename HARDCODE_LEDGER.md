@@ -172,17 +172,41 @@
 - **STATO**: ✅ RISOLTA (stale entry chiusa)
 
 
-### HC-KV-03 — Kovacic Case 2 (dihedral D∞) — SCAFFOLD ONLY (2026-06-14)
-- **File**: `src/calculus/ode_kovacic_case2.cpp` (entry point scaffold),
+### HC-KV-03 — Kovacic Case 2 (dihedral D∞) + Case 3 (SL(2,C) finite) — CHIUSO (2026-06-14)
+- **File**: `src/calculus/ode_kovacic_case2.cpp` (Steps 1-2 + dispatcher),
+  `src/calculus/ode_kovacic_case2_helpers.cpp` (Step 3 polynomial search +
+  Step 4 ω quadratic + Riccati certificate),
   `src/calculus/ode_kovacic.cpp` (dispatcher routes Case 1 failure
-  through `case2_omega`), `src/calculus/ode_kovacic_internal.hpp`
-  (forward decl).
-- **Categoria CLAUDE.md**: Cat 8 (algoritmo non implementato; diagnostic
-  esplicito invece di silent dispatch).
-- **Stato**: scaffold-only. `case2_omega` ritorna sempre
-  `Unimplemented("Kovacic Case 2 not yet implemented...")` con riferimento
-  esplicito a HC-KV-03 + spec
-  `.APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Kovacic_Case2.md`.
+  through `case2_omega`),
+  `src/calculus/ode_kovacic_internal.hpp` (forward decl),
+  `test/unit/calculus/test_ode_kovacic_case2.cpp` (C2-1/3/4/5 corpus).
+- **Categoria CLAUDE.md**: Cat 8 (algoritmo non implementato — RISOLTO).
+- **Stato CHIUSO**: implementazione completa Kovacic §4.1 Steps 1-4
+  (E_c finite + E_∞, family enumeration con cap CASContext, θ build,
+  polynomial P via csolve linear system, ω quadratic via discriminant
+  4r-φ²-2φ').  Riccati algebraic certificate ω' + ω² ≡ r verificato
+  per ω± a x ∈ {1,4,9} prima del return ok().
+- **Test verde**: 4/4 C2 PASS (C2-1 Example 1 paper p.19 with Riccati
+  multi-point identity, C2-3 Bessel n=3 → Unimplemented, C2-4 Airy →
+  Unimplemented, C2-5 Riccati multipoint certificate); 24/24 ODE
+  regression intatti.
+- **Note debt** (2026-06-14, RISOLTO 2026-06-15): certificate
+  point-based originale era HARDCODE-OF-PASSAGE (HC-KV-04); ora
+  simplifier estesa con sqrt(c·x^n) reduction → certificate two-tier
+  symbolic-first, fallback multi-point conservato come safety.
+
+- **Case 3 (Kovacic 1986 §5)** implementato in
+  `src/calculus/ode_kovacic_case3.cpp` (Steps 1-2 + dispatcher),
+  `src/calculus/ode_kovacic_case3_helpers.cpp` (Step 3 P-recurrence +
+  Step 4 minimal polynomial of ω), refactor PF helpers condivisi in
+  `src/calculus/ode_kovacic_pf_helpers.{hpp,cpp}`,
+  `test/unit/calculus/test_ode_kovacic_case3.cpp` (C3 corpus).
+  ω algebrico ritornato come `RootOf(minpoly, ω_var)`.  Necessary
+  conditions §2 (poli ≤ 2, ord(r,∞) ≥ 2) enforced upstream con
+  diagnostic Unimplemented esplicito.  Scope corrente n ∈ {4, 6}
+  (tetrahedral/octahedral); n=12 (icosahedral A₅) debt aperto sotto
+  HC-KV-06.  Test verde: 3/3 PASS + 1 SKIP (struttura su success
+  branch — gated da HC-KV-06).  31/31 ODE+C2+C3 regression intatti.
 - **Fix corretto**: implementare Steps 1-7 di Kovacic 1986 §3.2:
   - Step 1: condizioni necessarie su ordini poli (verifica formula
     esatta contro paper);
@@ -204,7 +228,87 @@
   - `compute_taylor_rational` / `compute_laurent_sqrt` esistenti
   - ctx params `kovacic_case2_max_pole_combinations`,
     `kovacic_case2_max_poly_degree` (commit `c6ee9e5`)
-- **STATO**: SCAFFOLD (Unimplemented esplicito, NON silent wrong-answer).
+- **STATO**: ✅ CHIUSO 2026-06-14.
+
+### HC-KV-04 — Kovacic Case 2 certificate sample points + sqrt(c/x) simplifier (2026-06-14, CHIUSO 2026-06-15)
+- **File**: `src/calculus/ode_kovacic_case2_helpers.cpp`
+  (`build_omega_from_phi_case2` certificate block),
+  `src/symbolic/simplify_exp_log.cpp` (sqrt rules),
+  `src/symbolic/simplify_arithmetic_power.cpp` (Pow rules).
+- **Categoria CLAUDE.md**: Cat 3 (originale: set fisso `{1, 4, 9}`).
+- **Fix applicato**: estensione simplifier:
+  - `sqrt(Pow(a, b))` con `a` non-literal e `b ∈ Q` → `Pow(a, b/2)` (legacy mode).
+  - `sqrt(N/D)` → `sqrt(N)/sqrt(D)` (legacy mode).
+  - `sqrt(c · Pow(x, n))` con `c ≥ 0`, `x` non-literal → `sqrt(c) · Pow(x, n/2)`.
+  - `Pow(x, p/2)` con `p` odd integer → `sqrt(x)^p` (canonical reciprocal handling).
+  - `Pow(sqrt(A), n)` per `n < 0` → `1 / Pow(sqrt(A), |n|)` (reciprocal).
+  Certificate ora two-tier: symbolic Riccati check; fallback multi-point
+  `{1, 4, 9}` solo quando simplifier non riesce a cancellare strutturalmente.
+- **Risultato**: 4/4 C2 PASS + 24/24 ODE regression + 2380/2380 quick suite verde.
+  Test rotti riparati: `ResidueTheoremTest.BiquadraticAntiHardcodeIrrationalConstant`
+  protetto restringendo nuova rule a `Pow(non-literal, ...)`.
+- **STATO**: ✅ CHIUSO 2026-06-15 (path symbolic prioritario; fallback
+  3-point conservato come safety per casi simplifier-incomplete).
+
+### HC-KV-05 — Kovacic Case 3 ω = RootOf downstream integrate (2026-06-14, CHIUSO 2026-06-15)
+- **File**: `src/calculus/integrate_core.cpp` (RootOf fast-path).
+- **Categoria CLAUDE.md**: Cat 4 (era: bail-out su tipo `RootOf`).
+- **Fix applicato**: in `Integrator::integrate`, prima delle strategy
+  generiche, aggiunto fast-path:
+  ```
+  if (expr_is<RootOf>(expr))
+      return ok(arena_.make<Integral>(expr, var, std::nullopt, std::nullopt));
+  ```
+  Emette `Integral(RootOf(M, ω), x)` simbolico unevaluated come "soluzione
+  formale" — preserva la struttura algebrica esatta e permette al
+  dispatcher Kovacic Case 3 di completare end-to-end.  Bronstein §8
+  (Algebraic Risch) tracked come future enhancement separato.
+- **STATO**: ✅ CHIUSO 2026-06-15 (path minimale wired, no silent error).
+
+### HC-IBP-VDU — IBP sub-integration of x·inv_trig(x) products (2026-06-15, CHIUSO 2026-06-15)
+- **File**: `src/calculus/integrate_product_power.cpp` (Product → Div(N,D)
+  rational gate),
+  `src/calculus/integrate_trig_substitution.cpp` + `integrate_engine.hpp`
+  (`integrate_xsq_over_sqrt_quadratic`).
+- **Fix applicato**:
+  - Detection in `integrate_product`: shape `Π c_i · Π p_j(x) · Π q_k(x)^{-1}`
+    (Pow(-1) only, no repeated factors) → convert to `Div(N, D)` and route
+    via `integrate_via_partial_fractions` + polynomial-divide fallback.
+    Triggered only when `deg(N) ≥ deg(D)` to preserve Hermite path for
+    improper rationals.
+  - New helper `integrate_xsq_over_sqrt_quadratic(R, var)` handles
+    `∫ x² / √R(x) dx` for `R ∈ {a²−x², a²+x², x²−a²}` via the standard
+    trig-substitution closed forms (arcsin / asinh / acosh).
+  - Pattern detection in `integrate_product` covers both
+    `Pow(sqrt(R), -1)` and `Div(1, sqrt(R))` factor shapes.
+- **Verifica**: 21/21 `IntegrateInverseTrigTest` PASS (incluso
+  `XTimesAtanX`, `XTimesAsinX`, `XTimesAsinhX` precedentemente skip).
+  2401/2401 suite quick verde. Zero regressioni.
+- **STATO**: ✅ CHIUSO 2026-06-15.
+
+### HC-KV-06 — Kovacic Case 3 n=12 (icosahedral A₅) recurrence blow-up (2026-06-14, MITIGATO 2026-06-15)
+- **File**: `src/calculus/ode_kovacic_case3.cpp` (try_case3_for_n
+  wall-clock budget + family-loop guard);
+  `src/calculus/ode_kovacic_case3_helpers.cpp` (`compute_P_sequence`
+  per-iteration budget).
+- **Categoria CLAUDE.md**: Cat 3 (set sfruttabile parzialmente n=12 due
+  to perf).
+- **Mitigazione applicata 2026-06-15**:
+  - Dispatcher loop ora itera `{4, 6, 12}` completo.
+  - Wall-clock budget `2s` per `try_case3_for_n`; supererato → ritorna
+    `nullopt` (family ok, advance n).
+  - `compute_P_sequence` per-iter budget `500ms`; supererato → ritorna
+    `std::vector<ExprPtr>{}` (soft-fail), dispatcher avanza famiglia.
+  - `build_omega_minpoly_case3` soft-fail su sequence empty.
+  - Garantisce terminazione bounded; n=12 success per input semplici;
+    n=12 input complessi (es. paper Ex.1) ritornano Unimplemented.
+- **Closure completo**: rappresentazione `PolyLin` (vector di coeff
+  Rational + linear-in-a_i parts) sostituisce ExprPtr in `compute_P_sequence`;
+  recurrence diventa O(n · d²) deterministico per n=12.
+- **Blocking dependency**: design polymorphic-coefficient ring per
+  ExprPtr-with-linear-symbolic-coefficients; ~3-5 gg lavoro focused.
+- **STATO**: ⚠️ MITIGATO (terminazione garantita, soft-fail per cases
+  intractabili; closure completa pending PolyLin work).
 
 ### HC-F8-F2GATE-BENCHMARK-FAIL — F2 exit-gate benchmark perf regression
 - **File**: `test/unit/algebra/test_f2_gate_benchmark.cpp:107`

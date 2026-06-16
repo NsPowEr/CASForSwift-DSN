@@ -122,18 +122,21 @@ Result<std::optional<ExprPtr>> integrate_by_substitution(
         // Skip constants (handled by linearity/integrate_once)
         if (integrate_detail::is_rational_value(dg, 0, 1)) continue;
         
-        // 2. Candidate integrand in terms of u: f(u) = integrand / g'(x)
-        auto ratio = ctx.simplify(integrate_detail::make_binary(ctx.arena(), BinaryOp::Div, integrand, dg));
-        if (ratio.is_error()) continue;
-        
-        // 3. Check if f(u) depends on x ONLY through g(x).
-        ExprPtr f_u_raw = replace_expr(ratio.value(), g, u_expr, ctx.arena());
+        // 2. Candidate integrand in terms of u: f(u) = integrand / g'(x).
+        //    Use the raw quotient (no simplifier pass) so trig-linearisation
+        //    identities (sin(x)·cos(x) → sin(2x)/2, etc.) do not destroy the
+        //    candidate sub-expression before replacement can lock onto it.
+        ExprPtr ratio_raw = integrate_detail::make_binary(ctx.arena(), BinaryOp::Div, integrand, dg);
+        // 3. Replace candidate g(x) by u in the raw ratio, then simplify.
+        //    Simplifying AFTER the substitution lets `u` act as an opaque
+        //    atom so cancellations like sin·u/sin → u proceed without the
+        //    multi-angle expansion that fires on (sin·cos² / sin) directly.
+        ExprPtr f_u_raw = replace_expr(ratio_raw, g, u_expr, ctx.arena());
         auto f_u = ctx.simplify(f_u_raw);
         if (f_u.is_error()) continue;
         
         // If f_u no longer depends on x, then integrand = f(g(x)) * g'(x).
         if (!integrate_detail::depends_on(f_u.value(), var)) {
-            // Success! Integrate f(u) du.
             auto primitive_u = integrate(f_u.value(), u_sym, ctx);
             if (primitive_u.is_ok()) {
                 // Back-substitute u -> g(x) to get the result in terms of x.
@@ -144,7 +147,7 @@ Result<std::optional<ExprPtr>> integrate_by_substitution(
                 if (verification.is_ok()) {
                      auto s_diff = ctx.simplify(verification.value());
                      auto s_integrand = ctx.simplify(integrand);
-                     if (s_diff.is_ok() && s_integrand.is_ok() && 
+                     if (s_diff.is_ok() && s_integrand.is_ok() &&
                          structural_equal(s_diff.value(), s_integrand.value())) {
                          return ok(std::make_optional(result));
                      }

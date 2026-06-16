@@ -659,6 +659,24 @@ struct CASContextParams {
         return kovacic_case2_max_poly_degree_;
     }
 
+    // F4.K3 Kovacic Case 3 (Kovacic 1986 §5) — combinatorial cap on
+    // (e_c, e_∞) tuple search.  Default 4096 (Case 3 sets larger than Case 2).
+    void set_kovacic_case3_max_pole_combinations(std::size_t n) noexcept {
+        kovacic_case3_max_pole_combinations_ = n;
+    }
+    [[nodiscard]] std::size_t kovacic_case3_max_pole_combinations() const noexcept {
+        return kovacic_case3_max_pole_combinations_;
+    }
+
+    // F4.K3 Kovacic Case 3 — max degree d of polynomial P searched in Step 3.
+    // Default 32. Exceeded → Unimplemented.
+    void set_kovacic_case3_max_poly_degree(std::size_t d) noexcept {
+        kovacic_case3_max_poly_degree_ = d;
+    }
+    [[nodiscard]] std::size_t kovacic_case3_max_poly_degree() const noexcept {
+        return kovacic_case3_max_poly_degree_;
+    }
+
     // ── together() polynomial GCD content reduction (HC-F8-PENDING-20-RESIDUE) ──
     // See .APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Together_Polynomial_GCD_Reduction.md
     void set_together_gcd_enabled(bool enabled) noexcept {
@@ -753,6 +771,8 @@ protected:
     std::size_t   integration_singularity_scan_max_k_{1000U};        // HPP-026 (trig zero scan)
     std::size_t   kovacic_case2_max_pole_combinations_{1024U};       // F4.K2 (Kovacic 1986 §3.2)
     std::size_t   kovacic_case2_max_poly_degree_{64U};               // F4.K2 (Kovacic 1986 §3.2)
+    std::size_t   kovacic_case3_max_pole_combinations_{4096U};       // F4.K3 (Kovacic 1986 §5)
+    std::size_t   kovacic_case3_max_poly_degree_{32U};               // F4.K3 (Kovacic 1986 §5)
     bool          together_gcd_enabled_{true};                       // HC-F8-PENDING-20-RESIDUE
     std::size_t   together_gcd_max_degree_{64U};                     // HC-F8-PENDING-20-RESIDUE perf guard
     std::size_t   together_gcd_max_symbols_{8U};                     // HC-F8-PENDING-20-RESIDUE perf guard

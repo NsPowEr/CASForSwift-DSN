@@ -33,17 +33,32 @@ struct OmegaPair {
 [[nodiscard]] Result<OmegaPair> case1_omega(
     ExprPtr r, const Symbol& x, symbolic::CASContext& ctx);
 
-// F4.K2 — Kovacic Case 2 (dihedral D∞ subgroup) — SCAFFOLD ONLY.
-// Algorithm body NOT YET implemented; returns Unimplemented with explicit
-// diagnostic referencing HC-KV-03 ledger and Kovacic_Case2.md spec.
+// F4.K2 — Kovacic Case 2 (dihedral D∞ subgroup) — IMPLEMENTED (2026-06-14).
+// Full §4.1 Steps 1-4 of Kovacic 1986 with Riccati algebraic certificate
+// at perfect-square sample points (HARDCODE-OF-PASSAGE HC-KV-04).
 //
-// Entry point reserved so solve_ode_kovacic can route through Case 2
-// before final dispatch.  No algorithmic computation performed; no
-// silent wrong-answer possible.  See:
-//   - Kovacic 1986 §3.2
+// On success returns OmegaPair{ω+, ω-} both satisfying ω' + ω² = r.
+// On Case 2 inapplicability returns Unimplemented with explicit diagnostic.
+//
+// See:
+//   - Kovacic 1986 §4
 //   - .APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Kovacic_Case2.md
-//   - HARDCODE_LEDGER.md HC-KV-03
+//   - HARDCODE_LEDGER.md HC-KV-03 (CHIUSO) / HC-KV-04 (certificate debt)
 [[nodiscard]] Result<OmegaPair> case2_omega(
+    ExprPtr r, const Symbol& x, symbolic::CASContext& ctx);
+
+// F4.K3 — Kovacic Case 3 (SL(2,C) finite subgroups: A₄/S₄/A₅).
+// Tries n ∈ {4, 6, 12} in order (paper §5.1).  Returns OmegaPair{ω, ω}
+// where ω is one (algebraic) root of the irreducible minimal polynomial.
+// Both fields of OmegaPair carry the same ω (no conjugate-pair structure
+// in Case 3, unlike Case 2 D⁺); downstream solver picks z₁ = exp(∫ω)
+// and obtains z₂ via reduction-of-order.
+//
+// See:
+//   - Kovacic 1986 §5
+//   - .APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Kovacic_Case3_SL2C.md
+//   - HARDCODE_LEDGER.md HC-KV-03
+[[nodiscard]] Result<OmegaPair> case3_omega(
     ExprPtr r, const Symbol& x, symbolic::CASContext& ctx);
 
 // Arithmetic short-hands used by both translation units.

@@ -1,23 +1,9 @@
 // HC-F8-MONOLITH-WAIVER tier-1 split (2026-06-11): estratto da
-// `simplify_arithmetic.cpp` (era 833 LOC, ora ~410). Contiene
-// `Simplifier::simplify_power` + Chebyshev/DeMoivre linearizzazione
-// trigonometrica.
-//
-// Tutti i dispatch su Pow nodi del simplifier finiscono qui. Le
-// dipendenze (Simplifier::simplify_expr, simplify_product_factors,
-// try_get_exact_complex/rational, traced_result, append_trace,
-// rewrite_provider_, context_, assumptions_, arena_) restano
-// raggiungibili via `simplify_impl.hpp` perché siamo nello stesso
-// namespace `cas::symbolic::detail` e nella stessa translation unit
-// group della classe Simplifier.
+// simplify_arithmetic.cpp.  Dispatch Pow nodes; dependencies via simplify_impl.hpp.
 
 #include "simplify_impl.hpp"
 #include "simplify_branch_cut.hpp"
-#include "cas/extended_real.hpp"
-#include "cas/linalg/Matrix.hpp"
-#include "cas/algebra.hpp"
 #include "../algebra/polynomial_internal.hpp"
-#include <algorithm>
 
 namespace cas::symbolic::detail {
 
@@ -232,6 +218,23 @@ Result<ExprPtr> Simplifier::simplify_power(ExprPtr base, ExprPtr exponent, ExprP
             return simplify_expr(sqrt_expr);
         }
     }
+    // HC-KV-04: x^(p/2), p odd → sqrt(x)^p  (p<0: 1/sqrt(x)^|p|).
+    {
+        LiteralRational eq;
+        auto eqr = try_get_exact_rational(exponent, eq);
+        if (eqr.is_ok() && eqr.value()
+            && eq.value.denominator() == BigInt(2) && !eq.value.is_integer()) {
+            const BigInt p = eq.value.numerator();
+            ExprPtr sb = arena_.make<FuncCall>(BuiltinOp::Sqrt,
+                std::vector<ExprPtr>{base});
+            ExprPtr out = p.is_negative()
+                ? arena_.make<Binary>(BinaryOp::Div, make_integer(arena_, BigInt(1)),
+                    arena_.make<Binary>(BinaryOp::Pow, sb,
+                        make_integer(arena_, -p)))
+                : arena_.make<Binary>(BinaryOp::Pow, sb, make_integer(arena_, p));
+            return simplify_expr(out);
+        }
+    }
     if (is_zero_expr(base)) {
         LiteralRational exp_rat_check;
         auto exp_check = try_get_exact_rational(exponent, exp_rat_check);
@@ -299,6 +302,12 @@ Result<ExprPtr> Simplifier::simplify_power(ExprPtr base, ExprPtr exponent, ExprP
         sqrt_call != nullptr && sqrt_call->func_id == BuiltinOp::Sqrt && sqrt_call->args.size() == 1U) {
         if (auto maybe_n = try_get_integer_exponent(exponent); maybe_n.has_value()) {
             const BigInt n = *maybe_n;
+            if (n.is_negative()) {  // HC-KV-04: reciprocal sqrt(A)^(-m)
+                ExprPtr pp = arena_.make<Binary>(BinaryOp::Pow, base, make_integer(arena_, -n));
+                auto ps = simplify_expr(pp);
+                if (ps.is_ok()) return simplify_expr(arena_.make<Binary>(BinaryOp::Div,
+                    make_integer(arena_, BigInt(1)), ps.value()));
+            }
             if (!n.is_negative() && !n.is_zero()) {
                 ExprPtr arg = sqrt_call->args.front();
                 BigInt k = n / BigInt(2);

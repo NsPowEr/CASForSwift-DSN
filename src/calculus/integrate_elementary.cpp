@@ -206,7 +206,44 @@ Result<ExprPtr> Integrator::integrate_function(const FuncCall& call, const Symbo
 
     auto affine = extract_affine_argument(argument, var);
     if (!affine.has_value() || affine->coefficient.numerator() == BigInt(0)) {
-        return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Function integration currently supports only direct or affine exact arguments"));
+        // F7.5: IBP fallback for non-affine argument.
+        //   ∫ f(g(x)) dx  with u = f(g(x)), v = x  →
+        //     x·f(g(x)) − ∫ x · f'(g(x)) · g'(x) dx
+        // Effective on log(poly), asin/acos/atan/atanh(poly), etc.
+        // Reconstruct the call as ExprPtr.  Direct address-of would be safer
+        // but is not exposed; rebuild using known constructor.
+        ExprPtr u = arena_.make<FuncCall>(call.func_id, std::vector<ExprPtr>{argument});
+        ExprPtr v = arena_.make<Symbol>(var);
+        auto du_res = diff(u, var, 1U, context_);
+        if (du_res.is_ok()) {
+            ExprPtr du_simp = du_res.value();
+            if (auto ds = context_.simplify(du_simp); ds.is_ok())
+                du_simp = ds.value();
+            ExprPtr v_du = arena_.make<Product>(std::vector<ExprPtr>{v, du_simp});
+            auto vdu_simp = context_.simplify(v_du);
+            ExprPtr vdu_in = vdu_simp.is_ok() ? vdu_simp.value() : v_du;
+            auto int_vdu = ::cas::calculus::integrate(vdu_in, var, context_);
+            if (int_vdu.is_ok()) {
+                ExprPtr candidate = arena_.make<Sum>(std::vector<ExprPtr>{
+                    arena_.make<Product>(std::vector<ExprPtr>{v, u}),
+                    arena_.make<Unary>(UnaryOp::Neg, int_vdu.value())});
+                // Verify D(candidate) ≡ original integrand (call.func_id(arg)).
+                auto D_res = diff(candidate, var, 1U, context_);
+                if (D_res.is_ok()) {
+                    ExprPtr orig = arena_.make<FuncCall>(call.func_id,
+                        std::vector<ExprPtr>{argument});
+                    ExprPtr delta = arena_.make<Binary>(BinaryOp::Sub,
+                        D_res.value(), orig);
+                    auto delta_simp = context_.simplify(delta);
+                    bool ok_zero = delta_simp.is_ok()
+                        && expr_is<IntegerLit>(delta_simp.value())
+                        && expr_ref<IntegerLit>(delta_simp.value()).value.is_zero();
+                    if (ok_zero) return ok(candidate);
+                }
+            }
+        }
+        return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
+            "Function integration: non-affine arg, IBP fallback failed"));
     }
 
     auto primitive = integrate_function_direct(call.name, argument);

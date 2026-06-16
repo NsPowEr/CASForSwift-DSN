@@ -25,6 +25,19 @@ namespace {
             func_id == BuiltinOp::Erf  || func_id == BuiltinOp::Erfc) {
             return 1;
         }
+        // F7.5.B1: inverse hyperbolic (parsed as BuiltinOp::Unknown; matched
+        // by canonical name).  Same ILATE category as inverse trig — picking
+        // them as `u` collapses x·asinh(x)-style integrals to elementary
+        // rational forms.
+        if (func_id == BuiltinOp::Unknown) {
+            const std::string& nm = call->name;
+            if (nm == "asinh" || nm == "arcsinh"
+                || nm == "acosh" || nm == "arccosh"
+                || nm == "atanh" || nm == "arctanh"
+                || nm == "acoth" || nm == "arccoth") {
+                return 1;
+            }
+        }
         // L: Logarithmic (Ln and Log are aliases — both natural log).
         if (func_id == BuiltinOp::Ln || func_id == BuiltinOp::Log) {
             return 2;
