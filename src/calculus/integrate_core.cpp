@@ -423,34 +423,26 @@ Result<ExprPtr> Integrator::integrate_binary(const Binary& binary, const Symbol&
                 }
             }
         }
-        if (!depends_on(binary.right, var)) {
-            auto res = integrate_once(binary.left, var);
-            if (res.is_ok()) {
+        if (!depends_on(binary.right, var))
+            if (auto res = integrate_once(binary.left, var); res.is_ok())
                 return ok(make_binary(arena_, BinaryOp::Div, res.value(), binary.right));
-            }
-        }
-        // Pre-pass: cancel poly gcd(num,den) so (x^2+x+1)/(x^3-1) reduces to
-        // 1/(x-1) before LRT/PFD emits spurious RootSum forms.
-        if (auto dn = algebra::polynomial_degree(binary.left, var, context_),
-                dd = algebra::polynomial_degree(binary.right, var, context_);
-            dn.is_ok() && dd.is_ok()) {
-            auto g = algebra::polynomial_gcd(binary.left, binary.right, var, context_);
-            auto dg = g.is_ok() ? algebra::polynomial_degree(g.value(), var, context_)
-                                : Result<std::size_t>(fail<std::size_t>(g.error()));
-            if (dg.is_ok() && dg.value() > 0U) {
-                auto pn = algebra::polynomial_exact_divide(binary.left, g.value(), var, context_);
-                auto pd = algebra::polynomial_exact_divide(binary.right, g.value(), var, context_);
-                if (pn.is_ok() && pd.is_ok()) {
-                    auto simp = context_.simplify(make_binary(arena_, BinaryOp::Div, pn.value(), pd.value()));
-                    if (simp.is_ok())
-                        if (auto r = integrate_once(simp.value(), var); r.is_ok()) return r;
+        // Pre-pass: cancel poly gcd(num,den) so (x^2+x+1)/(x^3-1) reduces to 1/(x-1) before LRT/PFD.
+        if (auto dn = algebra::polynomial_degree(binary.left, var, context_), dd = algebra::polynomial_degree(binary.right, var, context_); dn.is_ok() && dd.is_ok())
+            if (auto g = algebra::polynomial_gcd(binary.left, binary.right, var, context_); g.is_ok())
+                if (auto dg = algebra::polynomial_degree(g.value(), var, context_); dg.is_ok() && dg.value() > 0U) {
+                    auto pn = algebra::polynomial_exact_divide(binary.left, g.value(), var, context_);
+                    auto pd = algebra::polynomial_exact_divide(binary.right, g.value(), var, context_);
+                    if (pn.is_ok() && pd.is_ok())
+                        if (auto simp = context_.simplify(make_binary(arena_, BinaryOp::Div, pn.value(), pd.value())); simp.is_ok())
+                            if (auto r = integrate_once(simp.value(), var); r.is_ok()) return r;
                 }
-            }
-        }
-        if (auto quadratic_integral = integrate_linear_over_quadratic(binary, var);
-            quadratic_integral.is_ok()) {
-            return quadratic_integral;
-        }
+        if (auto q = integrate_linear_over_quadratic(binary, var); q.is_ok()) return q;
+        // F7.5: c/(x²±a²)^n → Apostol/Bronstein recursion (helper file).
+        if (const auto* dp = expr_cast<Binary>(binary.right); dp && dp->op == BinaryOp::Pow)
+            if (const auto* ei = expr_cast<IntegerLit>(dp->right);
+                ei && !ei->value.is_negative() && ei->value >= BigInt(2) && !depends_on(binary.left, var))
+                if (auto r = integrate_inverse_quadratic_power(dp->left, -ei->value, var); r.is_ok())
+                    return ok(make_product(arena_, {binary.left, r.value()}));
         if (auto rational_integral = integrate_via_partial_fractions(make_binary(arena_, BinaryOp::Div, binary.left, binary.right), var);
             rational_integral.is_ok()) {
             return rational_integral;

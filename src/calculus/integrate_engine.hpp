@@ -59,8 +59,11 @@ public:
     [[nodiscard]] Result<ExprPtr> integrate_binary(const Binary& binary, const Symbol& var);
     [[nodiscard]] Result<ExprPtr> integrate_linear_over_quadratic(const Binary& quotient, const Symbol& var);
     [[nodiscard]] Result<ExprPtr> integrate_sqrt_quadratic(ExprPtr radicand, const Symbol& var);
+    [[nodiscard]] Result<ExprPtr> integrate_xsq_over_sqrt_quadratic(ExprPtr radicand, const Symbol& var);
     [[nodiscard]] Result<ExprPtr> integrate_product(const Product& product, const Symbol& var);
     [[nodiscard]] Result<ExprPtr> integrate_power(const Binary& power, const Symbol& var);
+    [[nodiscard]] Result<ExprPtr> integrate_inverse_quadratic_power(
+        ExprPtr radicand, const BigInt& negative_exponent, const Symbol& var);
     [[nodiscard]] Result<ExprPtr> integrate_function_direct(const std::string& name, ExprPtr argument);
     [[nodiscard]] Result<ExprPtr> integrate_power_direct(ExprPtr base, ExprPtr exponent, const Symbol& var);
     [[nodiscard]] Result<ExprPtr> integrate_function(const FuncCall& call, const Symbol& var);

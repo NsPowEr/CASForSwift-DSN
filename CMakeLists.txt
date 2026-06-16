@@ -184,6 +184,7 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/integrate_elementary.cpp
     src/calculus/integrate_helpers.cpp
     src/calculus/integrate_quadratic_rational.cpp
+    src/calculus/integrate_inverse_quadratic_power.cpp
     src/calculus/integrate_product_power.cpp
     src/calculus/integrate_substitution.cpp
     src/calculus/integrate_trig_substitution.cpp

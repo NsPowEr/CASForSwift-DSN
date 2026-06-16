@@ -1,4 +1,5 @@
 #include "integrate_engine.hpp"
+#include "cas/algebra.hpp"
 
 #include <utility>
 #include <vector>
@@ -71,6 +72,197 @@ bool has_exp_rational_non_poly_factor(const std::vector<ExprPtr>& factors, const
 }  // namespace
 
 Result<ExprPtr> Integrator::integrate_product(const Product& product, const Symbol& var) {
+    {  // F7.5: ∫e^{ax}·sin/cos(bx) — Laplace-style closed form.
+        ExprPtr exp_arg = nullptr;
+        bool exp_seen = false;
+        const FuncCall* trig = nullptr;
+        bool trig_seen = false;
+        std::vector<ExprPtr> consts;
+        bool shape_ok = true;
+        for (ExprPtr f : product.factors) {
+            if (!depends_on(f, var)) { consts.push_back(f); continue; }
+            if (const auto* fc = expr_cast<FuncCall>(f); fc && fc->args.size() == 1U) {
+                if (fc->func_id == BuiltinOp::Exp) {
+                    if (exp_seen) { shape_ok = false; break; }
+                    exp_seen = true;
+                    exp_arg = fc->args[0];
+                    continue;
+                }
+                if (fc->func_id == BuiltinOp::Sin || fc->func_id == BuiltinOp::Cos) {
+                    if (trig_seen) { shape_ok = false; break; }
+                    trig_seen = true;
+                    trig = fc;
+                    continue;
+                }
+            }
+            shape_ok = false; break;
+        }
+        if (shape_ok && exp_seen && trig_seen) {
+            auto aff_e = extract_affine_argument(exp_arg, var);
+            auto aff_t = extract_affine_argument(trig->args[0], var);
+            if (aff_e.has_value() && aff_t.has_value()
+                && !aff_e->coefficient.numerator().is_zero()
+                && !aff_t->coefficient.numerator().is_zero()) {
+                const Rational a = aff_e->coefficient;
+                const Rational b = aff_t->coefficient;
+                const Rational denom = a * a + b * b;
+                // F = e^{ax+p} · (a·trig(bx+q) ∓ b·other(bx+q)) / (a² + b²)
+                ExprPtr e_factor = make_function(arena_, "exp", {exp_arg});
+                ExprPtr s_fn = make_function(arena_, "sin", {trig->args[0]});
+                ExprPtr c_fn = make_function(arena_, "cos", {trig->args[0]});
+                ExprPtr a_expr = make_rational(arena_, a);
+                ExprPtr b_expr = make_rational(arena_, b);
+                ExprPtr denom_expr = make_rational(arena_, denom);
+                ExprPtr inv_denom = make_binary(arena_, BinaryOp::Div,
+                    make_integer(arena_, 1), denom_expr);
+                ExprPtr bracket;
+                if (trig->func_id == BuiltinOp::Sin) {
+                    bracket = make_sum(arena_, {
+                        make_product(arena_, {a_expr, s_fn}),
+                        make_unary(arena_, UnaryOp::Neg,
+                            make_product(arena_, {b_expr, c_fn})),
+                    });
+                } else {  // Cos
+                    bracket = make_sum(arena_, {
+                        make_product(arena_, {a_expr, c_fn}),
+                        make_product(arena_, {b_expr, s_fn}),
+                    });
+                }
+                ExprPtr primitive = make_product(arena_, {
+                    inv_denom, e_factor, bracket});
+                if (consts.empty()) return ok(primitive);
+                consts.push_back(primitive);
+                return ok(make_product(arena_, std::move(consts)));
+            }
+        }
+    }
+
+    // HC-IBP-VDU: detect rational-function shape  Π c_i · Π p_j(x) · Π q_k(x)^{-1}
+    // upfront and route through Div(N, D) → poly-divide + PFD.
+    // Without this gate, the recursive u-substitution path can return a
+    // wrong-but-internally-self-consistent stub (e.g. (1/2)x for
+    // x²/(2(1+x²))) on shapes IBP produces as v·du.
+    {
+        auto is_poly = [&](ExprPtr e) {
+            return algebra::polynomial_degree(e, var, context_).is_ok();
+        };
+        std::vector<ExprPtr> num_factors;
+        std::vector<ExprPtr> den_factors;
+        bool all_rational = true;
+        for (ExprPtr f : product.factors) {
+            if (!depends_on(f, var)) { num_factors.push_back(f); continue; }
+            if (const auto* pw = expr_cast<Binary>(f);
+                pw && pw->op == BinaryOp::Pow) {
+                if (const auto* el = expr_cast<IntegerLit>(pw->right)) {
+                    // Restrict to single-power denominators (Pow exp = -1).
+                    // Repeated factors (exp ≤ -2) are best served by the
+                    // Hermite reduction path; bypassing it here regresses
+                    // CalculusIntegrateTest.P1_HermiteReduction_*.
+                    if (el->value == BigInt(-1) && is_poly(pw->left)) {
+                        den_factors.push_back(pw->left);
+                        continue;
+                    }
+                    if (!el->value.is_negative() && is_poly(f)) {
+                        num_factors.push_back(f);
+                        continue;
+                    }
+                }
+                all_rational = false; break;
+            }
+            if (is_poly(f)) { num_factors.push_back(f); continue; }
+            all_rational = false; break;
+        }
+        if (all_rational && !den_factors.empty()) {
+            ExprPtr N = num_factors.empty()
+                ? arena_.make<IntegerLit>(BigInt(1))
+                : (num_factors.size() == 1U ? num_factors[0]
+                    : arena_.make<Product>(std::move(num_factors)));
+            ExprPtr D = den_factors.size() == 1U ? den_factors[0]
+                : arena_.make<Product>(std::move(den_factors));
+            ExprPtr div = arena_.make<Binary>(BinaryOp::Div, N, D);
+            // Only trigger when numerator degree ≥ denominator degree.
+            // For deg(N) < deg(D) the existing dispatch (PFD via the Binary(Div)
+            // path or Hermite) already handles the integrand correctly;
+            // preempting here causes regressions on ln/log integrands whose
+            // IBP path produces Product([N, Pow(D,-1)]) sub-integrands that
+            // need to flow through the standard rational pipeline.
+            auto dn = algebra::polynomial_degree(N, var, context_);
+            auto dd = algebra::polynomial_degree(D, var, context_);
+            if (dn.is_ok() && dd.is_ok() && dn.value() >= dd.value()) {
+                auto rat = integrate_via_partial_fractions(div, var);
+                if (rat.is_ok()) return rat;
+                // Polynomial-divide: N = D·Q + R → ∫N/D = ∫Q + ∫R/D.
+                auto dm = algebra::polynomial_divmod(N, D, var, context_);
+                if (dm.is_ok()) {
+                    ExprPtr leftover = arena_.make<Binary>(BinaryOp::Div,
+                        dm.value().remainder, D);
+                    auto q_int = integrate(dm.value().quotient, var);
+                    auto r_int = integrate(leftover, var);
+                    if (q_int.is_ok() && r_int.is_ok()) {
+                        return ok(arena_.make<Sum>(std::vector<ExprPtr>{
+                            q_int.value(), r_int.value()}));
+                    }
+                }
+            }
+        }
+    }
+
+    // HC-IBP-VDU: detect shape  c · x² · sqrt(R)^{-1}  →
+    //   c · integrate_xsq_over_sqrt_quadratic(R).
+    // R(x) recognised by match_constant_square_minus_variable_square etc.
+    {
+        std::vector<ExprPtr> consts;
+        ExprPtr xsq = nullptr;
+        ExprPtr inv_sqrt_arg = nullptr;
+        bool shape_ok = true;
+        for (ExprPtr f : product.factors) {
+            if (!depends_on(f, var)) { consts.push_back(f); continue; }
+            // x² factor?
+            if (const auto* pw = expr_cast<Binary>(f);
+                pw && pw->op == BinaryOp::Pow && !xsq) {
+                if (auto* sym = expr_cast<Symbol>(pw->left);
+                    sym && sym->name == var.name) {
+                    if (const auto* el = expr_cast<IntegerLit>(pw->right);
+                        el && el->value == BigInt(2)) {
+                        xsq = f; continue;
+                    }
+                }
+            }
+            // 1/sqrt(R)?  Accept both Pow(sqrt(R), -1) and Div(1, sqrt(R)).
+            if (const auto* pw = expr_cast<Binary>(f);
+                pw && pw->op == BinaryOp::Pow && !inv_sqrt_arg) {
+                if (const auto* el = expr_cast<IntegerLit>(pw->right);
+                    el && el->value == BigInt(-1)) {
+                    if (const auto* fc = expr_cast<FuncCall>(pw->left);
+                        fc && fc->func_id == BuiltinOp::Sqrt
+                        && fc->args.size() == 1U) {
+                        inv_sqrt_arg = fc->args[0]; continue;
+                    }
+                }
+            }
+            if (const auto* dv = expr_cast<Binary>(f);
+                dv && dv->op == BinaryOp::Div && !inv_sqrt_arg) {
+                if (const auto* nu = expr_cast<IntegerLit>(dv->left);
+                    nu && nu->value == BigInt(1)) {
+                    if (const auto* fc = expr_cast<FuncCall>(dv->right);
+                        fc && fc->func_id == BuiltinOp::Sqrt
+                        && fc->args.size() == 1U) {
+                        inv_sqrt_arg = fc->args[0]; continue;
+                    }
+                }
+            }
+            shape_ok = false; break;
+        }
+        if (shape_ok && xsq && inv_sqrt_arg) {
+            auto primitive = integrate_xsq_over_sqrt_quadratic(inv_sqrt_arg, var);
+            if (primitive.is_ok()) {
+                if (consts.empty()) return primitive;
+                consts.push_back(primitive.value());
+                return ok(make_product(arena_, std::move(consts)));
+            }
+        }
+    }
+
     auto substitution = try_u_substitution_for_product(product, var);
     if (substitution.is_ok()) {
         return substitution;
@@ -225,11 +417,11 @@ Result<ExprPtr> Integrator::integrate_power(const Binary& power, const Symbol& v
             }));
         }
 
-        if (auto rational_integral = integrate_via_partial_fractions(make_binary(arena_, BinaryOp::Pow, power.left, power.right), var);
-            rational_integral.is_ok()) {
-            return rational_integral;
-        }
+        if (auto r = integrate_via_partial_fractions(make_binary(arena_, BinaryOp::Pow, power.left, power.right), var); r.is_ok()) return r;
     }
+    // F7.5: ∫ c/(x²±a²)^n via Apostol/Bronstein recursion (helper file).
+    if (const auto* ie = expr_cast<IntegerLit>(power.right); ie && ie->value.is_negative())
+        if (auto r = integrate_inverse_quadratic_power(power.left, ie->value, var); r.is_ok()) return r;
 
     if (is_rational_value(power.right, -1, 2)) {
         if (matches_one_minus_square(power.left, var)) {
@@ -240,6 +432,9 @@ Result<ExprPtr> Integrator::integrate_power(const Binary& power, const Symbol& v
             ExprPtr x = arena_.make<Symbol>(var);
             return ok(make_function(arena_, "ln", {make_function(arena_, "abs", {make_sum(arena_, {x, make_function(arena_, "sqrt", {power.left})})})}));
         }
+        if (matches_square_minus_constant_square(power.left, var, constant_base)) {  // F7.5: ∫1/√(x²−a²) = ln|x+√…|
+            ExprPtr x = arena_.make<Symbol>(var);
+            return ok(make_function(arena_, "ln", {make_function(arena_, "abs", {make_sum(arena_, {x, make_function(arena_, "sqrt", {power.left})})})})); }
     }
 
     if (const auto* integer = expr_cast<IntegerLit>(power.right)) {
@@ -262,10 +457,12 @@ Result<ExprPtr> Integrator::integrate_power(const Binary& power, const Symbol& v
             if (func_id == BuiltinOp::Csc) {
                 return ok(make_unary(arena_, UnaryOp::Neg, make_function(arena_, "cot", {arena_.make<Symbol>(var)})));
             }
+            if (func_id == BuiltinOp::Tan) return ok(make_sum(arena_, {make_function(arena_, "tan", {arena_.make<Symbol>(var)}), make_unary(arena_, UnaryOp::Neg, arena_.make<Symbol>(var))}));
+            if (func_id == BuiltinOp::Cot) return ok(make_sum(arena_, {make_unary(arena_, UnaryOp::Neg, make_function(arena_, "cot", {arena_.make<Symbol>(var)})), make_unary(arena_, UnaryOp::Neg, arena_.make<Symbol>(var))}));
         }
     }
 
-    if (const auto* call = expr_cast<FuncCall>(power.left); call != nullptr && call->func_id == BuiltinOp::Ln && call->args.size() == 1U && is_same_symbol(call->args.front(), var) && expr_is<IntegerLit>(power.right)) {
+    if (const auto* call = expr_cast<FuncCall>(power.left); call != nullptr && (call->func_id == BuiltinOp::Ln || call->func_id == BuiltinOp::Log) && call->args.size() == 1U && is_same_symbol(call->args.front(), var) && expr_is<IntegerLit>(power.right)) {
         const auto& exponent = expr_ref<IntegerLit>(power.right);
         if (exponent.value > BigInt(0)) {
             // int ln(x)^n dx = x*ln(x)^n - n * int ln(x)^(n-1) dx
