@@ -196,23 +196,29 @@ Result<ExprPtr> Integrator::integrate_sqrt_quadratic(ExprPtr radicand, const Sym
     }
 
     if (auto matched = match_variable_square_plus_constant_square(arena_, radicand, var); matched.has_value()) {
+        // ∫ √(x² + a²) dx = ½(x·√(x²+a²) + a²·asinh(x/a))
+        // Emit asinh directly so the equivalence checker doesn't have to
+        // bridge ln|x+√(x²+a²)| ↔ asinh(x/a) for every comparison.
         ExprPtr a_squared = square_expr(arena_, matched->constant_base);
+        ExprPtr arg = make_binary(arena_, BinaryOp::Div, x, matched->constant_base);
         return ok(half_times(arena_, make_sum(arena_, {
             x_sqrt,
             make_product(arena_, {
                 a_squared,
-                make_function(arena_, "ln", {make_function(arena_, "abs", {make_sum(arena_, {x, sqrt_radicand})})}),
+                make_function(arena_, "asinh", {arg}),
             }),
         })));
     }
 
     if (auto matched = match_variable_square_minus_constant_square(arena_, radicand, var); matched.has_value()) {
+        // ∫ √(x² − a²) dx = ½(x·√(x²−a²) − a²·acosh(x/a))
         ExprPtr a_squared = square_expr(arena_, matched->constant_base);
+        ExprPtr arg = make_binary(arena_, BinaryOp::Div, x, matched->constant_base);
         return ok(half_times(arena_, make_sum(arena_, {
             x_sqrt,
             make_unary(arena_, UnaryOp::Neg, make_product(arena_, {
                 a_squared,
-                make_function(arena_, "ln", {make_function(arena_, "abs", {make_sum(arena_, {x, sqrt_radicand})})}),
+                make_function(arena_, "acosh", {arg}),
             })),
         })));
     }
@@ -220,6 +226,54 @@ Result<ExprPtr> Integrator::integrate_sqrt_quadratic(ExprPtr radicand, const Sym
     return fail<ExprPtr>(make_error(
         CASErrorKind::Unimplemented,
         "No supported trigonometric substitution pattern found for sqrt radicand"));
+}
+
+// HC-IBP-VDU: ∫ x² / √R(x) dx for R(x) ∈ {a² − x², a² + x², x² − a²}.
+//   √(a² − x²) → (a²/2)·arcsin(x/a) − (x/2)·√(a² − x²)
+//   √(a² + x²) → (x/2)·√(a² + x²) − (a²/2)·arcsinh(x/a)
+//   √(x² − a²) → (x/2)·√(x² − a²) − (a²/2)·arccosh(x/a)
+Result<ExprPtr> Integrator::integrate_xsq_over_sqrt_quadratic(
+    ExprPtr radicand, const Symbol& var) {
+    ExprPtr x = arena_.make<Symbol>(var);
+    ExprPtr sqrt_r = make_function(arena_, "sqrt", {radicand});
+    ExprPtr half = make_rational(arena_, 1, 2);
+
+    if (auto m = match_constant_square_minus_variable_square(arena_, radicand, var);
+        m.has_value()) {
+        ExprPtr a_sq = square_expr(arena_, m->constant_base);
+        ExprPtr arc = make_function(arena_, "arcsin",
+            {make_binary(arena_, BinaryOp::Div, x, m->constant_base)});
+        return ok(make_sum(arena_, {
+            make_product(arena_, {half, a_sq, arc}),
+            make_unary(arena_, UnaryOp::Neg,
+                make_product(arena_, {half, x, sqrt_r})),
+        }));
+    }
+    if (auto m = match_variable_square_plus_constant_square(arena_, radicand, var);
+        m.has_value()) {
+        ExprPtr a_sq = square_expr(arena_, m->constant_base);
+        ExprPtr arc = make_function(arena_, "asinh",
+            {make_binary(arena_, BinaryOp::Div, x, m->constant_base)});
+        return ok(make_sum(arena_, {
+            make_product(arena_, {half, x, sqrt_r}),
+            make_unary(arena_, UnaryOp::Neg,
+                make_product(arena_, {half, a_sq, arc})),
+        }));
+    }
+    if (auto m = match_variable_square_minus_constant_square(arena_, radicand, var);
+        m.has_value()) {
+        ExprPtr a_sq = square_expr(arena_, m->constant_base);
+        ExprPtr arc = make_function(arena_, "acosh",
+            {make_binary(arena_, BinaryOp::Div, x, m->constant_base)});
+        return ok(make_sum(arena_, {
+            make_product(arena_, {half, x, sqrt_r}),
+            make_unary(arena_, UnaryOp::Neg,
+                make_product(arena_, {half, a_sq, arc})),
+        }));
+    }
+    return fail<ExprPtr>(make_error(
+        CASErrorKind::Unimplemented,
+        "No supported trig-substitution pattern for x² / sqrt(quadratic)"));
 }
 
 }  // namespace cas::calculus::integrate_detail

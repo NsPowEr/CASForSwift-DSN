@@ -84,6 +84,53 @@ ExprPtr hyperbolic_normalize(ExprPtr expr, AstArena& arena) {
             if (nm == "log") {
                 return make_call("ln");
             }
+            // Inverse hyperbolic ↔ logarithmic forms. These identities are
+            // exact on the principal real branch and unblock equivalence
+            // checks where one side emits `asinh(x)` and the other the
+            // equivalent `ln(x + sqrt(x²+1))` (∫ sqrt(x²+1) dx) etc.
+            auto sqrt_call = [&](ExprPtr inner) {
+                std::vector<ExprPtr> a; a.push_back(inner);
+                return arena.make<FuncCall>(std::string("sqrt"), std::move(a));
+            };
+            auto u_sq = arena.make<Binary>(BinaryOp::Pow, u,
+                arena.make<IntegerLit>(BigInt(2)));
+            if (nm == "asinh") {
+                // asinh(u) = ln(u + sqrt(u² + 1))
+                ExprPtr radicand = arena.make<Sum>(std::vector<ExprPtr>{u_sq, one});
+                ExprPtr inner = arena.make<Sum>(std::vector<ExprPtr>{u, sqrt_call(radicand)});
+                std::vector<ExprPtr> args; args.push_back(inner);
+                return arena.make<FuncCall>(std::string("ln"), std::move(args));
+            }
+            if (nm == "acosh") {
+                // acosh(u) = ln(u + sqrt(u² − 1))
+                ExprPtr neg_one = arena.make<Unary>(UnaryOp::Neg, one);
+                ExprPtr radicand = arena.make<Sum>(std::vector<ExprPtr>{u_sq, neg_one});
+                ExprPtr inner = arena.make<Sum>(std::vector<ExprPtr>{u, sqrt_call(radicand)});
+                std::vector<ExprPtr> args; args.push_back(inner);
+                return arena.make<FuncCall>(std::string("ln"), std::move(args));
+            }
+            if (nm == "atanh") {
+                // atanh(u) = ½ · ln((1 + u) / (1 − u))
+                ExprPtr neg_u = arena.make<Unary>(UnaryOp::Neg, u);
+                ExprPtr num = arena.make<Sum>(std::vector<ExprPtr>{one, u});
+                ExprPtr den = arena.make<Sum>(std::vector<ExprPtr>{one, neg_u});
+                ExprPtr ratio = arena.make<Binary>(BinaryOp::Div, num, den);
+                std::vector<ExprPtr> args; args.push_back(ratio);
+                ExprPtr ln_call = arena.make<FuncCall>(std::string("ln"), std::move(args));
+                return arena.make<Product>(std::vector<ExprPtr>{
+                    arena.make<RationalLit>(BigInt(1), BigInt(2)), ln_call});
+            }
+            if (nm == "acoth") {
+                // acoth(u) = ½ · ln((u + 1) / (u − 1))
+                ExprPtr neg_one = arena.make<Unary>(UnaryOp::Neg, one);
+                ExprPtr num = arena.make<Sum>(std::vector<ExprPtr>{u, one});
+                ExprPtr den = arena.make<Sum>(std::vector<ExprPtr>{u, neg_one});
+                ExprPtr ratio = arena.make<Binary>(BinaryOp::Div, num, den);
+                std::vector<ExprPtr> args; args.push_back(ratio);
+                ExprPtr ln_call = arena.make<FuncCall>(std::string("ln"), std::move(args));
+                return arena.make<Product>(std::vector<ExprPtr>{
+                    arena.make<RationalLit>(BigInt(1), BigInt(2)), ln_call});
+            }
             if (u.get() == fc->args[0].get()) return expr;
             std::vector<ExprPtr> new_args; new_args.push_back(u);
             return arena.make<FuncCall>(fc->name, std::move(new_args));
