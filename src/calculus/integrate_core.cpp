@@ -368,7 +368,7 @@ Result<ExprPtr> Integrator::integrate_binary(const Binary& binary, const Symbol&
         }
         {
             ExprPtr arctan_base{};
-            if (is_one(binary.left) && matches_square_plus_constant_square(arena_, binary.right, var, arctan_base)) {
+            if (is_one(binary.left) && matches_square_plus_constant_square(binary.right, var, arctan_base)) {
                 ExprPtr x = arena_.make<Symbol>(var);
                 return ok(make_binary(arena_, BinaryOp::Div,
                     make_function(arena_, "arctan", {make_binary(arena_, BinaryOp::Div, x, arctan_base)}),
@@ -381,12 +381,12 @@ Result<ExprPtr> Integrator::integrate_binary(const Binary& binary, const Symbol&
             if (is_sqrt && matches_one_minus_square(sc->args.front(), var))
                 return ok(make_function(arena_, "arcsin", {arena_.make<Symbol>(var)}));
             ExprPtr cb{};
-            if (is_sqrt && matches_constant_square_minus_variable_square(arena_, sc->args.front(), var, cb))
+            if (is_sqrt && matches_constant_square_minus_variable_square(sc->args.front(), var, cb))
                 return ok(make_function(arena_, "arcsin", {make_binary(arena_, BinaryOp::Div, arena_.make<Symbol>(var), cb)}));
-            if (is_sqrt && (matches_square_plus_constant_square(arena_, sc->args.front(), var, cb)
-                         || matches_square_minus_constant_square(arena_, sc->args.front(), var, cb)))
+            if (is_sqrt && (matches_square_plus_constant_square(sc->args.front(), var, cb)
+                         || matches_square_minus_constant_square(sc->args.front(), var, cb)))
                 return ok(make_function(arena_, "ln", {make_function(arena_, "abs", {make_sum(arena_, {arena_.make<Symbol>(var), binary.right})})}));
-            if (!is_sqrt && matches_square_minus_constant_square(arena_, binary.right, var, cb)) {
+            if (!is_sqrt && matches_square_minus_constant_square(binary.right, var, cb)) {
                 ExprPtr x = arena_.make<Symbol>(var);
                 return ok(make_product(arena_, {
                     make_binary(arena_, BinaryOp::Div, make_integer(arena_, 1), make_product(arena_, {make_integer(arena_, 2), cb})),
@@ -411,7 +411,7 @@ Result<ExprPtr> Integrator::integrate_binary(const Binary& binary, const Symbol&
                     return ok(make_unary(arena_, UnaryOp::Neg, binary.right));
                 }
                 // x/sqrt(a^2-x^2) = -sqrt(a^2-x^2)
-                if (matches_constant_square_minus_variable_square(arena_, radicand, var, cbase)) {
+                if (matches_constant_square_minus_variable_square(radicand, var, cbase)) {
                     return ok(make_unary(arena_, UnaryOp::Neg, binary.right));
                 }
                 // x/sqrt(x^2+1) = sqrt(x^2+1)
@@ -419,12 +419,12 @@ Result<ExprPtr> Integrator::integrate_binary(const Binary& binary, const Symbol&
                     return ok(binary.right);
                 }
                 // x/sqrt(x^2+a^2) = sqrt(x^2+a^2)
-                if (matches_square_plus_constant_square(arena_, radicand, var, cbase)) {
+                if (matches_square_plus_constant_square(radicand, var, cbase)) {
                     return ok(binary.right);
                 }
                 ExprPtr cbase2{};
                 // x/sqrt(x^2-a^2) = sqrt(x^2-a^2)
-                if (matches_square_minus_constant_square(arena_, radicand, var, cbase2)) {
+                if (matches_square_minus_constant_square(radicand, var, cbase2)) {
                     return ok(binary.right);
                 }
             }
