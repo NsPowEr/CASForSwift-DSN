@@ -158,7 +158,8 @@ set(CAS_SYMBOLIC_SOURCES
     src/symbolic/simplify_utils.cpp
     src/symbolic/context_core.cpp
     src/symbolic/context_utils.cpp
-    src/symbolic/assumptions.cpp
+    src/symbolic/assumptions_core.cpp
+    src/symbolic/assumptions_predicates.cpp
     src/symbolic/term_order.cpp
     src/symbolic/rewrite_engine.cpp
     src/symbolic/rewrite_matching.cpp

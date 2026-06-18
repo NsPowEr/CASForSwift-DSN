@@ -35,6 +35,10 @@ namespace cas::symbolic {
 // Internal scalar and expression helpers
 [[nodiscard]] std::optional<Rational> exact_scalar_from_expr(ExprPtr expr);
 [[nodiscard]] int compare_exact_scalars(const Rational& lhs, const Rational& rhs);
+// Scalar sign predicates shared by Assumptions setters/predicates (W9.3 split).
+[[nodiscard]] bool is_zero_expr(ExprPtr expr);
+[[nodiscard]] bool is_positive_scalar(ExprPtr expr);
+[[nodiscard]] bool is_negative_scalar(ExprPtr expr);
 [[nodiscard]] ExprPtr negate_expr(ExprPtr expr, AstArena& arena);
 [[nodiscard]] bool range_is_exact_zero(ExprPtr lower, ExprPtr upper);
 [[nodiscard]] bool exact_range_excludes_zero(ExprPtr lower, ExprPtr upper);

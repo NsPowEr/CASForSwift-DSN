@@ -17,8 +17,8 @@
 # src/symbolic/simplify_arithmetic.cpp    (~724 lines)  — like-term collection; split target: F1.4
 src/symbolic/simplify_arithmetic.cpp
 
-# src/symbolic/assumptions.cpp            (~682 lines)  — assumption inference; split target: F1.4
-src/symbolic/assumptions.cpp
+# src/symbolic/assumptions.cpp — SPLIT DONE (W9.3, 2026-06-18): assumptions_core.cpp
+# (mutators/consistency) + assumptions_predicates.cpp (queries/provers), both <500 LOC.
 
 # src/symbolic/context_core.cpp           (~627 lines)  — CASContext; split target: F1.3
 src/symbolic/context_core.cpp
