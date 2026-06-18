@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # debt_report.sh — Weekly debt snapshot for the CAS Engine.
 # Counts machine-verifiable signals of repo health and prints a table.
+# Final section delegates to scripts/tasks_audit.sh for a unified view of
+# every task ledger (CAS_TASKS.md, PLAN_*.md, TODO*.md).
 # Exit code: always 0 (informational). Use --strict to fail when over thresholds.
 
 set -u
@@ -101,6 +103,12 @@ if [[ "$ORPHAN_COUNT" != "0" ]]; then
   echo
   echo "Sources NOT wired in CMakeLists.txt:"
   echo "$ORPHAN_SRC" | sed 's/^/  • /'
+fi
+
+# ── Unified task-ledger audit (delegates to tasks_audit.sh) ──────────────────
+if [[ -x scripts/tasks_audit.sh ]]; then
+  echo
+  bash scripts/tasks_audit.sh 2>/dev/null | sed -n '1,24p'
 fi
 
 if [[ "$STRICT" == "1" ]]; then
