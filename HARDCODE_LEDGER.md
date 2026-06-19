@@ -400,6 +400,14 @@
 - **Fix corretto**: ispezionare `integrate_by_parts` per evitare ri-visita del termine post-sub. Il sub-integrale dopo riduzione (`-∫(x/2) dx`) dovrebbe risolversi via `integrate_power_direct` senza ulteriori chiamate by-parts. Verificare anche che ILATE non emetta `Sum`/`Product` con priorità sbagliata sul termine ridotto, causando dispatch infinito a se stesso.
 - **Acceptance**: `integrate(x*log(x), x)` → corretto `½x²·log(x) - ¼x²`. Idem entry 60 `x*log(x)^2`, entry 59 `log(x)^3`.
 - **Fix applicato (2026-06-10)**: `integrate_by_parts` ora chiama `context.simplify(vdu)` prima della ricorsione `integrate(vdu)`. Il sub-integrando `(x²/2)·(1/x)` collassa a `x/2` e viene risolto direttamente da `integrate_power_direct`, evitando il re-dispatch IBP che generava i 4 termini ridondanti. Suite quick 2233/2233 PASS, zero regressioni.
+- **Fix aggiuntivo (2026-06-19, T-016)**: il caso di accettazione `x*log(x)^2` (entry 60)
+  era ancora ROTTO (`INTEGRATE_NO_STRATEGY`) — scoperto da nuovo regression test
+  round-trip `test_integrate_byparts.cpp`. Causa: `get_ilate_priority` classificava
+  OGNI `Pow` come Algebraico (3), quindi `(log x)^n` perdeva la classe Logaritmica e
+  l'IBP sceglieva u/dv errati. Fix generale (no hardcode): un Pow eredita la classe
+  ILATE della sua base (`integrate_parts.cpp:60`) — `(log x)^n`→L, `(asin x)^n`→I,
+  base algebrica→A. Verificato: round-trip `d/dx ∫f = f` per x·log x, x·log²x, log³x;
+  suite quick 2414/2414 PASS, zero regressioni.
 - **STATO**: CHIUSO
 
 ### HC-F75-A2-MATRIX-SCALAR-OP — Runner non gestisce scalar·matrix / matrix±matrix / matrix·matrix

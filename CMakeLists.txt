@@ -620,6 +620,7 @@ test/unit/symbolic/test_sqrt_fold.cpp
         test/unit/calculus/test_limit_smoke.cpp
         test/unit/calculus/test_limit_gruntz_nested_log.cpp
         test/unit/calculus/test_integrate_interrupt.cpp
+        test/unit/calculus/test_integrate_byparts.cpp
         test/unit/calculus/test_integrate_risch_smoke.cpp
         test/unit/calculus/test_integrate_substitution.cpp
         test/unit/algebra/test_polynomial_sparse_interpolation.cpp

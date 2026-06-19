@@ -59,7 +59,13 @@ namespace {
     }
     if (const auto* bin = expr_cast<Binary>(expr)) {
         if (bin->op == BinaryOp::Pow) {
-            return 3;
+            // A power inherits the ILATE class of its base: (log x)^n is still
+            // Logarithmic, (asin x)^n Inverse, (sin x)^n Trig, etc., while a
+            // purely algebraic base (x^n, (x+1)^n → Symbol/Sum/Product) resolves
+            // to Algebraic (3). Without this, log(x)^2 was blanket-classified
+            // Algebraic, so ∫ x·(log x)^n dx picked the wrong u and dead-ended
+            // (INTEGRATE_NO_STRATEGY) even though it reduces to ∫ x·log x dx.
+            return get_ilate_priority(bin->left);
         }
     }
     if (expr_is<Sum>(expr) || expr_is<Product>(expr)) {
