@@ -149,6 +149,8 @@ set(CAS_SYMBOLIC_SOURCES
     src/symbolic/simplify_hyperbolic.cpp
     src/symbolic/simplify_combinatorial.cpp
     src/symbolic/simplify_exp_log.cpp
+    src/symbolic/simplify_sqrt.cpp          # W9.3 split — sqrt branch of simplify_funcall_exp_log_sqrt
+    src/symbolic/simplify_sqrt_helpers.cpp  # W9.3 split — rational-sqrt / denesting helpers
     src/symbolic/simplify_branch_cut.cpp  # F8.0-6.2 / Task 20 BC-1..BC-3 — unwinding-number corrections
     src/symbolic/simplify_special_fn.cpp
     src/symbolic/simplify_special_fn_hyper.cpp

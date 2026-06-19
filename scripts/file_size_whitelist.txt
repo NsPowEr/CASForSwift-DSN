@@ -14,8 +14,7 @@
 # src/calculus/integrate_risch.cpp — SPLIT DONE (F7.0-A1.1): now 338 LOC.
 #   Split into integrate_risch_hermite/_rde.cpp + _internal.hpp.
 
-# src/symbolic/simplify_arithmetic.cpp    (~724 lines)  — like-term collection; split target: F1.4
-src/symbolic/simplify_arithmetic.cpp
+# src/symbolic/simplify_arithmetic.cpp — DEBT CLOSED (W9.3): now 403 LOC (≤500). No whitelist needed.
 
 # src/symbolic/assumptions.cpp — SPLIT DONE (W9.3, 2026-06-18): assumptions_core.cpp
 # (mutators/consistency) + assumptions_predicates.cpp (queries/provers), both <500 LOC.
@@ -26,9 +25,9 @@ src/symbolic/context_core.cpp
 # src/algebra/algebraic_tower_bridge.cpp  (~620 lines)  — Trager primitive element; split target: F3.4
 src/algebra/algebraic_tower_bridge.cpp
 
-# src/foundation/bigint.cpp               (~615 lines)  — BigInt core; split target: F1.1
-# (Note: bigint split already done into bigint_arithmetic/conversions/logic — verify count)
-src/foundation/bigint.cpp
+# src/foundation/bigint.cpp — DEAD ORPHAN REMOVED (W9.3): never compiled (not in
+# CMakeLists, not #included); superseded by wired bigint_arithmetic/conversions/logic/...
+# File deleted, so no whitelist entry needed.
 
 # src/calculus/differentiate.cpp          (~611 lines)  — diff rules; split target: F5
 src/calculus/differentiate.cpp
@@ -36,8 +35,7 @@ src/calculus/differentiate.cpp
 # src/rewrite/builtin_rewrite.cpp         (~610 lines)  — rewrite rules; split target: F1.5
 src/rewrite/builtin_rewrite.cpp
 
-# src/ast/ast.cpp                         (~605 lines)  — AST nodes; split target: F1.3
-src/ast/ast.cpp
+# src/ast/ast.cpp — DEBT CLOSED (W9.3): now 274 LOC (≤500). No whitelist needed.
 
 # src/symbolic/term_order.cpp             (~589 lines)  — LPO/GrevLex ordering; split target: F3.3
 src/symbolic/term_order.cpp
@@ -48,13 +46,12 @@ src/algebra/algebraic_number_bridge.cpp
 # src/algebra/solve_polynomial.cpp        (~573 lines)  — polynomial solver; split target: F2
 src/algebra/solve_polynomial.cpp
 
-# src/symbolic/simplify_exp_log.cpp       (~550 lines)  — exp/log simplification; split target: F1.4
-src/symbolic/simplify_exp_log.cpp
+# src/symbolic/simplify_exp_log.cpp — SPLIT DONE (W9.3): sqrt branch + helpers
+# extracted to simplify_sqrt.cpp + simplify_sqrt_helpers.cpp; now ≤500 LOC.
 
 # src/symbolic/simplify_arithmetic_chain.cpp — SPLIT DONE (F1.6-B1): now 440 LOC.
 
-# include/cas/ast.hpp                     (~542 lines)  — public AST header; split target: F1.3
-include/cas/ast.hpp
+# include/cas/ast.hpp — DEBT CLOSED (W9.3): now 19 LOC (≤500). No whitelist needed.
 
 # src/calculus/limit.cpp                  (~540 lines)  — limit dispatcher; split target: F5.2
 src/calculus/limit.cpp

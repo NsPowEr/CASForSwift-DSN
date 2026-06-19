@@ -17,9 +17,9 @@
 #   2) build/cas_golden_runner <corpus.jsonl> <maxdir> --json report.json
 #   3) bash scripts/check_golden_ratchet.sh --report report.json --update-baseline
 #
-STATUS: UNSET
-PASS_FLOOR: 0
-FAIL_CEILING: 0
+STATUS: SET
+PASS_FLOOR: 914
+FAIL_CEILING: 26
 TOLERANCE: 0
 #
 # Riferimento storico (STATE.md, 2026-06-10): aggregato ~83.9% = 753 pass / 145 fail
