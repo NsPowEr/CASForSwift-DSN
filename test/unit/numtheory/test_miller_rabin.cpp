@@ -43,13 +43,10 @@ TEST(MillerRabinTest, DeterministicBases) {
 
 TEST(MillerRabinTest, LargePrime) {
     // 10^12 + 39 è primo (oltre 32 bit, sotto 64 bit)
-    EXPECT_TRUE(is_prime(Integer("1000000000039")).value());
-    
-    // 10^12 + 37 non è primo (1000000000037 = 7 * 142857142862.4... no, verifichiamo)
-    // In realtà 10^12 + 37 = 1000000000037. Verifichiamo un composto noto grande.
-    EXPECT_FALSE(is_prime(Integer("1000000000001")).value()); // 1000000000001 = 137 * 7300000001? no.
-    // 10^12 + 1 = 73 * 137 * 99990001
-    EXPECT_FALSE(is_prime(Integer("1000000000001")).value());
+    EXPECT_TRUE(is_prime(Integer(1000000000039LL)).value());
+
+    // 10^12 + 1 = 73 * 137 * 99990001 (composto noto: (10^4)^3+1 = 10001·99990001, 10001=73·137)
+    EXPECT_FALSE(is_prime(Integer(1000000000001LL)).value());
 }
 
 } // namespace cas::numtheory

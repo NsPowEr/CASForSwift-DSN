@@ -586,6 +586,12 @@ if(CAS_ENABLE_TESTING)
         test/unit/error/test_diagnostic.cpp
         test/unit/error/test_unimplemented_payload.cpp
 
+        # T-053: reactivated orphan tests (were on disk but not wired → 0 coverage)
+        test/unit/numtheory/test_miller_rabin.cpp
+        test/unit/algebra/test_multivariate_square_free.cpp
+        test/unit/symbolic/test_gc.cpp
+        test/unit/symbolic/test_gaps.cpp
+
         test/unit/ast/test_ast_model.cpp
         test/unit/ast/test_ast_debug.cpp
         test/unit/foundation/test_foundation.cpp
