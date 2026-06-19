@@ -898,7 +898,11 @@
 - **Eccezione legittima preservata**: `kSingularityCheckPrec=256` è budget hardware MPFR; derivato da `prec ≫ log2(1/1e-9) = 30 bit`. Non configurabile via CASContext perché interno a decisione boolean heuristic; tolleranza `1e-9` è il parametro semantico e resta documentato nel codice.
 - **STATO**: ✅ RISOLTA 2026-06-02.
 
-### HPP-006 — fsolve kTolerance=1e-10 non configurabile (fsolve.cpp:77)
+### HPP-006 — fsolve kTolerance=1e-10 non configurabile (fsolve.cpp:77) — ✅ SUPERSEDED/CHIUSO
+- **STATO**: CHIUSO — risolto sotto [[HPP-024]] "RISOLTA 2026-06-13". fsolve.cpp:91 usa
+  ora `ctx.fsolve_tolerance()`; params reali in cas_context_params.hpp:629-633 (default
+  1e-10, settable, clamp >0) + :621 (fsolve_tolerance_bits_, default 80). Nessun hardcode
+  residuo. Verificato 2026-06-19 (TASKLIST T-019). Questa entry era rimasta OPEN per errore.
 - **File**: `src/algebra/fsolve.cpp:77`
 - **Nota**: Riga effettiva 77 (non 88 — drift verificato 2026-05-24). `constexpr double kTolerance = 1e-10;`
 - **Categoria CLAUDE.md**: Cat 1 — budget computazionale non configurabile.
@@ -1880,7 +1884,14 @@ Vedi `PLAN_TASKS_REMAINING.md` per breakdown completo.
 
 ### HC-F8-PENDING-20 — Branch-cut propagation completo — PARTIAL
 - **Task ID**: 20 — sqrt(x²) gating CHIUSO in commit `3ff0840`.
-- **Residuo**: ln(z1·z2)/ln(z1/z2) strict gating, (z^a)^b correction K, direction-limit table.
+- **DONE** (rule 1/3/4/5 di Branch_Cut_Propagation.md, tutte wired+testate):
+  - rule 1 sqrt(z²): make_sqrt_of_square_correction (commit `3ff0840`).
+  - rule 3 (z^a)^b: make_pow_of_pow_correction, wired simplify_arithmetic_power.cpp:417.
+  - rule 4 ln(z1·z2): make_log_product_correction, wired simplify_exp_log.cpp:203.
+  - rule 5 ln(z1/z2): make_log_quotient_correction, wired simplify_exp_log.cpp:227 (T-002).
+  - Gate: BranchCutsGlobalTest 12/12 PASS (LnOfQuotient_*, LnOfProduct_*, PowOfPow_*, Sqrt*).
+- **Residuo**: SOLO direction-limit table (spec §3.2) — continuità dei limiti
+  direzionali ai bordi del taglio, es. √(x ± iε) per ε→0± con x<0.
 - **Fix corretto**: vedi plan §Task 20 (BC-1..BC-5).
 
 ### HC-F8-PENDING-22 — Slater pFq → Meijer G + Bailey — APERTA
