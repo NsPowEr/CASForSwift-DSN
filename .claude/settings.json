@@ -11,6 +11,10 @@
           {
             "type": "command",
             "command": ".claude/hooks/guard_test_timeout.sh"
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/guard_anti_loop.sh"
           }
         ]
       }

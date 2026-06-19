@@ -30,26 +30,41 @@ echo "  CAS Engine — Definition of Done gate check"
 echo "  $(date +%H:%M:%S)  @ $(git rev-parse --short HEAD 2>/dev/null || echo '?')"
 echo "$div"
 
-# ── G3 — hardcode-of-passage comments must be ledgered ───────────────────────
+# ── G3 — every HARDCODE-OF-PASSAGE id in src/ must exist in the ledger ────────
+# Real gate: extract the <id> from each `HARDCODE-OF-PASSAGE: <id>` comment and
+# verify it is present in HARDCODE_LEDGER.md. (The old check only failed when the
+# ledger had *zero* entries — a tautology, since it has hundreds.)
 echo "G3  Hardcode discipline"
-HC_SRC=$(grep -rE "HARDCODE-OF-PASSAGE" src/ 2>/dev/null | wc -l | tr -d ' ')
-HC_LEDGER=$(grep -cE "HARDCODE-OF-PASSAGE|HC-" HARDCODE_LEDGER.md 2>/dev/null || echo 0)
-if [[ "$HC_SRC" -gt 0 && "$HC_LEDGER" -eq 0 ]]; then
-  ko "HARDCODE-OF-PASSAGE in src/ but HARDCODE_LEDGER.md has no entries"
+HC_IDS=$(grep -rhoE 'HARDCODE-OF-PASSAGE:[[:space:]]*[A-Za-z0-9._-]+' src/ 2>/dev/null \
+         | sed -E 's/.*:[[:space:]]*//' | sort -u)
+HC_UNLABELED=$(grep -rE 'HARDCODE-OF-PASSAGE' src/ 2>/dev/null \
+               | grep -vE 'HARDCODE-OF-PASSAGE:[[:space:]]*[A-Za-z0-9._-]+' | wc -l | tr -d ' ')
+if [[ -z "$HC_IDS" ]]; then
+  ok "no labeled HARDCODE-OF-PASSAGE ids in src/"
 else
-  ok "hardcode-of-passage comments: $HC_SRC (ledger entries present: $HC_LEDGER)"
+  MISSING=""
+  while IFS= read -r id; do
+    [[ -z "$id" ]] && continue
+    grep -qF "$id" HARDCODE_LEDGER.md 2>/dev/null || MISSING+=" $id"
+  done <<< "$HC_IDS"
+  if [[ -n "$MISSING" ]]; then
+    ko "HARDCODE-OF-PASSAGE id(s) in src/ NOT found in HARDCODE_LEDGER.md:$MISSING"
+  else
+    ok "all $(echo "$HC_IDS" | grep -c .) HARDCODE-OF-PASSAGE id(s) are ledgered"
+  fi
 fi
+[[ "$HC_UNLABELED" -gt 0 ]] && note "HARDCODE-OF-PASSAGE comments without a parseable id: $HC_UNLABELED (assegna un id ledgered)"
 
-# ── G4 — no int64_t/double in symbolic core (heuristic) ──────────────────────
-echo "G4  Exact arithmetic in core"
-# Exclude numeric/ engine (legit double), tests, and comments.
+# ── G4 — no int64_t/double in symbolic core (ADVISORY, non-blocking) ──────────
+# Heuristic only: many hits are legitimate numeric bridges. Reported as advisory
+# so it never inflates the pass count nor implies a guarantee it cannot give.
+echo "G4  Exact arithmetic in core (advisory)"
 RAW_DBL=$(grep -rnE '\b(double|int64_t|long long)\b' src/symbolic src/algebra src/calculus 2>/dev/null \
           | grep -vE '//|/\*|numeric|NumericEval|\.benchmark|to_double|as_double|approx' | wc -l | tr -d ' ')
 if [[ "$RAW_DBL" -gt 0 ]]; then
-  note "candidate double/int64 in symbolic dirs: $RAW_DBL (manual review — many are legit numeric bridges)"
-  ok "G4 reported (heuristic, non-blocking)"
+  note "candidate double/int64 in symbolic dirs: $RAW_DBL (advisory — revisione manuale, molti sono ponti numerici legittimi)"
 else
-  ok "no raw double/int64 in symbolic core dirs"
+  note "no raw double/int64 in symbolic core dirs (advisory)"
 fi
 
 # ── G9 — build hygiene: anti-monolith + orphan sources ───────────────────────

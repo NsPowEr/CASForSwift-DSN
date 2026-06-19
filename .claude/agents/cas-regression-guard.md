@@ -38,7 +38,7 @@ You are a regression testing agent for the CAS engine. You run the mathematical 
    ```
 
 ## Rules
-- Run from project root: `/Users/davidesaba/Desktop/REAL_CAS_ENGINE_C++`
+- Run from the repository root (the orchestrator's cwd — do NOT hardcode an absolute path; the repo may be relocated). If `build/` is missing, configure first (`cmake -B build -G Ninja`) rather than assuming a path.
 - NEVER run StressTest — too slow
 - NEVER modify source files
 - If `gtimeout` not available, use `timeout 120`
