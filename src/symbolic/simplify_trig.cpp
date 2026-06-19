@@ -163,6 +163,24 @@ constexpr int kTrigCombinationMaxDepth = 3;
         if (is_debug_chebyshev()) std::cerr << "  [DIRECT HALVING SUCCESS] ref = " << p.decimal() << "/" << q.decimal() << "\n";
         return direct;
     }
+    // Co-function reduction: cos(ref·π) = sin((1/2 − ref)·π).  For ref = p/q
+    // with p > q/3, the complement (q−2p)/(2q) reduces to a STRICTLY smaller
+    // numerator (e.g. 7/16 → 1/16), reachable by the cheap sin half-angle path —
+    // avoiding the O(p) Chebyshev T_p recurrence below, which otherwise builds an
+    // enormous expression that simplifies right at the depth/timeout budget and
+    // bails non-deterministically under suite-wide load (root cause of T-004,
+    // the flaky cos(7π/16)).  The strict-decrease guard bounds the mutual
+    // cos/sin recursion and never makes an already-cheap case worse.  Both ref
+    // and its complement lie in [0,1/2], so the identity holds with no sign flip.
+    {
+        const Rational cofunc = Rational(BigInt(1), BigInt(2)) - ref;  // auto-reduced
+        if (cofunc.numerator() > BigInt(0) && cofunc.numerator() < p) {
+            if (ExprPtr s = sin_ref_value(cofunc, arena)) {
+                if (is_debug_chebyshev()) std::cerr << "  [COFUNCTION cos→sin] ref = " << p.decimal() << "/" << q.decimal() << " → sin " << cofunc.numerator().decimal() << "/" << cofunc.denominator().decimal() << "\n";
+                return s;
+            }
+        }
+    }
     if (p <= BigInt(1) || q <= BigInt(1)) {
         if (p == BigInt(1) && q > BigInt(1)) {
             if (q.bit_length() <= 16U) {

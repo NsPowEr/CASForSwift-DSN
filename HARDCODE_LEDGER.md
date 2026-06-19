@@ -1911,8 +1911,11 @@ Vedi `PLAN_TASKS_REMAINING.md` per breakdown completo.
 - **Audit**: 28 file whitelisted in CMakeLists.txt anti-monolith scan.
 - **Fix corretto**: vedi plan §Task 25 (MS-1..MS-final).
 
-### HC-F8-FLAKY-COS-7PI-16 — `SpecialFunctionsTest.CosSevenPiOverSixteen_NonInert` order-dependent — APERTA (2026-06-12)
-- **Stato**: il test passa **isolato** (74/74 `SpecialFunctionsTest.*` verde, eseguibile diretto ~960 ms) ma fallisce nella suite quick completa con messaggio `cos(7π/16) stayed inert; got: FuncCall(cos, [Product([RationalLit(7, 16), Constant(Pi)])])`. Il test precedente `CosThreePiOverSeven_Chebyshev_NonInert` (in realtà cos(3π/16)) passa nella stessa sequenza.
+### HC-F8-FLAKY-COS-7PI-16 — `SpecialFunctionsTest.CosSevenPiOverSixteen_NonInert` order-dependent — RISOLTA (2026-06-19)
+- **ROOT CAUSE (confermata 2026-06-19 via `CAS_DEBUG_CHEBYSHEV=1`)**: NON un counter/cache globale (le ipotesi sotto erano errate). `cos(7π/16)` prendeva il ramo **Chebyshev T₇** in `cos_ref_value` (`simplify_trig.cpp`): `cos_q = cos(π/16)` (radicale annidato di profondità 3), poi 7 iterazioni di `2·cos_q·T_curr − T_prev` costruivano un'espressione **enorme**. La sua semplificazione costava ~605 ms e stava **al limite del budget depth/timeout** del Simplifier: dopo migliaia di test nella suite completa, lo stato di risorse al margine faceva fallire (bail → ritorno della `FuncCall(cos,…)` inerte). In isolamento il budget pieno riusciva → flaky order-dependent, deterministico solo sotto carico.
+- **FIX (2026-06-19)**: riduzione co-funzione in `cos_ref_value` PRIMA del loop Chebyshev: `cos(ref·π) = sin((1/2 − ref)·π)`. Per `ref = p/q` con `p > q/3` il complemento `(q−2p)/(2q)` si riduce a numeratore strettamente minore (7/16 → 1/16), raggiungibile dal percorso half-angle di `sin` (cheap, profondità ~3) — niente T₇. Guard `cofunc.num < p` garantisce terminazione della ricorsione mutua cos/sin e non peggiora i casi già economici. Identità esatta senza cambio di segno (entrambi gli angoli in [0,π/2]).
+- **Effetto**: test ora **18 ms** (era 605 ms), deterministico. Validazione: 244 test trig/special verdi; `cos(2π/5) = (√5−1)/4` (angolo in range co-funzione, p>q/3) confermato; suite quick 2429 PASS / 0 FAIL.
+- **Stato (storico)**: il test passava **isolato** ma falliva nella suite quick completa con `cos(7π/16) stayed inert; got: FuncCall(cos, [Product([RationalLit(7, 16), Constant(Pi)])])`.
 - **Bisezione tentata (2026-06-12)** senza riprodurre il fallimento in combinazioni più piccole:
   - `AcidTest.* + cos7π/16` → PASS
   - `SymbolicTest.* + CachingTest.* + cos7π/16` → PASS
