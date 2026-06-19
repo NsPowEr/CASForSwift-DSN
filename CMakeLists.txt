@@ -131,6 +131,7 @@ set(CAS_SYMBOLIC_SOURCES
     src/symbolic/simplify_core.cpp
     src/symbolic/simplify_arithmetic.cpp
     src/symbolic/simplify_arithmetic_power.cpp
+    src/symbolic/simplify_arithmetic_power_trig.cpp
     src/symbolic/simplify_arithmetic_chain_liketerm.cpp
     src/symbolic/summation_gosper.cpp
     src/symbolic/summation_zeilberger.cpp
@@ -621,6 +622,7 @@ test/unit/symbolic/test_sqrt_fold.cpp
         test/unit/calculus/test_limit_gruntz_nested_log.cpp
         test/unit/calculus/test_integrate_interrupt.cpp
         test/unit/calculus/test_integrate_byparts.cpp
+        test/unit/calculus/test_integrate_ibp_coverage.cpp
         test/unit/calculus/test_integrate_risch_smoke.cpp
         test/unit/calculus/test_integrate_substitution.cpp
         test/unit/algebra/test_polynomial_sparse_interpolation.cpp

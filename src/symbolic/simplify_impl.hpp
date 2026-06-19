@@ -203,6 +203,11 @@ private:
     // Specialized simplification methods
     [[nodiscard]] Result<ExprPtr> simplify_additive_chain_fast(ExprPtr original);
     [[nodiscard]] Result<ExprPtr> simplify_power(ExprPtr base, ExprPtr exponent, ExprPtr target_before = ExprPtr{});
+    // Chebyshev/DeMoivre linearization of sin^n / cos^n (integer n ≥ 2).
+    // Returns std::nullopt when the rule does not apply (base not sin/cos, n out
+    // of range, etc.) so the caller falls through. Defined in
+    // simplify_arithmetic_power_trig.cpp.
+    [[nodiscard]] std::optional<Result<ExprPtr>> try_linearize_trig_power(ExprPtr base, const BigInt& n);
     [[nodiscard]] Result<ExprPtr> simplify_sum_terms(const std::vector<ExprPtr>& terms, ExprPtr target_before = ExprPtr{}, bool inputs_are_simplified = false);
     [[nodiscard]] Result<ExprPtr> simplify_product_factors(const std::vector<ExprPtr>& factors, ExprPtr target_before = ExprPtr{}, bool inputs_are_simplified = false);
 

@@ -96,61 +96,10 @@ Result<ExprPtr> Simplifier::simplify_power(ExprPtr base, ExprPtr exponent, ExprP
     if (is_one_expr(base)) return ok(base);
 
     if (e_exact.value() && exp_rat.value.is_integer()) {
-        const BigInt n = exp_rat.value.numerator();
-        // Chebyshev/DeMoivre linearization: sin/cos^n → multiple-angle sum for n ≥ 2.
-        // Even n=2m: trig^n = (1/4^m)*[C(n,m) + 2*Σ_{j=0}^{m-1} s_j*C(n,j)*cos((n-2j)*arg)]
-        //   sin: s_j = (-1)^(m-j),  cos: s_j = 1
-        // Odd n=2m+1: trig^n = (1/4^m)*Σ_{j=0}^{m} s_j*C(n,j)*trig((n-2j)*arg)
-        //   sin: s_j = (-1)^(m-j),  cos: s_j = 1
-        // Limit: ctx.max_trig_power_reduction (default 32) — returns unchanged if exceeded.
-        if (n >= BigInt(2) && !n.is_negative()) {
-            if (const auto* func = expr_cast<FuncCall>(base)) {
-                const bool is_sin = (func->func_id == BuiltinOp::Sin);
-                const bool is_cos = (func->func_id == BuiltinOp::Cos);
-                if ((is_sin || is_cos) && func->args.size() == 1U) {
-                    const long long max_n = context_ ? static_cast<long long>(context_->max_trig_power_reduction()) : 32LL;
-                    if (n <= BigInt(max_n)) {
-                        const long long n_ll = static_cast<long long>(n.to_u64());
-                        ExprPtr arg = func->args[0];
-                        // Pascal's triangle for C(n, j), j = 0..n
-                        std::vector<BigInt> binom(static_cast<std::size_t>(n_ll + 1), BigInt(0));
-                        binom[0] = BigInt(1);
-                        for (long long i = 1; i <= n_ll; ++i)
-                            for (long long j = i; j >= 1; --j)
-                                binom[static_cast<std::size_t>(j)] = binom[static_cast<std::size_t>(j)] + binom[static_cast<std::size_t>(j - 1)];
-
-                        const long long m = n_ll / 2;
-                        BigInt denom(1);
-                        for (long long i = 0; i < m; ++i) denom = denom * BigInt(4);
-
-                        std::vector<ExprPtr> terms;
-                        if (n_ll % 2 == 0) {
-                            // Constant: C(n,m)/4^m
-                            terms.push_back(make_rational(arena_, Rational(binom[static_cast<std::size_t>(m)], denom)));
-                            for (long long j = 0; j < m; ++j) {
-                                BigInt c2 = binom[static_cast<std::size_t>(j)] * BigInt(2);
-                                Rational coeff(c2, denom);
-                                if (is_sin && ((m - j) % 2 == 1)) coeff = -coeff;
-                                const long long k = n_ll - 2 * j;
-                                ExprPtr ka = arena_.make<Binary>(BinaryOp::Mul, make_integer(arena_, BigInt(k)), arg);
-                                ExprPtr cos_ka = arena_.make<FuncCall>(BuiltinOp::Cos, std::vector<ExprPtr>{ka});
-                                terms.push_back(arena_.make<Binary>(BinaryOp::Mul, make_rational(arena_, coeff), cos_ka));
-                            }
-                        } else {
-                            const BuiltinOp trig_op = is_sin ? BuiltinOp::Sin : BuiltinOp::Cos;
-                            for (long long j = 0; j <= m; ++j) {
-                                Rational coeff(binom[static_cast<std::size_t>(j)], denom);
-                                if (is_sin && ((m - j) % 2 == 1)) coeff = -coeff;
-                                const long long k = n_ll - 2 * j;
-                                ExprPtr ka = arena_.make<Binary>(BinaryOp::Mul, make_integer(arena_, BigInt(k)), arg);
-                                ExprPtr trig_ka = arena_.make<FuncCall>(trig_op, std::vector<ExprPtr>{ka});
-                                terms.push_back(arena_.make<Binary>(BinaryOp::Mul, make_rational(arena_, coeff), trig_ka));
-                            }
-                        }
-                        return simplify_expr(arena_.make<Sum>(std::move(terms)));
-                    }
-                }
-            }
+        // Chebyshev/DeMoivre linearization: sin/cos^n → multiple-angle sum (n ≥ 2).
+        // Self-contained; extracted to simplify_arithmetic_power_trig.cpp.
+        if (auto trig = try_linearize_trig_power(base, exp_rat.value.numerator())) {
+            return *trig;
         }
     }
 
@@ -378,6 +327,15 @@ Result<ExprPtr> Simplifier::simplify_power(ExprPtr base, ExprPtr exponent, ExprP
                         }
                         return simplify_product_factors(factors);
                     }
+                    // Full distribution unsafe (a symbolic factor may vanish):
+                    // keep Pow(Product, n) intact and fall through. NOTE: pulling
+                    // out just the numeric coefficient here — (c·rest)^n →
+                    // c^n·Pow(rest,n) — is mathematically exact but BREAKS Gruntz:
+                    // its mrv machinery relies on the single un-split Pow node for
+                    // vanishing intermediates (regression: AcidTest Gruntz limit →
+                    // "ComplexRational: division by zero"). The numeric-factor
+                    // normalization that asin/atan round-trips need belongs at the
+                    // Sum/like-term layer, not in this universal power path. → T-054.
                 }
             }
         }
