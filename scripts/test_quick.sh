@@ -1,100 +1,129 @@
 #!/usr/bin/env bash
-# test_quick.sh — esegue la suite di test "quick" con esclusione canonica
-# dei test pesanti (>30s) e protezione anti-hang via timeout.
+# test_quick.sh — esegue la suite "quick" con esclusioni governate e protezione
+# anti-hang via timeout. Tre categorie di esclusione, semanticamente distinte:
+#
+#   STRUCTURAL  *Stress* / *Fuzz* / *Disabled*  → esclusi sempre (eseguiti
+#               altrove: Stress dal regression-guard, Fuzz via libFuzzer,
+#               Disabled è convenzione gtest). Legittimo.
+#   SLOW_OK     test che PASSANO ma sono lenti (>30s). Esclusi dal quick;
+#               INCLUSI in --slow (cap 1800s). Nessun debito: solo lenti.
+#   QUARANTINE  test NOTI-ROSSI (fail/hang) → scripts/test_quarantine.txt.
+#               Esclusi da quick E slow (altrimenti il loro hang rende il gate
+#               inusabile). NON sono nascosti: banner ad ogni run + ledger id +
+#               ratchet (check_quarantine_ratchet.sh). Debito visibile e capped.
+#
+# Differenza chiave vs la versione precedente: prima quarantena e lenti-legittimi
+# erano mescolati nella stessa lista, e --slow li re-includeva → il gate "serio"
+# andava in hang e nessuno lo lanciava, mentre il quick dava "verde" nascondendo
+# regressioni. Ora il verde del quick è onesto e --slow è di nuovo eseguibile.
 #
 # Uso:
-#   bash scripts/test_quick.sh              # default 600s wall-clock cap (quick suite)
-#   bash scripts/test_quick.sh --filter X   # filtro positivo aggiuntivo
-#   bash scripts/test_quick.sh --slow       # include anche i test slow (cap 1800s)
+#   bash scripts/test_quick.sh                 # quick, cap 600s
+#   bash scripts/test_quick.sh --slow          # + SLOW_OK, cap 1800s (gate pre-push)
+#   bash scripts/test_quick.sh --filter X      # filtro positivo aggiuntivo
+#   bash scripts/test_quick.sh --quarantine    # esegue SOLO i quarantenati, uno per
+#                                              #   uno con timeout stretto: l'hang
+#                                              #   diventa un FAIL veloce e visibile
+#   bash scripts/test_quick.sh --print-filter  # dry-run: stampa filtro+banner, no run
 #
-# Per CLAUDE.md "REGOLA TIMEOUT TEST": questa è l'unica via raccomandata per
-# eseguire la suite durante lo sviluppo iterativo. La suite completa con tutti
-# i test slow va eseguita solo come gate pre-commit (`--slow`).
-#
-# Lista di esclusione (test slow noti, pre-esistenti, >30s individualmente):
-#   - *Stress*              — esclusi da policy CLAUDE.md (cas-regression-guard).
-#   - *Fuzz*                — esclusi: invocati separatamente via libFuzzer.
-#   - *Disabled*            — gtest DISABLED_ convention.
-#   - VanHoeijDirect.Deg16_EightQuadratics_FindsRealFactor (181s legittimo).
-#   - FactorizationTowerNTest.SplitsX2Minus5_Over_Q_Sqrt2_Sqrt3_Sqrt5 (>240s).
-#   - PrimitiveElementTest.RedundantMixedTower_Sqrt2_Sqrt3_Sqrt5_Sqrt6 (>60s).
-#   - PrimitiveElementTest.DetectTowerNLevel_SqrtTwoSqrtThreeSqrtFive (31s).
-#
-# I tempi sopra riflettono baseline su macOS arm64. Se introduci una regressione
-# di complessità che porta un test sopra il cap, NON aggiungerlo qui: indaga la
-# causa (probabilmente bug O(2^n) accidentale) e fixa il codice.
+# Se introduci una regressione di complessità che porta un test sopra il cap, NON
+# aggiungerlo qui: indaga la causa (probabile O(2^n) accidentale) e fixa il codice.
+# Se è davvero rosso e non fixabile subito, va in test_quarantine.txt con un id di
+# ledger e alzando CEILING — un atto deliberato, non un'esclusione silenziosa.
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="${REPO_ROOT}/build/cas_foundation_tests"
-if [[ ! -x "$BIN" ]]; then
-    echo "[test_quick] cas_foundation_tests not built. Run: cmake --build build --target cas_foundation_tests" >&2
-    exit 2
+QUAR_FILE="${REPO_ROOT}/scripts/test_quarantine.txt"
+
+# ── Categorie ────────────────────────────────────────────────────────────────
+STRUCTURAL=( '*Stress*' '*Fuzz*' '*Disabled*' )
+
+# Lenti ma verdi (eseguiti in --slow). Tempi su macOS arm64.
+SLOW_OK=(
+    VanHoeijDirect.Deg16_EightQuadratics_FindsRealFactor                  # 181s
+    FactorizationTowerNTest.SplitsX2Minus5_Over_Q_Sqrt2_Sqrt3_Sqrt5       # >240s
+    PrimitiveElementTest.RedundantMixedTower_Sqrt2_Sqrt3_Sqrt5_Sqrt6      # >60s (oggi DISABLED_)
+    PrimitiveElementTest.DetectTowerNLevel_SqrtTwoSqrtThreeSqrtFive       # 31s
+    VanHoeijFactorTest.AcceptanceGate_AG2_SwinnertonDyer_SD3_Irreducible  # Swinnerton-Dyer, lento
+)
+
+# Quarantena (noti-rossi) — caricata dal file governato.
+QUARANTINE=()
+if [[ -f "$QUAR_FILE" ]]; then
+    while IFS= read -r line; do
+        case "$line" in
+            '#'*|'') continue ;;
+            CEILING:*) continue ;;
+        esac
+        name=$(awk '{print $1}' <<< "$line")
+        [[ -n "$name" ]] && QUARANTINE+=("$name")
+    done < "$QUAR_FILE"
 fi
 
-# Canonical exclusion patterns (single '-' prefix; ':' separates negative globs).
-EXCLUDE='-*Stress*:*Fuzz*:*Disabled*'
-EXCLUDE+=':VanHoeijDirect.Deg16_EightQuadratics_FindsRealFactor'
-EXCLUDE+=':FactorizationTowerNTest.SplitsX2Minus5_Over_Q_Sqrt2_Sqrt3_Sqrt5'
-EXCLUDE+=':PrimitiveElementTest.RedundantMixedTower_Sqrt2_Sqrt3_Sqrt5_Sqrt6'
-EXCLUDE+=':PrimitiveElementTest.DetectTowerNLevel_SqrtTwoSqrtThreeSqrtFive'
-EXCLUDE+=':VanHoeijFactorTest.AcceptanceGate_AG2_SwinnertonDyer_SD3_Irreducible'
-# F2GateBenchmark: pre-existing baseline FAIL (PLAN_TASKS_REMAINING.md:347)
-# always burns ~155s and always fails. Exclude from quick gate; re-runs only
-# in dedicated benchmark sessions.
-EXCLUDE+=':F2GateBenchmark.FactorOneHundredRandomZxUnderBudget'
-# FactorizationTowerTest.AntiHardcodeIrreducibleX2Minus2OverQSqrt3Sqrt5:
-# verified baseline hang >500s (git stash + rerun on 5c72bc0, 2026-06-14).
-# Pre-existing perf debt, NOT caused by Phase A/B interrupt-poll work.
-# FactorizationTowerTest.*_Over_Q_SqrtN_SqrtM family — 2-level Trager
-# factorization tests that have widespread perf regression (each hangs
-# >180s isolated on clean baseline 5c72bc0). Baseline observed F3
-# closure had these at <1 s, current state hangs.  Exclude the slow
-# family wholesale; the fast members (RejectsNullPolynomial 3ms,
-# RejectsNonRationalCoefficientPolynomial 13ms,
-# SplitsX2Minus3OverQSqrt2Sqrt3 4.7s) re-include explicitly via
-# positive filter or run individually.  Ledger entry
-# HC-F8-FACTORIZATIONTOWER-PERF tracks the family.
-EXCLUDE+=':FactorizationTowerTest.AntiHardcodeIrreducibleX2Minus2OverQSqrt3Sqrt5'
-EXCLUDE+=':FactorizationTowerTest.PreservesLeadingCoefficientAsContent'
-EXCLUDE+=':FactorizationTowerTest.SplitsProductOfQuadraticsOverQSqrt2Sqrt3'
-EXCLUDE+=':FactorizationTowerTest.SplitsX4Minus10X2Plus1OverQSqrt2Sqrt3'
-# Same regression family in TowerN class.
-EXCLUDE+=':FactorizationTowerNTest.IrreducibleX2Minus7_Over_Q_Sqrt2_Sqrt3'
-# Same perf regression family in 3-level PrimitiveElement
-EXCLUDE+=':PrimitiveElementTest.SqrtTwoSqrtThreeSqrtFive'
+join_colon() { local IFS=':'; echo "$*"; }
 
+# ── Parsing argomenti ────────────────────────────────────────────────────────
+# Due dimensioni ORTOGONALI (tenerle separate evita che --slow e --print-filter
+# si sovrascrivano): SUITE = cosa escludere; ACTION = cosa fare.
 POSITIVE_FILTER=''
 CAP=600
-INCLUDE_SLOW=0
+SUITE='quick'          # quick | slow
+ACTION='run'           # run | print | quarantine
+QCAP=60                # per-test cap in --quarantine
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --filter)
-            POSITIVE_FILTER="$2"
-            shift 2
-            ;;
-        --slow)
-            INCLUDE_SLOW=1
-            CAP=1800
-            EXCLUDE='-*Stress*:*Fuzz*:*Disabled*'
-            shift
-            ;;
-        --cap)
-            CAP="$2"
-            shift 2
-            ;;
-        -h|--help)
-            sed -n '1,40p' "$0"
-            exit 0
-            ;;
-        *)
-            echo "[test_quick] unknown arg: $1" >&2
-            exit 2
-            ;;
+        --filter)        POSITIVE_FILTER="$2"; shift 2 ;;
+        --slow)          SUITE='slow'; CAP=1800; shift ;;
+        --quarantine)    ACTION='quarantine'; shift ;;
+        --print-filter|--dry-run) ACTION='print'; shift ;;
+        --cap)           CAP="$2"; shift 2 ;;
+        --qcap)          QCAP="$2"; shift 2 ;;
+        -h|--help)       sed -n '1,45p' "$0"; exit 0 ;;
+        *) echo "[test_quick] unknown arg: $1" >&2; exit 2 ;;
     esac
 done
+
+# ── Banner quarantena (onestà: il verde è "verde ECCETTO questi rossi noti") ──
+print_quarantine_banner() {
+    local n="${#QUARANTINE[@]}"
+    if (( n > 0 )); then
+        echo "[test_quick] ⚠ $n test in QUARANTENA esclusi (NON coperti da questo run):"
+        printf '            - %s\n' "${QUARANTINE[@]}"
+        echo "            → noti-rossi tracciati in scripts/test_quarantine.txt (+ ledger)."
+        echo "            → stato reale: bash scripts/test_quick.sh --quarantine"
+    fi
+}
+
+# ── Azione quarantine: ogni test isolato con timeout stretto ──────────────────
+if [[ "$ACTION" == "quarantine" ]]; then
+    [[ ! -x "$BIN" ]] && { echo "[test_quick] binario non buildato: $BIN" >&2; exit 2; }
+    echo "[test_quick] --quarantine: ${#QUARANTINE[@]} test, per-test cap ${QCAP}s"
+    pass=0; fail=0; tmo=0
+    for name in "${QUARANTINE[@]}"; do
+        if timeout "$QCAP" "$BIN" --gtest_filter="$name" >/dev/null 2>&1; then
+            echo "  PASS    $name   (potenziale candidato a de-quarantena!)"
+            pass=$((pass+1))
+        else
+            rc=$?
+            if [[ $rc -eq 124 ]]; then echo "  TIMEOUT $name   (hang > ${QCAP}s)"; tmo=$((tmo+1))
+            else echo "  FAIL    $name   (exit $rc)"; fail=$((fail+1)); fi
+        fi
+    done
+    echo "[test_quick] quarantena: pass=$pass fail=$fail timeout=$tmo"
+    # I PASS qui sono test pronti a uscire dalla quarantena (abbassa CEILING).
+    exit 0
+fi
+
+# ── Costruzione filtro quick / slow ──────────────────────────────────────────
+if [[ "$SUITE" == "slow" ]]; then
+    NEG=( "${STRUCTURAL[@]}" "${QUARANTINE[@]}" )           # SLOW_OK INCLUSI
+else
+    NEG=( "${STRUCTURAL[@]}" "${SLOW_OK[@]}" "${QUARANTINE[@]}" )
+fi
+EXCLUDE="-$(join_colon "${NEG[@]}")"
 
 if [[ -n "$POSITIVE_FILTER" ]]; then
     FILTER="${POSITIVE_FILTER}${EXCLUDE}"
@@ -102,6 +131,20 @@ else
     FILTER="$EXCLUDE"
 fi
 
-echo "[test_quick] cap=${CAP}s slow=${INCLUDE_SLOW}"
+if [[ "$ACTION" == "print" ]]; then
+    print_quarantine_banner
+    echo "[test_quick] suite=${SUITE} action=print cap=${CAP}s"
+    echo "[test_quick] filter='${FILTER}'"
+    exit 0
+fi
+
+# ── Esecuzione ───────────────────────────────────────────────────────────────
+if [[ ! -x "$BIN" ]]; then
+    echo "[test_quick] cas_foundation_tests non buildato. Esegui: cmake --build build --target cas_foundation_tests" >&2
+    exit 2
+fi
+
+print_quarantine_banner
+echo "[test_quick] suite=${SUITE} cap=${CAP}s"
 echo "[test_quick] filter='${FILTER}'"
 exec timeout "${CAP}" "$BIN" --gtest_filter="$FILTER"

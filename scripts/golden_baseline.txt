@@ -1,0 +1,27 @@
+# golden_baseline.txt — Ratchet floor per il corpus golden (motore CAS vs Maxima 5.49.0).
+#
+# È il guardiano della VERITÀ MATEMATICA: impedisce che la correttezza del motore
+# regredisca in silenzio mentre i gate strutturali restano verdi. Per un CAS fatto
+# evolvere in autonomia è il segnale più importante, ed era l'unico lasciato a
+# giudizio umano (DEFINITION_OF_DONE G6).
+#
+# Metrica (dal runner cas_golden_runner, pass-rate = pass/(pass+fail), skip esclusi):
+#   - PASS_FLOOR   : i PASS aggregati non possono scendere sotto questo (− TOLERANCE).
+#   - FAIL_CEILING : i FAIL aggregati non possono salire sopra questo (+ TOLERANCE).
+#   Tracciare entrambi (pass come pavimento, fail come soffitto) impedisce il
+#   "gaming": trasformare un PASS in SKIP abbassa i PASS → colto dal pavimento.
+#
+# STATUS=UNSET → il gate è in SOLA LETTURA (non blocca): non si applica un baseline
+# che non è stato MISURATO. Per attivarlo, esegui una misura reale e fissa il floor:
+#   1) bash scripts/run_golden_maxima.sh <corpus.jsonl> <maxdir>        (genera refs)
+#   2) build/cas_golden_runner <corpus.jsonl> <maxdir> --json report.json
+#   3) bash scripts/check_golden_ratchet.sh --report report.json --update-baseline
+#
+STATUS: UNSET
+PASS_FLOOR: 0
+FAIL_CEILING: 0
+TOLERANCE: 0
+#
+# Riferimento storico (STATE.md, 2026-06-10): aggregato ~83.9% = 753 pass / 145 fail
+# (su 898 pass+fail). Target dichiarati: aggregato ≥86%, bronstein ≥70%, special_fn ≥82%.
+# Questi NON sono ancora il baseline attivo: vanno confermati da una misura fresca.

@@ -90,6 +90,32 @@ if [[ -x scripts/tasks_audit.sh ]]; then
   note "task ledger UNKNOWN statuses: $UNK (bonificare quando tocchi il file)"
 fi
 
+# ── G11 — quarantine ratchet: i test noti-rossi non crescono in silenzio ──────
+echo "G11 Quarantine ratchet"
+if [[ -x scripts/check_quarantine_ratchet.sh ]]; then
+  if out=$(bash scripts/check_quarantine_ratchet.sh 2>&1); then
+    ok "$(echo "$out" | grep -E 'ratchet:' | head -1 | sed 's/^[[:space:]]*//')"
+    echo "$out" | grep -E '•' | sed 's/^/      /'
+  else
+    ko "quarantine ratchet violato"; echo "$out" | sed 's/^/      /'
+  fi
+else
+  skipg "check_quarantine_ratchet.sh not found"
+fi
+
+# ── G6 — golden ratchet: la correttezza matematica non regredisce ────────────
+echo "G6  Golden ratchet"
+if [[ -x scripts/check_golden_ratchet.sh ]]; then
+  if out=$(bash scripts/check_golden_ratchet.sh 2>&1); then
+    note "$(echo "$out" | head -1)"
+    echo "$out" | grep -E '•|✓' | sed 's/^/      /'
+  else
+    ko "golden ratchet: regressione matematica"; echo "$out" | sed 's/^/      /'
+  fi
+else
+  skipg "check_golden_ratchet.sh not found"
+fi
+
 # ── G7 — regression suite (slow, opt-in) ─────────────────────────────────────
 echo "G7  Regression suite"
 if [[ "$FULL" -eq 1 ]]; then
@@ -117,7 +143,6 @@ echo "Manual gates (document in commit/PR):"
 note "G1  Spec read (MISSING_FEATURES_SPECS/<task>.md)"
 note "G2  General algorithm, no shortcut (REGOLA ZERO)"
 note "G5  Tests: distinct vars + equivalent forms + anti-hardcode"
-note "G6  Golden diff vs Maxima 5.49.0 green on declared domain"
 
 echo "$div"
 printf "  pass: %d   fail: %d   skipped: %d\n" "$pass" "$fail" "$skip"
