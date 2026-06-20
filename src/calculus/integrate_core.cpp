@@ -386,6 +386,9 @@ Result<ExprPtr> Integrator::integrate_binary(const Binary& binary, const Symbol&
             if (is_sqrt && (matches_square_plus_constant_square(sc->args.front(), var, cb)
                          || matches_square_minus_constant_square(sc->args.front(), var, cb)))
                 return ok(make_function(arena_, "ln", {make_function(arena_, "abs", {make_sum(arena_, {arena_.make<Symbol>(var), binary.right})})}));
+            if (is_sqrt)  // ∫1/√(Ax²+Bx+C) general, completing the square
+                if (auto g = integrate_inverse_sqrt_quadratic(sc->args.front(), var); g.is_ok())
+                    return g;
             if (!is_sqrt && matches_square_minus_constant_square(binary.right, var, cb)) {
                 ExprPtr x = arena_.make<Symbol>(var);
                 return ok(make_product(arena_, {

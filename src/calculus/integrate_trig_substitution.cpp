@@ -1,4 +1,5 @@
 #include "integrate_engine.hpp"
+#include "cas/algebra.hpp"
 
 #include <optional>
 #include <vector>
@@ -274,6 +275,63 @@ Result<ExprPtr> Integrator::integrate_xsq_over_sqrt_quadratic(
     return fail<ExprPtr>(make_error(
         CASErrorKind::Unimplemented,
         "No supported trig-substitution pattern for x² / sqrt(quadratic)"));
+}
+
+// ∫ dx / √(A x² + B x + C) for rational A≠0, B, C — general completing-the-square.
+// Generalizes the specific a²−x² / x²±a² matchers (no closed pattern table).
+//
+//   Let R = A x² + B x + C = A·(x + h)² + k  with h = B/(2A), k = C − B²/(4A).
+//   • A > 0:  ∫ = (1/√A)·ln| √A·(x+h) + √R |          (d/dx ⇒ 1/√R, verified)
+//   • A < 0 (needs k > 0, else no real domain):
+//             ∫ = (1/√|A|)·arcsin( √|A|·(x+h) / √k )
+//   √A, √|A|, √k are built via sqrt() and stay exact for any rational argument.
+Result<ExprPtr> Integrator::integrate_inverse_sqrt_quadratic(ExprPtr radicand, const Symbol& var) {
+    auto coeffs_res = algebra::univariate_coefficients(radicand, var, context_);
+    if (coeffs_res.is_error())
+        return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
+            "1/sqrt(quadratic): radicand not a univariate polynomial in var"));
+    const auto& coeffs = coeffs_res.value();              // ascending: [C, B, A]
+    if (coeffs.size() != 3U)                              // degree exactly 2
+        return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
+            "1/sqrt(quadratic): radicand is not quadratic in var"));
+
+    auto C = exact_scalar_from_expr(coeffs[0]);
+    auto B = exact_scalar_from_expr(coeffs[1]);
+    auto A = exact_scalar_from_expr(coeffs[2]);
+    if (!A.has_value() || !B.has_value() || !C.has_value() || A->numerator().is_zero())
+        return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
+            "1/sqrt(quadratic): non-rational or degenerate coefficients"));
+
+    const Rational two(BigInt(2)), four(BigInt(4));
+    const Rational h = *B / (two * *A);                   // B/(2A)
+    const Rational k = *C - (*B * *B) / (four * *A);      // C − B²/(4A)
+
+    ExprPtr x = arena_.make<Symbol>(var);
+    // u = x + h  (drop the +0 term when h == 0 to keep the form minimal)
+    ExprPtr u = h.numerator().is_zero()
+        ? x
+        : make_sum(arena_, {x, make_rational(arena_, h)});
+    ExprPtr sqrt_R = make_function(arena_, "sqrt", {radicand});
+
+    if (A->numerator().is_negative()) {
+        if (!(k.numerator().is_positive()))              // A<0 needs k>0 for real values
+            return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
+                "1/sqrt(quadratic): A<0 with k≤0 has no real domain"));
+        const Rational absA = -*A;
+        ExprPtr sqrt_absA = make_function(arena_, "sqrt", {make_rational(arena_, absA)});
+        ExprPtr sqrt_k = make_function(arena_, "sqrt", {make_rational(arena_, k)});
+        ExprPtr arg = make_binary(arena_, BinaryOp::Div,
+            make_product(arena_, {sqrt_absA, u}), sqrt_k);
+        ExprPtr inv = make_binary(arena_, BinaryOp::Div, make_integer(arena_, 1), sqrt_absA);
+        return ok(make_product(arena_, {inv, make_function(arena_, "arcsin", {arg})}));
+    }
+
+    // A > 0
+    ExprPtr sqrt_A = make_function(arena_, "sqrt", {make_rational(arena_, *A)});
+    ExprPtr ln_arg = make_sum(arena_, {make_product(arena_, {sqrt_A, u}), sqrt_R});
+    ExprPtr inv = make_binary(arena_, BinaryOp::Div, make_integer(arena_, 1), sqrt_A);
+    return ok(make_product(arena_, {inv,
+        make_function(arena_, "ln", {make_function(arena_, "abs", {ln_arg})})}));
 }
 
 }  // namespace cas::calculus::integrate_detail

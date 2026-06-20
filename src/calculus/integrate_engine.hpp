@@ -60,6 +60,9 @@ public:
     [[nodiscard]] Result<ExprPtr> integrate_linear_over_quadratic(const Binary& quotient, const Symbol& var);
     [[nodiscard]] Result<ExprPtr> integrate_sqrt_quadratic(ExprPtr radicand, const Symbol& var);
     [[nodiscard]] Result<ExprPtr> integrate_xsq_over_sqrt_quadratic(ExprPtr radicand, const Symbol& var);
+    // ∫ dx/√(A x² + B x + C) for any rational A≠0, B, C — general completing-the-square
+    // (arcsin / ln family). Generalizes the specific a²−x² / x²±a² matchers.
+    [[nodiscard]] Result<ExprPtr> integrate_inverse_sqrt_quadratic(ExprPtr radicand, const Symbol& var);
     [[nodiscard]] Result<ExprPtr> integrate_product(const Product& product, const Symbol& var);
     [[nodiscard]] Result<ExprPtr> integrate_power(const Binary& power, const Symbol& var);
     [[nodiscard]] Result<ExprPtr> integrate_inverse_quadratic_power(

@@ -12,8 +12,10 @@
 #include "cas/lexer.hpp"
 #include "cas/parser.hpp"
 #include "cas/symbolic.hpp"
+#include "cas/numeric.hpp"
 
 #include <gtest/gtest.h>
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -153,6 +155,48 @@ TEST(DefiniteIntegralProbe, ClassicClosedForms) {
     }
     for (const auto& f : fails) ADD_FAILURE() << "  " << f;
     EXPECT_TRUE(fails.empty()) << fails.size() << "/" << cases.size() << " definite integrals failed";
+}
+
+// T-055 base / ∫1/√(quadratic): general completing-the-square handler.
+// Verified NUMERICALLY (independent of the simplifier): d/dx(∫f) − f sampled at
+// several interior points of each integrand's real domain must vanish.
+TEST(InverseSqrtQuadratic, RoundTripNumeric) {
+    symbolic::CASContext ctx;
+    Symbol x{"x"};
+    auto parse = [&](const std::string& s) -> ExprPtr {
+        auto t = Lexer(s).tokenize();
+        Parser p(t.value(), ctx.arena());
+        return p.parse().value();
+    };
+    // f(x) integrand; check d/dx(∫f) == f at the given sample points.
+    struct Case { std::string f; std::vector<double> samples; };
+    const std::vector<Case> cases = {
+        {"1/sqrt(1-x^2)",   {-0.5, 0.0, 0.3, 0.7}},
+        {"1/sqrt(4-x^2)",   {-1.0, 0.0, 1.5}},
+        {"1/sqrt(x^2+1)",   {-2.0, 0.0, 1.0, 3.0}},
+        {"1/sqrt(x^2-1)",   {1.5, 2.0, 4.0}},        // domain x>1
+        {"1/sqrt(x^2+x+1)", {-1.0, 0.0, 0.5, 2.0}},  // B≠0, A>0, k>0
+        {"1/sqrt(2-3*x^2)", {-0.5, 0.0, 0.4}},       // A<0, scaled
+        {"1/sqrt(2*x^2+4*x+5)", {-2.0, 0.0, 1.0}},   // A>0, B≠0
+        {"1/sqrt(5-4*x-x^2)", {-3.0, -2.0, 0.0}},    // A<0, B≠0, k>0 (=9-(x+2)^2)
+    };
+    std::vector<std::string> fails;
+    for (const auto& c : cases) {
+        auto integ = integrate(parse(c.f), x, ctx);
+        if (integ.is_error()) { fails.push_back(c.f + " → ERR: " + integ.error().message); continue; }
+        auto d = diff(integ.value(), x, 1U, ctx);
+        if (d.is_error()) { fails.push_back(c.f + " → DIFF_ERR"); continue; }
+        for (double xv : c.samples) {
+            numeric::NumericEnv env; env["x"] = xv;
+            auto dv = numeric::eval(d.value(), env);
+            auto fv = numeric::eval(parse(c.f), env);
+            if (dv.is_error() || fv.is_error()) { fails.push_back(c.f + " @x=" + std::to_string(xv) + " eval_err"); continue; }
+            if (std::fabs(dv.value() - fv.value()) > 1e-7)
+                fails.push_back(c.f + " @x=" + std::to_string(xv) + " d/dx∫=" + std::to_string(dv.value()) + " f=" + std::to_string(fv.value()));
+        }
+    }
+    for (const auto& f : fails) ADD_FAILURE() << "  " << f;
+    EXPECT_TRUE(fails.empty()) << fails.size() << " sample(s) failed";
 }
 
 }  // namespace cas::calculus
