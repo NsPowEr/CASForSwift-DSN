@@ -167,4 +167,24 @@ TEST_F(ComplexLogBranchTest, LnProductExpandsUnderPositivity) {
     }
 }
 
+// T-017: ln(a+bi) must produce EXACT angles for the full constructible family,
+// not only the π/4 / axis cases. These exercise atan(√3)=π/3, atan(1/√3)=π/6
+// across all four quadrants (|z|=2 for all four). Principal branch arg∈(-π,π].
+TEST_F(ComplexLogBranchTest, LnSqrt3PlusI_IsLn2PlusIPiOver6) {
+    // √3 + i : |z|=2, arg = atan(1/√3) = π/6  (Q1).
+    EXPECT_TRUE(simplify_equal(parse("ln(sqrt(3) + i)"), parse("ln(2) + i*pi/6")));
+}
+TEST_F(ComplexLogBranchTest, Ln1PlusSqrt3I_IsLn2PlusIPiOver3) {
+    // 1 + √3·i : |z|=2, arg = atan(√3) = π/3  (Q1).
+    EXPECT_TRUE(simplify_equal(parse("ln(1 + sqrt(3)*i)"), parse("ln(2) + i*pi/3")));
+}
+TEST_F(ComplexLogBranchTest, LnMinus1PlusSqrt3I_IsLn2Plus2IPiOver3) {
+    // -1 + √3·i : |z|=2, arg = π − π/3 = 2π/3  (Q2).
+    EXPECT_TRUE(simplify_equal(parse("ln(-1 + sqrt(3)*i)"), parse("ln(2) + 2*i*pi/3")));
+}
+TEST_F(ComplexLogBranchTest, LnMinusSqrt3PlusI_IsLn2Plus5IPiOver6) {
+    // -√3 + i : |z|=2, arg = π − π/6 = 5π/6  (Q2).
+    EXPECT_TRUE(simplify_equal(parse("ln(-sqrt(3) + i)"), parse("ln(2) + 5*i*pi/6")));
+}
+
 }  // namespace

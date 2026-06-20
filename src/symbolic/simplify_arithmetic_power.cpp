@@ -95,6 +95,22 @@ Result<ExprPtr> Simplifier::simplify_power(ExprPtr base, ExprPtr exponent, ExprP
     if (is_one_expr(exponent)) return traced_result(RuleId::SimplifyPowerOne, target_before, base);
     if (is_one_expr(base)) return ok(base);
 
+    // (−x)^n for integer n: even → x^n, odd → −(x^n). Letting the sign escape the
+    // power lets downstream consumers collapse e.g. (−√3)² → 3 (needed by abs(z),
+    // arg(z) and the trig special-value tables). Exact for any integer n; the I /
+    // −I fast-paths below still apply to x^n via the recursive call.
+    if (const auto* neg_base = expr_cast<Unary>(base);
+        neg_base != nullptr && neg_base->op == UnaryOp::Neg) {
+        if (auto n = try_get_integer_exponent(exponent); n.has_value()) {
+            auto inner = simplify_power(neg_base->operand, exponent);
+            if (inner.is_error()) return inner;
+            if ((*n % BigInt(2)) == BigInt(0))
+                return traced_result(RuleId::SimplifyPowerOne, target_before, inner.value());
+            return traced_result(RuleId::SimplifyPowerOne, target_before,
+                arena_.make<Unary>(UnaryOp::Neg, inner.value()));
+        }
+    }
+
     if (e_exact.value() && exp_rat.value.is_integer()) {
         // Chebyshev/DeMoivre linearization: sin/cos^n → multiple-angle sum (n ≥ 2).
         // Self-contained; extracted to simplify_arithmetic_power_trig.cpp.

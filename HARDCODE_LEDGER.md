@@ -472,7 +472,11 @@
   1. Per ComplexLit(a,b) con (a,b) entrambi ≠ 0 e razionali: calcolare `|z|² = a² + b²` (Rational); ritornare `½·ln(a²+b²) + i·atan2_symbolic(b,a)` (richiede `atan2_symbolic` per coppie razionali tipo (1,1)→π/4, (1,0)→0, etc).
   2. Estendere Product simplifier per riconoscere il pattern `exp(iθ)·exp(-iθ) = 1` come fast-path (riduzione preventiva prima di Euler factor).
 - **Workaround attuale**: i casi triviali (ln(±1), ln(±i)) sono coperti via dispatch esplicito; gli altri restituiscono ln(ComplexLit) opaco (no Unimplemented silenzioso — l'output è strutturalmente valido ma non semplificato).
-- **STATO**: RISOLTO — F1.6 canonicalizzazione completa e formula `ln|z| + i*arg(z)` integrata su base Abs/Arg robuste in `simplify_exp_log.cpp`. Test passati correttamente (M20).
+- **STATO**: RISOLTO COMPLETO (2026-06-20). Estesa la famiglia angolare costruibile oltre π/4: `ln(a+bi)` ora esatta su tutta la famiglia 30°/45°/60° in tutti i quadranti (test residui T-017: √3+i→ln2+iπ/6, 1+√3i→ln2+iπ/3, -1+√3i→ln2+2iπ/3, -√3+i→ln2+5iπ/6). Tre gap reali risolti alla radice:
+  1. `extract_imag_coeff` (ln Sum-branch, `simplify_exp_log.cpp`) non riconosceva `ComplexLit(0,b)` (forma canonica F1.6 di `i`): √3+i restava opaco, mai instradato a arg(). Aggiunto handling ComplexLit pari a `extract_complex_parts`.
+  2. `atan` privo dei valori speciali π/6, π/3: aggiunti via detection `tan²∈{1/3,3}` (form-independent, `simplify_trig_inverse.cpp`).
+  3. `is_known_positive(√x)` e `is_known_negative(base^n)` mancanti → segno di `√3`, `(−√3)^(−1)` non provabile; `(−√3)²` non collassava in abs/arg. Aggiunti predicati segno (`simplify_sign_predicates.cpp`, estratto anti-monolito) + regola simplifier `(−x)^n` intero → `±x^n` (`simplify_arithmetic_power.cpp`).
+- **STATO (storico)**: F1.6 canonicalizzazione + formula `ln|z| + i*arg(z)` su Abs/Arg (M20); copriva solo π/4 e assi.
 ### F5.7-ZEIL-HIGHER-ORDER — Zeilberger higher-order recurrence solver non implementato
 - **File**: `src/symbolic/summation_zeilberger.cpp`.
 - **Categoria CLAUDE.md**: Cat 3 (algoritmo incompleto).

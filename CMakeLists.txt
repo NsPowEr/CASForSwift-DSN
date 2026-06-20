@@ -143,6 +143,7 @@ set(CAS_SYMBOLIC_SOURCES
     src/symbolic/simplify_arithmetic_chain_exp.cpp
     src/symbolic/simplify_extended_real.cpp
     src/symbolic/simplify_functions.cpp
+    src/symbolic/simplify_sign_predicates.cpp
     src/symbolic/simplify_trig_chebyshev.cpp
     src/symbolic/simplify_trig_tables.cpp
     src/symbolic/simplify_trig.cpp

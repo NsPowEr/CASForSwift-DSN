@@ -324,6 +324,17 @@ Result<ExprPtr> Simplifier::simplify_funcall_exp_log_sqrt(
                 return c != nullptr && c->value == MathConstant::I;
             };
             auto extract_imag_coeff = [&](ExprPtr term) -> ExprPtr {
+                // Post-F1.6 a standalone `i` canonicalizes to ComplexLit(0,1),
+                // so a Sum like √3 + i carries a pure-imaginary ComplexLit term.
+                // Recognize it (re=0) and return its imaginary coefficient, matching
+                // extract_complex_parts in simplify_complex.cpp. (A ComplexLit with
+                // nonzero real part is fully handled by the ln(ComplexLit) branch
+                // above and never reaches this Sum path.)
+                if (const auto* cl = expr_cast<ComplexLit>(term)) {
+                    if (cl->re_num.is_zero() && !cl->im_num.is_zero())
+                        return make_rational(arena_, Rational(cl->im_num, cl->im_den));
+                    return nullptr;
+                }
                 if (is_i_unit(term)) return make_integer(arena_, BigInt(1));
                 if (const auto* prod = expr_cast<Product>(term)) {
                     bool found_i = false;
