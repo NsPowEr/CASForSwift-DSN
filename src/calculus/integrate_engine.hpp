@@ -63,6 +63,12 @@ public:
     // ∫ dx/√(A x² + B x + C) for any rational A≠0, B, C — general completing-the-square
     // (arcsin / ln family). Generalizes the specific a²−x² / x²±a² matchers.
     [[nodiscard]] Result<ExprPtr> integrate_inverse_sqrt_quadratic(ExprPtr radicand, const Symbol& var);
+    // ∫ xᵏ/√(c − d·x²) dx for integer k ≥ 0 via the reduction formula
+    //   I_k = [(k−1)·c·I_{k−2} − xᵏ⁻¹·√(c−dx²)] / (k·d)
+    // (no closed table). Radicand must be c − d·x² (B=0, A=−d<0, C=c>0) — the form
+    // produced by the asin/acos IBP chain; other shapes → Unimplemented (diagnostic).
+    [[nodiscard]] Result<ExprPtr> integrate_monomial_over_sqrt_quadratic(
+        long long k, ExprPtr radicand, const Symbol& var);
     [[nodiscard]] Result<ExprPtr> integrate_product(const Product& product, const Symbol& var);
     [[nodiscard]] Result<ExprPtr> integrate_power(const Binary& power, const Symbol& var);
     [[nodiscard]] Result<ExprPtr> integrate_inverse_quadratic_power(

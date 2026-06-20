@@ -62,8 +62,11 @@ ProbeResult probe_one(symbolic::CASContext& ctx, const Symbol& x, const std::str
 //   • ∫asin(x), ∫x·atan(x): antiderivative is CORRECT but the simplifier cannot
 //     reduce d/dx(∫f)-f to 0 (fails to pull a numeric factor out of (2·√…)⁻¹,
 //     and to combine ½x²/(x²+1)+½/(x²+1) over the common denominator). → T-054.
-//   • ∫x²·asin(x): NO_STRATEGY — IBP reduces it to ∫x³/√(1-x²) which the engine
-//     cannot finish. → T-055.
+//   • ∫x²·asin(x), ∫xⁿ·asin/acos: the antiderivative is now PRODUCED and CORRECT
+//     (T-055 closed the ∫xᵏ/√(1-x²) reduction) — verified in
+//     MonomialOverSqrtQuadratic.RoundTripNumeric. Kept out of this *symbolic* matrix
+//     only because d/dx(∫f)-f still needs the same (2·√…)⁻¹ / √-power fraction-combine
+//     the simplifier can't yet do → T-054, not a strategy gap.
 TEST(IntegrateElementaryCoverage, RoundTripMatrix) {
     symbolic::CASContext ctx;
     Symbol x{"x"};
@@ -179,6 +182,51 @@ TEST(InverseSqrtQuadratic, RoundTripNumeric) {
         {"1/sqrt(2-3*x^2)", {-0.5, 0.0, 0.4}},       // A<0, scaled
         {"1/sqrt(2*x^2+4*x+5)", {-2.0, 0.0, 1.0}},   // A>0, B≠0
         {"1/sqrt(5-4*x-x^2)", {-3.0, -2.0, 0.0}},    // A<0, B≠0, k>0 (=9-(x+2)^2)
+    };
+    std::vector<std::string> fails;
+    for (const auto& c : cases) {
+        auto integ = integrate(parse(c.f), x, ctx);
+        if (integ.is_error()) { fails.push_back(c.f + " → ERR: " + integ.error().message); continue; }
+        auto d = diff(integ.value(), x, 1U, ctx);
+        if (d.is_error()) { fails.push_back(c.f + " → DIFF_ERR"); continue; }
+        for (double xv : c.samples) {
+            numeric::NumericEnv env; env["x"] = xv;
+            auto dv = numeric::eval(d.value(), env);
+            auto fv = numeric::eval(parse(c.f), env);
+            if (dv.is_error() || fv.is_error()) { fails.push_back(c.f + " @x=" + std::to_string(xv) + " eval_err"); continue; }
+            if (std::fabs(dv.value() - fv.value()) > 1e-7)
+                fails.push_back(c.f + " @x=" + std::to_string(xv) + " d/dx∫=" + std::to_string(dv.value()) + " f=" + std::to_string(fv.value()));
+        }
+    }
+    for (const auto& f : fails) ADD_FAILURE() << "  " << f;
+    EXPECT_TRUE(fails.empty()) << fails.size() << " sample(s) failed";
+}
+
+// T-055: ∫xᵏ/√(c−d·x²) via the reduction formula, plus the ∫xⁿ·asin/acos cases it
+// unblocks (IBP sends them through ∫xⁿ⁺¹/√(1−x²)). Verified NUMERICALLY: d/dx(∫f) − f
+// must vanish on interior points of the real domain (|x|<√(c/d)).
+TEST(MonomialOverSqrtQuadratic, RoundTripNumeric) {
+    symbolic::CASContext ctx;
+    Symbol x{"x"};
+    auto parse = [&](const std::string& s) -> ExprPtr {
+        auto t = Lexer(s).tokenize();
+        Parser p(t.value(), ctx.arena());
+        return p.parse().value();
+    };
+    struct Case { std::string f; std::vector<double> samples; };
+    const std::vector<Case> cases = {
+        // bare reduction family, c=1 d=1 (the gap: k≥3 was NO_STRATEGY)
+        {"x^2/sqrt(1-x^2)", {-0.6, -0.2, 0.3, 0.7}},   // k=2 regression (xsq path)
+        {"x^3/sqrt(1-x^2)", {-0.6, -0.2, 0.3, 0.7}},
+        {"x^4/sqrt(1-x^2)", {-0.6, -0.2, 0.3, 0.7}},
+        {"x^5/sqrt(1-x^2)", {-0.6, -0.2, 0.3, 0.7}},
+        // scaled radicands: c≠1, d≠1 (no hardcode of c=1)
+        {"x^3/sqrt(4-x^2)",   {-1.5, 0.5, 1.2}},        // c=4, d=1
+        {"x^4/sqrt(2-3*x^2)", {-0.5, 0.0, 0.4}},        // c=2, d=3, |x|<√(2/3)
+        // ∫xⁿ·asin/acos unblocked by the reduction (domain |x|<1)
+        {"x^2*asin(x)", {-0.6, 0.2, 0.7}},
+        {"x^3*asin(x)", {-0.6, 0.2, 0.7}},
+        {"x^2*acos(x)", {-0.6, 0.2, 0.7}},
     };
     std::vector<std::string> fails;
     for (const auto& c : cases) {

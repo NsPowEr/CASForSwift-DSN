@@ -207,24 +207,27 @@ Result<ExprPtr> Integrator::integrate_product(const Product& product, const Symb
         }
     }
 
-    // HC-IBP-VDU: detect shape  c · x² · sqrt(R)^{-1}  →
-    //   c · integrate_xsq_over_sqrt_quadratic(R).
+    // HC-IBP-VDU: detect shape  c · xᵏ · sqrt(R)^{-1}  (integer k ≥ 2)  →
+    //   k == 2: c · integrate_xsq_over_sqrt_quadratic(R)  (covers a²±x², x²−a²)
+    //   k ≥ 3 : c · integrate_monomial_over_sqrt_quadratic(k, R)  (reduction, c−x²).
+    // This also closes the asin/acos IBP chain, whose sub-integral is ∫xⁿ⁺¹/√(1−x²).
     // R(x) recognised by match_constant_square_minus_variable_square etc.
     {
         std::vector<ExprPtr> consts;
-        ExprPtr xsq = nullptr;
+        long long x_power = 0;   // integer exponent of the x-power factor (0 = none yet)
         ExprPtr inv_sqrt_arg = nullptr;
         bool shape_ok = true;
         for (ExprPtr f : product.factors) {
             if (!depends_on(f, var)) { consts.push_back(f); continue; }
-            // x² factor?
+            // xᵏ factor (integer k ≥ 2)?  Cap k to keep the linear-cost reduction
+            // bounded; an absurd exponent falls through to other strategies.
             if (const auto* pw = expr_cast<Binary>(f);
-                pw && pw->op == BinaryOp::Pow && !xsq) {
+                pw && pw->op == BinaryOp::Pow && x_power == 0) {
                 if (auto* sym = expr_cast<Symbol>(pw->left);
                     sym && sym->name == var.name) {
                     if (const auto* el = expr_cast<IntegerLit>(pw->right);
-                        el && el->value == BigInt(2)) {
-                        xsq = f; continue;
+                        el && el->value >= BigInt(2) && el->value <= BigInt(1000000)) {
+                        x_power = static_cast<long long>(el->value.to_u64()); continue;
                     }
                 }
             }
@@ -253,8 +256,10 @@ Result<ExprPtr> Integrator::integrate_product(const Product& product, const Symb
             }
             shape_ok = false; break;
         }
-        if (shape_ok && xsq && inv_sqrt_arg) {
-            auto primitive = integrate_xsq_over_sqrt_quadratic(inv_sqrt_arg, var);
+        if (shape_ok && x_power >= 2 && inv_sqrt_arg) {
+            auto primitive = (x_power == 2)
+                ? integrate_xsq_over_sqrt_quadratic(inv_sqrt_arg, var)
+                : integrate_monomial_over_sqrt_quadratic(x_power, inv_sqrt_arg, var);
             if (primitive.is_ok()) {
                 if (consts.empty()) return primitive;
                 consts.push_back(primitive.value());
