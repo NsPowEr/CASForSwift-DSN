@@ -146,6 +146,12 @@ struct MultivariateSquareFreeFactor {
 [[nodiscard]] std::optional<std::vector<ExprPtr>>
 enumerate_geometric_rootof(const RootOf& node, symbolic::CASContext& ctx);
 
+// T-025 — genuine cyclotomic Φ_n (composite n) RootOf expansion into its φ(n)
+// primitive roots exp(2πi·m/n), gcd(m,n)=1. Complements the geometric enumerator
+// (which only covers prime-n Φ_p). See src/algebra/algebraic_equal_cyclotomic.cpp.
+[[nodiscard]] std::optional<std::vector<ExprPtr>>
+enumerate_cyclotomic_rootof(const RootOf& node, symbolic::CASContext& ctx);
+
 // Returns Some(bool) when the RootOf-specific dispatch (distinct-index
 // guard + geometric expansion) can decide the equality outright;
 // returns nullopt to fall through to the general mathematically_equal

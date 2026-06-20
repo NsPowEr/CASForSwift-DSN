@@ -54,11 +54,21 @@ Result<bool> mathematically_equal(ExprPtr lhs, ExprPtr rhs, CASContext& context)
 
     // F7.5.A1 / HC-F75-CYCLOTOMIC-ROOTOF: RootOf-specific decisions.
     // See src/algebra/algebraic_equal_cyclotomic.cpp::try_rootof_decision.
-    if (auto rootof_dec = algebra::try_rootof_decision(
-            lhs_s.value(), rhs_s.value(), context);
-        rootof_dec.has_value()) {
-        finalize();
-        return ok(*rootof_dec);
+    // RootOf dispatch — try the ORIGINAL operands first. simplify() above may
+    // keep a RootOf (e.g. the biquadratic x⁴+1) while rewriting the OTHER side
+    // into radical form; the cyclotomic enumerator emits exp-form roots, so a
+    // simplified radical `other` would spuriously compare unequal and the call
+    // would short-circuit to false. On the originals both sides are still in
+    // their given (exp) notation, so Φ_n recognition matches. The simplified
+    // forms are tried as a fallback for inputs where simplify EXPOSES a RootOf.
+    for (const std::pair<ExprPtr, ExprPtr>& ops :
+             {std::pair<ExprPtr, ExprPtr>{lhs, rhs},
+              std::pair<ExprPtr, ExprPtr>{lhs_s.value(), rhs_s.value()}}) {
+        if (auto rootof_dec = algebra::try_rootof_decision(ops.first, ops.second, context);
+            rootof_dec.has_value()) {
+            finalize();
+            return ok(*rootof_dec);
+        }
     }
 
     // F1.6 bridge: Constant::I ↔ ComplexLit(0,1) (and other purely-imaginary

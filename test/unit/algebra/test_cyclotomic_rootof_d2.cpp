@@ -150,4 +150,68 @@ TEST_F(CyclotomicRootOfTest, EnumeratorRejectsNonMonic) {
     EXPECT_FALSE(enumerated.has_value());
 }
 
+// T-025: genuine cyclotomic Φ_n for COMPOSITE n. Unlike Φ_p (prime p), which
+// equals the geometric (x^p−1)/(x−1) already handled above, composite Φ_n is
+// not geometric: Φ_8 = x⁴+1, Φ_6 = x²−x+1, Φ_12 = x⁴−x²+1. Its roots are ONLY
+// the primitive n-th roots {exp(2πi·m/n) : gcd(m,n)=1}. mathematically_equal
+// must recognise RootOf(Φ_n, x, k) as equal to one of those primitive roots.
+namespace {
+[[nodiscard]] ExprPtr exp_2pi_i(symbolic::CASContext& ctx, long long m, long long n) {
+    auto& a = ctx.arena();
+    auto num = a.make<Product>(std::vector<ExprPtr>{
+        a.make<IntegerLit>(BigInt(2)), a.make<IntegerLit>(BigInt(m)),
+        a.make<Constant>(MathConstant::Pi), a.make<Constant>(MathConstant::I)});
+    auto arg = a.make<Binary>(BinaryOp::Div, num, a.make<IntegerLit>(BigInt(n)));
+    return a.make<FuncCall>(BuiltinOp::Exp, std::vector<ExprPtr>{arg});
+}
+[[nodiscard]] int igcd(int a, int b) { while (b) { a %= b; std::swap(a, b); } return a; }
+}  // namespace
+
+class CyclotomicCompositeTest : public CyclotomicRootOfTest {};
+
+// Each RootOf index of Φ_n must equal SOME primitive n-th root exp(2πi·m/n).
+static void expect_phi_matches(symbolic::CASContext& ctx, const Symbol& x,
+                               const std::string& phi_src, int n, std::size_t phi_n) {
+    auto t = Lexer(phi_src).tokenize();
+    ASSERT_TRUE(t.is_ok());
+    Parser p(t.value(), ctx.arena());
+    auto poly = p.parse();
+    ASSERT_TRUE(poly.is_ok());
+    for (std::size_t k = 0; k < phi_n; ++k) {
+        ExprPtr root = ctx.arena().make<RootOf>(poly.value(), x, std::optional<std::size_t>{k});
+        bool any = false;
+        for (int m = 1; m < n; ++m) {
+            if (igcd(m, n) != 1) continue;
+            auto eq = cas::symbolic::mathematically_equal(root, exp_2pi_i(ctx, m, n), ctx);
+            ASSERT_TRUE(eq.is_ok());
+            if (eq.value()) { any = true; break; }
+        }
+        EXPECT_TRUE(any) << phi_src << " index k=" << k << " matched no primitive " << n << "-th root";
+    }
+}
+
+TEST_F(CyclotomicCompositeTest, Phi8_X4Plus1) {  // primitive 8th roots, φ(8)=4
+    expect_phi_matches(ctx, x, "x^4 + 1", 8, 4);
+}
+TEST_F(CyclotomicCompositeTest, Phi6_X2MinusXPlus1) {  // φ(6)=2
+    expect_phi_matches(ctx, x, "x^2 - x + 1", 6, 2);
+}
+TEST_F(CyclotomicCompositeTest, Phi12_X4MinusX2Plus1) {  // φ(12)=4
+    expect_phi_matches(ctx, x, "x^4 - x^2 + 1", 12, 4);
+}
+// Direct enumerator surface: a composite Φ_n expands to 2·φ(n) candidates
+// (positive + negative-angle reps); a non-cyclotomic poly returns nullopt.
+TEST_F(CyclotomicCompositeTest, EnumeratorDirectPhi8) {
+    auto poly = parse("x^4 + 1");
+    RootOf node(poly, x, std::optional<std::size_t>{0});
+    auto en = cas::algebra::enumerate_cyclotomic_rootof(node, ctx);
+    ASSERT_TRUE(en.has_value());
+    EXPECT_EQ(en->size(), 8U);  // 2 * φ(8) = 2*4
+}
+TEST_F(CyclotomicCompositeTest, EnumeratorDirectNonCyclotomic) {
+    auto poly = parse("x^4 - x^2 + 2");  // not any Φ_n
+    RootOf node(poly, x, std::optional<std::size_t>{0});
+    EXPECT_FALSE(cas::algebra::enumerate_cyclotomic_rootof(node, ctx).has_value());
+}
+
 }  // namespace
