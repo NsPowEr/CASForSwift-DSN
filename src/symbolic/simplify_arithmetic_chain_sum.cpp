@@ -183,6 +183,21 @@ for (ExprPtr term : flat_terms) {
         }
     }
 
+    // Step 6 (T-054b): combine over a common denominator and cancel. Cheap and
+    // non-recursive; commits only on full cancellation, so non-cancelling sums are
+    // untouched. A commit yields polynomial/√-free terms — re-collect them.
+    {
+        int pass_limit = static_cast<int>(normalized.size()) + 1;
+        while (pass_limit-- > 0 && try_combine_common_denominator(normalized)) {
+            auto recollected = simplify_sum_terms(normalized, ExprPtr{}, true);
+            if (recollected.is_error()) return recollected;
+            if (const auto* s = expr_cast<Sum>(recollected.value()))
+                normalized.assign(s->terms.begin(), s->terms.end());
+            else
+                normalized = {recollected.value()};
+        }
+    }
+
     if (normalized.empty())
         return traced_result(RuleId::SimplifyCollectLikeTerms,
             target_before, make_integer(arena_, BigInt(0)));

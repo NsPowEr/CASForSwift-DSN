@@ -209,6 +209,12 @@ private:
     // simplify_arithmetic_power_trig.cpp.
     [[nodiscard]] std::optional<Result<ExprPtr>> try_linearize_trig_power(ExprPtr base, const BigInt& n);
     [[nodiscard]] Result<ExprPtr> simplify_sum_terms(const std::vector<ExprPtr>& terms, ExprPtr target_before = ExprPtr{}, bool inputs_are_simplified = false);
+    // T-054b: combine sum terms over a common denominator and cancel. Non-recursive
+    // (local univariate Rational-polynomial arithmetic, no simplify_expr). Rewrites
+    // `terms` in place and returns true when a denominator fully cancels; otherwise
+    // leaves the sum untouched. Defined in simplify_combine_fractions.cpp.
+    [[nodiscard]] bool try_combine_common_denominator(std::vector<ExprPtr>& terms);
+    [[nodiscard]] ExprPtr poly_to_expr_for_combine(const std::vector<Rational>& coeffs, ExprPtr var);
     [[nodiscard]] Result<ExprPtr> simplify_product_factors(const std::vector<ExprPtr>& factors, ExprPtr target_before = ExprPtr{}, bool inputs_are_simplified = false);
 
     // Rewrite and trace helpers

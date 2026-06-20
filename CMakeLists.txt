@@ -137,6 +137,7 @@ set(CAS_SYMBOLIC_SOURCES
     src/symbolic/summation_zeilberger.cpp
     src/symbolic/summation_zeilberger_helpers.cpp
     src/symbolic/simplify_arithmetic_chain_sum.cpp
+    src/symbolic/simplify_combine_fractions.cpp
     src/symbolic/simplify_arithmetic_chain.cpp
     src/symbolic/simplify_arithmetic_chain_gamma.cpp
     src/symbolic/simplify_arithmetic_chain_sqrt.cpp

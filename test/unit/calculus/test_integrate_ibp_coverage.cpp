@@ -57,18 +57,9 @@ ProbeResult probe_one(symbolic::CASContext& ctx, const Symbol& x, const std::str
 // Cases verified to integrate correctly AND round-trip to 0. This locks in the
 // T-016 ILATE fix (x²·log²x etc.) plus the standard IBP families.
 //
-// KNOWN GAPS (real bugs found by this probe 2026-06-19, filed as tasks — NOT
-// included below because they currently fail; excluded openly, not hidden):
-//   • ∫x·atan(x): antiderivative is CORRECT but the simplifier cannot reduce
-//     d/dx(∫f)-f to 0 — it needs ½x²·(x²+1)⁻¹ + ½·(x²+1)⁻¹ combined over the
-//     common denominator (x²+1) and cancelled. Fraction-combine layer → T-054 (B).
-//   • ∫x²·asin(x), ∫xⁿ·asin/acos: antiderivative is now PRODUCED and CORRECT
-//     (T-055 closed the ∫xᵏ/√(1-x²) reduction) — verified in
-//     MonomialOverSqrtQuadratic.RoundTripNumeric. Kept out of this *symbolic*
-//     matrix because d/dx(∫f)-f mixes √R and √R⁻¹ terms that only cancel after a
-//     common-denominator (√R) combine — same fraction-combine layer → T-054 (B).
-// RESOLVED: ∫asin(x) now round-trips symbolically (T-054 part A — numeric-factor
-//   normalization at the Sum/like-term layer) and is included below.
+// All entries round-trip symbolically: simplify(d/dx(∫f) − f) → 0. The
+// inverse-trig / poly·inverse-trig cases were closed by T-054 (A: numeric-factor
+// normalization of surd denominators; B: common-denominator combine + cancel).
 TEST(IntegrateElementaryCoverage, RoundTripMatrix) {
     symbolic::CASContext ctx;
     Symbol x{"x"};
@@ -80,10 +71,11 @@ TEST(IntegrateElementaryCoverage, RoundTripMatrix) {
         "x*sin(x)", "x^2*cos(x)",
         // polynomial × logarithm (higher powers / degrees)
         "x^3*log(x)", "x^2*log(x)^2",
-        // inverse trig alone: ∫atan(x) and ∫asin(x) both round-trip cleanly.
-        // (∫asin previously left (2·√(1-x²))⁻¹ uncancelled — fixed by T-054 part A,
-        // numeric-factor normalization at the Sum/like-term layer.)
+        // inverse trig alone (∫asin fixed by T-054 part A)
         "atan(x)", "asin(x)",
+        // polynomial × inverse-trig — closed by T-054 part B (common-denominator
+        // combine + cancel): ∫x·atan over (x²+1), ∫xⁿ·asin/acos over the surd √(1-x²).
+        "x*atan(x)", "x^2*asin(x)", "x^3*asin(x)", "x^2*acos(x)",
         // logarithm powers alone
         "log(x)^2",
         // cyclic IBP
