@@ -59,14 +59,16 @@ ProbeResult probe_one(symbolic::CASContext& ctx, const Symbol& x, const std::str
 //
 // KNOWN GAPS (real bugs found by this probe 2026-06-19, filed as tasks — NOT
 // included below because they currently fail; excluded openly, not hidden):
-//   • ∫asin(x), ∫x·atan(x): antiderivative is CORRECT but the simplifier cannot
-//     reduce d/dx(∫f)-f to 0 (fails to pull a numeric factor out of (2·√…)⁻¹,
-//     and to combine ½x²/(x²+1)+½/(x²+1) over the common denominator). → T-054.
-//   • ∫x²·asin(x), ∫xⁿ·asin/acos: the antiderivative is now PRODUCED and CORRECT
+//   • ∫x·atan(x): antiderivative is CORRECT but the simplifier cannot reduce
+//     d/dx(∫f)-f to 0 — it needs ½x²·(x²+1)⁻¹ + ½·(x²+1)⁻¹ combined over the
+//     common denominator (x²+1) and cancelled. Fraction-combine layer → T-054 (B).
+//   • ∫x²·asin(x), ∫xⁿ·asin/acos: antiderivative is now PRODUCED and CORRECT
 //     (T-055 closed the ∫xᵏ/√(1-x²) reduction) — verified in
-//     MonomialOverSqrtQuadratic.RoundTripNumeric. Kept out of this *symbolic* matrix
-//     only because d/dx(∫f)-f still needs the same (2·√…)⁻¹ / √-power fraction-combine
-//     the simplifier can't yet do → T-054, not a strategy gap.
+//     MonomialOverSqrtQuadratic.RoundTripNumeric. Kept out of this *symbolic*
+//     matrix because d/dx(∫f)-f mixes √R and √R⁻¹ terms that only cancel after a
+//     common-denominator (√R) combine — same fraction-combine layer → T-054 (B).
+// RESOLVED: ∫asin(x) now round-trips symbolically (T-054 part A — numeric-factor
+//   normalization at the Sum/like-term layer) and is included below.
 TEST(IntegrateElementaryCoverage, RoundTripMatrix) {
     symbolic::CASContext ctx;
     Symbol x{"x"};
@@ -78,10 +80,10 @@ TEST(IntegrateElementaryCoverage, RoundTripMatrix) {
         "x*sin(x)", "x^2*cos(x)",
         // polynomial × logarithm (higher powers / degrees)
         "x^3*log(x)", "x^2*log(x)^2",
-        // inverse trig alone: ∫atan(x) round-trips cleanly. ∫asin(x) does NOT
-        // (residual leaves (2·√(1-x²))⁻¹ uncancelled) — excluded as a known gap,
-        // see KNOWN GAPS above → T-054 (Sum/fraction-combine layer).
-        "atan(x)",
+        // inverse trig alone: ∫atan(x) and ∫asin(x) both round-trip cleanly.
+        // (∫asin previously left (2·√(1-x²))⁻¹ uncancelled — fixed by T-054 part A,
+        // numeric-factor normalization at the Sum/like-term layer.)
+        "atan(x)", "asin(x)",
         // logarithm powers alone
         "log(x)^2",
         // cyclic IBP

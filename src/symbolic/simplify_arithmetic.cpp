@@ -297,7 +297,59 @@ Result<std::optional<MonomialTerm>> Simplifier::extract_monomial(ExprPtr expr) {
         // or magnitude of a purely-imaginary factor collapse correctly in
         // the Sum collector.
         const ExprPtr i_marker = arena_.make<Constant>(MathConstant::I);
+        // num^e for integer e (e may be negative): reciprocal when e < 0.
+        auto pow_rat_int = [](const Rational& b, const BigInt& e) -> Rational {
+            const bool neg = e.is_negative();
+            Rational p = pow_rational_nonnegative(b, neg ? -e : e);
+            return neg ? Rational(p.denominator(), p.numerator()) : p;
+        };
         for (ExprPtr factor : product->factors) {
+            // T-054: pull rational numeric factors out of a (c·rest)^e base so
+            // (2·√R)^-1 and (√R)^-1 produce the SAME monomial key — the numeric
+            // part c^e folds into the coefficient. (c·e)^n = c^n·e^n is exact for
+            // integer n. This is SAFE at the Sum/like-term layer (it only reshapes
+            // coefficients); doing it in simplify_power instead breaks Gruntz mrv,
+            // which needs the single un-split Pow node (see simplify_arithmetic_power).
+            if (const auto* pw = expr_cast<Binary>(factor);
+                pw != nullptr && pw->op == BinaryOp::Pow) {
+                if (auto e = try_get_integer_exponent(pw->right); e.has_value()) {
+                    if (const auto* pbase = expr_cast<Product>(pw->left)) {
+                        Rational num(BigInt(1));
+                        std::vector<ExprPtr> rest;
+                        rest.reserve(pbase->factors.size());
+                        for (ExprPtr pf : pbase->factors) {
+                            LiteralRational lr;
+                            auto ex = try_get_exact_rational(pf, lr);
+                            if (ex.is_ok() && ex.value() && !lr.value.numerator().is_zero())
+                                num *= lr.value;
+                            else
+                                rest.push_back(pf);
+                        }
+                        // Restrict to SURD bases: every residual factor must be a
+                        // sqrt(...). Pulling a numeric factor out of a polynomial /
+                        // exp-tower base (e.g. (c·wᵏ)^n) re-keys mrv intermediates and
+                        // breaks Gruntz (AcidTest Test1 → ComplexRational div by zero).
+                        // The integration artifacts that need this normalization
+                        // (∫xᵏ/√(…), ∫asin, …) always have radical denominators.
+                        bool all_sqrt = true;
+                        for (ExprPtr rf : rest) {
+                            const auto* fc = expr_cast<FuncCall>(rf);
+                            if (fc == nullptr || fc->func_id != BuiltinOp::Sqrt) {
+                                all_sqrt = false;
+                                break;
+                            }
+                        }
+                        if (!(num == Rational(BigInt(1))) && !rest.empty() && all_sqrt) {
+                            coefficient *= pow_rat_int(num, *e);
+                            ExprPtr rest_base = rest.size() == 1U
+                                ? rest[0]
+                                : arena_.make<Product>(std::move(rest));
+                            factor = arena_.make<Binary>(BinaryOp::Pow, rest_base,
+                                make_integer(arena_, *e));
+                        }
+                    }
+                }
+            }
             auto factor_exact = try_get_exact_rational(factor, rational);
             if (factor_exact.is_ok() && factor_exact.value()) {
                 coefficient *= rational.value;
