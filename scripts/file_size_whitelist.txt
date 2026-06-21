@@ -109,8 +109,5 @@ src/calculus/ode_solver_frobenius.cpp
 # src/calculus/summation_abramov.cpp       (562 lines) — split target: F5.7
 src/calculus/summation_abramov.cpp
 
-# src/linalg/matrix_smith.cpp              (551 lines) — split target: F4.2
-src/linalg/matrix_smith.cpp
-
 # src/symbolic/summation_zeilberger_helpers.cpp (545 lines) — split target: F5.7
 src/symbolic/summation_zeilberger_helpers.cpp

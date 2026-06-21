@@ -346,6 +346,7 @@ set(CAS_LINALG_SOURCES
     src/linalg/matrix_eigenvalues.cpp
     src/linalg/matrix_null_space_extension.cpp
     src/linalg/matrix_smith.cpp
+    src/linalg/matrix_smith_qx.cpp
     src/linalg/matrix_jordan.cpp
     src/linalg/matrix_determinant_modular.cpp
     src/linalg/matrix_structured_determinant.cpp
