@@ -301,6 +301,7 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/polynomial_groebner_f4_solver.cpp
     src/algebra/polynomial_groebner_fglm.cpp
     src/algebra/polynomial_groebner_f5.cpp
+    src/algebra/polynomial_groebner_f5_buchberger.cpp
     src/algebra/csolve.cpp
     src/algebra/fsolve.cpp
     src/algebra/solve_inequality.cpp

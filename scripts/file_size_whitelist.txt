@@ -84,10 +84,6 @@ src/algebra/polynomial_gcd_fp_recursive.cpp
 #   split target: F3.1 CRT phase to polynomial_gcd_brown_crt.cpp
 src/algebra/polynomial_gcd_brown_modular.cpp
 
-# src/algebra/polynomial_groebner_f5.cpp (~524 lines) — F5 Groebner;
-#   split target: F3.3 signature reduction to polynomial_groebner_f5_reduce.cpp
-src/algebra/polynomial_groebner_f5.cpp
-
 # src/algebra/polynomial_groebner_fglm.cpp (~572 lines) — FGLM;
 #   split target: F3.3 linear algebra phase to polynomial_groebner_fglm_linalg.cpp
 src/algebra/polynomial_groebner_fglm.cpp
