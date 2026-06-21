@@ -857,7 +857,17 @@
 - **Descrizione**: Numero di campioni per interpolazione sparsa non deriva da un bound probabilistico formale. Schwartz-Zippel lemma dà: per polinomio di grado totale d su campo con |F|=q punti, prob(falso zero) ≤ d/q. Campioni necessari per confidence δ: `ceil(log(1/δ) / log(1/(1-d/q)))`.
 - **Fix corretto**: `max_samples = ceil(log(1/δ) / log(1/(1 - interpolation_degree_bound/field_size)))` con `δ = ctx.gcd_error_probability()` (già esposto).
 - **Blocking dependency**: L1-08 GCD multivariato, L1-21 campioni confidence-based.
-- **STATO**: ✅ RISOLTA 2026-05-28 — Formula applicata: `extra_guard = max(2, ceil(log2(required_samples+1)))`, `max_samples = 2*D + extra_guard`. Derivazione: con N=2D+extra punti, almeno D+extra punti sono lucky (Schwartz-Zippel). extra = ceil(log2(D+2)) cresce O(log D), evitando il blowup esponenziale O(N^k) del precedente log(1/δ). Per D≤2 (99% dei casi): extra=2, N=2D+2 (invariato nella pratica). La formula sostituisce il letterale `3U` con un'espressione derivata da required_samples.
+- **STATO**: ✅ RISOLTA 2026-06-21 (T-021) — La formula era poi derivata in
+  un'espressione probabilistica `k = ceil(log(δ)/log(p_fail))` con `p_fail = d/S` e
+  **`S = 10000` magic** (box di valutazione fittizio). Ma i punti di valutazione sono
+  interi consecutivi DETERMINISTICI (`i+1+offset`), non draw random: Schwartz-Zippel
+  (|S|) non si applica. Sostituita con un **bound deterministico esatto**:
+  `max_samples = required_samples + interpolation_degree_bound + 1`. Derivazione:
+  servono D+1 campioni buoni (required_samples); un campione è "cattivo" solo se è
+  radice del leading coefficient in main_var, e tali radici sono ≤ il suo grado in
+  interpolation_var ≤ interpolation_degree_bound. Coprendo ogni punto cattivo +1 si
+  garantiscono ≥ required_samples punti buoni. Nessuna costante magica, nessun
+  `δ`/`double`/`log`. Full suite 2442 pass.
 
 ### F3.1-ZIPPEL — Zippel sparse Prony stage
 - **File**: `src/algebra/polynomial_gcd_zippel_prony.cpp` (nuovo, T3-Opus Block A2 2026-05-28)
