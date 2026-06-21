@@ -285,6 +285,7 @@ void collect_symbols(ExprPtr e, std::set<std::string>& out) {
 
     std::size_t p = 0;
     while (p < std::min(rows, cols)) {
+        if (auto chk = ctx.check_interrupt(); chk.is_error()) return fail<SmithNormalForm>(chk.error());
         std::optional<std::pair<std::size_t, std::size_t>> pivot;
         std::size_t min_deg = 0;
         for (std::size_t i = p; i < rows; ++i) {
@@ -307,6 +308,7 @@ void collect_symbols(ExprPtr e, std::set<std::string>& out) {
         std::size_t guard = 0;
         const std::size_t guard_max = (rows + cols) * ctx.smith_stabilization_multiplier();
         while (changed) {
+            if (auto chk = ctx.check_interrupt(); chk.is_error()) return fail<SmithNormalForm>(chk.error());
             changed = false;
             if (++guard > guard_max) {
                 return fail<SmithNormalForm>(CASError{CASErrorKind::Unimplemented,
@@ -447,6 +449,7 @@ Result<SmithNormalForm> smith_normal_form(const MatrixExpr& matrix, symbolic::CA
 
     std::size_t p = 0;
     while (p < std::min(rows, cols)) {
+        if (auto chk = ctx.check_interrupt(); chk.is_error()) return fail<SmithNormalForm>(chk.error());
         std::optional<std::pair<std::size_t, std::size_t>> pivot;
         BigInt min_val;
 
@@ -473,6 +476,7 @@ Result<SmithNormalForm> smith_normal_form(const MatrixExpr& matrix, symbolic::CA
         std::size_t guard = 0;
         const std::size_t guard_max = (rows + cols) * ctx.smith_stabilization_multiplier();
         while (changed) {
+            if (auto chk = ctx.check_interrupt(); chk.is_error()) return fail<SmithNormalForm>(chk.error());
             changed = false;
             if (++guard > guard_max) {
                  return fail<SmithNormalForm>(CASError{CASErrorKind::Unimplemented,

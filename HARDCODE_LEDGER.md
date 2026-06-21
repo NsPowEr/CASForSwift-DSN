@@ -116,10 +116,19 @@
     signature esteso con optional `symbolic::CASContext* ctx = nullptr`,
     propagato dal call-site Wang EEZ.
 
+  AGGIORNAMENTO 2026-06-21 (T-024) — poll-point diretti aggiunti ai loop
+  pure-integer di linalg precedentemente scoperti:
+  - `src/linalg/matrix_smith.cpp`: Q(x)-path outer `while` + inner
+    `while(changed)` stabilization; Z-path outer `while` + inner
+    `while(changed)` stabilization (BigInt extended_gcd, nessun
+    simplify/substitute intermedio → era non-interruttibile).
+  - `src/linalg/matrix_hermite.cpp`: Z-path e Q(x)-path outer column
+    `for`-loop.
+
   Residui: equal-degree factorization inner recursion (covered
-  transitively via outer while-loop poll); Smith normal form / Hermite
-  normal form ed alcuni loop pure-integer non ancora coperti — bassa
-  priorità (durata tipica < 1s su input osservati).
+  transitively via outer while-loop poll); alcuni loop pure-integer
+  minori (HNF/SNF ora coperti) — bassa priorità (durata tipica < 1s su
+  input osservati).
 
 ### HC-F70-A31-MIGRATION-TODO — AstArena reset without root migration
 - **File**: `include/cas/ast.hpp` (AstArena::reset declaration), `src/ast/ast.cpp` (impl)

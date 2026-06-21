@@ -111,6 +111,7 @@ void swap_rows_HU(MatrixExpr& H, MatrixExpr& U, std::size_t i, std::size_t j) {
 
     std::size_t r = 0;
     for (std::size_t c = 0; c < n && r < m; ++c) {
+        if (auto chk = ctx.check_interrupt(); chk.is_error()) return fail<HermiteNormalForm>(chk.error());
         std::size_t pivot = m;
         for (std::size_t i = r; i < m; ++i) {
             auto v = try_get_bigint(H(i, c));
@@ -179,6 +180,7 @@ void swap_rows_HU(MatrixExpr& H, MatrixExpr& U, std::size_t i, std::size_t j) {
 
     std::size_t r = 0;
     for (std::size_t c = 0; c < n && r < m; ++c) {
+        if (auto chk = ctx.check_interrupt(); chk.is_error()) return fail<HermiteNormalForm>(chk.error());
         std::size_t pivot = m;
         std::size_t pivot_deg = 0;
         for (std::size_t i = r; i < m; ++i) {
