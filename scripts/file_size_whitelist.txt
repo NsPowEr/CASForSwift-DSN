@@ -56,8 +56,6 @@ src/algebra/solve_polynomial.cpp
 # src/calculus/limit.cpp                  (~540 lines)  — limit dispatcher; split target: F5.2
 src/calculus/limit.cpp
 
-# src/calculus/laplace_transform.cpp      (~515 lines)  — Laplace table + algorithm; split target: F5.8
-src/calculus/laplace_transform.cpp
 
 # src/calculus/orthogonal_polynomials.cpp (~521 lines)  — Legendre/Chebyshev/Hermite/Laguerre; split target: F5.9
 src/calculus/orthogonal_polynomials.cpp

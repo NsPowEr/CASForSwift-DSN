@@ -249,6 +249,7 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/asymptotes.cpp
     src/calculus/numeric_diff.cpp
     src/calculus/laplace_transform.cpp
+    src/calculus/laplace_transform_inverse.cpp
     src/calculus/ode_laplace.cpp
 )
 
