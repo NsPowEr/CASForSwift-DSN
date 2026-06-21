@@ -213,6 +213,7 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/integrate_dirac.cpp
     src/calculus/fourier_transform.cpp
     src/calculus/differential_field.cpp
+    src/calculus/differential_field_integration.cpp
     src/calculus/limit.cpp
     src/calculus/limit_helpers.cpp
     src/calculus/limit_infinite.cpp

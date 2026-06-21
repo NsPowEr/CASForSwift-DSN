@@ -91,9 +91,6 @@ src/algebra/polynomial_groebner_fglm.cpp
 # include/cas/cas_context_params.hpp      (508 lines) — split target: F1.3
 include/cas/cas_context_params.hpp
 
-# src/calculus/differential_field.cpp      (577 lines) — split target: F5.1
-src/calculus/differential_field.cpp
-
 # src/calculus/ode_classifier.cpp — SPLIT DONE (F7.0-A1.4): now 172 LOC.
 #   Split into ode_classifier_first_order/_higher_order.cpp + _internal.hpp.
 
