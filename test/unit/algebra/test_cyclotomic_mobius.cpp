@@ -131,6 +131,41 @@ TEST(CyclotomicMobiusTest, DegenerateEmptyPoly) {
     EXPECT_FALSE(v.has_value());
 }
 
+// ─── A5-LARGECYCLO closed (T-022): deg > 724 detection ──────────────────────
+//
+// The former implementation materialised order-n intermediates and capped at
+// n ≤ 2^20, so is_cyclotomic returned nullopt proactively for deg > 724. The
+// squarefree-reduction compute_cyclotomic keeps intermediates at degree O(φ(n))
+// and inverse-totient candidate enumeration replaces the O(d²) scan, so large
+// degrees are now both computable and detectable.
+//
+// Φ_1009 (1009 prime) has degree 1008 > 724; Φ_2018 = Φ_2·1009 also degree 1008.
+TEST(CyclotomicMobiusTest, RoundTripLargeDegreeAbove724) {
+    for (int n : {105, 1155, 1009, 2018}) {
+        IntPoly phi = compute_cyclotomic(n);
+        ASSERT_FALSE(phi.empty()) << "compute_cyclotomic failed for n=" << n;
+        auto v = is_cyclotomic(phi);
+        ASSERT_TRUE(v.has_value())
+            << "is_cyclotomic returned nullopt for Phi_" << n
+            << " (deg " << phi.degree() << ")";
+        EXPECT_EQ(*v, n) << "wrong order recovered for n=" << n;
+    }
+}
+
+// Independent correctness check (not self-referential): Φ_105 = Φ_{3·5·7} is the
+// smallest cyclotomic polynomial with a coefficient outside {-1,0,1}; it has two
+// coefficients equal to -2. Validates the multi-prime squarefree fold.
+TEST(CyclotomicMobiusTest, Phi105HasMinusTwoCoefficient) {
+    IntPoly phi = compute_cyclotomic(105);
+    ASSERT_EQ(phi.degree(), static_cast<std::size_t>(48));
+    int minus_two_count = 0;
+    for (std::size_t i = 0; i < phi.size(); ++i) {
+        if (phi[i] == BigInt(-2)) ++minus_two_count;
+    }
+    EXPECT_EQ(minus_two_count, 2)
+        << "Phi_105 must contain exactly two -2 coefficients";
+}
+
 // ─── cyclotomic_roots (production path via solve_polynomial wiring) ──────────
 //
 // cyclotomic_roots is called from solve_polynomial.cpp:493 when is_cyclotomic

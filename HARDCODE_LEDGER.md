@@ -996,7 +996,19 @@
 - **Descrizione**: `constexpr int kDefaultCyclotomicN = 1 << 20` (riga 98) limita `compute_cyclotomic` a n ≤ 2^20. Per un polinomio di grado d, l'ordine ciclotomico n soddisfa φ(n) = d, quindi n ≤ 2d². Il bound 2d² > 2^20 si verifica per d > √(2^19) ≈ 724. `is_cyclotomic()` ritorna `nullopt` proattivamente per deg > 724 (riga 202-210) invece di eseguire una ricerca esaustiva che excederebbe il cap OOM. Un polinomio Φ_n con n > 2^20 (e deg φ(n) > 724) viene classificato come non-ciclotomico via nullopt — non un risultato silenziosamente sbagliato (nullopt è segnale esplicito), ma una limitazione nota documentata in codice come `A5-LARGECYCLO`. Iscritto anche in `CAS_TASKS.md:103` (CAS-L2-15).
 - **Fix corretto**: (a) Esporre `ctx.max_cyclotomic_n()` (default 2^20, documentato con costo memoria O(n·τ(n)) per l'inversion Möbius); (b) per n arbitrario grande, usare un algoritmo che non materializzi tutti i divisori di n — es. fattorizzazione + formula prodotto euleriana incrementale via sieve on-demand sui divisori di n (costo O(τ(n)·d²) invece di O(n·τ(n))). Questo consentirebbe detection ciclotomica per deg > 724 con costo proporzionale a τ(n) · deg², non a n.
 - **Blocking dependency**: Nessuno — fix autonomo. OOM-safety by design: il cap corrente è matematicamente giustificato e produce `nullopt` esplicito (mai silent-wrong).
-- **Stato**: APERTA — differita (OOM safety prioritaria; deg > 724 è raro in pratica CAS).
+- **Stato**: ✅ RISOLTA 2026-06-23 (T-022) — Eliminato `kDefaultCyclotomicN`
+  (magic 2^20) e l'intera euristica del cap. `compute_cyclotomic(n)` riscritta
+  con **riduzione al radicale squarefree**: `Φ_rad(n)(x)` via il fold
+  `Φ_{k·p}(x) = Φ_k(x^p)/Φ_k(x)` sui primi distinti di n, poi
+  `Φ_n(x) = Φ_rad(x^(n/rad))` (Apostol Thm 8.13). Ogni intermedio resta di
+  grado O(φ(n)) — nessuna materializzazione di grado n, nessun cap OOM.
+  `is_cyclotomic()` ora testa solo i candidati `{n : φ(n)=d}` via
+  **inverse-totient** (enumera i primi p con (p−1)|d + potenze), eliminando lo
+  scan O(d²) e il `nullopt` proattivo per deg>724. Unico limite residuo: guard
+  di overflow `deg ≤ 30000` (2d² < INT_MAX), documentato, ritorna nullopt
+  diagnostico. Test: `RoundTripLargeDegreeAbove724` (Φ_1009/Φ_2018 deg 1008 ora
+  rilevati), `Phi105HasMinusTwoCoefficient` (fold multi-primo). Caller
+  regression 180/180; cyclotomic suite 14/14.
 
 ### HPP-013 — evaluator.cpp RootOf seed scheme deterministico (evaluator.cpp:142-149)
 - **File**: `src/numeric/evaluator.cpp:142-149`
