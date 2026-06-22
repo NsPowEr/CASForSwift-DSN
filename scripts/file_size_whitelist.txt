@@ -19,32 +19,11 @@
 # src/symbolic/assumptions.cpp — SPLIT DONE (W9.3, 2026-06-18): assumptions_core.cpp
 # (mutators/consistency) + assumptions_predicates.cpp (queries/provers), both <500 LOC.
 
-# src/symbolic/context_core.cpp           (~627 lines)  — CASContext; split target: F1.3
-src/symbolic/context_core.cpp
-
-# src/algebra/algebraic_tower_bridge.cpp  (~620 lines)  — Trager primitive element; split target: F3.4
-src/algebra/algebraic_tower_bridge.cpp
-
 # src/foundation/bigint.cpp — DEAD ORPHAN REMOVED (W9.3): never compiled (not in
 # CMakeLists, not #included); superseded by wired bigint_arithmetic/conversions/logic/...
 # File deleted, so no whitelist entry needed.
 
-# src/calculus/differentiate.cpp          (~611 lines)  — diff rules; split target: F5
-src/calculus/differentiate.cpp
-
-# src/rewrite/builtin_rewrite.cpp         (~610 lines)  — rewrite rules; split target: F1.5
-src/rewrite/builtin_rewrite.cpp
-
 # src/ast/ast.cpp — DEBT CLOSED (W9.3): now 274 LOC (≤500). No whitelist needed.
-
-# src/symbolic/term_order.cpp             (~589 lines)  — LPO/GrevLex ordering; split target: F3.3
-src/symbolic/term_order.cpp
-
-# src/algebra/algebraic_number_bridge.cpp (~584 lines)  — Q(alpha) arithmetic; split target: F3.4
-src/algebra/algebraic_number_bridge.cpp
-
-# src/algebra/solve_polynomial.cpp        (~573 lines)  — polynomial solver; split target: F2
-src/algebra/solve_polynomial.cpp
 
 # src/symbolic/simplify_exp_log.cpp — SPLIT DONE (W9.3): sqrt branch + helpers
 # extracted to simplify_sqrt.cpp + simplify_sqrt_helpers.cpp; now ≤500 LOC.
@@ -52,16 +31,6 @@ src/algebra/solve_polynomial.cpp
 # src/symbolic/simplify_arithmetic_chain.cpp — SPLIT DONE (F1.6-B1): now 440 LOC.
 
 # include/cas/ast.hpp — DEBT CLOSED (W9.3): now 19 LOC (≤500). No whitelist needed.
-
-# src/calculus/limit.cpp                  (~540 lines)  — limit dispatcher; split target: F5.2
-src/calculus/limit.cpp
-
-
-# src/calculus/orthogonal_polynomials.cpp (~521 lines)  — Legendre/Chebyshev/Hermite/Laguerre; split target: F5.9
-src/calculus/orthogonal_polynomials.cpp
-
-# src/calculus/residue_theorem.cpp        (~501 lines)  — residue + contour integration; split target: F5.6
-src/calculus/residue_theorem.cpp
 
 # src/symbolic/simplify_trig.cpp — SPLIT DONE (F1-DEBT1): arc-trig extracted to
 #   simplify_trig_inverse.cpp; simplify_trig.cpp now 455 lines (≤500). No whitelist needed.
@@ -72,30 +41,14 @@ src/calculus/residue_theorem.cpp
 
 # Pre-existing violations (split tasks filed in CAS_TASKS.md under SPLIT-F3.x):
 
-# src/algebra/algebraic_tower_primitive_internal.hpp (~581 lines) — F3.4 internal helpers;
-#   split target: extract compute_shift_resultant to algebraic_tower_primitive_shift.cpp
-src/algebra/algebraic_tower_primitive_internal.hpp
-
-# src/algebra/polynomial_gcd_fp_recursive.cpp (~546 lines) — Brown sparse GCD recursive;
-#   split target: F3.1 content helpers to polynomial_gcd_fp_content.cpp
-src/algebra/polynomial_gcd_fp_recursive.cpp
-
-# src/algebra/polynomial_gcd_brown_modular.cpp (~596 lines) — Brown modular GCD;
-#   split target: F3.1 CRT phase to polynomial_gcd_brown_crt.cpp
-src/algebra/polynomial_gcd_brown_modular.cpp
-
-# src/algebra/polynomial_groebner_fglm.cpp (~572 lines) — FGLM;
-#   split target: F3.3 linear algebra phase to polynomial_groebner_fglm_linalg.cpp
-src/algebra/polynomial_groebner_fglm.cpp
-
-# include/cas/cas_context_params.hpp      (508 lines) — split target: F1.3
-include/cas/cas_context_params.hpp
-
 # src/calculus/ode_classifier.cpp — SPLIT DONE (F7.0-A1.4): now 172 LOC.
 #   Split into ode_classifier_first_order/_higher_order.cpp + _internal.hpp.
 
-# src/calculus/ode_solver_frobenius.cpp    (644 lines) — split target: F5.3
-src/calculus/ode_solver_frobenius.cpp
 
-# src/calculus/summation_abramov.cpp       (562 lines) — split target: F5.7
-src/calculus/summation_abramov.cpp
+# ── SPLIT DONE 2026-06-22 (anti-monolith batch T-029…T-051) ──────────────────
+# The following files were split below 500 LOC and their whitelist entries
+# removed: context_core, algebraic_tower_bridge, differentiate, builtin_rewrite,
+# term_order, algebraic_number_bridge, solve_polynomial, limit,
+# orthogonal_polynomials, residue_theorem, algebraic_tower_primitive_internal.hpp,
+# polynomial_gcd_fp_recursive, polynomial_gcd_brown_modular, polynomial_groebner_fglm,
+# cas_context_params.hpp, ode_solver_frobenius, summation_abramov.

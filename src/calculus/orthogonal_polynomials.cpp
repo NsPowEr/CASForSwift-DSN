@@ -4,15 +4,8 @@
 //   Legendre P_n on [-1, 1]:        ∫ P_m(x) P_n(x) dx = 2/(2n+1) · δ_{mn}
 //   Hermite physicist H_n on R:     ∫ H_m(x) H_n(x) e^{-x²} dx = 2ⁿ·n!·√π · δ_{mn}
 //   Hermite probabilist He_n on R:  ∫ He_m(x) He_n(x) e^{-x²/2} dx = n!·√(2π) · δ_{mn}
-//
-// Each pattern matches the canonical integrand shape (product of two
-// polynomial calls, plus the appropriate weight for the Hermite cases),
-// extracts the integer indices m and n, and returns the closed-form
-// value.  Mismatches simply propagate as nullopt so the next pattern in
-// the registry can try.
 
-#include "integrate_definite_patterns.hpp"
-
+#include "orthogonal_polynomials_internal.hpp"
 #include "cas/builtin_functions.hpp"
 #include "cas/error.hpp"
 #include "cas/extended_real.hpp"
@@ -23,8 +16,6 @@
 #include <vector>
 
 namespace cas::calculus {
-
-namespace {
 
 // ─── shared helpers ────────────────────────────────────────────────────────
 
@@ -44,12 +35,10 @@ void flatten_mul_factors(ExprPtr expr, std::vector<ExprPtr>& out) {
     out.push_back(expr);
 }
 
-// Adopt the canonical extended-real predicates from cas::; legacy local
-// copies missed Constant(NegInfinity).
 using cas::is_pos_infinity;
 using cas::is_neg_infinity;
 
-[[nodiscard]] bool depends_on_var(ExprPtr expr, const Symbol& var) {
+bool depends_on_var(ExprPtr expr, const Symbol& var) {
     if (!expr) return false;
     if (const auto* sym = expr_cast<Symbol>(expr)) return sym->name == var.name;
     bool found = false;
@@ -74,9 +63,7 @@ using cas::is_neg_infinity;
     return found;
 }
 
-// Match a FuncCall(op, [idx_lit, var_symbol]) and return the integer index.
-// nullopt if the call shape does not fit.
-[[nodiscard]] std::optional<BigInt> match_poly_call(
+std::optional<BigInt> match_poly_call(
     ExprPtr expr, BuiltinOp op, const Symbol& var) {
     const auto* call = expr_cast<FuncCall>(expr);
     if (!call || call->func_id != op || call->args.size() != 2U) return std::nullopt;
@@ -88,7 +75,7 @@ using cas::is_neg_infinity;
     return idx_lit->value;
 }
 
-[[nodiscard]] bool is_literal_rational(ExprPtr expr, long long num, long long den) {
+bool is_literal_rational(ExprPtr expr, long long num, long long den) {
     if (den == 1) {
         const auto* il = expr_cast<IntegerLit>(expr);
         return il != nullptr && il->value == BigInt(num);
@@ -97,7 +84,7 @@ using cas::is_neg_infinity;
     return rl != nullptr && rl->numerator == BigInt(num) && rl->denominator == BigInt(den);
 }
 
-[[nodiscard]] bool is_literal_neg_one(ExprPtr expr) {
+bool is_literal_neg_one(ExprPtr expr) {
     if (const auto* il = expr_cast<IntegerLit>(expr); il && il->value == BigInt(-1)) return true;
     if (const auto* un = expr_cast<Unary>(expr); un && un->op == UnaryOp::Neg) {
         const auto* il = expr_cast<IntegerLit>(un->operand);
@@ -105,6 +92,8 @@ using cas::is_neg_infinity;
     }
     return false;
 }
+
+namespace {
 
 // Match exp(−x²) where x is the integration variable.  Used by HermiteH.
 [[nodiscard]] bool match_exp_neg_xsq(ExprPtr expr, const Symbol& var) {
@@ -136,7 +125,6 @@ using cas::is_neg_infinity;
     const auto* call = expr_cast<FuncCall>(expr);
     if (!call || call->func_id != BuiltinOp::Exp || call->args.size() != 1U) return false;
     ExprPtr arg = call->args.front();
-    // Accept Binary(Div, Unary(Neg, x²), 2)  ← parser output for "exp(-(x^2)/2)"
     if (const auto* div = expr_cast<Binary>(arg); div && div->op == BinaryOp::Div) {
         const auto* two = expr_cast<IntegerLit>(div->right);
         if (two && two->value == BigInt(2)) {
@@ -145,7 +133,6 @@ using cas::is_neg_infinity;
             }
         }
     }
-    // Accept Unary(Neg, Binary(Div, x², 2))
     if (const auto* un = expr_cast<Unary>(arg); un && un->op == UnaryOp::Neg) {
         if (const auto* div = expr_cast<Binary>(un->operand); div && div->op == BinaryOp::Div) {
             const auto* pw = expr_cast<Binary>(div->left);
@@ -187,13 +174,11 @@ using cas::is_neg_infinity;
     return acc;
 }
 
-// Build the diagonal Legendre normalization 2/(2n+1).
 [[nodiscard]] ExprPtr build_legendre_norm(const BigInt& n, AstArena& arena) {
     BigInt denom = BigInt(2) * n + BigInt(1);
     return arena.make<RationalLit>(BigInt(2), denom);
 }
 
-// Build the diagonal Hermite H normalization 2^n · n! · √π.
 [[nodiscard]] ExprPtr build_hermite_h_norm(const BigInt& n, AstArena& arena) {
     const BigInt pow_two = pow2_bigint(n);
     const BigInt fact = factorial_bigint(n);
@@ -204,7 +189,6 @@ using cas::is_neg_infinity;
     return arena.make<Binary>(BinaryOp::Mul, scalar_expr, sqrt_pi);
 }
 
-// Build the diagonal Hermite He normalization n! · √(2π).
 [[nodiscard]] ExprPtr build_hermite_he_norm(const BigInt& n, AstArena& arena) {
     const BigInt fact = factorial_bigint(n);
     ExprPtr fact_expr = arena.make<IntegerLit>(fact);
@@ -214,16 +198,9 @@ using cas::is_neg_infinity;
     return arena.make<Binary>(BinaryOp::Mul, fact_expr, sqrt_two_pi);
 }
 
-// Detect a product-of-two-poly-calls pattern.  Returns (m, n) extracted
-// indices and the residual non-poly factors (which must all be the
-// weight if any, plus possibly numeric constants).
-struct PolyProductMatch {
-    BigInt m;
-    BigInt n;
-    std::vector<ExprPtr> other_factors;       // factors that are not the two poly calls
-};
+}  // namespace
 
-[[nodiscard]] std::optional<PolyProductMatch> match_two_poly_product(
+std::optional<PolyProductMatch> match_two_poly_product(
     ExprPtr integrand_normalized,
     BuiltinOp op,
     const Symbol& var) {
@@ -238,7 +215,6 @@ struct PolyProductMatch {
         } else if (!second_idx.has_value()) {
             if (auto idx = match_poly_call(f, op, var)) { second_idx = idx; continue; }
         }
-        // Pow(P_n(x), 2) → both indices identical, base contributes twice.
         if (const auto* binary = expr_cast<Binary>(f); binary && binary->op == BinaryOp::Pow) {
             if (auto idx = match_poly_call(binary->left, op, var)) {
                 const auto* exp_lit = expr_cast<IntegerLit>(binary->right);
@@ -257,9 +233,7 @@ struct PolyProductMatch {
     return out;
 }
 
-// Multiply `base` by every constant non-var factor in `others`.  Var-dependent
-// factors disqualify the match (caller must check).
-[[nodiscard]] Result<std::optional<ExprPtr>> apply_constant_factors(
+Result<std::optional<ExprPtr>> apply_constant_factors(
     ExprPtr base,
     const std::vector<ExprPtr>& others,
     const Symbol& var,
@@ -275,10 +249,7 @@ struct PolyProductMatch {
     return ok(std::optional<ExprPtr>(simp.value()));
 }
 
-}  // namespace
-
-[[nodiscard]] Result<std::optional<ExprPtr>> pattern_legendre_orthogonality(const DefiniteContext& dc) {
-    // Limits must be exactly [-1, 1].
+Result<std::optional<ExprPtr>> pattern_legendre_orthogonality(const DefiniteContext& dc) {
     if (!is_literal_neg_one(dc.lower)) return ok(std::optional<ExprPtr>{});
     if (!is_literal_rational(dc.upper, 1, 1)) return ok(std::optional<ExprPtr>{});
 
@@ -295,10 +266,9 @@ struct PolyProductMatch {
     return apply_constant_factors(base, match->other_factors, dc.var, dc.ctx);
 }
 
-[[nodiscard]] Result<std::optional<ExprPtr>> pattern_hermite_h_orthogonality(const DefiniteContext& dc) {
+Result<std::optional<ExprPtr>> pattern_hermite_h_orthogonality(const DefiniteContext& dc) {
     if (!is_neg_infinity(dc.lower) || !is_pos_infinity(dc.upper)) return ok(std::optional<ExprPtr>{});
 
-    // Hermite H product needs an explicit exp(-x²) weight factor.
     std::vector<ExprPtr> factors;
     flatten_mul_factors(dc.integrand, factors);
     std::vector<ExprPtr> non_weight;
@@ -312,9 +282,6 @@ struct PolyProductMatch {
     }
     if (!weight_found) return ok(std::optional<ExprPtr>{});
 
-    // Run the poly-product matcher directly on the flattened non-weight
-    // factors — DO NOT call ctx.simplify(), which would expand HermiteH
-    // into its polynomial form and destroy the pattern.
     AstArena& arena = dc.ctx.arena();
     ExprPtr residual = arena.make<IntegerLit>(BigInt(1));
     if (!non_weight.empty()) {
@@ -334,7 +301,7 @@ struct PolyProductMatch {
     return apply_constant_factors(base, match->other_factors, dc.var, dc.ctx);
 }
 
-[[nodiscard]] Result<std::optional<ExprPtr>> pattern_hermite_he_orthogonality(const DefiniteContext& dc) {
+Result<std::optional<ExprPtr>> pattern_hermite_he_orthogonality(const DefiniteContext& dc) {
     if (!is_neg_infinity(dc.lower) || !is_pos_infinity(dc.upper)) return ok(std::optional<ExprPtr>{});
 
     std::vector<ExprPtr> factors;
@@ -362,152 +329,6 @@ struct PolyProductMatch {
     ExprPtr base;
     if (match->m == match->n) {
         base = build_hermite_he_norm(match->n, arena);
-    } else {
-        base = arena.make<IntegerLit>(BigInt(0));
-    }
-    return apply_constant_factors(base, match->other_factors, dc.var, dc.ctx);
-}
-
-namespace {
-
-// Does `expr` simplify to (1 − x²) where x is `var`?
-[[nodiscard]] bool match_one_minus_xsq(ExprPtr expr, const Symbol& var, symbolic::CASContext& ctx) {
-    if (!expr) return false;
-    AstArena& arena = ctx.arena();
-    ExprPtr x = arena.make<Symbol>(var);
-    ExprPtr x_sq = arena.make<Binary>(BinaryOp::Pow, x, arena.make<IntegerLit>(BigInt(2)));
-    ExprPtr expected = arena.make<Binary>(BinaryOp::Sub, arena.make<IntegerLit>(BigInt(1)), x_sq);
-    ExprPtr delta = arena.make<Binary>(BinaryOp::Sub, expr, expected);
-    auto s = ctx.simplify(delta);
-    if (s.is_error()) return false;
-    const auto* lit = expr_cast<IntegerLit>(s.value());
-    return lit != nullptr && lit->value.is_zero();
-}
-
-// Match Sqrt(1 − x²)  ↔  the U weight.
-[[nodiscard]] bool match_sqrt_one_minus_xsq(ExprPtr expr, const Symbol& var, symbolic::CASContext& ctx) {
-    const auto* call = expr_cast<FuncCall>(expr);
-    if (!call || call->func_id != BuiltinOp::Sqrt || call->args.size() != 1U) return false;
-    return match_one_minus_xsq(call->args.front(), var, ctx);
-}
-
-// Match 1 / Sqrt(1 − x²)  ↔  the T weight, in any of:
-//   Binary(Div, 1, Sqrt(…))
-//   Binary(Pow, Sqrt(…), -1)
-//   Binary(Pow, (1 − x²), -1/2)
-[[nodiscard]] bool match_inv_sqrt_one_minus_xsq(ExprPtr expr, const Symbol& var, symbolic::CASContext& ctx) {
-    if (const auto* div = expr_cast<Binary>(expr); div && div->op == BinaryOp::Div) {
-        const auto* one = expr_cast<IntegerLit>(div->left);
-        if (one && one->value == BigInt(1)) {
-            return match_sqrt_one_minus_xsq(div->right, var, ctx);
-        }
-    }
-    if (const auto* pw = expr_cast<Binary>(expr); pw && pw->op == BinaryOp::Pow) {
-        // Sqrt(…)^(-1)
-        if (match_sqrt_one_minus_xsq(pw->left, var, ctx)) {
-            const auto* il = expr_cast<IntegerLit>(pw->right);
-            if (il && il->value == BigInt(-1)) return true;
-            if (const auto* un = expr_cast<Unary>(pw->right); un && un->op == UnaryOp::Neg) {
-                const auto* il2 = expr_cast<IntegerLit>(un->operand);
-                if (il2 && il2->value == BigInt(1)) return true;
-            }
-        }
-        // (1 − x²)^(-1/2)
-        if (match_one_minus_xsq(pw->left, var, ctx)) {
-            if (const auto* rl = expr_cast<RationalLit>(pw->right);
-                rl && rl->numerator == BigInt(-1) && rl->denominator == BigInt(2)) return true;
-        }
-    }
-    return false;
-}
-
-}  // namespace
-
-[[nodiscard]] Result<std::optional<ExprPtr>> pattern_chebyshev_t_orthogonality(const DefiniteContext& dc) {
-    // ∫_{-1}^{1} T_m(x)·T_n(x) / √(1−x²) dx
-    //   = π        if m = n = 0
-    //   = π/2      if m = n > 0
-    //   = 0        otherwise
-    if (!is_literal_neg_one(dc.lower)) return ok(std::optional<ExprPtr>{});
-    if (!is_literal_rational(dc.upper, 1, 1)) return ok(std::optional<ExprPtr>{});
-
-    // Two structural shapes for the weight 1/√(1−x²) :
-    //   (A) integrand = Binary(Div, numerator, √(1−x²))
-    //   (B) explicit reciprocal factor inside a Mul/Product tree
-    ExprPtr numerator_form = dc.integrand;
-    bool weight_found = false;
-    if (const auto* div = expr_cast<Binary>(dc.integrand); div && div->op == BinaryOp::Div) {
-        if (match_sqrt_one_minus_xsq(div->right, dc.var, dc.ctx)) {
-            numerator_form = div->left;
-            weight_found = true;
-        }
-    }
-    std::vector<ExprPtr> factors;
-    flatten_mul_factors(numerator_form, factors);
-    std::vector<ExprPtr> non_weight;
-    for (ExprPtr f : factors) {
-        if (!weight_found && match_inv_sqrt_one_minus_xsq(f, dc.var, dc.ctx)) {
-            weight_found = true;
-            continue;
-        }
-        non_weight.push_back(f);
-    }
-    if (!weight_found) return ok(std::optional<ExprPtr>{});
-
-    AstArena& arena = dc.ctx.arena();
-    ExprPtr residual = arena.make<IntegerLit>(BigInt(1));
-    if (!non_weight.empty()) {
-        if (non_weight.size() == 1U) residual = non_weight.front();
-        else residual = arena.make<Product>(std::move(non_weight));
-    }
-    auto match = match_two_poly_product(residual, BuiltinOp::ChebyshevT, dc.var);
-    if (!match.has_value()) return ok(std::optional<ExprPtr>{});
-
-    ExprPtr base;
-    if (match->m == match->n) {
-        ExprPtr pi = arena.make<Constant>(MathConstant::Pi);
-        if (match->n.is_zero()) {
-            base = pi;
-        } else {
-            base = arena.make<Binary>(BinaryOp::Div, pi, arena.make<IntegerLit>(BigInt(2)));
-        }
-    } else {
-        base = arena.make<IntegerLit>(BigInt(0));
-    }
-    return apply_constant_factors(base, match->other_factors, dc.var, dc.ctx);
-}
-
-[[nodiscard]] Result<std::optional<ExprPtr>> pattern_chebyshev_u_orthogonality(const DefiniteContext& dc) {
-    // ∫_{-1}^{1} U_m(x)·U_n(x) · √(1−x²) dx = (π/2) · δ_{mn}.
-    if (!is_literal_neg_one(dc.lower)) return ok(std::optional<ExprPtr>{});
-    if (!is_literal_rational(dc.upper, 1, 1)) return ok(std::optional<ExprPtr>{});
-
-    std::vector<ExprPtr> factors;
-    flatten_mul_factors(dc.integrand, factors);
-    std::vector<ExprPtr> non_weight;
-    bool weight_found = false;
-    for (ExprPtr f : factors) {
-        if (!weight_found && match_sqrt_one_minus_xsq(f, dc.var, dc.ctx)) {
-            weight_found = true;
-            continue;
-        }
-        non_weight.push_back(f);
-    }
-    if (!weight_found) return ok(std::optional<ExprPtr>{});
-
-    AstArena& arena = dc.ctx.arena();
-    ExprPtr residual = arena.make<IntegerLit>(BigInt(1));
-    if (!non_weight.empty()) {
-        if (non_weight.size() == 1U) residual = non_weight.front();
-        else residual = arena.make<Product>(std::move(non_weight));
-    }
-    auto match = match_two_poly_product(residual, BuiltinOp::ChebyshevU, dc.var);
-    if (!match.has_value()) return ok(std::optional<ExprPtr>{});
-
-    ExprPtr base;
-    if (match->m == match->n) {
-        ExprPtr pi = arena.make<Constant>(MathConstant::Pi);
-        base = arena.make<Binary>(BinaryOp::Div, pi, arena.make<IntegerLit>(BigInt(2)));
     } else {
         base = arena.make<IntegerLit>(BigInt(0));
     }

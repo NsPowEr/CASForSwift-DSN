@@ -37,6 +37,7 @@
 //   zero-dimensional (staircase is finite by Hilbert basis theorem + 0-dim cond).
 
 #include "polynomial_groebner_fglm.hpp"
+#include "polynomial_groebner_fglm_internal.hpp"
 #include "polynomial_groebner_f4.hpp"
 #include "algebra_internal.hpp"
 #include "cas/rational.hpp"
@@ -170,92 +171,6 @@ struct TotalDegreeLexLt {
         }
     }
     return ok(std::move(vec));
-}
-
-// Multiply matrix M (D×D) by vector v (D), result in Q^D.
-[[nodiscard]] std::vector<Rational> mat_vec_mul(
-    const std::vector<std::vector<Rational>>& M,
-    const std::vector<Rational>& v)
-{
-    const std::size_t D = v.size();
-    std::vector<Rational> result(D, Rational(0));
-    for (std::size_t i = 0; i < D; ++i) {
-        for (std::size_t j = 0; j < D; ++j) {
-            result[i] = result[i] + M[i][j] * v[j];
-        }
-    }
-    return result;
-}
-
-// Try to express vec as Q-linear combination of the rows in basis_vecs.
-// Returns coefficients c_0..c_{k-1} s.t. sum c_i * basis_vecs[i] = vec,
-// or nullopt if vec is linearly independent.
-// Method: Gaussian elimination on augmented matrix [basis_vecs | vec].
-[[nodiscard]] std::optional<std::vector<Rational>> linear_dependency(
-    const std::vector<std::vector<Rational>>& basis_vecs,
-    const std::vector<Rational>& vec)
-{
-    const std::size_t k = basis_vecs.size();
-    const std::size_t D = vec.size();
-    if (k == 0) return std::nullopt;
-
-    // Build augmented matrix: rows are basis_vecs[i] | 1 in column k+i
-    // We solve for coefficients c such that vec = sum c_i * basis_vecs[i].
-    // Equivalently: [ basis_vecs^T | vec ] and row-reduce.
-
-    // Work with a (k x D) system: find c such that c^T * basis_vecs = vec.
-    // Use the transposed formulation: treat each dimension as a constraint.
-
-    // Augmented matrix: columns are basis_vecs[0]..basis_vecs[k-1] | vec  (D rows, k+1 cols)
-    std::vector<std::vector<Rational>> aug(D, std::vector<Rational>(k + 1, Rational(0)));
-    for (std::size_t i = 0; i < D; ++i) {
-        for (std::size_t j = 0; j < k; ++j) aug[i][j] = basis_vecs[j][i];
-        aug[i][k] = vec[i];
-    }
-
-    // Gaussian elimination
-    std::vector<std::size_t> pivot_col(k, D); // track which col each pivot is in
-    std::size_t pivot_row = 0;
-    for (std::size_t col = 0; col < k && pivot_row < D; ++col) {
-        // Find pivot
-        std::size_t sel = D;
-        for (std::size_t row = pivot_row; row < D; ++row) {
-            if (!aug[row][col].numerator().is_zero()) { sel = row; break; }
-        }
-        if (sel == D) continue; // no pivot in this column
-        std::swap(aug[pivot_row], aug[sel]);
-        // Scale pivot row
-        Rational piv = aug[pivot_row][col];
-        for (std::size_t c = col; c <= k; ++c) aug[pivot_row][c] = aug[pivot_row][c] / piv;
-        // Eliminate column
-        for (std::size_t row = 0; row < D; ++row) {
-            if (row == pivot_row) continue;
-            if (aug[row][col].numerator().is_zero()) continue;
-            Rational factor = aug[row][col];
-            for (std::size_t c = col; c <= k; ++c) {
-                aug[row][c] = aug[row][c] - factor * aug[pivot_row][c];
-            }
-        }
-        pivot_col[col] = pivot_row;
-        pivot_row++;
-    }
-
-    // Check consistency: remaining rows of augmented must be zero
-    for (std::size_t row = pivot_row; row < D; ++row) {
-        if (!aug[row][k].numerator().is_zero()) return std::nullopt; // independent
-    }
-
-    // Extract solution from reduced system
-    // For each basis col: the coefficient is aug[pivot_row_of_col][k]
-    std::vector<Rational> coeffs(k, Rational(0));
-    std::size_t pr = 0;
-    for (std::size_t col = 0; col < k && pr < D; ++col) {
-        if (pivot_col[col] != D) {
-            coeffs[col] = aug[pivot_col[col]][k];
-            ++pr;
-        }
-    }
-    return coeffs;
 }
 
 } // namespace

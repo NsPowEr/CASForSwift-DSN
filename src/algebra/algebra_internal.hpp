@@ -36,6 +36,23 @@ template <typename T>
 [[nodiscard]] Result<ExprPtr> pow_expr(ExprPtr base, std::size_t exponent, symbolic::CASContext& ctx);
 [[nodiscard]] Result<ExprPtr> subtract_exprs(ExprPtr lhs, ExprPtr rhs, symbolic::CASContext& ctx);
 
+[[nodiscard]] bool same_generator_expr(
+    ExprPtr expr,
+    ExprPtr alpha_expr,
+    symbolic::CASContext& ctx);
+
+[[nodiscard]] Result<std::vector<ExprPtr>> solve_degree_two_expr(
+    const PolyExpr& poly,
+    symbolic::CASContext& ctx);
+
+[[nodiscard]] Result<std::vector<ExprPtr>> solve_degree_three_expr(
+    const PolyExpr& poly,
+    symbolic::CASContext& ctx);
+
+[[nodiscard]] Result<std::vector<ExprPtr>> solve_degree_four_expr(
+    const PolyExpr& poly,
+    symbolic::CASContext& ctx);
+
 [[nodiscard]] BigInt pow_bigint_nonnegative(BigInt base, unsigned int exponent);
 
 // Polynomial helpers

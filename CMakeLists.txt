@@ -127,6 +127,9 @@ set(CAS_PARSER_SOURCES
 
 set(CAS_SYMBOLIC_SOURCES
     src/rewrite/builtin_rewrite.cpp
+    src/rewrite/builtin_rewrite_trig.cpp
+    src/rewrite/builtin_rewrite_log_exp.cpp
+    src/rewrite/builtin_rewrite_algebraic.cpp
     src/rewrite/discrimination_net.cpp
     src/symbolic/simplify_core.cpp
     src/symbolic/simplify_arithmetic.cpp
@@ -163,10 +166,14 @@ set(CAS_SYMBOLIC_SOURCES
     src/symbolic/simplify_complex.cpp
     src/symbolic/simplify_utils.cpp
     src/symbolic/context_core.cpp
+    src/symbolic/context_params.cpp
+    src/symbolic/context_helpers.cpp
     src/symbolic/context_utils.cpp
     src/symbolic/assumptions_core.cpp
     src/symbolic/assumptions_predicates.cpp
     src/symbolic/term_order.cpp
+    src/symbolic/term_order_lpo.cpp
+    src/symbolic/term_order_kbw.cpp
     src/symbolic/rewrite_engine.cpp
     src/symbolic/rewrite_matching.cpp
     src/symbolic/substitute.cpp
@@ -179,13 +186,17 @@ set(CAS_SYMBOLIC_SOURCES
 
 set(CAS_CALCULUS_SOURCES
     src/calculus/differentiate.cpp
+    src/calculus/differentiate_visitor.cpp
+    src/calculus/differentiate_rules.cpp
     src/calculus/integrate.cpp
     src/calculus/integrate_definite_patterns.cpp
     src/calculus/bessel_orthogonality.cpp
     src/calculus/orthogonal_polynomials.cpp
+    src/calculus/orthogonal_polynomials_chebyshev.cpp
     src/calculus/integrate_improper.cpp
     src/calculus/summation.cpp
     src/calculus/summation_abramov.cpp
+    src/calculus/summation_abramov_quadratic.cpp
     src/calculus/summation_zeilberger_driver.cpp
     src/calculus/integrate_core.cpp
     src/calculus/integrate_elementary.cpp
@@ -215,6 +226,7 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/differential_field.cpp
     src/calculus/differential_field_integration.cpp
     src/calculus/limit.cpp
+    src/calculus/limit_rules.cpp
     src/calculus/limit_helpers.cpp
     src/calculus/limit_infinite.cpp
     src/calculus/limit_polynomial.cpp
@@ -227,6 +239,8 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/limit_quotient_d2.cpp
     src/calculus/residue.cpp
     src/calculus/residue_theorem.cpp
+    src/calculus/residue_theorem_symbolic.cpp
+    src/calculus/residue_theorem_numeric.cpp
     src/calculus/laurent_general.cpp
     src/calculus/pade.cpp
     src/calculus/puiseux.cpp
@@ -247,6 +261,7 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/ode_kovacic_laurent.cpp
     src/calculus/ode_kovacic.cpp
     src/calculus/ode_solver_frobenius.cpp
+    src/calculus/ode_solver_frobenius_series.cpp
     src/calculus/ode_solver_nonlinear.cpp
     src/calculus/asymptotes.cpp
     src/calculus/numeric_diff.cpp
@@ -269,7 +284,9 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/algebraic_number.cpp
     src/algebra/algebraic_number_qx.cpp
     src/algebra/algebraic_number_bridge.cpp
+    src/algebra/algebraic_number_bridge_express.cpp
     src/algebra/algebraic_tower_bridge.cpp
+    src/algebra/algebraic_tower_bridge_parse.cpp
     src/algebra/algebraic_tower_primitive.cpp
     src/algebra/algebraic_tower_primitive_nested.cpp
     src/algebra/polynomial_arithmetic.cpp
@@ -302,6 +319,7 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/polynomial_groebner_f4_conversion.cpp
     src/algebra/polynomial_groebner_f4_solver.cpp
     src/algebra/polynomial_groebner_fglm.cpp
+    src/algebra/polynomial_groebner_fglm_linalg.cpp
     src/algebra/polynomial_groebner_f5.cpp
     src/algebra/polynomial_groebner_f5_buchberger.cpp
     src/algebra/csolve.cpp
@@ -310,6 +328,7 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/partial_fractions.cpp
     src/algebra/partial_fractions_lrt.cpp
     src/algebra/solve_polynomial.cpp
+    src/algebra/solve_polynomial_cubic_quartic.cpp
     src/algebra/polynomial_internal.cpp
     src/algebra/polynomial_hensel.cpp
     src/algebra/lattice_lll.cpp
@@ -318,8 +337,10 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/polynomial_gcd_modular.cpp
     src/algebra/polynomial_gcd_brown.cpp
     src/algebra/polynomial_gcd_brown_modular.cpp
+    src/algebra/polynomial_gcd_brown_helpers.cpp
     src/algebra/polynomial_gcd_brown_lc_scaling.cpp
     src/algebra/polynomial_gcd_fp_recursive.cpp
+    src/algebra/polynomial_gcd_fp_helpers.cpp
     src/algebra/polynomial_gcd_zippel_prony.cpp
     src/algebra/polynomial_gcd_zippel_crt.cpp
     src/algebra/polynomial_gcd_multivariate_helpers.cpp

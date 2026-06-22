@@ -1,6 +1,7 @@
 #include "cas/symbolic.hpp"
 #include "cas/rational.hpp"
 #include "symbolic_internal.hpp"
+#include "term_order_internal.hpp"
 
 #include <algorithm>
 #include <string>
@@ -8,9 +9,7 @@
 
 namespace cas::symbolic {
 
-namespace {
-
-[[nodiscard]] int term_kind_rank(ExprKind kind) noexcept {
+int term_kind_rank(ExprKind kind) noexcept {
     switch (kind) {
     case ExprKind::Null:
         return 0;
@@ -19,7 +18,6 @@ namespace {
     case ExprKind::DecimalLit:
     case ExprKind::Constant:
     case ExprKind::ComplexLit:
-
         return 1;
     case ExprKind::Symbol:
         return 2;
@@ -45,7 +43,7 @@ namespace {
     return 9;
 }
 
-[[nodiscard]] int compare_kind_precedence(ExprKind lhs, ExprKind rhs) noexcept {
+int compare_kind_precedence(ExprKind lhs, ExprKind rhs) noexcept {
     const int lhs_rank = term_kind_rank(lhs);
     const int rhs_rank = term_kind_rank(rhs);
     if (lhs_rank < rhs_rank) {
@@ -57,7 +55,7 @@ namespace {
     return 0;
 }
 
-[[nodiscard]] int compare_string_precedence(const std::string& lhs, const std::string& rhs) noexcept {
+int compare_string_precedence(const std::string& lhs, const std::string& rhs) noexcept {
     if (lhs < rhs) {
         return -1;
     }
@@ -67,41 +65,15 @@ namespace {
     return 0;
 }
 
-// LPO (Lexicographic Path Ordering) function precedence.
-//
-// Formal constraints derived from simplifier rewrite rules (each pair must
-// satisfy lhs ≻ rhs so the rewrite is orientation-preserving and terminates):
-//
-//   R1.  exp(ln(x))  → x          ⇒  Exp ≻ Ln
-//   R2.  sqrt(x^2)   → |x|        ⇒  Sqrt ≻ Pow  (Pow = 60, ok)
-//                                  ⇒  Sqrt ≻ Abs (Abs  = 50, ok)
-//   R3.  tan(x)      → sin/cos    ⇒  Tan ≻ Sin, Tan ≻ Cos
-//   R4.  asin(sin)   → x          ⇒  Sin ≻ Asin
-//   R5.  acos(cos)   → x          ⇒  Cos ≻ Acos
-//   R6.  atan(tan)   → x          ⇒  Tan ≻ Atan
-//   R7.  cot/sec/csc → 1/{tan,cos,sin}
-//                                  ⇒  Cot ≻ Tan, Sec ≻ Cos, Csc ≻ Sin
-//   R8.  asinh/acosh/atanh:        not in BuiltinOp enum (no constraint)
-//   R9.  digamma     ≺ gamma      ⇒  Digamma ≺ Gamma (logarithmic deriv.)
-//   R10. polygamma   ≺ digamma    ⇒  Polygamma ≺ Digamma
-//   R11. log10(x)    → ln(x)/ln(10)
-//                                  ⇒  Log10 ≻ Ln
-//   R12. log_b(x)    → ln(x)/ln(b)
-//                                  ⇒  Log   ≻ Ln
-//   R13. bessel_*    composite of exp + polynomial: ranked below Exp.
-//
-// All other rankings are stylistic (do not block any rewrite rule) but kept
-// strictly distinct so the LPO order is total on builtins, which is required
-// for confluence of the AC-rewriter on commutative operators.
-[[nodiscard]] int get_builtin_precedence(BuiltinOp op) noexcept {
+int get_builtin_precedence(BuiltinOp op) noexcept {
     switch (op) {
-    // Top tier: exponential/log core. R1, R11, R12.
+    // Top tier: exponential/log core.
     case BuiltinOp::Exp:        return 100;
     case BuiltinOp::Log10:      return 96;
     case BuiltinOp::Log:        return 95;
     case BuiltinOp::Ln:         return 94;
 
-    // Gamma family. R9, R10.
+    // Gamma family.
     case BuiltinOp::Gamma:      return 92;
     case BuiltinOp::Digamma:    return 91;
     case BuiltinOp::Polygamma:  return 90;
@@ -115,7 +87,7 @@ namespace {
     case BuiltinOp::Zeta:       return 84;
     case BuiltinOp::Erf:        return 83;
 
-    // Trig (R3, R7). Cot/Sec/Csc above Tan/Cos/Sin to orient R7.
+    // Trig.
     case BuiltinOp::Cot:        return 82;
     case BuiltinOp::Sec:        return 81;
     case BuiltinOp::Csc:        return 80;
@@ -123,18 +95,18 @@ namespace {
     case BuiltinOp::Sin:        return 78;
     case BuiltinOp::Cos:        return 77;
 
-    // Inverse trig (R4, R5, R6). Strictly below their forward counterparts.
+    // Inverse trig.
     case BuiltinOp::Atan:       return 74;
     case BuiltinOp::Asin:       return 73;
     case BuiltinOp::Acos:       return 72;
 
-    // Hyperbolic. Coth above Tanh by analogy with R7.
+    // Hyperbolic.
     case BuiltinOp::Coth:       return 70;
     case BuiltinOp::Tanh:       return 69;
     case BuiltinOp::Sinh:       return 68;
     case BuiltinOp::Cosh:       return 67;
 
-    // Bessel family (R13).
+    // Bessel family.
     case BuiltinOp::BesselJ:    return 65;
     case BuiltinOp::BesselY:    return 64;
     case BuiltinOp::BesselI:    return 63;
@@ -158,7 +130,7 @@ namespace {
     case BuiltinOp::Abs:        return 44;
     case BuiltinOp::Sign:       return 43;
 
-    // Discrete rounding (deterministic on real inputs).
+    // Discrete rounding.
     case BuiltinOp::Floor:      return 41;
     case BuiltinOp::Ceil:       return 40;
     case BuiltinOp::Round:      return 39;
@@ -169,13 +141,13 @@ namespace {
     case BuiltinOp::Min:        return 36;
     case BuiltinOp::Max:        return 35;
 
-    // Complementary error function (paired with Erf above).
+    // Complementary error function.
     case BuiltinOp::Erfc:       return 82;
 
-    // F8.0-6.1: branch-cut bookkeeping; arithmetic-neutral, low order.
+    // Branch-cut bookkeeping.
     case BuiltinOp::UnwindingNumber: return 81;
 
-    // Matrix operators (semantically distinct domain).
+    // Matrix operators.
     case BuiltinOp::Det:        return 33;
     case BuiltinOp::Rank:       return 32;
     case BuiltinOp::Trace:      return 31;
@@ -202,13 +174,10 @@ namespace {
     case BuiltinOp::EllipticF:  return 90;
     case BuiltinOp::Unknown:    return 1;
     }
-    // Unreachable: enum is exhaustive above. Return a deterministic low rank
-    // rather than UB so new builtins added without updating this switch sort
-    // to the bottom (terminating but suboptimal) until repaired.
     return 0;
 }
 
-[[nodiscard]] int get_binary_op_precedence(BinaryOp op) noexcept {
+int get_binary_op_precedence(BinaryOp op) noexcept {
     switch (op) {
     case BinaryOp::Pow: return 60;
     case BinaryOp::Mul: return 40;
@@ -226,13 +195,13 @@ namespace {
     return 0;
 }
 
-[[nodiscard]] int compare_bigint(const BigInt& lhs, const BigInt& rhs) noexcept {
+int compare_bigint(const BigInt& lhs, const BigInt& rhs) noexcept {
     if (lhs < rhs) return -1;
     if (rhs < lhs) return 1;
     return 0;
 }
 
-[[nodiscard]] std::vector<ExprPtr> term_order_children(ExprPtr expr) {
+std::vector<ExprPtr> term_order_children(ExprPtr expr) {
     return visit_expr(
         expr,
         [](const auto& node) -> std::vector<ExprPtr> {
@@ -274,8 +243,6 @@ namespace {
         });
 }
 
-} // namespace
-
 int canonical_compare(ExprPtr lhs, ExprPtr rhs) noexcept {
     if (lhs == rhs) return 0;
     if (!lhs) return -1;
@@ -287,7 +254,6 @@ int canonical_compare(ExprPtr lhs, ExprPtr rhs) noexcept {
     const int rhs_rank = term_kind_rank(rhs_kind);
     if (lhs_rank != rhs_rank) return lhs_rank < rhs_rank ? -1 : 1;
 
-    // Se hanno lo stesso rango, confrontiamo il tipo specifico prima di castare
     if (lhs_kind != rhs_kind) return static_cast<int>(lhs_kind) < static_cast<int>(rhs_kind) ? -1 : 1;
 
     if (const auto* lhs_integer = expr_cast<IntegerLit>(lhs)) {
@@ -330,7 +296,6 @@ int canonical_compare(ExprPtr lhs, ExprPtr rhs) noexcept {
         if (var_cmp != 0) return var_cmp;
         int int_cmp = canonical_compare(lhs_integral->integrand, rhs_integral->integrand);
         if (int_cmp != 0) return int_cmp;
-        // Compare optional limits
         auto compare_opt = [](const std::optional<ExprPtr>& l, const std::optional<ExprPtr>& r) -> int {
             if (!l.has_value() && !r.has_value()) return 0;
             if (!l.has_value()) return -1;
@@ -360,7 +325,6 @@ int canonical_compare(ExprPtr lhs, ExprPtr rhs) noexcept {
         return canonical_compare(lhs_unary->operand, rhs_unary->operand);
     }
 
-    // L3-08 Quantity: order by SI dimensions first, then by value.
     if (const auto* lhs_qty = expr_cast<Quantity>(lhs)) {
         const auto* rhs_qty = expr_cast<Quantity>(rhs);
         if (lhs_qty->dimensions < rhs_qty->dimensions) return -1;
@@ -385,12 +349,10 @@ int canonical_compare(ExprPtr lhs, ExprPtr rhs) noexcept {
             if (lp != rp) return lp < rp ? -1 : 1;
             return lhs_call->func_id < rhs_call->func_id ? -1 : 1;
         }
-        // Same func_id — for Unknown, compare names
         if (lhs_call->func_id == BuiltinOp::Unknown) {
             const int name_cmp = compare_string_precedence(lhs_call->name, rhs_call->name);
             if (name_cmp != 0) return name_cmp;
         }
-        // Same function: compare arguments
         const auto& la = lhs_call->args;
         const auto& ra = rhs_call->args;
         const std::size_t shared = std::min(la.size(), ra.size());
@@ -460,106 +422,6 @@ int compare_head_precedence(ExprPtr lhs, ExprPtr rhs) noexcept {
     return 0;
 }
 
-namespace {
-
-[[nodiscard]] bool term_order_ge(ExprPtr lhs, ExprPtr rhs);
-
-[[nodiscard]] bool term_order_gt(ExprPtr lhs, ExprPtr rhs) {
-    if (!lhs || !rhs || lhs == rhs) {
-        return false;
-    }
-
-    const std::vector<ExprPtr> lhs_children = term_order_children(lhs);
-    for (ExprPtr child : lhs_children) {
-        if (term_order_ge(child, rhs)) {
-            return true;
-        }
-    }
-
-    const std::vector<ExprPtr> rhs_children = term_order_children(rhs);
-    const auto dominates_rhs_children = [&]() {
-        return std::all_of(
-            rhs_children.begin(),
-            rhs_children.end(),
-            [&](ExprPtr child) {
-                return term_order_gt(lhs, child);
-            });
-    };
-
-    const int head_cmp = compare_head_precedence(lhs, rhs);
-    if (head_cmp > 0 && dominates_rhs_children()) {
-        return true;
-    }
-
-    if (head_cmp == 0 && lhs_children.size() == rhs_children.size() && dominates_rhs_children()) {
-        for (std::size_t index = 0; index < lhs_children.size(); ++index) {
-            if (structural_equal(lhs_children[index], rhs_children[index])) {
-                continue;
-            }
-            return term_order_gt(lhs_children[index], rhs_children[index]);
-        }
-    }
-
-    return false;
-}
-
-[[nodiscard]] bool term_order_ge(ExprPtr lhs, ExprPtr rhs) {
-    return lhs == rhs || term_order_gt(lhs, rhs);
-}
-
-[[nodiscard]] TermOrderRelation relation_from_compare(int cmp) noexcept {
-    if (cmp < 0) {
-        return TermOrderRelation::Less;
-    }
-    if (cmp > 0) {
-        return TermOrderRelation::Greater;
-    }
-    return TermOrderRelation::Equivalent;
-}
-
-[[nodiscard]] TermOrderRelation compare_knuth_bendix_weight_order(ExprPtr lhs, ExprPtr rhs) {
-    if (!lhs || !rhs) {
-        return lhs == rhs ? TermOrderRelation::Equivalent : TermOrderRelation::Incomparable;
-    }
-    if (lhs == rhs) {
-        return TermOrderRelation::Equivalent;
-    }
-
-    const std::size_t lhs_weight = expr_weight(lhs);
-    const std::size_t rhs_weight = expr_weight(rhs);
-    if (lhs_weight < rhs_weight) {
-        return TermOrderRelation::Less;
-    }
-    if (lhs_weight > rhs_weight) {
-        return TermOrderRelation::Greater;
-    }
-
-    const int head_cmp = compare_head_precedence(lhs, rhs);
-    if (head_cmp != 0) {
-        return relation_from_compare(head_cmp);
-    }
-
-    const std::vector<ExprPtr> lhs_children = term_order_children(lhs);
-    const std::vector<ExprPtr> rhs_children = term_order_children(rhs);
-    const std::size_t shared_size = std::min(lhs_children.size(), rhs_children.size());
-    for (std::size_t index = 0; index < shared_size; ++index) {
-        const TermOrderRelation child_cmp = compare_knuth_bendix_weight_order(lhs_children[index], rhs_children[index]);
-        if (child_cmp != TermOrderRelation::Equivalent) {
-            return child_cmp;
-        }
-    }
-    if (lhs_children.size() < rhs_children.size()) {
-        return TermOrderRelation::Less;
-    }
-    if (lhs_children.size() > rhs_children.size()) {
-        return TermOrderRelation::Greater;
-    }
-
-    return relation_from_compare(canonical_compare(lhs, rhs));
-}
-
-} // namespace
-
 TermOrderRelation compare_rewrite_terms_impl(ExprPtr lhs, ExprPtr rhs) {
     if (!lhs || !rhs) {
         return lhs == rhs ? TermOrderRelation::Equivalent : TermOrderRelation::Incomparable;
@@ -604,4 +466,4 @@ bool is_strongly_normalizing(const std::vector<RewriteRule>& rules) {
         });
 }
 
-} // namespace cas::symbolic
+}  // namespace cas::symbolic

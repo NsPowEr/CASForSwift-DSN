@@ -29,11 +29,49 @@ using BSparsePoly = std::map<BMonomial, BigInt>;
 [[nodiscard]] BSparsePoly eval_var_mod_p(const BSparsePoly& sp, std::size_t var_idx,
                                           const BigInt& val, const BigInt& p);
 
+[[nodiscard]] std::optional<BSparsePoly> univariate_sparse_gcd_fp(
+    const BSparsePoly& A, const BSparsePoly& B,
+    std::size_t var_idx, const BigInt& p);
+
+[[nodiscard]] std::optional<BSparsePoly> lagrange_interp_fp(
+    const std::vector<BigInt>& bs, const std::vector<BSparsePoly>& vals,
+    std::size_t var_idx, std::size_t target_deg, const BigInt& p);
+
+[[nodiscard]] std::map<std::size_t, BSparsePoly> layers_by_var(
+    const BSparsePoly& sp, std::size_t var_idx);
+
+[[nodiscard]] BSparsePoly reassemble_layers(
+    const std::map<std::size_t, BSparsePoly>& layers,
+    std::size_t var_idx, const BigInt& p);
+
+[[nodiscard]] BSparsePoly mul_mod_p(
+    const BSparsePoly& A, const BSparsePoly& B, const BigInt& p);
+
+[[nodiscard]] std::optional<BSparsePoly> exact_div_fp(
+    const BSparsePoly& A, const BSparsePoly& B, const BigInt& p);
+
 // Recursive Brown-in-Fp gcd of A,B in Fp[active_vars].
 [[nodiscard]] std::optional<BSparsePoly> sparse_gcd_fp(
     const BSparsePoly& A, const BSparsePoly& B,
     const std::vector<std::size_t>& active_vars,
     const BigInt& p, symbolic::CASContext& ctx, std::size_t depth);
+
+[[nodiscard]] BSparsePoly to_sparse(const MultivariatePolynomial& p,
+                                    const std::vector<Symbol>& vars);
+
+[[nodiscard]] MultivariatePolynomial from_sparse(const BSparsePoly& sp,
+                                                 const std::vector<Symbol>& vars);
+
+[[nodiscard]] std::vector<Symbol> collect_vars(const MultivariatePolynomial& p,
+                                               const MultivariatePolynomial& q);
+
+[[nodiscard]] BigInt multivar_mignotte_bound(const BSparsePoly& P,
+                                             const BSparsePoly& Q);
+
+[[nodiscard]] bool divides_sparse_z(
+    const BSparsePoly& dividend,
+    const BSparsePoly& divisor,
+    std::size_t n_vars);
 
 }  // namespace cas::algebra::fp_helpers
 
