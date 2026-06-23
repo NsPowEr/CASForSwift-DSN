@@ -39,4 +39,40 @@ struct HyperResult {
     const Symbol& n,
     symbolic::CASContext& ctx);
 
+// As above but returns ALL distinct verified hypergeometric term ratios (each a
+// rational function in n).  Distinct = not equal as rational functions; this is
+// what a closed-form solver needs to span the solution space.
+[[nodiscard]] Result<HyperResult> hyper_all_ratios(
+    const std::vector<ExprPtr>& p,
+    const Symbol& n,
+    std::vector<ExprPtr>& ratios_out,
+    symbolic::CASContext& ctx);
+
+// Closed form for the sequence satisfying  Σ_{i=0}^J p[i](n)·S(n+i)=0  with the
+// J initial values init[t] = S(n0+t), t=0..J−1.  Returns the closed form
+// S(n) = Σ c_i h_i(n)  when S is a ℚ-linear combination of the hypergeometric
+// solutions of the recurrence (each reconstructed as a Pochhammer/power term),
+// verified by extending S through the recurrence beyond the fitted points.
+// Returns ok(nullopt) when no such closed form exists — never a silent guess.
+[[nodiscard]] Result<std::optional<ExprPtr>> solve_recurrence_closed_form(
+    const std::vector<ExprPtr>& p,
+    const std::vector<ExprPtr>& init,
+    const Symbol& n,
+    long long n0,
+    symbolic::CASContext& ctx);
+
+// Closed form for the definite sum S(n)=Σ_{k=lower}^{n} F(n,k) whose Zeilberger
+// recurrence is `p` (order ≥ 1).  Computes the initial values by direct
+// summation, solves the recurrence (solve_recurrence_closed_form), then
+// CROSS-VERIFIES the candidate against directly-computed sums beyond the
+// fitted range — guarding against telescoping boundary terms.  Requires an
+// integer `lower`.  Returns ok(nullopt) when no verified closed form is found.
+[[nodiscard]] Result<std::optional<ExprPtr>> sum_closed_form_from_recurrence(
+    const std::vector<ExprPtr>& p,
+    ExprPtr F,
+    const Symbol& n,
+    const Symbol& k,
+    ExprPtr lower,
+    symbolic::CASContext& ctx);
+
 }  // namespace cas::symbolic

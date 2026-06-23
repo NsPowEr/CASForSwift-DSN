@@ -487,12 +487,29 @@
   2. `atan` privo dei valori speciali π/6, π/3: aggiunti via detection `tan²∈{1/3,3}` (form-independent, `simplify_trig_inverse.cpp`).
   3. `is_known_positive(√x)` e `is_known_negative(base^n)` mancanti → segno di `√3`, `(−√3)^(−1)` non provabile; `(−√3)²` non collassava in abs/arg. Aggiunti predicati segno (`simplify_sign_predicates.cpp`, estratto anti-monolito) + regola simplifier `(−x)^n` intero → `±x^n` (`simplify_arithmetic_power.cpp`).
 - **STATO (storico)**: F1.6 canonicalizzazione + formula `ln|z| + i*arg(z)` su Abs/Arg (M20); copriva solo π/4 e assi.
-### F5.7-ZEIL-HIGHER-ORDER — Zeilberger higher-order recurrence solver non implementato
-- **File**: `src/symbolic/summation_zeilberger.cpp`.
-- **Categoria CLAUDE.md**: Cat 3 (algoritmo incompleto).
-- **Descrizione**: Zeilberger creative telescoping genera recurrences corrette per $J \ge 2$, ma il solver per equazioni alle differenze di ordine superiore non è ancora integrato.
-- **Fix corretto**: Integrare o implementare un linear difference equation solver (Hyper algorithm di Petkovšek).
-- **STATO**: APERTO — infrastruttura base completa, solver di grado superiore richiesto per sums generalizzate.
+### F5.7-ZEIL-HIGHER-ORDER — Zeilberger higher-order recurrence solver — CHIUSO (T-027)
+- **File**: `src/symbolic/summation_hyper.{hpp,cpp}` (Petkovšek Hyper, rational z),
+  `src/symbolic/summation_petkovsek.cpp` (closed-form combinazione + wiring),
+  `src/symbolic/summation_zeilberger.cpp` (dispatch J≥2).
+- **Categoria CLAUDE.md**: Cat 3 (algoritmo incompleto) → risolto.
+- **Stato**: CHIUSO 2026-06-23 (commit Hyper 3addb54 + closed-form). Il solver per
+  equazioni alle differenze di ordine superiore è ora implementato e integrato:
+  - `hyper_term_ratio` / `hyper_all_ratios`: Petkovšek 1992 — divisori monici di
+    p₀ e p_J(n−J+1) via factor_polynomial, χ(z) dai leading coeff, z razionale,
+    sistema lineare per c(n) (csolve). Ogni ρ verificato contro la ricorrenza.
+  - `solve_recurrence_closed_form`: S(n)=Σ cᵢ hᵢ(n), hᵢ ricostruiti come
+    z^{n−n0}·∏Pochhammer (ratio→termine), cᵢ fittati dai valori iniziali su ℚ,
+    verifica estendendo S via la ricorrenza oltre i punti di fit.
+  - `sum_closed_form_from_recurrence`: wiring in `zeilberger_sum` per J≥2 con
+    cross-verifica contro la somma calcolata direttamente (guard boundary terms).
+  - Restrizione a z razionale (copre ~tutte le sums combinatorie); z algebrico →
+    `needs_algebraic` esplicito. Cap divisori configurabile (`max_hyper_divisors`).
+  - Test isolati: 2^n, n!, (E−3)(E−2)→{2,3}, (E−(n+1))²→n!, Fibonacci (no ℚ-hyper),
+    closed-form 2^n+3^n e n! da ordine 2, Σ(2^k+3^k) da ordine 3.
+- **Dipendenza residua per binomiali end-to-end**: l'attivazione su somme
+  binomiali Γ-encoded dipende ancora da **F5.7-ZEIL-GAMMA-RATIO** (estrazione di
+  shift-ratio razionali puliti da Γ(z+n)); il solver J≥2 è pronto e si attiverà
+  appena quella estrazione fornisce ricorrenze J≥2.
 
 ### F5.7-B6BIS-QUADRATIC-M-GT-1 — Polygamma ad alto ordine per (B₁k+B₀)/Q(k)^m con m>1
 - **File**: `src/calculus/summation_abramov.cpp` (helper `try_quadratic_atom_antidiff`, linea che ritorna `std::nullopt` per m>1).

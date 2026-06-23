@@ -130,3 +130,108 @@ TEST(HyperTest, Fibonacci_NoRationalHypergeometric) {
     EXPECT_FALSE(res.value().ratio.has_value());
     EXPECT_TRUE(res.value().needs_algebraic) << "irrational z should set needs_algebraic";
 }
+
+// Evaluate a closed form S(n) at an integer point as an exact rational.
+namespace {
+bool closed_form_equals_at(ExprPtr S, const Symbol& n, long long v,
+                           long long num, long long den, CASContext& ctx) {
+    AstArena& a = ctx.arena();
+    auto sub = ctx.substitute(S, n, a.make<IntegerLit>(BigInt(v)));
+    if (sub.is_error()) return false;
+    auto s = ctx.simplify(sub.value());
+    if (s.is_error()) return false;
+    const auto* il = expr_cast<IntegerLit>(s.value());
+    const auto* rl = expr_cast<RationalLit>(s.value());
+    if (il) return il->value == BigInt(num) && den == 1;
+    if (rl) return rl->numerator == BigInt(num) && rl->denominator == BigInt(den);
+    return false;
+}
+}  // namespace
+
+// Closed form of (E−3)(E−2): p=[6,-5,1], S(0)=2, S(1)=5 ⇒ S(n)=2^n+3^n.
+TEST(HyperTest, ClosedForm_TwoGeometric_Combination) {
+    CASContext ctx;
+    Symbol n("n");
+    AstArena& a = ctx.arena();
+    std::vector<ExprPtr> p{
+        a.make<IntegerLit>(BigInt(6)),
+        a.make<IntegerLit>(BigInt(-5)),
+        a.make<IntegerLit>(BigInt(1))};
+    std::vector<ExprPtr> init{a.make<IntegerLit>(BigInt(2)), a.make<IntegerLit>(BigInt(5))};
+
+    auto res = solve_recurrence_closed_form(p, init, n, 0, ctx);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+    ASSERT_TRUE(res.value().has_value()) << "2^n+3^n is a hypergeometric combination";
+    ExprPtr S = *res.value();
+    // 2^n+3^n at n=2 → 13, n=3 → 35, n=4 → 97.
+    EXPECT_TRUE(closed_form_equals_at(S, n, 2, 13, 1, ctx)) << debug_print(S);
+    EXPECT_TRUE(closed_form_equals_at(S, n, 3, 35, 1, ctx)) << debug_print(S);
+    EXPECT_TRUE(closed_form_equals_at(S, n, 4, 97, 1, ctx)) << debug_print(S);
+}
+
+// Closed form of (E−(n+1))²: p=[(n+1)²,-(2n+3),1], S(0)=1, S(1)=1 ⇒ S(n)=n!.
+TEST(HyperTest, ClosedForm_Factorial_FromOrder2) {
+    CASContext ctx;
+    Symbol n("n");
+    AstArena& a = ctx.arena();
+    ExprPtr np1 = a.make<Binary>(BinaryOp::Add, a.make<Symbol>(n), a.make<IntegerLit>(BigInt(1)));
+    ExprPtr p0 = a.make<Binary>(BinaryOp::Pow, np1, a.make<IntegerLit>(BigInt(2)));
+    ExprPtr p1 = a.make<Unary>(UnaryOp::Neg, a.make<Binary>(BinaryOp::Add,
+        a.make<Binary>(BinaryOp::Mul, a.make<IntegerLit>(BigInt(2)), a.make<Symbol>(n)),
+        a.make<IntegerLit>(BigInt(3))));
+    std::vector<ExprPtr> p{p0, p1, a.make<IntegerLit>(BigInt(1))};
+    std::vector<ExprPtr> init{a.make<IntegerLit>(BigInt(1)), a.make<IntegerLit>(BigInt(1))};
+
+    auto res = solve_recurrence_closed_form(p, init, n, 0, ctx);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+    ASSERT_TRUE(res.value().has_value());
+    ExprPtr S = *res.value();
+    // n! at n=3 → 6, n=4 → 24, n=5 → 120.
+    EXPECT_TRUE(closed_form_equals_at(S, n, 3, 6, 1, ctx)) << debug_print(S);
+    EXPECT_TRUE(closed_form_equals_at(S, n, 4, 24, 1, ctx)) << debug_print(S);
+    EXPECT_TRUE(closed_form_equals_at(S, n, 5, 120, 1, ctx)) << debug_print(S);
+}
+
+// End-to-end wrapper: Σ_{k=0}^{n} (2^k + 3^k) satisfies (E−1)(E−2)(E−3),
+// p=[-6,11,-6,1].  Closed form = −3/2 + 2·2^n + (3/2)·3^n, cross-verified
+// against the directly-computed sum.  Exercises sum_closed_form_from_recurrence,
+// the 3-solution fit, and the direct-summation soundness gate.
+TEST(HyperTest, SumClosedForm_FromRecurrence_ThreeSolutions) {
+    CASContext ctx;
+    Symbol n("n");
+    Symbol k("k");
+    AstArena& a = ctx.arena();
+    // F(n,k) = 2^k + 3^k
+    ExprPtr F = a.make<Binary>(BinaryOp::Add,
+        a.make<Binary>(BinaryOp::Pow, a.make<IntegerLit>(BigInt(2)), a.make<Symbol>(k)),
+        a.make<Binary>(BinaryOp::Pow, a.make<IntegerLit>(BigInt(3)), a.make<Symbol>(k)));
+    std::vector<ExprPtr> p{
+        a.make<IntegerLit>(BigInt(-6)), a.make<IntegerLit>(BigInt(11)),
+        a.make<IntegerLit>(BigInt(-6)), a.make<IntegerLit>(BigInt(1))};
+    ExprPtr lower = a.make<IntegerLit>(BigInt(0));
+
+    auto res = sum_closed_form_from_recurrence(p, F, n, k, lower, ctx);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+    ASSERT_TRUE(res.value().has_value()) << "Σ(2^k+3^k) has a hypergeometric closed form";
+    ExprPtr S = *res.value();
+    // Direct sums: S(3)=55, S(4)=152, S(5)=427.
+    EXPECT_TRUE(closed_form_equals_at(S, n, 3, 55, 1, ctx)) << debug_print(S);
+    EXPECT_TRUE(closed_form_equals_at(S, n, 4, 152, 1, ctx)) << debug_print(S);
+    EXPECT_TRUE(closed_form_equals_at(S, n, 5, 427, 1, ctx)) << debug_print(S);
+}
+
+// Fibonacci has no rational hypergeometric closed form ⇒ ok(nullopt).
+TEST(HyperTest, ClosedForm_Fibonacci_None) {
+    CASContext ctx;
+    Symbol n("n");
+    AstArena& a = ctx.arena();
+    std::vector<ExprPtr> p{
+        a.make<IntegerLit>(BigInt(-1)),
+        a.make<IntegerLit>(BigInt(-1)),
+        a.make<IntegerLit>(BigInt(1))};
+    std::vector<ExprPtr> init{a.make<IntegerLit>(BigInt(0)), a.make<IntegerLit>(BigInt(1))};
+
+    auto res = solve_recurrence_closed_form(p, init, n, 0, ctx);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+    EXPECT_FALSE(res.value().has_value()) << "Fibonacci is not ℚ-hypergeometric";
+}

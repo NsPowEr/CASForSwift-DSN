@@ -138,6 +138,7 @@ set(CAS_SYMBOLIC_SOURCES
     src/symbolic/simplify_arithmetic_chain_liketerm.cpp
     src/symbolic/summation_gosper.cpp
     src/symbolic/summation_hyper.cpp
+    src/symbolic/summation_petkovsek.cpp
     src/symbolic/summation_zeilberger.cpp
     src/symbolic/summation_zeilberger_helpers.cpp
     src/symbolic/summation_zeilberger_shift_ratio.cpp

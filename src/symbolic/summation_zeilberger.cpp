@@ -11,6 +11,7 @@
 
 #include "summation_zeilberger.hpp"
 #include "summation_zeilberger_helpers.hpp"
+#include "summation_hyper.hpp"
 #include "cas/algebra.hpp"
 #include "cas/ast.hpp"
 #include "cas/ast_debug.hpp"
@@ -427,7 +428,15 @@ Result<std::optional<ExprPtr>> zeilberger_sum(
             auto closed_opt = solve_first_order_rec(
                 p_vec[0], p_vec[1], *S0_opt, lower, n_param, ctx);
             if (closed_opt) return ok(std::optional<ExprPtr>{*closed_opt});
+            break;
         }
+
+        // J ≥ 2: solve the recurrence into a verified Petkovšek closed form
+        // (a ℚ-linear combination of hypergeometric terms), cross-checked
+        // against directly-computed sums.  ok(nullopt) ⇒ no closed form.
+        auto closed = sum_closed_form_from_recurrence(p_vec, F, n_param, k, lower, ctx);
+        if (closed.is_ok() && closed.value().has_value())
+            return ok(std::optional<ExprPtr>{*closed.value()});
         break;
     }
 

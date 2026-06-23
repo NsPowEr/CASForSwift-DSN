@@ -255,10 +255,26 @@ std::optional<ExprPtr> solve_poly_recurrence(
     return std::nullopt;
 }
 
+// Two ratios denote the same hypergeometric solution iff they are equal as
+// rational functions in n.
+bool ratios_equal(ExprPtr r1, ExprPtr r2, const Symbol& n, symbolic::CASContext& ctx) {
+    AstArena& a = ctx.arena();
+    ExprPtr diff = a.make<Binary>(BinaryOp::Sub, r1, r2);
+    auto tog = algebra::together(diff, ctx);
+    ExprPtr combined = tog.is_ok() ? tog.value() : diff;
+    auto parts = algebra::apart_num_den(combined, ctx);
+    ExprPtr num = parts.is_ok() ? parts.value().numerator : combined;
+    return is_zero_poly(num, n, ctx);
+}
+
 }  // namespace
 
-Result<HyperResult> hyper_term_ratio(
-    const std::vector<ExprPtr>& p, const Symbol& n, symbolic::CASContext& ctx) {
+// Shared core: collect verified hypergeometric term ratios.  When
+// stop_after_first is set, returns as soon as one is found.
+static Result<HyperResult> collect_ratios(
+    const std::vector<ExprPtr>& p, const Symbol& n,
+    std::vector<ExprPtr>& ratios, bool stop_after_first,
+    symbolic::CASContext& ctx) {
     AstArena& a = ctx.arena();
     HyperResult result;
 
@@ -348,14 +364,32 @@ Result<HyperResult> hyper_term_ratio(
                 if (rho_simp.is_ok()) rho_s = rho_simp.value();
 
                 if (verify_ratio(p, rho_s, n, ctx)) {
-                    result.ratio = rho_s;
-                    return ok(result);
+                    bool dup = false;
+                    for (ExprPtr existing : ratios)
+                        if (ratios_equal(existing, rho_s, n, ctx)) { dup = true; break; }
+                    if (!dup) {
+                        ratios.push_back(rho_s);
+                        if (!result.ratio) result.ratio = rho_s;
+                        if (stop_after_first) return ok(result);
+                    }
                 }
             }
         }
     }
 
     return ok(result);
+}
+
+Result<HyperResult> hyper_term_ratio(
+    const std::vector<ExprPtr>& p, const Symbol& n, symbolic::CASContext& ctx) {
+    std::vector<ExprPtr> ratios;
+    return collect_ratios(p, n, ratios, /*stop_after_first=*/true, ctx);
+}
+
+Result<HyperResult> hyper_all_ratios(
+    const std::vector<ExprPtr>& p, const Symbol& n,
+    std::vector<ExprPtr>& ratios_out, symbolic::CASContext& ctx) {
+    return collect_ratios(p, n, ratios_out, /*stop_after_first=*/false, ctx);
 }
 
 }  // namespace cas::symbolic
