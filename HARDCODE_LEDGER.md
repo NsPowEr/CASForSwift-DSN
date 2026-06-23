@@ -1822,14 +1822,14 @@ tutti gli input; questi sono upgrade prestazionali per casi specifici.
 - **Bivariate path**: invariato algoritmicamente; gli stessi prime distinti sostituiscono il vecchio `next_prime(100+...)` ma con guarantee di distinctness, quindi bivariate non degrada (verificato: `BivariateSparse`, `BivariateProduct`, `UnivariateX2` tutti PASS).
 - **Regola Zero compliance**: `sparse_interp_max_retries` configurabile via CASContext, no hardcode magico, no silent failure (Unimplemented diagnostico se max retry esaurito).
 
-### HC-KV-02 — Kovacic Case 1: poli/poly part di r di ordine pari ≥ 4 (Laurent expansion of √r)
-- **File**: `src/calculus/ode_kovacic_case1.cpp` (`case1_omega`), branches per `pole_opt->power >= 4U` (pari) e `dq_res.value() >= 2U` (pari).
-- **Categoria CLAUDE.md**: §DIVIETO HARDCODE, Categoria 8 (pattern matching a tabella chiusa) — l'attuale implementazione del Caso 1 di Kovacic copre **solo** poli di ordine 2 e parte polinomiale di grado 0 di `r`. Tutti gli altri ordini pari (poli ordine 4,6,…; gradi polinomiali 2,4,…) restituiscono `Unimplemented` esplicito.
-- **Comportamento attuale**: diagnostico chiaro: *"requires Laurent expansion of √r around the pole"* / *"requires polynomial-Laurent expansion at ∞"*.
-- **Fix corretto**: implementare il motore Puiseux/Laurent series per funzioni algebriche (`√r` espansa attorno a un polo o all'infinito), poi popolare i coefficienti a₀,…,a_{v-1} e calcolare il termine α_c dal coefficiente a_v come da Kovacic 1986 §3.
-- **Blocking dependency**: motore Puiseux/Laurent generico (non esiste ancora come componente); parzialmente sovrapposto a TODO_PH8 Task 6 (UnwindingNumber) e Task 5.4 (AlgebraicNumber).
-- **Casi reali bloccati**: ODE di tipo Bessel di ordine ≥ 1 (`x²y''+xy'+(x²−n²)y=0`), Weber/parabolic-cylinder, equazioni con poli quartici. Per la maggior parte di queste, Case 1 fallisce comunque e serve Case 2/3 (ulteriore dipendenza su HC-KV-03).
-- **Quando reintegrarlo**: dopo aver completato il motore Laurent series (probabilmente accoppiato a Frobenius generalizzato).
+### HC-KV-02 — Kovacic Case 1: poli/poly part di r di ordine pari ≥ 4 (Laurent expansion of √r) — CHIUSO (T-008)
+- **File**: `src/calculus/ode_kovacic_case1.cpp` (`case1_omega`, `try_extract_pole`, `match_neg_power`), `src/calculus/ode_kovacic.cpp` (`solve_ode_kovacic`).
+- **Stato**: CHIUSO 2026-06-23 (T-008). La Laurent-expansion di √r a poli di ordine pari ≥4 e a ∞ era **già scritta** ma era **codice morto / silent-wrong**: tre bug a catena la rendevano inattiva.
+- **Bug 1 — pole detection**: `try_extract_pole` riconosceva solo nodi `Div`, ma `simplify`/`partial_fractions` emettono i poli come `Pow(x,−k)` e `Product([coeff, Pow(x,−k)])`. Tutti i poli venivano scartati → `case1_omega` restituiva ω=0 → ODE risolta come `y''=0` (`y=C₁+C₂x`), risultato **silenziosamente errato**. Fix: `match_neg_power` riconosce gli esponenti negativi + estrazione coeff dai `Product`. (Nessun test esistente lo copriva: l'unico test Case-1 con r≠0 era Euler-Cauchy, che ha r=0 e non tocca mai il path dei poli.)
+- **Bug 2 — apart_num_den non ridotto**: `apart_num_den` ritorna num/den su denominatore comune senza ridurre ai minimi termini (es. `x⁻⁴−2x⁻³ → (x³−2x⁴)/x⁷` invece di `(1−2x)/x⁴`), quindi `d_other = den/(x−c)^k` si annullava al polo → `compute_taylor_rational` falliva (d₀=0). Fix: cancellazione del `polynomial_gcd(num,den)` prima dell'espansione.
+- **Bug 3 — ω₋ non certificato (silent-wrong)**: per poli di ordine >2 la branch "tutti i segni √r flippati" (ω₋) non soddisfa la Riccati `ω'+ω²=r`; usare `e^{∫ω₋}` come seconda soluzione fabbricava una forma chiusa errata (es. `x²e^{1/x}`). Fix: certificato Riccati su ogni branch in `solve_ode_kovacic`; branch non certificate → reduction-of-order (integrale non valutato onesto). Vedi anche prerequisito FTC differentiation sotto.
+- **Verifica**: `OdeTest.Kovacic_Case1_EvenPoleOrder4` — `y''=(1/x⁴−2/x³)y` → η₁=e^{−1/x}, certificato di sostituzione a 3 punti su `x⁴Y''+(2x−1)Y`; seconda soluzione reduction-of-order con `∫e^{2/x}dx` non valutato.
+- **Nota**: il motore Puiseux generale (`Puiseux_Series_Engine.md`) NON è richiesto — Kovacic 1986 §3 espande √r direttamente via Laurent binomiale, formulazione standard. Poli di ordine dispari restano `Unimplemented` per definizione (Case 1 inapplicabile).
 
 ### HC-KV-03 — Kovacic Case 2 e Case 3 (Q(x)-algebraic extensions / SL(2,C) finite subgroups)
 - **File**: `src/calculus/ode_kovacic.cpp` (`solve_ode_kovacic`)
@@ -1976,6 +1976,15 @@ Vedi `PLAN_TASKS_REMAINING.md` per breakdown completo.
 - **Task ID**: 26 — tracker distribuito.
 - **Params già esposti** (sessione 2026-06-12): `max_bessel_half_integer_order`, `integration_abs_tol`, `integration_rel_tol`, `integration_max_intervals`.
 - **Params pendenti**: vedi plan §Task 26 tabella (12 params associati a task pending).
+
+### HC-SIMP-EXP-PRODUCT — simplify non fonde e^a·e^b → e^{a+b}
+- **Scoperto**: 2026-06-23 durante T-008 (verifica simbolica soluzioni ODE).
+- **File**: simplifier / `src/rewrite/builtin_rewrite_log_exp.cpp` (regola assente).
+- **Sintomo**: `ctx.simplify(exp(-1/x) * exp(2/x))` resta `Product([exp(-1/x), exp(2/x)])` invece di `exp(1/x)`. Identità esponenziale base mancante.
+- **Categoria CLAUDE.md**: §REGOLA ZERO (algoritmo generale mancante, non hardcode) — gap di completezza del simplifier, non un valore magico.
+- **Impatto**: blocca la verifica simbolica diretta (sostituzione → 0) delle soluzioni reduction-of-order che contengono prodotti di esponenziali con esponenti distinti (es. seconda soluzione Kovacic con `∫e^{2/x}dx`). Workaround nei test: certificato di sostituzione a punti razionali multipli (prova p(x)≡0 per p di grado limitato). Vedi `OdeTest.Kovacic_Case1_EvenPoleOrder4`.
+- **Fix corretto**: regola di rewrite `e^a·e^b → e^{a+b}` (orientata LPO) nel collect dei `Product`; gate benchmark + trace validation (hot-path Simplifier, R3).
+- **Blocking dependency**: nessuna; richiede solo cautela benchmark/trace per la modifica del Simplifier.
 
 ## Note operative
 

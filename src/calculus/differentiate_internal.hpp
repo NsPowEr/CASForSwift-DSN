@@ -92,6 +92,7 @@ private:
     [[nodiscard]] Result<ExprPtr> differentiate_product(const Product& product, const Symbol& var);
     [[nodiscard]] Result<ExprPtr> differentiate_power(const Binary& power, const Symbol& var);
     [[nodiscard]] Result<ExprPtr> differentiate_function(const FuncCall& call, const Symbol& var);
+    [[nodiscard]] Result<ExprPtr> differentiate_integral(const Integral& integral, const Symbol& var);
 
     symbolic::CASContext& context_;
     AstArena& arena_;
