@@ -137,6 +137,7 @@ set(CAS_SYMBOLIC_SOURCES
     src/symbolic/simplify_arithmetic_power_trig.cpp
     src/symbolic/simplify_arithmetic_chain_liketerm.cpp
     src/symbolic/summation_gosper.cpp
+    src/symbolic/summation_hyper.cpp
     src/symbolic/summation_zeilberger.cpp
     src/symbolic/summation_zeilberger_helpers.cpp
     src/symbolic/summation_zeilberger_shift_ratio.cpp
@@ -660,6 +661,7 @@ test/unit/symbolic/test_sqrt_fold.cpp
 test/unit/algebra/test_cyclotomic_rootof_d2.cpp
         test/unit/algebra/test_csolve_linear.cpp
         test/unit/symbolic/test_summation_gosper.cpp
+        test/unit/symbolic/test_summation_hyper.cpp
         test/unit/algebra/test_factorization_polynomials_smoke.cpp
         test/unit/algebra/test_polynomial_gcd_multivariate_smoke.cpp
         test/unit/algebra/test_zippel_sparse_gcd.cpp

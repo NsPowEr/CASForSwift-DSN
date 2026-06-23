@@ -318,6 +318,15 @@ struct CASContextAlgebraParams {
         return max_zeilberger_cert_degree_;
     }
 
+    // Petkovšek Hyper: cap on the number of monic divisors enumerated for the
+    // leading/trailing coefficient (bounds the (a,b) candidate search).
+    void set_max_hyper_divisors(unsigned int n) noexcept {
+        max_hyper_divisors_ = (n < 1U) ? 1U : n;
+    }
+    [[nodiscard]] unsigned int max_hyper_divisors() const noexcept {
+        return max_hyper_divisors_;
+    }
+
 protected:
     double        gcd_error_probability_{0.001};
     unsigned int  numeric_precision_digits_{15U};
@@ -360,6 +369,7 @@ protected:
     unsigned int  max_zeilberger_order_{2U};
     unsigned int  max_zeilberger_poly_degree_{2U};
     unsigned int  max_zeilberger_cert_degree_{4U};
+    unsigned int  max_hyper_divisors_{64U};
     long long     solve_inequality_search_half_width_{1000LL};
     long long     solve_inequality_sturm_tolerance_inv_{1000000000LL};
     std::uint64_t max_expand_monomials_{100000ULL};
