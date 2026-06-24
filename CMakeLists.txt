@@ -656,6 +656,7 @@ test/unit/symbolic/test_sqrt_fold.cpp
         test/unit/calculus/test_integrate_byparts.cpp
         test/unit/calculus/test_integrate_ibp_coverage.cpp
         test/unit/calculus/test_integrate_risch_smoke.cpp
+        test/unit/calculus/test_integrate_bronstein_corpus.cpp
         test/unit/calculus/test_integrate_substitution.cpp
         test/unit/algebra/test_polynomial_sparse_interpolation.cpp
         test/unit/algebra/test_algebraic_number_rootof.cpp

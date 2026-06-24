@@ -107,6 +107,82 @@ Result<ExprPtr> integrate_log_polynomial_part(
     return ok(raw);
 }
 
+// True if `e` contains an elementary transcendental function (exp/ln/trig/
+// inverse-trig/…) whose argument depends on `var` — i.e. `e` is not a pure
+// rational function of `var`.
+[[nodiscard]] static bool has_var_transcendental(ExprPtr e, const Symbol& var) {
+    if (!e) return false;
+    if (const auto* fc = expr_cast<FuncCall>(e)) {
+        bool arg_has_var = false;
+        for (ExprPtr a : fc->args) if (depends_on(a, var)) { arg_has_var = true; break; }
+        if (arg_has_var) {
+            switch (fc->func_id) {
+                case BuiltinOp::Exp: case BuiltinOp::Ln:  case BuiltinOp::Log:
+                case BuiltinOp::Sin: case BuiltinOp::Cos: case BuiltinOp::Tan:
+                case BuiltinOp::Sec: case BuiltinOp::Csc: case BuiltinOp::Cot:
+                case BuiltinOp::Asin: case BuiltinOp::Acos: case BuiltinOp::Atan:
+                case BuiltinOp::Unknown:  // asinh/acosh/… parsed as Unknown
+                    return true;
+                default: break;
+            }
+        }
+        for (ExprPtr a : fc->args) if (has_var_transcendental(a, var)) return true;
+        return false;
+    }
+    if (const auto* b = expr_cast<Binary>(e))
+        return has_var_transcendental(b->left, var) || has_var_transcendental(b->right, var);
+    if (const auto* u = expr_cast<Unary>(e)) return has_var_transcendental(u->operand, var);
+    if (const auto* s = expr_cast<Sum>(e)) {
+        for (ExprPtr t : s->terms) if (has_var_transcendental(t, var)) return true;
+        return false;
+    }
+    if (const auto* p = expr_cast<Product>(e)) {
+        for (ExprPtr f : p->factors) if (has_var_transcendental(f, var)) return true;
+        return false;
+    }
+    return false;
+}
+
+// Decide whether the t_top-polynomial coefficient `coeff` makes the polynomial-
+// quotient integration UNSOUND and the integral non-elementary here.
+//
+// The branch below integrates each coefficient with the lower-field integrate(),
+// which treats every free symbol — INCLUDING a sibling generator t_j = exp(u)
+// or ln(u) — as a constant in `var` (D(t_j) is unknown to the bare symbol).
+// That is correct only when the coefficient lies in the base field Q(var).
+//
+// A coefficient that mixes in a sibling generator splits into two cases:
+//   • REDUCIBLE — mapping the generators back to their real forms collapses the
+//     coefficient to a rational function of `var` (e.g. x·exp(-ln x) → 1, the
+//     integrating factor in a Bernoulli/linear ODE).  These stay integrable and
+//     are left to the existing path unchanged.
+//   • IRREDUCIBLE — a genuine foreign transcendental survives (e.g. e^{-x}·ln x
+//     from ∫ e^{-x}·ln(x) dx).  Integrating the symbol form as if D(e^{-x})=0
+//     produced the silently-wrong closed form e^{-x}·(x·ln x − x); since the
+//     integral is in fact non-elementary, bail to Unimplemented (REGOLA ZERO:
+//     "mai output sbagliato").
+//
+// Rational integrands and single-generator towers never reach the irreducible
+// case (no sibling generators), so neither is affected.
+[[nodiscard]] static bool coeff_blocks_poly_quotient(
+    ExprPtr coeff, const Symbol& t_top, const DifferentialField& field,
+    const Symbol& var, symbolic::CASContext& context) {
+    if (!coeff) return false;
+    bool has_sibling = false;
+    for (const auto& ext : field.extensions()) {
+        if (ext.t_var.name == t_top.name) continue;
+        if (depends_on(coeff, ext.t_var)) { has_sibling = true; break; }
+    }
+    if (!has_sibling) return false;
+    // Map the generator symbols back to their real expressions and simplify; a
+    // surviving var-transcendental marks a genuinely non-elementary coefficient.
+    auto real = field.from_field_generators(coeff, context);
+    if (real.is_error()) return true;  // cannot verify reducibility → safe bail
+    ExprPtr c = real.value();
+    if (auto s = context.simplify(c); s.is_ok()) c = s.value();
+    return has_var_transcendental(c, var);
+}
+
 // Steps 3..end of integrate_risch():
 //   3.  Decompose gen_expr into P/Q w.r.t. topmost generator t_n.
 //   3b. Extract polynomial quotient; handle base and transcendental cases.
@@ -121,7 +197,7 @@ Result<ExprPtr> integrate_risch_poly_and_rational_part(
     ExprPtr poly_integral_part,
     symbolic::CASContext& context) {
     AstArena& arena = context.arena();
-    (void)expr_original; // reserved for future round-trip verification
+    (void)expr_original;  // round-trip verification handled by the per-coefficient guard
 
     // 3. Decompose into P/Q with respect to the topmost generator t_n
     Symbol t_top = field.extensions().empty() ? var : field.extensions().back().t_var;
@@ -164,6 +240,28 @@ Result<ExprPtr> integrate_risch_poly_and_rational_part(
                     const bool handle_log_polynomial = (ext.type == ExtensionType::Logarithmic);
 
                     if (handle_log_polynomial) {
+                        // Soundness precondition (REGOLA ZERO): the log-polynomial
+                        // ansatz integrates each coefficient in the lower field
+                        // via integrate(), which treats a sibling generator symbol
+                        // (e.g. the exp generator left in ∫ e^{-x}·ln(x) dx) as a
+                        // constant in `var` — silently producing the wrong closed
+                        // form e^{-x}·(x·ln x − x).  Bail when an *irreducible*
+                        // sibling transcendental survives (the integral is then
+                        // non-elementary); reducible coefficients fall through.
+                        for (std::size_t k = 0; k < quot.size(); ++k) {
+                            if (coeff_blocks_poly_quotient(quot[k], t_top, field, var, context)) {
+                                return make_unimplemented<ExprPtr>(
+                                    "calculus", "integrate_risch",
+                                    "log-polynomial coefficient carries an "
+                                    "irreducible sibling generator (e.g. exp inside "
+                                    "a ln-polynomial coefficient); not elementary-"
+                                    "integrable by the single-level Risch pipeline",
+                                    cas::error::reason_codes::RISCH_LOG_EXTENSION_GENERAL,
+                                    "Extend the Risch structure theorem to multi-level "
+                                    "exp/log towers (Bronstein §5)",
+                                    "F0.8");
+                            }
+                        }
                         auto B_res = integrate_log_polynomial_part(quot, ext.argument, t_top, var, context);
                         if (B_res.is_error()) return fail<ExprPtr>(B_res.error());
                         int_terms.push_back(B_res.value());
