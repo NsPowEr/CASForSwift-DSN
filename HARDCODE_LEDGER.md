@@ -454,6 +454,17 @@
 - **Verifica corpus**: bronstein 90/90 traversato sotto `--per-entry-timeout 5` (17 PASS, 35 FAIL, 38 SKIP = 32.7% non-skip; 18.9% sul totale). Acceptance "bronstein 90/90 traversed" SUPERATA. Il target "bronstein ≥70%" richiede F7.5.B2/B3 (Risch Hermite + transcendental), non interrupt fix.
 - **STATO**: CHIUSO
 
+### HC-IBP-RADSUM-RATIONALIZE — anti-hang IBP su denominatore radical-sum è versione di passaggio (manca razionalizzazione coniugata)
+- **File**: `src/calculus/integrate_parts.cpp` (~L274, guard `nested_active() && ibp_has_radical_sum_denominator`); helper `ibp_has_radical_sum_denominator`/`is_radical_sum`/`expr_contains_var_radical` stesso file.
+- **Categoria**: 4 (bail-out diagnostico esplicito — `Unimplemented`, mai silenzioso) + 8 (manca il path algoritmico generale a valle).
+- **Aperta da**: T-055-followup (2026-06-25), durante cleanup di lavoro anti-hang a metà lasciato nel working tree.
+- **Sintomo**: `integrate(log(x + sqrt(x^2+1)), x)` (= asinh(x), elementare, antiderivata `x·asinh(x) − √(x²+1)`) prima NON terminava (hang infinito, S5). La guard converte l'hang in terminazione ma il risultato è `INTEGRATE_NO_STRATEGY`, NON la forma chiusa. Causa radice: la IBP `u=log(g)`, `dv=dx` produce `du = g'/g` con `g = x+√(x²+1)` (radical-sum). Matematicamente `g' = g/√(x²+1)` quindi `g'/g = 1/√(x²+1)`, ma il simplifier NON cancella questo quoziente radical-sum (non esiste razionalizzazione coniugata simbolica generale nel motore — solo coniugio su ComplexRational/Qi). Il sub-integrando resta `x·(x+√(x²+1))⁻¹·(…)`, che la IBP annidata non può ridurre (ogni passo approfondisce la potenza negativa) → la guard lo defer.
+- **Perf collaterale**: la guard rende il caso finito ma lento (~29s, ~58 chiamate IBP, dominato da `simplify` su espressioni radical-sum — spam WARN "simplify result is not strictly canonical"). NON è O(2^n) in IBP; è O(N · simplify_costoso) sul simplifier dei radicali. Il test di regressione `BronsteinCorpus.NoHang_LogXPlusSqrt_Asinh` è quindi tenuto fuori dal quick-gate (lista SLOW_OK in `scripts/test_quick.sh`), eseguito in `--slow`.
+- **Workaround attuale**: guard anti-hang (esplicito `Unimplemented` "nested IBP on radical-sum-denominator integrand diverges; needs rationalisation"). Caso bare-radical `√(x²+1)⁻¹` (base FuncCall, non Sum) NON intercettato → path ∫asin / quadratic-radical intatto.
+- **Fix corretto**: implementare razionalizzazione coniugata simbolica generale per denominatori `a + b√q` (moltiplica num/den per il coniugato `a − b√q`, denominatore → `a² − b²q` razionale). Wiring: (1) come regola simplifier sui Sum con un termine radical (riduce `g'/g → 1/√(x²+1)` a monte), preferito perché generale; oppure (2) localmente nel calcolo del `du` di IBP quando `u=log(radical-sum)`. Risolto (1): asinh si integra al primo passo IBP, veloce e corretto, e la guard diventa irraggiungibile (rimuovibile). Sblocca la famiglia `∫log(x+√(x²+a))`, `∫asinh/acosh`-equivalenti, e in generale integrandi con radical-sum in denominatore.
+- **Acceptance**: `integrate(log(x+sqrt(x^2+1)), x)` → forma chiusa verificata `D(F)=f` numericamente; tempo < 1s; nessuna regressione su `BronsteinCorpus.*` né su ∫asin coverage.
+- **STATO**: APERTO (versione di passaggio: anti-hang attivo, forma chiusa NON prodotta).
+
 ### HC-F75-CYCLOTOMIC-ROOTOF — mathematically_equal non riconosce RootOf(cyclotomic) ↔ exp(2πik/n)
 - **File**: `src/algebra/algebraic_equal.cpp`.
 - **Categoria**: 8 (pattern matching a tabella chiusa — manca normalizzazione cyclotomic).

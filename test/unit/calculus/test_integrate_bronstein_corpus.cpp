@@ -15,9 +15,11 @@
 // Non-elementary kernels (Ei/erf/Si/dilog) are expected to return
 // Unimplemented; that is counted as neither wrong nor covered.
 //
-// NOTE: two integrands are intentionally omitted because integrate() does
-// not currently terminate on them (tracked separately as an S5 hang):
-//   log(x + sqrt(x^2 + 1))   and   sin(x)/x.
+// NOTE: two integrands — log(x + sqrt(x^2 + 1)) and sin(x)/x — previously
+// drove integrate() into a non-terminating recursion (S5 hang) and were
+// omitted from the corpus.  They are now pinned by the dedicated regression
+// NoHang_SiAndAsinh_NoSilentWrong below (anti-hang fixes in
+// integrate_weierstrass.cpp and integrate_parts.cpp).
 
 #include <gtest/gtest.h>
 
@@ -134,6 +136,44 @@ TEST_F(BronsteinCorpus, NoSilentWrongAnswers_And_CoverageFloor) {
     EXPECT_GE(n_verified, 28)
         << "Risch coverage regressed below the established floor (28); "
         << n_verified << "/" << kCorpus.size() << " verified Bronstein ch.6-8.";
+}
+
+// Shared contract for the two integrands that previously hung integrate() (S5):
+//   * integrate() must TERMINATE — the gtest TIMEOUT is the liveness assertion.
+//   * NO SILENT WRONG ANSWER — if a closed form F is returned, D(F) must equal
+//     the integrand at every sampled point (Unimplemented is acceptable).
+// Split one-per-hang so each stays well under the 60s per-test CTest cap and a
+// regression points at the exact integrand.
+static void expect_no_hang_no_silent_wrong(
+    ExprPtr f, const Symbol& x, symbolic::CASContext& ctx, const char* in) {
+    ASSERT_NE(f, nullptr) << in;
+    auto r = calculus::integrate(f, x, ctx);  // must terminate (no hang)
+    if (r.is_error()) return;                 // Unimplemented: acceptable
+    auto dF = calculus::diff(r.value(), x, 1U, ctx);
+    ASSERT_TRUE(dF.is_ok()) << in;
+    for (double xv : {0.37, 0.81, 1.43, 2.17}) {
+        numeric::NumericEnv env{{"x", xv}};
+        auto fv = numeric::eval(f, env);
+        auto Fv = numeric::eval(dF.value(), env);
+        if (fv.is_error() || Fv.is_error()) continue;
+        const double d = std::fabs(fv.value() - Fv.value());
+        const double scale = 1.0 + std::fabs(fv.value());
+        EXPECT_LE(d, 1e-6 * scale) << in << " at x=" << xv;
+    }
+}
+
+// sin(x)/x — non-elementary (Si).  Weierstrass must NOT apply (integrand is not
+// rational in sin/cos), so it returns Unimplemented instead of looping.
+TEST_F(BronsteinCorpus, NoHang_SinXOverX_NonElementary) {
+    expect_no_hang_no_silent_wrong(parse("sin(x)/x"), x, ctx, "sin(x)/x");
+}
+
+// log(x + sqrt(x^2+1)) = asinh(x), elementary.  The first by-parts step must run
+// while the divergent *nested* IBP on the resulting radical-sum denominator is
+// deferred (anti-hang guard in integrate_parts.cpp).
+TEST_F(BronsteinCorpus, NoHang_LogXPlusSqrt_Asinh) {
+    expect_no_hang_no_silent_wrong(
+        parse("log(x + sqrt(x^2 + 1))"), x, ctx, "log(x + sqrt(x^2 + 1))");
 }
 
 }  // namespace
