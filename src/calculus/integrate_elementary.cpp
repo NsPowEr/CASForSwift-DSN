@@ -175,6 +175,117 @@ Result<ExprPtr> Integrator::integrate_power_direct(ExprPtr base, ExprPtr exponen
     return ok(make_binary(arena_, BinaryOp::Div, make_binary(arena_, BinaryOp::Pow, base, exponent_plus_one), exponent_plus_one));
 }
 
+namespace {
+
+// True if `e` carries a genuine radical in `var`: sqrt of a var-dependent
+// argument, or a fractional power of a var-dependent base.
+[[nodiscard]] bool has_var_radical(ExprPtr e, const Symbol& var) {
+    if (!e) return false;
+    if (const auto* fc = expr_cast<FuncCall>(e)) {
+        if (fc->func_id == BuiltinOp::Sqrt)
+            for (ExprPtr a : fc->args) if (depends_on(a, var)) return true;
+        for (ExprPtr a : fc->args) if (has_var_radical(a, var)) return true;
+        return false;
+    }
+    if (const auto* b = expr_cast<Binary>(e)) {
+        if (b->op == BinaryOp::Pow && depends_on(b->left, var)
+            && expr_is<RationalLit>(b->right)) return true;
+        return has_var_radical(b->left, var) || has_var_radical(b->right, var);
+    }
+    if (const auto* u = expr_cast<Unary>(e)) return has_var_radical(u->operand, var);
+    if (const auto* s = expr_cast<Sum>(e)) {
+        for (ExprPtr t : s->terms) if (has_var_radical(t, var)) return true;
+        return false;
+    }
+    if (const auto* p = expr_cast<Product>(e)) {
+        for (ExprPtr f : p->factors) if (has_var_radical(f, var)) return true;
+        return false;
+    }
+    return false;
+}
+
+// Conjugate of a radical-sum: negate exactly the terms carrying a var-radical.
+// For S = A + B√q (A radical-free, B√q the radical part) returns A − B√q.
+[[nodiscard]] ExprPtr radical_sum_conjugate(const Sum& s, const Symbol& var, AstArena& arena) {
+    std::vector<ExprPtr> terms;
+    terms.reserve(s.terms.size());
+    for (ExprPtr t : s.terms)
+        terms.push_back(has_var_radical(t, var) ? make_unary(arena, UnaryOp::Neg, t) : t);
+    return make_sum(arena, std::move(terms));
+}
+
+// Canonical negation of an explicit integer/rational exponent literal, so the
+// rewritten power never carries a non-canonical Neg(IntegerLit(neg)) node.
+[[nodiscard]] ExprPtr negate_exponent(ExprPtr e, AstArena& arena) {
+    if (const auto* il = expr_cast<IntegerLit>(e)) return arena.make<IntegerLit>(-il->value);
+    if (const auto* rl = expr_cast<RationalLit>(e)) return arena.make<RationalLit>(-rl->numerator, rl->denominator);
+    return make_unary(arena, UnaryOp::Neg, e);
+}
+
+// General conjugate rationalisation of radical-sum denominators (Regola Zero:
+// algorithm, not pattern table).  Recursively rewrites every factor Pow(S, n<0)
+// whose base S is a Sum carrying a var-radical:
+//   Pow(S, n) → conj^{-n} · Pow(S·conj, n),   conj = radical terms of S negated,
+// since for S = A + B√q the product S·conj = A² − B²q is radical-free.  The
+// rewrite is applied ONLY when S·conj actually loses the radical (guard), so a
+// multi-radical denominator like √2+√3 — which a single conjugation does not
+// clear — is left untouched.  The caller re-simplifies and verifies
+// D(result) ≡ integrand, so a wrong rewrite can never leak a silent wrong answer.
+[[nodiscard]] ExprPtr rationalize_radical_denominators(
+    ExprPtr e, const Symbol& var, symbolic::CASContext& ctx) {
+    if (!e) return e;
+    AstArena& arena = ctx.arena();
+    if (const auto* b = expr_cast<Binary>(e)) {
+        if (b->op == BinaryOp::Pow) {
+            bool neg = false;
+            if (const auto* il = expr_cast<IntegerLit>(b->right)) neg = il->value.is_negative();
+            else if (const auto* rl = expr_cast<RationalLit>(b->right)) neg = rl->numerator.is_negative();
+            const auto* base_sum = expr_cast<Sum>(b->left);
+            if (neg && base_sum != nullptr && has_var_radical(b->left, var)) {
+                ExprPtr conj = radical_sum_conjugate(*base_sum, var, arena);
+                auto rs = ctx.simplify(make_product(arena, {b->left, conj}));
+                ExprPtr R = rs.is_ok() ? rs.value() : nullptr;
+                if (R != nullptr && !has_var_radical(R, var)) {
+                    ExprPtr conj_pow = make_binary(arena, BinaryOp::Pow, conj,
+                        negate_exponent(b->right, arena));
+                    ExprPtr R_pow = make_binary(arena, BinaryOp::Pow, R, b->right);
+                    return make_product(arena, {conj_pow, R_pow});
+                }
+            }
+        }
+        ExprPtr l = rationalize_radical_denominators(b->left, var, ctx);
+        ExprPtr r = rationalize_radical_denominators(b->right, var, ctx);
+        return (l == b->left && r == b->right) ? e : make_binary(arena, b->op, l, r);
+    }
+    if (const auto* u = expr_cast<Unary>(e)) {
+        ExprPtr o = rationalize_radical_denominators(u->operand, var, ctx);
+        return (o == u->operand) ? e : make_unary(arena, u->op, o);
+    }
+    if (const auto* s = expr_cast<Sum>(e)) {
+        std::vector<ExprPtr> terms; terms.reserve(s->terms.size());
+        bool changed = false;
+        for (ExprPtr t : s->terms) {
+            ExprPtr nt = rationalize_radical_denominators(t, var, ctx);
+            changed = changed || (nt != t);
+            terms.push_back(nt);
+        }
+        return changed ? make_sum(arena, std::move(terms)) : e;
+    }
+    if (const auto* p = expr_cast<Product>(e)) {
+        std::vector<ExprPtr> factors; factors.reserve(p->factors.size());
+        bool changed = false;
+        for (ExprPtr f : p->factors) {
+            ExprPtr nf = rationalize_radical_denominators(f, var, ctx);
+            changed = changed || (nf != f);
+            factors.push_back(nf);
+        }
+        return changed ? make_product(arena, std::move(factors)) : e;
+    }
+    return e;
+}
+
+}  // namespace
+
 Result<ExprPtr> Integrator::integrate_function(const FuncCall& call, const Symbol& var) {
     if (call.args.size() != 1U) {
         return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Only unary function integration is implemented"));
@@ -223,6 +334,19 @@ Result<ExprPtr> Integrator::integrate_function(const FuncCall& call, const Symbo
             ExprPtr v_du = arena_.make<Product>(std::vector<ExprPtr>{v, du_simp});
             auto vdu_simp = context_.simplify(v_du);
             ExprPtr vdu_in = vdu_simp.is_ok() ? vdu_simp.value() : v_du;
+            // HC-IBP-RADSUM-RATIONALIZE: the parts remainder x·g'/g of
+            // ∫f(g(x))dx can carry a radical-sum denominator (e.g.
+            // ∫log(x+√(x²+1)) leaves x·(x+√(x²+1))^{-1}·…) that simplify alone
+            // does not cancel.  Conjugate rationalisation clears the radical;
+            // together() then combines over a common denominator (x·√(x²+1) −
+            // x³/√(x²+1) → x/√(x²+1)) so the remainder integrates.
+            ExprPtr vdu_rat = rationalize_radical_denominators(vdu_in, var, context_);
+            if (vdu_rat != vdu_in) {
+                if (auto tg = algebra::together(vdu_rat, context_); tg.is_ok())
+                    vdu_rat = tg.value();
+                auto rs = context_.simplify(vdu_rat);
+                vdu_in = rs.is_ok() ? rs.value() : vdu_rat;
+            }
             auto int_vdu = ::cas::calculus::integrate(vdu_in, var, context_);
             if (int_vdu.is_ok()) {
                 ExprPtr candidate = arena_.make<Sum>(std::vector<ExprPtr>{
@@ -239,14 +363,20 @@ Result<ExprPtr> Integrator::integrate_function(const FuncCall& call, const Symbo
                         return expr_is<IntegerLit>(e)
                             && expr_ref<IntegerLit>(e).value.is_zero();
                     };
-                    auto delta_simp = context_.simplify(delta);
+                    // Rationalise any radical-sum denominator in the residual
+                    // first (no-op when absent): for a log-of-radical-sum the
+                    // residual still carries the uncancellable g'/g fraction
+                    // (x·g'/g − x/√(x²+1)); conjugate rationalisation lets it
+                    // collapse to 0 instead of the simplifier churning on it.
+                    ExprPtr delta_r = rationalize_radical_denominators(delta, var, context_);
+                    auto delta_simp = context_.simplify(delta_r);
                     if (delta_simp.is_ok() && check_zero_e(delta_simp.value()))
                         return ok(candidate);
                     // Fallback: combine fractions then re-simplify; covers the
                     // common log(p(x)) IBP shape where the delta is a sum of
                     // rational terms whose numerator collapses to zero but the
                     // canonicaliser does not group them automatically.
-                    if (auto tg = algebra::together(delta, context_); tg.is_ok())
+                    if (auto tg = algebra::together(delta_r, context_); tg.is_ok())
                         if (auto ts = context_.simplify(tg.value()); ts.is_ok())
                             if (check_zero_e(ts.value())) return ok(candidate);
                 }

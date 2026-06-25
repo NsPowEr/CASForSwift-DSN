@@ -16,10 +16,11 @@
 // Unimplemented; that is counted as neither wrong nor covered.
 //
 // NOTE: two integrands — log(x + sqrt(x^2 + 1)) and sin(x)/x — previously
-// drove integrate() into a non-terminating recursion (S5 hang) and were
-// omitted from the corpus.  They are now pinned by the dedicated regression
-// NoHang_SiAndAsinh_NoSilentWrong below (anti-hang fixes in
-// integrate_weierstrass.cpp and integrate_parts.cpp).
+// drove integrate() into a non-terminating recursion (S5 hang).  Both are now
+// pinned by dedicated regressions below: sin(x)/x returns Unimplemented
+// (non-elementary Si) via the Weierstrass guard; log(x+√(x²+1)) is now SOLVED
+// in closed form via conjugate rationalisation (HC-IBP-RADSUM-RATIONALIZE +
+// the parse_integer_exponent robustness fix).
 
 #include <gtest/gtest.h>
 
@@ -168,12 +169,29 @@ TEST_F(BronsteinCorpus, NoHang_SinXOverX_NonElementary) {
     expect_no_hang_no_silent_wrong(parse("sin(x)/x"), x, ctx, "sin(x)/x");
 }
 
-// log(x + sqrt(x^2+1)) = asinh(x), elementary.  The first by-parts step must run
-// while the divergent *nested* IBP on the resulting radical-sum denominator is
-// deferred (anti-hang guard in integrate_parts.cpp).
-TEST_F(BronsteinCorpus, NoHang_LogXPlusSqrt_Asinh) {
-    expect_no_hang_no_silent_wrong(
-        parse("log(x + sqrt(x^2 + 1))"), x, ctx, "log(x + sqrt(x^2 + 1))");
+// log(x + sqrt(x^2+1)) = asinh(x), elementary.  Now SOLVED in closed form
+// (x·log(x+√(x²+1)) − √(x²+1)) via conjugate rationalisation of the parts
+// remainder x·g'/g (HC-IBP-RADSUM-RATIONALIZE), enabled by the
+// parse_integer_exponent robustness fix.  Asserts the closed form is produced
+// and is a genuine antiderivative (D(F) = f).
+TEST_F(BronsteinCorpus, SolvesLogXPlusSqrt_Asinh) {
+    ExprPtr f = parse("log(x + sqrt(x^2 + 1))");
+    ASSERT_NE(f, nullptr);
+    auto r = calculus::integrate(f, x, ctx);
+    ASSERT_TRUE(r.is_ok()) << "asinh log integral must produce a closed form";
+    auto dF = calculus::diff(r.value(), x, 1U, ctx);
+    ASSERT_TRUE(dF.is_ok());
+    bool any = false;
+    for (double xv : {0.37, 0.81, 1.43, 2.17}) {
+        numeric::NumericEnv env{{"x", xv}};
+        auto fv = numeric::eval(f, env);
+        auto Fv = numeric::eval(dF.value(), env);
+        if (fv.is_error() || Fv.is_error()) continue;
+        any = true;
+        EXPECT_LE(std::fabs(fv.value() - Fv.value()), 1e-6 * (1.0 + std::fabs(fv.value())))
+            << "D(F) != f at x=" << xv;
+    }
+    EXPECT_TRUE(any) << "numeric verification could not evaluate any sample point";
 }
 
 }  // namespace

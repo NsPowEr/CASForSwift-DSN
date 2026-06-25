@@ -47,7 +47,6 @@ SLOW_OK=(
     PrimitiveElementTest.RedundantMixedTower_Sqrt2_Sqrt3_Sqrt5_Sqrt6      # >60s (oggi DISABLED_)
     PrimitiveElementTest.DetectTowerNLevel_SqrtTwoSqrtThreeSqrtFive       # 31s
     VanHoeijFactorTest.AcceptanceGate_AG2_SwinnertonDyer_SD3_Irreducible  # Swinnerton-Dyer, lento
-    BronsteinCorpus.NoHang_LogXPlusSqrt_Asinh                             # ~29s: anti-hang OK, lentezza = simplify radicali (HC-IBP-RADSUM-RATIONALIZE)
 )
 
 # Quarantena (noti-rossi) — caricata dal file governato.
