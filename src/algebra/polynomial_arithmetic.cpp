@@ -8,35 +8,35 @@
 
 namespace cas::algebra {
 
+// Decompose a signed BigInt exponent into (magnitude, sign).  Always derives
+// the magnitude from the ABSOLUTE value, so the unsigned decimal parser never
+// sees a leading '-' (which it would otherwise misread into a garbage limb).
+[[nodiscard]] static Result<IntegerExponent> integer_exponent_from_value(const BigInt& value) {
+    const bool is_neg = value.is_negative();
+    const BigInt magnitude_val = is_neg ? -value : value;
+    const auto parsed = parse_bounded_unsigned_decimal<std::size_t>(magnitude_val.decimal());
+    if (!parsed.has_value()) {
+        return fail<IntegerExponent>(make_error(
+            CASErrorKind::Unimplemented,
+            "Esponente troppo grande"));
+    }
+    return ok(IntegerExponent{.magnitude = parsed.value(), .negative = is_neg});
+}
+
 [[nodiscard]] Result<IntegerExponent> parse_integer_exponent(ExprPtr expr) {
     if (const auto* integer = expr_cast<IntegerLit>(expr)) {
-        const bool is_neg = integer->value.is_negative();
-        BigInt magnitude_val = integer->value;
-        if (is_neg) {
-            magnitude_val = -magnitude_val;
-        }
-        
-        const std::string decimal = magnitude_val.decimal();
-        const auto parsed = parse_bounded_unsigned_decimal<std::size_t>(decimal);
-        if (!parsed.has_value()) {
-            return fail<IntegerExponent>(make_error(
-                CASErrorKind::Unimplemented,
-                "Esponente troppo grande"));
-        }
-        return ok(IntegerExponent{.magnitude = parsed.value(), .negative = is_neg});
+        return integer_exponent_from_value(integer->value);
     }
 
+    // A non-canonical Neg(IntegerLit(n)) exponent (e.g. `--1` produced by a
+    // rewrite that wraps Neg around an already-negative literal) means the
+    // effective exponent is -n.  Compute the true signed value rather than
+    // assuming the inner literal is positive — otherwise a negated negative
+    // literal yields a wrong sign AND feeds the unsigned parser a "-…" string,
+    // corrupting the magnitude into a huge garbage exponent.
     if (const auto* unary = expr_cast<Unary>(expr)) {
         if (unary->op == UnaryOp::Neg && expr_is<IntegerLit>(unary->operand)) {
-            const auto& inner = expr_ref<IntegerLit>(unary->operand);
-            const std::string decimal = inner.value.decimal();
-            const auto parsed = parse_bounded_unsigned_decimal<std::size_t>(decimal);
-            if (!parsed.has_value()) {
-                return fail<IntegerExponent>(make_error(
-                    CASErrorKind::Unimplemented,
-                    "Esponente troppo grande"));
-            }
-            return ok(IntegerExponent{.magnitude = parsed.value(), .negative = true});
+            return integer_exponent_from_value(-expr_ref<IntegerLit>(unary->operand).value);
         }
     }
 
