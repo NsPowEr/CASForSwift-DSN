@@ -284,6 +284,73 @@ namespace {
     return e;
 }
 
+// Distribute a numeric literal coefficient out of a power whose base is a
+// Product containing a var-radical: (c·rest)^n → c^n · Pow(rest, n).  After
+// conjugate rationalisation, `together` can leave the parts remainder as
+// c·x·(c·√(x²+a))⁻¹ (c = (S·conj)² , e.g. 16 when S·conj=−4) whose constant the
+// universal simplifier does not pull out of the reciprocal (T-054, deferred
+// there because doing it in the hot power/product path is costly and regresses
+// Gruntz).  Lifting it HERE — once, on the integration remainder — lets the
+// constant cancel with its sibling so the remainder integrates, with no
+// hot-path cost and no Gruntz interaction.  No-op when the radical base has no
+// numeric coefficient (e.g. the a=1 asinh remainder x·√(x²+1)⁻¹).
+[[nodiscard]] ExprPtr lift_numeric_from_radical_powers(
+    ExprPtr e, const Symbol& var, symbolic::CASContext& ctx) {
+    if (!e) return e;
+    AstArena& arena = ctx.arena();
+    if (const auto* b = expr_cast<Binary>(e)) {
+        if (b->op == BinaryOp::Pow && expr_is<IntegerLit>(b->right)) {
+            if (const auto* bp = expr_cast<Product>(b->left)) {
+                std::vector<ExprPtr> nums, rest;
+                bool rest_radical = false;
+                for (ExprPtr bf : bp->factors) {
+                    if (expr_is<IntegerLit>(bf) || expr_is<RationalLit>(bf)) {
+                        nums.push_back(bf);
+                    } else {
+                        rest.push_back(bf);
+                        if (has_var_radical(bf, var)) rest_radical = true;
+                    }
+                }
+                if (!nums.empty() && !rest.empty() && rest_radical) {
+                    ExprPtr num = nums.size() == 1 ? nums[0] : make_product(arena, std::move(nums));
+                    ExprPtr rst = rest.size() == 1 ? rest[0] : make_product(arena, std::move(rest));
+                    return make_product(arena, {
+                        make_binary(arena, BinaryOp::Pow, num, b->right),
+                        make_binary(arena, BinaryOp::Pow, rst, b->right)});
+                }
+            }
+        }
+        ExprPtr l = lift_numeric_from_radical_powers(b->left, var, ctx);
+        ExprPtr r = lift_numeric_from_radical_powers(b->right, var, ctx);
+        return (l == b->left && r == b->right) ? e : make_binary(arena, b->op, l, r);
+    }
+    if (const auto* u = expr_cast<Unary>(e)) {
+        ExprPtr o = lift_numeric_from_radical_powers(u->operand, var, ctx);
+        return (o == u->operand) ? e : make_unary(arena, u->op, o);
+    }
+    if (const auto* s = expr_cast<Sum>(e)) {
+        std::vector<ExprPtr> terms; terms.reserve(s->terms.size());
+        bool changed = false;
+        for (ExprPtr t : s->terms) {
+            ExprPtr nt = lift_numeric_from_radical_powers(t, var, ctx);
+            changed = changed || (nt != t);
+            terms.push_back(nt);
+        }
+        return changed ? make_sum(arena, std::move(terms)) : e;
+    }
+    if (const auto* p = expr_cast<Product>(e)) {
+        std::vector<ExprPtr> factors; factors.reserve(p->factors.size());
+        bool changed = false;
+        for (ExprPtr f : p->factors) {
+            ExprPtr nf = lift_numeric_from_radical_powers(f, var, ctx);
+            changed = changed || (nf != f);
+            factors.push_back(nf);
+        }
+        return changed ? make_product(arena, std::move(factors)) : e;
+    }
+    return e;
+}
+
 }  // namespace
 
 Result<ExprPtr> Integrator::integrate_function(const FuncCall& call, const Symbol& var) {
@@ -344,6 +411,9 @@ Result<ExprPtr> Integrator::integrate_function(const FuncCall& call, const Symbo
             if (vdu_rat != vdu_in) {
                 if (auto tg = algebra::together(vdu_rat, context_); tg.is_ok())
                     vdu_rat = tg.value();
+                // together can strand a numeric coefficient inside a radical
+                // reciprocal (c·x·(c·√(x²+a))⁻¹ for a≠1); lift it so it cancels.
+                vdu_rat = lift_numeric_from_radical_powers(vdu_rat, var, context_);
                 auto rs = context_.simplify(vdu_rat);
                 vdu_in = rs.is_ok() ? rs.value() : vdu_rat;
             }

@@ -194,4 +194,30 @@ TEST_F(BronsteinCorpus, SolvesLogXPlusSqrt_Asinh) {
     EXPECT_TRUE(any) << "numeric verification could not evaluate any sample point";
 }
 
+// General radius: ∫log(x+√(x²+a)) for a≠1.  Needs both the conjugate
+// rationalisation AND the T-054 numeric-coefficient lift — without it the parts
+// remainder reduces to c·x·(c·√(x²+a))⁻¹ (c=(S·conj)²) whose constant does not
+// cancel, leaving NO_STRATEGY.  Asserts the closed form is produced and verified.
+TEST_F(BronsteinCorpus, SolvesLogXPlusSqrt_GeneralRadius) {
+    for (const char* in : {"log(x + sqrt(x^2 + 4))", "log(x + sqrt(x^2 + 9))"}) {
+        ExprPtr f = parse(in);
+        ASSERT_NE(f, nullptr) << in;
+        auto r = calculus::integrate(f, x, ctx);
+        ASSERT_TRUE(r.is_ok()) << in << " must produce a closed form";
+        auto dF = calculus::diff(r.value(), x, 1U, ctx);
+        ASSERT_TRUE(dF.is_ok()) << in;
+        bool any = false;
+        for (double xv : {0.4, 0.9, 1.6, 2.3}) {
+            numeric::NumericEnv env{{"x", xv}};
+            auto fv = numeric::eval(f, env);
+            auto Fv = numeric::eval(dF.value(), env);
+            if (fv.is_error() || Fv.is_error()) continue;
+            any = true;
+            EXPECT_LE(std::fabs(fv.value() - Fv.value()), 1e-6 * (1.0 + std::fabs(fv.value())))
+                << in << " D(F) != f at x=" << xv;
+        }
+        EXPECT_TRUE(any) << in;
+    }
+}
+
 }  // namespace
