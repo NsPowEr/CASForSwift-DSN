@@ -51,9 +51,9 @@ Ordinati per severità/impatto decrescente. Ogni voce verificata aperta a codice
 - **Stato a codice**: `src/linalg/matrix_smith.cpp:166,216` → `Unimplemented`. Funziona solo su Z, non Q[x] PID (no Storjohann LLL).
 - **Cosa**: generalizzare a PID Q[x]. **Refs**: F4.2, CAS-L2-04
 
-### A5 · ODE Frobenius: log-term + resonance (radici differing-by-integer) — `[E3·C3·S3·R1]`
-- **Stato a codice**: `src/calculus/ode_solver_frobenius.cpp:187-245` → `Unimplemented` su più casi; "Resonance detection" a `:260` parziale.
-- **Cosa**: caso radici che differiscono per intero con termine log; risonanza generale. **Refs**: F5.3, CAS-L2-01
+### A5 · ODE Frobenius: log-term + resonance (radici differing-by-integer) — PARZIALE 2026-06-26 — `[E3·C3·S3·R1]`
+- **Stato a codice**: ✅ gap principale chiuso: **radice indiciale doppia** (gap N=0) ora produce la seconda soluzione logaritmica via costruzione parametro-derivata `y₂ = ln(x)·y₁ + x^{r1}·Σ aₙ'(r1) xⁿ` (`build_double_root_log_branch`, recurrence con root simbolico ρ + `d/dρ` + sub ρ=r1). Prima `series_solutions.size()==1` restituiva solo `C1·y₁` (soluzione generale incompleta). Verificato: Euler `x²y''−xy'+y=0` → `C1·x + C2·x·ln x`; Bessel₀ `x²y''+xy'+x²y=0` → `J₀·ln x + x²/4 − 3x⁴/128…`. +2 test, 6/6 FrobeniusTest. Gap intero positivo (`build_log_branch`) + resonance detection già presenti.
+- **Residuo**: risonanza secondaria multi-livello durante costruzione bₙ (log branch, `ode_solver_frobenius_series.cpp:201`) → `Unimplemented` esplicito diagnostico; punto singolare regolare a x≠0 (solo x=0). **Refs**: F5.3, CAS-L2-01
 
 ### A6 · Stauduhar Galois group deg ≥ 6 — `[E4·C4·S3·R1]`
 - **Stato a codice**: solo `src/algebra/galois_deg5.cpp` (deg ≤5: S5/A5/D5/F20/C5). Nessun descent Stauduhar.

@@ -293,6 +293,20 @@ Result<ExprPtr> solve_ode_frobenius_at_zero(
                                        num_terms, y1_res.value(), x, ctx);
         if (y2_res.is_error()) return fail<ExprPtr>(y2_res.error());
         series_solutions.push_back(y2_res.value());
+    } else if (unique_roots.size() == 1U) {
+        // Double indicial root (gap N = 0): the quadratic indicial polynomial has
+        // a repeated root, so the two independent solutions are y_1 and
+        // y_2 = ln(x)·y_1 + x^{r1}·Σ a_n'(r1) x^n (always logarithmic).
+        ExprPtr r1 = unique_roots[0];
+        auto a_coeffs_res = compute_recurrence(r1, p_coeffs, q_coeffs, p0, q0, num_terms, ctx);
+        if (a_coeffs_res.is_error()) return fail<ExprPtr>(a_coeffs_res.error());
+        auto y1_res = build_series(r1, a_coeffs_res.value(), x, ctx);
+        if (y1_res.is_error()) return fail<ExprPtr>(y1_res.error());
+        series_solutions.push_back(y1_res.value());
+        auto y2_res = build_double_root_log_branch(
+            r1, p_coeffs, q_coeffs, p0, q0, num_terms, y1_res.value(), x, ctx);
+        if (y2_res.is_error()) return fail<ExprPtr>(y2_res.error());
+        series_solutions.push_back(y2_res.value());
     } else {
         for (auto r : unique_roots) {
             auto coeffs_res = compute_recurrence(r, p_coeffs, q_coeffs, p0, q0, num_terms, ctx);

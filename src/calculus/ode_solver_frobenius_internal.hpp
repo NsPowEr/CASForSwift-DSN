@@ -72,4 +72,17 @@ namespace cas::calculus {
     const Symbol& x,
     symbolic::CASContext& ctx);
 
+// Double indicial root (gap N = 0): second solution via the parameter-derivative
+// construction.  Returns y_2 = ln(x)·y_1 + x^{r1}·Σ_{n≥1} a_n'(r1) x^n.
+[[nodiscard]] Result<ExprPtr> build_double_root_log_branch(
+    ExprPtr r1,
+    const std::vector<ExprPtr>& p_coeffs,
+    const std::vector<ExprPtr>& q_coeffs,
+    ExprPtr p0,
+    ExprPtr q0,
+    unsigned int num_terms,
+    ExprPtr y_1_series,
+    const Symbol& x,
+    symbolic::CASContext& ctx);
+
 }  // namespace cas::calculus

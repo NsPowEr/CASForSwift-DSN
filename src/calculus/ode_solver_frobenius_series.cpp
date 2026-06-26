@@ -238,6 +238,68 @@ Result<ExprPtr> build_log_branch(
     return ctx.simplify(y_2);
 }
 
+// Double indicial root r1 (gap N = 0): the second solution always carries a
+// logarithm.  Parameter-derivative construction (Frobenius; Coddington-Levinson
+// §4.8, repeated-root case):
+//   y(r,x) = x^r Σ_{n≥0} a_n(r) x^n,   a_0 ≡ 1
+//   y_1 = y(r1,x)
+//   y_2 = ∂y/∂r |_{r=r1} = ln(x)·y_1 + x^{r1} Σ_{n≥1} a_n'(r1) x^n.
+// The a_n(r) are produced by running the standard recurrence with the indicial
+// root kept as a *free symbol*; then b_n := d/dr a_n(r) |_{r=r1}.  Since the
+// indicial polynomial has a double root at r1, I(n+r1) = n² ≠ 0 for n ≥ 1, so
+// every substitution r→r1 is well defined.
+Result<ExprPtr> build_double_root_log_branch(
+    ExprPtr r1,
+    const std::vector<ExprPtr>& p_coeffs,
+    const std::vector<ExprPtr>& q_coeffs,
+    ExprPtr p0,
+    ExprPtr q0,
+    unsigned int num_terms,
+    ExprPtr y_1_series,
+    const Symbol& x,
+    symbolic::CASContext& ctx) {
+    AstArena& arena = ctx.arena();
+
+    // Recurrence with the indicial root as a free symbol → a_n(ρ).
+    Symbol rho = ctx.make_fresh_symbol("r");
+    ExprPtr rho_expr = arena.make<Symbol>(rho);
+    auto a_sym_res = compute_recurrence(rho_expr, p_coeffs, q_coeffs, p0, q0, num_terms, ctx);
+    if (a_sym_res.is_error()) return fail<ExprPtr>(a_sym_res.error());
+    const std::vector<ExprPtr>& a_rho = a_sym_res.value();
+
+    // Power-series part x^{r1} Σ_{n≥1} b_n x^n with b_n = d/dr a_n(r)|_{r=r1}.
+    // b_0 = 0 because a_0 ≡ 1 (constant in r).
+    ExprPtr x_sym = arena.make<Symbol>(x.name);
+    std::vector<ExprPtr> series_terms;
+    series_terms.push_back(make_int(arena, 0));
+    for (unsigned int n = 1U; n < a_rho.size(); ++n) {
+        auto da = diff(a_rho[n], rho, 1, ctx);
+        if (da.is_error()) return fail<ExprPtr>(da.error());
+        auto da_sub = ctx.substitute(da.value(), rho, r1);
+        if (da_sub.is_error()) return fail<ExprPtr>(da_sub.error());
+        auto b_n = ctx.simplify(da_sub.value());
+        if (b_n.is_error()) return fail<ExprPtr>(b_n.error());
+        if (is_literal_zero(b_n.value())) continue;
+        ExprPtr xn = (n == 1U) ? x_sym
+            : arena.make<Binary>(BinaryOp::Pow, x_sym,
+                make_int(arena, static_cast<long long>(n)));
+        series_terms.push_back(arena.make<Binary>(BinaryOp::Mul, b_n.value(), xn));
+    }
+    ExprPtr inner = (series_terms.size() == 1U) ? series_terms[0]
+        : arena.make<Sum>(std::move(series_terms));
+    auto inner_simp = ctx.simplify(inner);
+    if (inner_simp.is_error()) return inner_simp;
+    ExprPtr power_part = arena.make<Binary>(BinaryOp::Mul,
+        make_x_to_r(r1, x, arena), inner_simp.value());
+
+    // y_2 = ln(x)·y_1 + power_part.
+    ExprPtr ln_x = arena.make<FuncCall>(BuiltinOp::Ln,
+        std::vector<ExprPtr>{x_sym});
+    ExprPtr log_part = arena.make<Binary>(BinaryOp::Mul, ln_x, y_1_series);
+    ExprPtr y_2 = arena.make<Binary>(BinaryOp::Add, log_part, power_part);
+    return ctx.simplify(y_2);
+}
+
 // Build the Frobenius series y_r(x) = x^r * (1 + c_1 x + c_2 x^2 + ... )
 Result<ExprPtr> build_series(
     ExprPtr root_r,
