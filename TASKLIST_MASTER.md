@@ -101,9 +101,9 @@ Ordinati per severità/impatto decrescente. Ogni voce verificata aperta a codice
 - **Stato a codice**: `src/algebra/solve_inequality.cpp:98-100` usa `double low/high/tol` (la logica Sturm è OK, solo il boundary numerico no).
 - **Ledger**: HC-F70-A21-NUMERIC-BOUNDARY · **Refs**: T-018
 
-### A17 · IBP doppia applicazione su `Product(Log,…)` — `[E1·C2·S3·R2]`
-- **Cosa**: integration-by-parts applica regola due volte; detection duplicato nel dispatcher IBP.
-- **Ledger**: HC-F75-B1-IBP-DOUBLE-APPLY · **Refs**: T-016
+### A17 · IBP doppia applicazione su `Product(Log,…)` — ✅ FATTO (verificato 2026-06-26, stale) — `[E1·C2·S3·R2]`
+- **Stato a codice**: ledger HC-F75-B1-IBP-DOUBLE-APPLY CHIUSO (fix 2026-06-10 simplify(vdu) pre-ricorsione + T-016 ILATE-class-da-base per `Pow`). Round-trip `IntegrateByPartsTest.{XLogX,XLogXSquared,LogXCubed}` 3/3 verdi 2026-06-26. Voce era stale nel tasklist.
+- **Ledger**: HC-F75-B1-IBP-DOUBLE-APPLY (chiuso) · **Refs**: T-016
 
 ### A18 · GCD multivariato budget magico `*16U` → bound Mignotte — PARZIALE 2026-06-26 — `[E1·C2·S2·R2]`
 - **Stato a codice**: ✅ galois `*8U+16U` rimosso → bound derivato `prime_budget + Σ bit_length(lc,disc_num,disc_den)` (galois_deg5.cpp:187, HPP-003B). 🟡 Residuo: pad `+16U` additivo in `divides_sparse_z` (brown_helpers/lc_scaling/fp_helpers) — diagnosi: il bound moltiplicativo sottostante è euristico (non provato), il budget→`return false` è un falso-negativo Cat-4 latente pre-esistente. Fix corretto specificato in HPP-003C (rely on well-ordering termination, cap provato `∏(deg_i+1)`, ritorna `Unimplemented` non `false`). R2/R3 hot-path, deferito con ledger.
@@ -126,9 +126,9 @@ Ordinati per severità/impatto decrescente. Ogni voce verificata aperta a codice
 - **Cosa**: payload strutturato `{module, fn, input_shape, reason, suggestion, ticket}` su ogni `Unimplemented`.
 - **Ledger**: F0.8-ERROR-STRUCT · **Refs**: T-026
 
-### A24 · Runner matrix·scalar / matrix±matrix — `[E1·C2·S2·R1]`
-- **Cosa**: gestire scalar·matrix, matrix±matrix, matrix·matrix nel runner.
-- **Ledger**: HC-F75-A2-MATRIX-SCALAR-OP, HC-F75-A2-MAXIMA-MATTRACE
+### A24 · Runner matrix·scalar / matrix±matrix — ✅ FATTO (verificato 2026-06-26, stale) — `[E1·C2·S2·R1]`
+- **Stato a codice**: entrambi ledger CHIUSI. `matrix_adapter.hpp::evaluate_matrix_expression` (evaluatore top-level precedence-aware: scalar·matrix, matrix·matrix, matrix±matrix, matrix/scalar, unary −matrix; `Unimplemented` esplicito su scalar±matrix e div-by-matrix) + `try_evaluate_mattrace_wrapper`. Corpus matrix 79/79 = 100% (era 70.9%). `MatrixAdapterD2Test` 19/19 verdi 2026-06-26.
+- **Ledger**: HC-F75-A2-MATRIX-SCALAR-OP, HC-F75-A2-MAXIMA-MATTRACE (entrambi chiusi)
 
 ---
 
