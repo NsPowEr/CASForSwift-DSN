@@ -19,17 +19,29 @@ namespace {
 
 [[nodiscard]] bool is_logarithmic_in_var(ExprPtr expr, const Symbol& var) {
     const auto* call = expr_cast<FuncCall>(expr);
+    // Ln and Log share one growth class: log_b(x) = ln(x)/ln(b) differs only by a
+    // constant factor, so both are logarithmic for asymptotic comparison.
     return call != nullptr &&
-        call->func_id == BuiltinOp::Ln &&
+        (call->func_id == BuiltinOp::Ln || call->func_id == BuiltinOp::Log) &&
         call->args.size() == 1U &&
         depends_on(call->args.front(), var);
 }
 
+// A factor that grows like x^p with p > 0 (rational) as x → +∞. The asymptotic
+// growth class depends only on the *sign* of the exponent, not its integrality:
+// x^(1/2) dominates every logarithm exactly as x^1 does. `sqrt(u)` is the
+// canonical form of u^(1/2), so it is a positive power of u^(1/2)'s base.
 [[nodiscard]] bool is_positive_power_growth(ExprPtr expr, const Symbol& var) {
     if (is_same_symbol(expr, var)) return true;
-    if (const auto* power = expr_cast<Binary>(expr); power != nullptr && power->op == BinaryOp::Pow && is_same_symbol(power->left, var)) {
+    if (const auto* power = expr_cast<Binary>(expr); power != nullptr && power->op == BinaryOp::Pow) {
         auto exponent = rational_from_expr(power->right);
-        return exponent.has_value() && exponent->is_integer() && !exponent->numerator().is_negative() && !exponent->numerator().is_zero();
+        return exponent.has_value()
+            && !exponent->numerator().is_negative() && !exponent->numerator().is_zero()
+            && is_positive_power_growth(power->left, var);
+    }
+    if (const auto* call = expr_cast<FuncCall>(expr);
+        call != nullptr && call->func_id == BuiltinOp::Sqrt && call->args.size() == 1U) {
+        return is_positive_power_growth(call->args.front(), var);
     }
     if (const auto* product = expr_cast<Product>(expr)) {
         for (ExprPtr factor : product->factors) {
@@ -39,6 +51,9 @@ namespace {
     return false;
 }
 
+// A factor that decays like x^(-p) with p > 0 (rational) as x → +∞, i.e. the
+// reciprocal of a positive power. Covers 1/sqrt(x) = Pow(sqrt(x), -1) and
+// x^(-1/2) = Pow(x, -1/2) alike — only the negative exponent sign matters.
 [[nodiscard]] bool is_reciprocal_positive_power_growth(ExprPtr expr, const Symbol& var) {
     const auto* power = expr_cast<Binary>(expr);
     if (power == nullptr || power->op != BinaryOp::Pow) {
@@ -46,7 +61,6 @@ namespace {
     }
     auto exponent = rational_from_expr(power->right);
     return exponent.has_value() &&
-        exponent->is_integer() &&
         exponent->numerator().is_negative() &&
         is_positive_power_growth(power->left, var);
 }
@@ -58,7 +72,6 @@ namespace {
     }
     auto exponent = rational_from_expr(power->right);
     return exponent.has_value() &&
-        exponent->is_integer() &&
         exponent->numerator().is_negative() &&
         is_logarithmic_in_var(power->left, var);
 }

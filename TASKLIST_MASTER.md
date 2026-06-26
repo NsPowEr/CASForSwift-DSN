@@ -77,9 +77,10 @@ Ordinati per severità/impatto decrescente. Ogni voce verificata aperta a codice
 - **Stato a codice**: routing RootOf GIÀ presente (`matrix_jordan.cpp:150` → `null_space_over_extension` quando autovalore è `RootOf`). 8/8 test Jordan verdi: `RootOf_Eigenvalues_2x2_Sqrt2`, **`RootOf_Multiplicity2_CompanionDeg4`** (4×4, n>3, catena mult-2 sotto RootOf), `NonDiagonalizable_2x2_Double`. La descrizione "non affidabili" pare obsoleta per i casi testati.
 - **Da fare (verifica)**: probe mirato n≥5 con autovalore RootOf molteplicità ≥3 (catena lunghezza ≥3) per confermare/escludere gap residuo prima di chiudere. **Refs**: CAS-L2-02, F4.4
 
-### A11 · Gruntz MRV growth-rank dinamico — `[E3·C4·S2·R2]`
-- **Stato a codice**: rank di crescita statico (viola Cat-10 hardcode). No Cancellation Tower generale.
-- **Cosa**: confronto asintotico dinamico (Gruntz §3.5) + torri log annidate. **Refs**: CAS-L1-01, F5.2, F7.5.D1
+### A11 · Gruntz MRV growth-rank dinamico — IN PROGRESS 2026-06-26 — `[E3·C4·S2·R2]`
+- **Stato a codice**: rank statico GIÀ rimosso (`limit_infinite.cpp:155` — confronto via `compare_growth` dinamico ricorsivo, Cat-10 chiuso). Torri log annidate (F7.5.D1+D2) funzionanti: 11/11 `GruntzNestedLogTest` (incluso C6 `(log x+log log x)/log x=1`, C7 `x·log log x/(x·log x)=0`).
+- **FIXED 2026-06-26** (spec `Gruntz_Nested_Log.md` letta): potenze frazionarie vs log. `log(x)/sqrt(x)→0` (era `∞`, silent-wrong). Due cause: (1) `is_positive_power_growth`/`is_reciprocal_positive_power_growth` richiedevano esponente **intero** → ora qualsiasi razionale (la classe di crescita dipende solo dal segno dell'esponente) + riconoscimento `sqrt`; (2) `is_logarithmic_in_var` riconosceva solo `BuiltinOp::Ln`, non `Log` (stessa classe: log_b=ln/ln b). +2 test (`LogOverSqrtX`, `FractionalPowerBeatsLog`); 13/13 gruntz, 74/74 limit/mrv, zero regressioni.
+- **Residuo (C4, deep)**: track del **coefficiente lentamente variabile** Gruntz §3.5 — es. `x^(3/2)/(x·log x)` colpisce `ComplexRational division by zero` in `leading_power_w` (il coefficiente non è costante ma funzione del livello MRV successivo). Richiede ricorsione Gruntz completa sul coefficiente. **Refs**: CAS-L1-01, F5.2, F7.5.D1
 
 ### A12 · RootOf come operatore algebrico semplificabile/valutabile — ✅ FATTO (verificato 2026-06-26) — `[E3·C3·S3·R2]`
 - **Stato a codice**: RootOf è operatore completo, non più "semi-inerte":
