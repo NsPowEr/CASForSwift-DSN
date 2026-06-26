@@ -47,9 +47,9 @@ Ordinati per severità/impatto decrescente. Ogni voce verificata aperta a codice
 - **Stato a codice**: hang >400-500s su `Q(√2,√3,√5)` factorization e VanHoeij SD3 Swinnerton-Dyer.
 - **Ledger**: HC-F8-FACTORIZATIONTOWER-PERF, HC-F8-FACTORIZATIONTOWER-AntiHardcode-X2Minus2-Sqrt3Sqrt5, HC-F8-SD3-VANHOEIJ-SLOW · **Refs**: BUG-HANG-002
 
-### A4 · Smith Normal Form su Q[x] PID generale — `[E3·C3·S3·R2]`
-- **Stato a codice**: `src/linalg/matrix_smith.cpp:166,216` → `Unimplemented`. Funziona solo su Z, non Q[x] PID (no Storjohann LLL).
-- **Cosa**: generalizzare a PID Q[x]. **Refs**: F4.2, CAS-L2-04
+### A4 · Smith Normal Form su Q[x] PID generale — ✅ FATTO (verificato 2026-06-26, stale) — `[E3·C3·S3·R2]`
+- **Stato a codice**: già implementato in `src/linalg/matrix_smith_qx.cpp` (`smith_normal_form_qx`): algoritmo PID Bezout-based completo (row/col ops con `polynomial_bezout` + `polynomial_exact_divide`, catena divisibilità, normalizzazione monica). Dispatch automatico da `matrix_smith.cpp:163` quando entrate single-var poly. I citati `:166/:216` sono il bail multivar (correttamente NON-PID) e il guard Z-path — non gap. Q[x] è Euclideo ⇒ no Storjohann/LLL necessario. Coverage rafforzata 2026-06-26: +test non-diagonale `[[x,1],[−1,x]]` → `diag(1, x²+1)` con certificato `U·A·V==S`. 4/4 SmithQxTest.
+- **Refs**: F4.2, CAS-L2-04
 
 ### A5 · ODE Frobenius: log-term + resonance (radici differing-by-integer) — PARZIALE 2026-06-26 — `[E3·C3·S3·R1]`
 - **Stato a codice**: ✅ gap principale chiuso: **radice indiciale doppia** (gap N=0) ora produce la seconda soluzione logaritmica via costruzione parametro-derivata `y₂ = ln(x)·y₁ + x^{r1}·Σ aₙ'(r1) xⁿ` (`build_double_root_log_branch`, recurrence con root simbolico ρ + `d/dρ` + sub ρ=r1). Prima `series_solutions.size()==1` restituiva solo `C1·y₁` (soluzione generale incompleta). Verificato: Euler `x²y''−xy'+y=0` → `C1·x + C2·x·ln x`; Bessel₀ `x²y''+xy'+x²y=0` → `J₀·ln x + x²/4 − 3x⁴/128…`. +2 test, 6/6 FrobeniusTest. Gap intero positivo (`build_log_branch`) + resonance detection già presenti.

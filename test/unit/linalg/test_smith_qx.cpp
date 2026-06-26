@@ -80,4 +80,35 @@ TEST_F(SmithQxTest, Qx_diagonal_xp1_xm1) {
                 << "U·A·V != S at (" << i << "," << j << ")";
 }
 
+// Smith su Q[x]: matrice NON diagonale x·I − A con A = [[0,−1],[1,0]] (rotazione),
+// cioè [[x, 1], [−1, x]].  Esercita davvero il pivoting off-diagonal e la
+// Bezout-elimination (il pivot iniziale è la costante 1, grado 0).
+//   gcd di tutte le entrate = 1  →  d1 = 1,  d2 = det = x² + 1.
+//   SNF = diag(1, x² + 1).
+TEST_F(SmithQxTest, Qx_nondiagonal_companion_x2plus1) {
+    auto x = parse("x");
+    ASSERT_NE(x, nullptr);
+    MatrixExpr A(2, 2, {x, lit(1), lit(-1), x});
+    auto s = smith_normal_form(A, ctx);
+    ASSERT_TRUE(s.is_ok()) << s.error().message;
+
+    // Invariant factors (monic): d1 = 1, d2 = x² + 1.
+    EXPECT_TRUE(entries_equal(s.value().S(0, 0), lit(1)))
+        << "d1 expected 1";
+    EXPECT_TRUE(entries_equal(s.value().S(1, 1), parse("x^2 + 1")))
+        << "d2 expected x^2 + 1";
+    EXPECT_TRUE(entries_equal(s.value().S(0, 1), lit(0)));
+    EXPECT_TRUE(entries_equal(s.value().S(1, 0), lit(0)));
+
+    // Transformation certificate: U·A·V == S.
+    auto UA = multiply(s.value().U, A, ctx);
+    ASSERT_TRUE(UA.is_ok());
+    auto UAV = multiply(UA.value(), s.value().V, ctx);
+    ASSERT_TRUE(UAV.is_ok());
+    for (std::size_t i = 0; i < 2; ++i)
+        for (std::size_t j = 0; j < 2; ++j)
+            EXPECT_TRUE(entries_equal(UAV.value()(i, j), s.value().S(i, j)))
+                << "U·A·V != S at (" << i << "," << j << ")";
+}
+
 }  // namespace
