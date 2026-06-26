@@ -102,9 +102,14 @@ Ordinati per severità/impatto decrescente. Ogni voce verificata aperta a codice
   +2 test `A14TranscendentalEqual`.
 - **Nota teorica**: la versione *"completa"* (zero-equivalence elementare totale) è **Richardson-indecidibile** — il contratto corretto è soundness (mai falso-positivo), non completezza. Questa è raggiunta. **Refs**: CAS-L2-19
 
-### A15 · Units SI system — `[E3·C2·S3·R1]`
-- **Stato a codice**: **mai iniziato** — zero file units in `src/`/`include/`.
-- **Cosa**: quantità con unità (`1.5*meter`), conversioni, dimensional analysis su +/−/=, base SI + derived + prefissi + costanti fisiche. **Refs**: F6.6
+### A15 · Units SI system — ✅ FATTO (verificato+completato 2026-06-26, era stale) — `[E3·C2·S3·R1]`
+- **Stato a codice**: NON "mai iniziato" — sistema completo:
+  - AST node `Quantity{value, SIDimensions}` (7 dimensioni base m·kg·s·A·K·mol·cd).
+  - Registro `src/symbolic/units.cpp`: base SI + derivati (Hz,N,J,W,Pa,C,V,Ohm) + non-SI (ft,in,mi,lb,cal,eV) con scale Rational esatte.
+  - `make_quantity_from_unit` / `convert_quantity` (con check mismatch dimensionale).
+  - **Dimensional analysis** in simplify: prodotto combina dimensioni (chain.cpp:325); somma raggruppa per dimensione e **rifiuta** dimensioni incompatibili `1·m+1·s` (chain_sum.cpp:75, no silent-wrong); potenza scala dim·n.
+  - **Completato 2026-06-26**: prefissi SI algoritmici (decomposizione `GHz→giga·Hz`, `um→micro·m`, set CGPM esaustivo applicato ai simboli prefissabili, exact-match prioritario) + **costanti fisiche esatte 2019-SI** (`make_physical_constant`: speed_of_light, planck_constant, elementary_charge, boltzmann_constant, avogadro_constant, standard_gravity — tutte Rational esatte).
+  - 18 UnitsTest + 10 QuantityTest verdi. **Refs**: F6.6
 
 ### A16 · solve_inequality boundary `double` → `Rational` — `[E1·C2·S3·R2]`
 - **Stato a codice**: `src/algebra/solve_inequality.cpp:98-100` usa `double low/high/tol` (la logica Sturm è OK, solo il boundary numerico no).

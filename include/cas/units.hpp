@@ -29,7 +29,17 @@ struct UnitInfo {
     SIDimensions dimensions;
 };
 
+// Look up a unit by name. Tries an exact registry match first, then an
+// algorithmic SI-prefix decomposition (e.g. "GHz" → giga·Hz, "um" → micro·m)
+// restricted to the prefixable SI base/derived symbols.
 [[nodiscard]] std::optional<UnitInfo> lookup_unit(const std::string& name) noexcept;
+
+// Build a Quantity for a named exact physical constant (2019 SI redefinition —
+// all values exact rationals). Recognised names: speed_of_light,
+// planck_constant, elementary_charge, boltzmann_constant, avogadro_constant,
+// standard_gravity. Returns Unimplemented for unknown names.
+[[nodiscard]] Result<ExprPtr> make_physical_constant(
+    const std::string& name, symbolic::CASContext& ctx);
 
 // Wrap a numeric value with a unit, converting scale to SI base.
 //   make_quantity_from_unit(5, "cm", ctx) → Quantity(5/100, {m=1})

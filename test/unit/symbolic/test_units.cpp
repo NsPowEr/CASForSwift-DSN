@@ -109,4 +109,81 @@ TEST_F(UnitsTest, AntiHardcodeMultipleUnits) {
     }
 }
 
+// ── F6.6 — algorithmic SI prefixes (not in the explicit registry) ──
+TEST_F(UnitsTest, SIPrefixGigahertz) {
+    auto ghz = lookup_unit("GHz");  // giga (10^9) · Hz
+    ASSERT_TRUE(ghz.has_value());
+    EXPECT_EQ(ghz->dimensions.s, -1);
+    EXPECT_EQ(ghz->scale_to_si, Rational(BigInt(1000000000), BigInt(1)));
+}
+
+TEST_F(UnitsTest, SIPrefixMicrometer) {
+    auto um = lookup_unit("um");  // micro (10^-6) · m
+    ASSERT_TRUE(um.has_value());
+    EXPECT_EQ(um->dimensions.m, 1);
+    EXPECT_EQ(um->scale_to_si, Rational(BigInt(1), BigInt(1000000)));
+}
+
+TEST_F(UnitsTest, SIPrefixMegagramIsThousandKg) {
+    auto Mg = lookup_unit("Mg");  // mega (10^6) · gram = 10^6/1000 kg = 1000 kg
+    ASSERT_TRUE(Mg.has_value());
+    EXPECT_EQ(Mg->dimensions.kg, 1);
+    EXPECT_EQ(Mg->scale_to_si, Rational(BigInt(1000), BigInt(1)));
+}
+
+TEST_F(UnitsTest, SIPrefixDecaVsDeci) {
+    auto dam = lookup_unit("dam");  // deca (10^1) · m
+    ASSERT_TRUE(dam.has_value());
+    EXPECT_EQ(dam->scale_to_si, Rational(BigInt(10), BigInt(1)));
+    auto dm = lookup_unit("dm");    // deci (10^-1) · m
+    ASSERT_TRUE(dm.has_value());
+    EXPECT_EQ(dm->scale_to_si, Rational(BigInt(1), BigInt(10)));
+}
+
+TEST_F(UnitsTest, ExactMatchWinsOverPrefix) {
+    // "min" must stay minute (60 s), not milli-inch.
+    auto mn = lookup_unit("min");
+    ASSERT_TRUE(mn.has_value());
+    EXPECT_EQ(mn->dimensions.s, 1);
+    EXPECT_EQ(mn->scale_to_si, Rational(BigInt(60), BigInt(1)));
+}
+
+TEST_F(UnitsTest, PrefixOnlyAppliesToSISymbols) {
+    // "kfoo" — foo is not a prefixable SI symbol → no decomposition.
+    EXPECT_FALSE(lookup_unit("kfoo").has_value());
+}
+
+// ── F6.6 — exact physical constants (2019 SI) ──
+TEST_F(UnitsTest, PhysicalConstantSpeedOfLight) {
+    auto c = make_physical_constant("speed_of_light", ctx);
+    ASSERT_TRUE(c.is_ok());
+    auto* qty = expr_cast<Quantity>(c.value());
+    ASSERT_NE(qty, nullptr);
+    EXPECT_EQ(qty->dimensions.m, 1);
+    EXPECT_EQ(qty->dimensions.s, -1);
+    auto* il = expr_cast<IntegerLit>(qty->value);
+    ASSERT_NE(il, nullptr);
+    EXPECT_EQ(il->value, BigInt(299792458));
+}
+
+TEST_F(UnitsTest, PhysicalConstantElementaryChargeExactRational) {
+    // e = 1.602176634e-19 C = 1602176634 / 10^28.
+    auto e = make_physical_constant("elementary_charge", ctx);
+    ASSERT_TRUE(e.is_ok());
+    auto* qty = expr_cast<Quantity>(e.value());
+    ASSERT_NE(qty, nullptr);
+    EXPECT_EQ(qty->dimensions.A, 1);
+    EXPECT_EQ(qty->dimensions.s, 1);  // Coulomb = A·s
+    auto* rl = expr_cast<RationalLit>(qty->value);
+    ASSERT_NE(rl, nullptr);
+    // 1602176634 / 10^28, reduced (gcd with 10^28: 2 → 801088317 / 5·10^27).
+    BigInt ten28(1);
+    for (int i = 0; i < 28; ++i) ten28 = ten28 * BigInt(10);
+    EXPECT_EQ(rl->numerator * ten28, BigInt(1602176634) * rl->denominator);
+}
+
+TEST_F(UnitsTest, PhysicalConstantUnknownFails) {
+    EXPECT_TRUE(make_physical_constant("unobtainium", ctx).is_error());
+}
+
 }  // namespace

@@ -83,9 +83,36 @@ constexpr RegistryEntry kUnitRegistry[] = {
     {"eV",  16021766340, 100000000000000000ULL, D(2,1,-2,0,0,0,0)}, // ≈ 1.602e-19 J
 };
 
-}  // namespace
+// SI decimal prefixes (CGPM). Exhaustive standard set; applied algorithmically
+// to the prefixable SI symbols below — not a closed table of pre-expanded units.
+struct PrefixEntry { const char* name; int power; };
+constexpr PrefixEntry kSIPrefixes[] = {
+    {"Y", 24}, {"Z", 21}, {"E", 18}, {"P", 15}, {"T", 12}, {"G", 9},
+    {"M", 6},  {"k", 3},  {"h", 2},  {"da", 1}, {"d", -1}, {"c", -2},
+    {"m", -3}, {"u", -6}, {"n", -9}, {"p", -12}, {"f", -15}, {"a", -18},
+    {"z", -21}, {"y", -24},
+};
 
-std::optional<UnitInfo> lookup_unit(const std::string& name) noexcept {
+// Symbols an SI prefix may attach to (base + coherent derived). By SI convention
+// mass prefixes attach to the gram "g", not "kg".
+[[nodiscard]] bool is_prefixable_si(const std::string& s) noexcept {
+    static constexpr const char* kUnits[] = {
+        "m", "g", "s", "A", "K", "mol", "cd",
+        "Hz", "N", "J", "W", "Pa", "C", "V", "Ohm"};
+    for (const char* u : kUnits) {
+        if (s == u) return true;
+    }
+    return false;
+}
+
+[[nodiscard]] BigInt pow10(unsigned int n) {
+    BigInt r(1);
+    const BigInt ten(10);
+    for (unsigned int i = 0; i < n; ++i) r = r * ten;
+    return r;
+}
+
+[[nodiscard]] std::optional<UnitInfo> lookup_exact(const std::string& name) noexcept {
     for (const auto& e : kUnitRegistry) {
         if (name == e.name) {
             return UnitInfo{
@@ -95,6 +122,72 @@ std::optional<UnitInfo> lookup_unit(const std::string& name) noexcept {
         }
     }
     return std::nullopt;
+}
+
+// Exact 2019-SI physical constants. value = mantissa · 10^exp10 (exact rational).
+struct ConstEntry {
+    const char* name;
+    long long mantissa;
+    int exp10;
+    SIDimensions dim;
+};
+constexpr ConstEntry kPhysicalConstants[] = {
+    {"speed_of_light",     299792458,  0,   D(1, 0, -1, 0, 0, 0, 0)},   // m·s⁻¹
+    {"planck_constant",    662607015,  -42, D(2, 1, -1, 0, 0, 0, 0)},   // J·s
+    {"elementary_charge",  1602176634, -28, D(0, 0, 1, 1, 0, 0, 0)},    // C
+    {"boltzmann_constant", 1380649,    -29, D(2, 1, -2, 0, -1, 0, 0)},  // J·K⁻¹
+    {"avogadro_constant",  602214076,  15,  D(0, 0, 0, 0, 0, -1, 0)},   // mol⁻¹
+    {"standard_gravity",   980665,     -5,  D(1, 0, -2, 0, 0, 0, 0)},   // m·s⁻²
+};
+
+}  // namespace
+
+std::optional<UnitInfo> lookup_unit(const std::string& name) noexcept {
+    // 1. Exact registry match (so "min", "kg", "cm" never get mis-decomposed).
+    if (auto exact = lookup_exact(name)) return exact;
+
+    // 2. Algorithmic SI-prefix decomposition: split a known prefix off the front
+    //    and require the remainder to be a prefixable SI symbol.
+    for (const auto& pfx : kSIPrefixes) {
+        const std::string p = pfx.name;
+        if (name.size() <= p.size()) continue;
+        if (name.compare(0, p.size(), p) != 0) continue;
+        const std::string base = name.substr(p.size());
+        if (!is_prefixable_si(base)) continue;
+        auto base_info = lookup_exact(base);
+        if (!base_info) continue;
+        const Rational factor = (pfx.power >= 0)
+            ? Rational(pow10(static_cast<unsigned int>(pfx.power)), BigInt(1))
+            : Rational(BigInt(1), pow10(static_cast<unsigned int>(-pfx.power)));
+        return UnitInfo{
+            .scale_to_si = base_info->scale_to_si * factor,
+            .dimensions = base_info->dimensions,
+        };
+    }
+    return std::nullopt;
+}
+
+Result<ExprPtr> make_physical_constant(const std::string& name,
+                                       symbolic::CASContext& ctx) {
+    for (const auto& c : kPhysicalConstants) {
+        if (name != c.name) continue;
+        const Rational value = (c.exp10 >= 0)
+            ? Rational(BigInt(c.mantissa) * pow10(static_cast<unsigned int>(c.exp10)), BigInt(1))
+            : Rational(BigInt(c.mantissa), pow10(static_cast<unsigned int>(-c.exp10)));
+        AstArena& arena = ctx.arena();
+        ExprPtr v = (value.denominator() == BigInt(1))
+            ? static_cast<ExprPtr>(arena.make<IntegerLit>(value.numerator()))
+            : static_cast<ExprPtr>(arena.make<RationalLit>(
+                  value.numerator(), value.denominator()));
+        return ok(static_cast<ExprPtr>(arena.make<Quantity>(v, c.dim)));
+    }
+    return make_unimplemented<ExprPtr>(
+        "symbolic", "make_physical_constant",
+        "unknown physical constant '" + name + "'",
+        error::reason_codes::SYMBOLIC_UNITS_UNKNOWN,
+        "Recognised: speed_of_light, planck_constant, elementary_charge, "
+        "boltzmann_constant, avogadro_constant, standard_gravity",
+        "F6.6");
 }
 
 Result<ExprPtr> make_quantity_from_unit(ExprPtr value,
