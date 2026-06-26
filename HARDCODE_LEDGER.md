@@ -125,10 +125,31 @@
   - `src/linalg/matrix_hermite.cpp`: Z-path e Q(x)-path outer column
     `for`-loop.
 
+  AGGIORNAMENTO 2026-06-26 (A2 / TASKLIST_MASTER) — coperto l'ultimo loop
+  puramente combinatorio dell'integrazione: le due eliminazioni di Gauss
+  pure-Rational in `src/calculus/integrate_risch_rde.cpp`
+  (`solve_risch_de_poly_q` §5.6 e `solve_risch_de_rational_q` §6.1). Nessuna
+  chiamata simplify()/substitute() nel corpo → non interrompibili
+  transitoriamente. Fix: poll `ctx.check_interrupt()` per colonna pivot
+  (idioma matrix_bareiss). Rimosso lo **stub morto** `auto sysop_timeout =
+  ctx.timeout_check_interval(); (void)sysop_timeout;` (poll mai cablato).
+  Inoltre **fedeltà di cancellazione** nel dispatcher `solve_risch_de_q`:
+  prima (a) ingoiava il Timeout di `ctx.simplify` (`if (is_ok())`), (b) sul
+  Timeout del ramo poly ricadeva sul ramo rational mascherandolo. Ora: poll
+  in testa + Timeout di simplify propagato + fall-through solo per dead-end
+  algebrico (non per cancellazione). Test: `test_integrate_interrupt.cpp`
+  +2 (`RischDeSolverCompletesWhenNotInterrupted`, `RischDeSolverHonorsInterrupt`).
+  Verifica: 147 test Risch/integrate verdi, nessun cambiamento di
+  comportamento su input validi (il poll è no-op senza interrupt).
+
   Residui: equal-degree factorization inner recursion (covered
   transitively via outer while-loop poll); alcuni loop pure-integer
   minori (HNF/SNF ora coperti) — bassa priorità (durata tipica < 1s su
-  input osservati).
+  input osservati). Fedeltà error-kind: un interrupt asincrono che arrivi
+  *durante* il `parse_polynomial` interno a un ramo viene rilevato da
+  simplify ma rietichettato Unimplemented dai siti `if (is_error()) return
+  fail_unimpl(...)` del ramo (finestra ~µs, nessun hang, re-poll a
+  integrate_once) — fedeltà parziale, non bloccante.
 
 ### HC-F70-A31-MIGRATION-TODO — AstArena reset without root migration
 - **File**: `include/cas/ast.hpp` (AstArena::reset declaration), `src/ast/ast.cpp` (impl)
@@ -890,6 +911,35 @@
 - **Fix corretto**: Bound derivato da teoria Schwartz-Zippel: numero massimo di passi di divisione è `O(deg(remainder) * deg(divisor))` — usare `(degree(remainder) + 1) * (degree(divisor) + 1)` senza costante magica.
 - **Blocking dependency**: L1-08 GCD multivariato completo.
 - **STATO**: ✅ RISOLTA 2026-05-28 — Formula applicata: `(remainder.size()+1)*(divisor_sparse.size()+1)`. Il `16U` e la variabile `vars.size()` (incorrelata al numero di passi) sono stati rimossi. Derivazione: ogni passo elimina un monomio di testa dal remainder e aggiunge al più `|divisor|-1` nuovi; bound totale = `|remainder| * |divisor|`.
+
+### HPP-003B — Galois deg5 prime-scan candidate budget `*8U + 16U` (galois_deg5.cpp:187)
+- **File**: `src/algebra/galois_deg5.cpp:187` (parte di A18)
+- **Categoria CLAUDE.md**: Cat 1 — budget computazionale con moltiplicatore/offset magici.
+- **Descrizione**: `max_candidates = prime_budget * 8U + 16U` limita il numero di primi
+  candidati scansionati nel Frobenius/Dedekind walk. `8U` e `16U` arbitrari.
+- **STATO**: ✅ RISOLTA 2026-06-26 — Bound derivato. Un primo candidato viene scartato
+  solo se divide `lc·disc_num·disc_den`; il numero di divisori primi *distinti* di N è
+  ≤ `bit_length(N)` (k primi distinti ⇒ prodotto ≥ 2^k ≤ N). Quindi servono al più
+  `prime_budget + bit_length(lc) + bit_length(disc_num) + bit_length(disc_den)` candidati.
+  Il break a `p > 2^30` resta backstop assoluto. 19/19 test Galois verdi.
+
+### HPP-003C — divides_sparse_z step-budget `+16U` additivo (residuo A18, NON chiuso)
+- **File**: `polynomial_gcd_brown_helpers.cpp:82`, `polynomial_gcd_brown_lc_scaling.cpp:188`,
+  `polynomial_gcd_fp_helpers.cpp:230` — `budget = (rem.size()+1)*(divisor.size()+1) + 16U`.
+- **Categoria CLAUDE.md**: Cat 4 — bail-out potenzialmente silent-wrong + Cat 2 (pad magico).
+- **Descrizione/diagnosi 2026-06-26**: il pad `+16U` è minore, ma l'analisi rivela un
+  problema più profondo *pre-esistente* (eredità HPP-003): il bound moltiplicativo
+  `(|rem|+1)*(|divisor|+1)` è **euristico**, NON un upper bound provato sul numero di
+  termini del quoziente. Per un divisore vero il numero di passi = |quoziente|, che in
+  presenza di molti termini può eccedere il bound → `return false` su un divisore reale
+  (falso negativo silenzioso). Il `+16U` non risolve questo.
+- **Fix corretto (deferito, R2/R3 hot-path)**: la terminazione è garantita dal
+  well-ordering monomiale (ogni passo riduce strettamente il leading monomial); rimuovere
+  il budget come gate-di-correttezza, cap di sola sicurezza al bound *provato*
+  `∏_i (deg_i(dividend)+1)` (numero di monomi ≼ lt(dividend)), e su sforamento ritornare
+  `Unimplemented` diagnostico — **mai** `false`. Richiede test mirati anti-regressione GCD.
+- **STATO**: 🟡 DOCUMENTATO — galois (HPP-003B) chiuso; questo residuo aperto con fix
+  specificato. Non destabilizzato ora per evitare regressione hot-path non testata.
 
 ### HPP-004 — GCD multivariate max_samples formula (polynomial_gcd_multivariate.cpp:774)
 - **File**: `src/algebra/polynomial_gcd_multivariate.cpp:774`
