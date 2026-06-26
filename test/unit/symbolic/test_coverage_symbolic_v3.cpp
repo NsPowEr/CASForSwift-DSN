@@ -920,6 +920,47 @@ TEST(SimplifyFunctionsCoverage2, SimplifyRootOfWithContext) {
     EXPECT_FALSE(r.is_error());
 }
 
+// A12 — RootOf as an algebraic *operator*: for an irreducible quintic
+// (not solvable by radicals, so the node stays inert), powers ≥ deg must reduce
+// modulo the minimal polynomial.  R is a root of x^5 - x - 1, so R^5 = R + 1 and
+// R^6 = R·R^5 = R^2 + R.  This exercises the P(R)=0 reduction in
+// simplify_arithmetic_power.cpp, not a radical solve.
+TEST(SimplifyFunctionsCoverage2, RootOfQuinticPowerReduction) {
+    CASContext ctx;
+    AstArena& arena = ctx.arena();
+    ctx.set_max_rootof_explicit_degree(4U);  // keep the quintic inert
+    // P = x^5 - x - 1
+    ExprPtr x5 = arena.make<Binary>(BinaryOp::Pow, make_sym(arena, "x"), make_int(arena, 5));
+    ExprPtr poly = arena.make<Sum>(std::vector<ExprPtr>{
+        x5,
+        arena.make<Unary>(UnaryOp::Neg, make_sym(arena, "x")),
+        make_int(arena, -1)});
+    ExprPtr R = arena.make<RootOf>(poly, Symbol("x"), std::optional<std::size_t>(0));
+
+    // R^5 → R + 1
+    ExprPtr r5 = arena.make<Binary>(BinaryOp::Pow, R, make_int(arena, 5));
+    auto r5_s = ctx.simplify(r5);
+    ASSERT_TRUE(r5_s.is_ok());
+    ExprPtr expected5 = arena.make<Sum>(std::vector<ExprPtr>{R, make_int(arena, 1)});
+    auto exp5_s = ctx.simplify(expected5);
+    ASSERT_TRUE(exp5_s.is_ok());
+    auto eq5 = symbolic::mathematically_equal(r5_s.value(), exp5_s.value(), ctx);
+    ASSERT_TRUE(eq5.is_ok());
+    EXPECT_TRUE(eq5.value()) << "R^5 should reduce to R+1, got " << debug_print(r5_s.value());
+
+    // R^6 → R^2 + R
+    ExprPtr r6 = arena.make<Binary>(BinaryOp::Pow, R, make_int(arena, 6));
+    auto r6_s = ctx.simplify(r6);
+    ASSERT_TRUE(r6_s.is_ok());
+    ExprPtr expected6 = arena.make<Sum>(std::vector<ExprPtr>{
+        arena.make<Binary>(BinaryOp::Pow, R, make_int(arena, 2)), R});
+    auto exp6_s = ctx.simplify(expected6);
+    ASSERT_TRUE(exp6_s.is_ok());
+    auto eq6 = symbolic::mathematically_equal(r6_s.value(), exp6_s.value(), ctx);
+    ASSERT_TRUE(eq6.is_ok());
+    EXPECT_TRUE(eq6.value()) << "R^6 should reduce to R^2+R, got " << debug_print(r6_s.value());
+}
+
 // ─── simplify_arithmetic.cpp: additional branches ────────────────────────────
 
 TEST(SimplifyArithmeticCoverage, IsKnownNegativeBinaryDiv) {

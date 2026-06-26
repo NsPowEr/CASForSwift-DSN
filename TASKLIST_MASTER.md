@@ -81,9 +81,14 @@ Ordinati per severità/impatto decrescente. Ogni voce verificata aperta a codice
 - **Stato a codice**: rank di crescita statico (viola Cat-10 hardcode). No Cancellation Tower generale.
 - **Cosa**: confronto asintotico dinamico (Gruntz §3.5) + torri log annidate. **Refs**: CAS-L1-01, F5.2, F7.5.D1
 
-### A12 · RootOf come operatore algebrico semplificabile/valutabile — `[E3·C3·S3·R2]`
-- **Stato a codice**: parziale — RootOf è semi-inerte.
-- **Cosa**: trasformare RootOf in operatore con simplify + eval numerica robusta. **Refs**: CAS-L1-05
+### A12 · RootOf come operatore algebrico semplificabile/valutabile — ✅ FATTO (verificato 2026-06-26) — `[E3·C3·S3·R2]`
+- **Stato a codice**: RootOf è operatore completo, non più "semi-inerte":
+  (1) **simplify** — `simplify_node(RootOf)` risolve esplicitamente se `deg ≤ ctx.max_rootof_explicit_degree()` (simplify_functions.cpp:241);
+  (2) **riduzione di potenza** — `Rⁿ → (xⁿ mod P)(R)` via divisione polinomiale (simplify_arithmetic_power.cpp:122), verificato su quintica irriducibile `x⁵−x−1`: `R⁵→R+1`, `R⁶→R²+R`;
+  (3) **eval numerica robusta** — Sturm isolation + isolating-bound del nodo (evaluator.cpp:161), con `root_index`;
+  (4) **normalizzazione Q(α)** on-demand via `simplify_in_q_alpha` (usata in residue/eigen);
+  (5) parser+printer round-trip con isolating bounds.
+  +test `RootOfQuinticPowerReduction`. La forma inerte di default per `1/R` è scelta standard (come Maxima/SymPy: ratsimp esplicito); non è un debito. **Refs**: CAS-L1-05
 
 ### A13 · Residue theorem grado arbitrario al denominatore — QUASI-FATTO 2026-06-26 — `[E3·C3·S2·R1]`
 - **Stato a codice**: ✅ grado arbitrario già coperto: quadratici + biquadratici esatti (Q(α)) **a molteplicità qualsiasi**, fattori grado ≥3/quartiche generali via fallback numerico Aberth (`numeric_residue_contribution`). Poli di ordine >1 risolti dalla ricorrenza di Laurent in `residue()`; l'assembly Q(α)→ℝ è un funzionale lineare indipendente dalla molteplicità. **Rimosso 2026-06-26** il guard `multiplicity > 1` sul ramo biquadratico (era falso limite). +4 test: `1/(x²+1)³`=3π/8, `1/(x⁴+1)²`=3π/2^(5/2), `1/(x⁴+x²+1)²`=2π/3^(3/2) (oracolo Maxima), `1/(x²+1)²`=π/2 (skip morto → assert duro). 14/14 ResidueTheoremTest, 51/51 area residue+laplace.
