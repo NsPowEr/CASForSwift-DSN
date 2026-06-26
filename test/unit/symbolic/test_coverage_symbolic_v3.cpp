@@ -920,6 +920,79 @@ TEST(SimplifyFunctionsCoverage2, SimplifyRootOfWithContext) {
     EXPECT_FALSE(r.is_error());
 }
 
+// A14 — transcendental are_equal with domain-assumption propagation.
+// Positivity-gated log/exp/sqrt identities must hold *under* the assumption and,
+// critically, must NOT be over-claimed without it (no silent-wrong; the full
+// "complete" zero-equivalence is Richardson-undecidable, so the contract is
+// soundness, not completeness).
+namespace {
+[[nodiscard]] bool equal_under(CASContext& ctx, ExprPtr a, ExprPtr b) {
+    auto sa = ctx.simplify(a);
+    auto sb = ctx.simplify(b);
+    if (sa.is_error() || sb.is_error()) return false;
+    auto eq = symbolic::mathematically_equal(sa.value(), sb.value(), ctx);
+    return eq.is_ok() && eq.value();
+}
+}  // namespace
+
+TEST(A14TranscendentalEqual, PositivityGatedIdentitiesHoldUnderAssumption) {
+    {   CASContext ctx; AstArena& ar = ctx.arena(); Symbol x("x");
+        ctx.assumptions().assume_positive(x);
+        ExprPtr X = make_sym(ar, "x");
+        ExprPtr lnx2 = ar.make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{
+            ar.make<Binary>(BinaryOp::Pow, X, make_int(ar, 2))});
+        ExprPtr two_lnx = ar.make<Binary>(BinaryOp::Mul, make_int(ar, 2),
+            ar.make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{X}));
+        EXPECT_TRUE(equal_under(ctx, lnx2, two_lnx)) << "ln(x^2)=2ln(x) under x>0";
+    }
+    {   CASContext ctx; AstArena& ar = ctx.arena(); Symbol x("x");
+        ctx.assumptions().assume_positive(x);
+        ExprPtr X = make_sym(ar, "x");
+        ExprPtr elnx = ar.make<FuncCall>(BuiltinOp::Exp, std::vector<ExprPtr>{
+            ar.make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{X})});
+        EXPECT_TRUE(equal_under(ctx, elnx, X)) << "exp(ln(x))=x under x>0";
+    }
+    {   CASContext ctx; AstArena& ar = ctx.arena(); Symbol a("a"), b("b");
+        ctx.assumptions().assume_positive(a); ctx.assumptions().assume_positive(b);
+        ExprPtr A = make_sym(ar, "a"), B = make_sym(ar, "b");
+        ExprPtr ln_ab = ar.make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{
+            ar.make<Binary>(BinaryOp::Mul, A, B)});
+        ExprPtr sum = ar.make<Binary>(BinaryOp::Add,
+            ar.make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{A}),
+            ar.make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{B}));
+        EXPECT_TRUE(equal_under(ctx, ln_ab, sum)) << "ln(ab)=ln a+ln b under a,b>0";
+    }
+    {   CASContext ctx; AstArena& ar = ctx.arena(); Symbol x("x");
+        ctx.assumptions().assume_positive(x);
+        ExprPtr X = make_sym(ar, "x");
+        ExprPtr sqrtx2 = ar.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{
+            ar.make<Binary>(BinaryOp::Pow, X, make_int(ar, 2))});
+        EXPECT_TRUE(equal_under(ctx, sqrtx2, X)) << "sqrt(x^2)=x under x>0";
+    }
+}
+
+TEST(A14TranscendentalEqual, NoOverClaimWithoutAssumption) {
+    {   CASContext ctx; AstArena& ar = ctx.arena();  // x unrestricted
+        ExprPtr X = make_sym(ar, "x");
+        ExprPtr lnx2 = ar.make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{
+            ar.make<Binary>(BinaryOp::Pow, X, make_int(ar, 2))});
+        ExprPtr two_lnx = ar.make<Binary>(BinaryOp::Mul, make_int(ar, 2),
+            ar.make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{X}));
+        EXPECT_FALSE(equal_under(ctx, lnx2, two_lnx))
+            << "ln(x^2)=2ln(x) must NOT be claimed without x>0";
+    }
+    {   CASContext ctx; AstArena& ar = ctx.arena();  // x unrestricted
+        ExprPtr X = make_sym(ar, "x");
+        ExprPtr sqrtx2 = ar.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{
+            ar.make<Binary>(BinaryOp::Pow, X, make_int(ar, 2))});
+        EXPECT_FALSE(equal_under(ctx, sqrtx2, X))
+            << "sqrt(x^2)=x must NOT be claimed without x>=0";
+        ExprPtr absx = ar.make<FuncCall>(BuiltinOp::Abs, std::vector<ExprPtr>{X});
+        EXPECT_TRUE(equal_under(ctx, sqrtx2, absx))
+            << "sqrt(x^2)=|x| holds unconditionally";
+    }
+}
+
 // A12 — RootOf as an algebraic *operator*: for an irreducible quintic
 // (not solvable by radicals, so the node stays inert), powers ≥ deg must reduce
 // modulo the minimal polynomial.  R is a root of x^5 - x - 1, so R^5 = R + 1 and

@@ -94,9 +94,13 @@ Ordinati per severità/impatto decrescente. Ogni voce verificata aperta a codice
 - **Stato a codice**: ✅ grado arbitrario già coperto: quadratici + biquadratici esatti (Q(α)) **a molteplicità qualsiasi**, fattori grado ≥3/quartiche generali via fallback numerico Aberth (`numeric_residue_contribution`). Poli di ordine >1 risolti dalla ricorrenza di Laurent in `residue()`; l'assembly Q(α)→ℝ è un funzionale lineare indipendente dalla molteplicità. **Rimosso 2026-06-26** il guard `multiplicity > 1` sul ramo biquadratico (era falso limite). +4 test: `1/(x²+1)³`=3π/8, `1/(x⁴+1)²`=3π/2^(5/2), `1/(x⁴+x²+1)²`=2π/3^(3/2) (oracolo Maxima), `1/(x²+1)²`=π/2 (skip morto → assert duro). 14/14 ResidueTheoremTest, 51/51 area residue+laplace.
 - **Residuo (deliberato, fuori scope)**: poli reali (fattori lineari) → rifiutati; Cauchy Principal Value + Jordan lemma per integrandi oscillatori (e^{iax}) non implementati. **Refs**: CAS-L2-22, F5.6
 
-### A14 · Equivalenza trascendente `are_equal` (assumption propagation completa) — `[E3·C3·S2·R2]`
-- **Stato a codice**: positivity inference debole.
-- **Cosa**: normal form exp/log/trig + propagazione algebrica ipotesi di dominio completa. **Refs**: CAS-L2-19
+### A14 · Equivalenza trascendente `are_equal` (assumption propagation completa) — ✅ FATTO/SOUND (verificato 2026-06-26) — `[E3·C3·S2·R2]`
+- **Stato a codice**: positivity inference NON debole — `Assumptions::is_positive/is_nonnegative` copre Exp/Abs/Sqrt/Product/linear/Pow(even)/Sum + graph proof (`prove_relation`). Verificato che `mathematically_equal` con propagazione dominio:
+  (a) **dimostra** sotto ipotesi: `ln(x²)=2ln(x)`, `exp(ln x)=x`, `ln(ab)=ln a+ln b`, `sqrt(x²)=x` con `x,a,b>0`;
+  (b) **NON sovra-dichiara** senza ipotesi: `ln(x²)=2ln(x)`→false, `sqrt(x²)=x`→false (no silent-wrong, REGOLA ZERO);
+  (c) identità incondizionate: `sqrt(x²)=|x|`→true.
+  +2 test `A14TranscendentalEqual`.
+- **Nota teorica**: la versione *"completa"* (zero-equivalence elementare totale) è **Richardson-indecidibile** — il contratto corretto è soundness (mai falso-positivo), non completezza. Questa è raggiunta. **Refs**: CAS-L2-19
 
 ### A15 · Units SI system — `[E3·C2·S3·R1]`
 - **Stato a codice**: **mai iniziato** — zero file units in `src/`/`include/`.
