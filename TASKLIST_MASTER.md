@@ -85,9 +85,9 @@ Ordinati per severità/impatto decrescente. Ogni voce verificata aperta a codice
 - **Stato a codice**: parziale — RootOf è semi-inerte.
 - **Cosa**: trasformare RootOf in operatore con simplify + eval numerica robusta. **Refs**: CAS-L1-05
 
-### A13 · Residue theorem grado arbitrario al denominatore — `[E3·C3·S2·R1]`
-- **Stato a codice**: `residue_theorem.cpp` solo quadratici+biquadratici.
-- **Cosa**: fattorizzazione denominatore + residui ai poli, grado qualsiasi; Jordan lemma per contour. **Refs**: CAS-L2-22, F5.6
+### A13 · Residue theorem grado arbitrario al denominatore — QUASI-FATTO 2026-06-26 — `[E3·C3·S2·R1]`
+- **Stato a codice**: ✅ grado arbitrario già coperto: quadratici + biquadratici esatti (Q(α)) **a molteplicità qualsiasi**, fattori grado ≥3/quartiche generali via fallback numerico Aberth (`numeric_residue_contribution`). Poli di ordine >1 risolti dalla ricorrenza di Laurent in `residue()`; l'assembly Q(α)→ℝ è un funzionale lineare indipendente dalla molteplicità. **Rimosso 2026-06-26** il guard `multiplicity > 1` sul ramo biquadratico (era falso limite). +4 test: `1/(x²+1)³`=3π/8, `1/(x⁴+1)²`=3π/2^(5/2), `1/(x⁴+x²+1)²`=2π/3^(3/2) (oracolo Maxima), `1/(x²+1)²`=π/2 (skip morto → assert duro). 14/14 ResidueTheoremTest, 51/51 area residue+laplace.
+- **Residuo (deliberato, fuori scope)**: poli reali (fattori lineari) → rifiutati; Cauchy Principal Value + Jordan lemma per integrandi oscillatori (e^{iax}) non implementati. **Refs**: CAS-L2-22, F5.6
 
 ### A14 · Equivalenza trascendente `are_equal` (assumption propagation completa) — `[E3·C3·S2·R2]`
 - **Stato a codice**: positivity inference debole.

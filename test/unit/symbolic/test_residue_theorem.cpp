@@ -157,13 +157,35 @@ TEST_F(ResidueTheoremTest, DoublePoleOneOverXsqPlusOneSquared) {
     // pole via the Laurent recurrence.
     auto result = calculus::integrate_rational_full_real_line(
         E("1/(x^2 + 1)^2"), Symbol("x"), *ctx);
-    if (result.is_ok()) {
-        expect_equal(result.value(), "pi/2");
-    } else {
-        GTEST_SKIP() << "Double-pole case not yet supported by residue() through Q(α) reduction. "
-                     << "Tracked by CAS-L2-22 (residue Laurent recurrence for higher poles). Error: "
-                     << result.error().message;
-    }
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+    expect_equal(result.value(), "pi/2");
+}
+
+TEST_F(ResidueTheoremTest, TriplePoleOneOverXsqPlusOneCubed) {
+    // ∫_{-∞}^{∞} 1/(x² + 1)³ dx = 3π/8.  Single irreducible quadratic factor
+    // with multiplicity 3; residue() resolves the order-3 pole via Laurent.
+    auto result = calculus::integrate_rational_full_real_line(
+        E("1/(x^2 + 1)^3"), Symbol("x"), *ctx);
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+    expect_equal(result.value(), "3*pi/8");
+}
+
+TEST_F(ResidueTheoremTest, DoublePoleBiquadraticOneOverXfourthPlusOneSquared) {
+    // ∫_{-∞}^{∞} 1/(x⁴ + 1)² dx = 3π/2^(5/2) = 3π/(4√2).  Irreducible
+    // biquadratic factor (b=0, c=1) with multiplicity 2.  Maxima oracle.
+    auto result = calculus::integrate_rational_full_real_line(
+        E("1/(x^4 + 1)^2"), Symbol("x"), *ctx);
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+    expect_equal(result.value(), "3*pi/(4*sqrt(2))");
+}
+
+TEST_F(ResidueTheoremTest, DoublePoleBiquadraticOneOverXfourthPlusXsqPlusOneSquared) {
+    // ∫_{-∞}^{∞} 1/(x⁴ + x² + 1)² dx = 2π/3^(3/2) = 2π/(3√3).  Irreducible
+    // biquadratic factor (b=1, c=1) with multiplicity 2.  Maxima oracle.
+    auto result = calculus::integrate_rational_full_real_line(
+        E("1/(x^4 + x^2 + 1)^2"), Symbol("x"), *ctx);
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+    expect_equal(result.value(), "2*pi/(3*sqrt(3))");
 }
 
 TEST_F(ResidueTheoremTest, RealPoleRejected) {

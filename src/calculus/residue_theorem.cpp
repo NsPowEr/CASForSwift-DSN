@@ -1,7 +1,14 @@
 // Real-axis improper integration of rational functions via the residue
-// theorem.  Restricted to rational integrands whose denominator factors over
-// Q[x] into linear/quadratic factors (no real roots) and whose degree gap is
-// at least 2.  See include/cas/residue_theorem.hpp for the public contract.
+// theorem.  Handles rational integrands with no real poles and degree gap ≥ 2:
+//   - irreducible quadratic factors (any multiplicity) via Q(α) reduction;
+//   - irreducible biquadratic factors x⁴+bx²+c (any multiplicity) via the
+//     Q(√c, √(2√c+b)) tower;
+//   - all remaining irreducible factors (degree ≥ 3, general quartics) via the
+//     numeric Aberth residue fallback.
+// Higher pole orders are resolved by residue()'s Laurent recurrence; the Q(α)→ℝ
+// assembly is a fixed linear functional of the residue coordinates, so it is
+// independent of multiplicity.  Real (linear) poles are rejected — Cauchy PV is
+// out of scope.  See include/cas/residue_theorem.hpp for the public contract.
 
 #include "cas/residue_theorem.hpp"
 #include "residue_theorem_internal.hpp"
@@ -188,11 +195,11 @@ Result<ExprPtr> integrate_rational_full_real_line(
                     .kind = CASErrorKind::Unimplemented,
                     .message = "Residue theorem: biquadratic factor with non‑negative auxiliary discriminant (real roots in u)"});
             }
-            if (pf.multiplicity > 1U) {
-                return fail<ExprPtr>(CASError{
-                    .kind = CASErrorKind::Unimplemented,
-                    .message = "Residue theorem: biquadratic factor with multiplicity > 1 not yet supported"});
-            }
+            // Multiplicity > 1 is handled uniformly: contribution_from_irreducible
+            // _biquadratic delegates to residue(), whose Laurent recurrence detects
+            // the pole order, and the Q(α)→ℝ assembly is a fixed linear functional
+            // of the residue coordinates (independent of pole order). Verified
+            // against Maxima on ∫1/(x⁴+1)² = 3π/2^(5/2) and ∫1/(x⁴+x²+1)² = 2π/3^(3/2).
             auto contrib = contribution_from_irreducible_biquadratic(b_norm, c_norm, rational_expr, var, ctx);
             if (contrib.is_error()) return fail<ExprPtr>(contrib.error());
             ExprPtr added = arena.make<Binary>(BinaryOp::Add, total, contrib.value());
