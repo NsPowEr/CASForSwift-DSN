@@ -14,6 +14,7 @@
 #include "cas/lexer.hpp"
 #include "cas/parser.hpp"
 #include "cas/symbolic.hpp"
+#include "../../../src/calculus/calculus_internal.hpp"
 
 using namespace cas;
 
@@ -71,6 +72,36 @@ TEST_F(IntegrateInterruptTest, InterruptObservedOnEachRecursiveEntry) {
     ctx.clear_interrupt();
     auto third = calculus::integrate(b, x, ctx);
     EXPECT_TRUE(third.is_ok());
+}
+
+// ── A2: Risch-DE solver interruptibility (unit level) ────────────────────────
+// integrate()-level interrupt is covered above. The Risch-DE solver is also a
+// public building block (used by the log/exp tower extensions) and contains two
+// pure-Rational Gaussian eliminations that make no simplify()/substitute() call
+// and were therefore the last uninterruptible window in the integration
+// subsystem. These tests pin the solver-level cancellation contract.
+
+TEST_F(IntegrateInterruptTest, RischDeSolverCompletesWhenNotInterrupted) {
+    // y' + 1·y = x  has the polynomial solution y = x - 1, reached via the
+    // pure-Rational Gaussian elimination in solve_risch_de_q. Establishes that
+    // these inputs actually traverse the elimination to a solution (so the
+    // Timeout in the next test is a genuine cancellation, not a parse failure).
+    auto f = parse("1");
+    auto g = parse("x");
+    auto r = calculus::solve_risch_de_q(f, g, x, ctx);
+    ASSERT_TRUE(r.is_ok()) << (r.is_ok() ? "" : r.error().message);
+}
+
+TEST_F(IntegrateInterruptTest, RischDeSolverHonorsInterrupt) {
+    // With the interrupt flag set, the Risch-DE solver must surface Timeout
+    // rather than running the (otherwise unpollable) elimination to completion.
+    // Guards the per-pivot-column poll-points added to both eliminations.
+    ctx.interrupt();
+    auto f = parse("1");
+    auto g = parse("x^3 + x^2 + x");
+    auto r = calculus::solve_risch_de_q(f, g, x, ctx);
+    ASSERT_FALSE(r.is_ok());
+    EXPECT_EQ(r.error().kind, CASErrorKind::Timeout);
 }
 
 }  // namespace

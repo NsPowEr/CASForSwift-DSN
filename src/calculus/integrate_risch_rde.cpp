@@ -169,11 +169,14 @@ risch_extract_rational_coeffs(const algebra::PolyExpr& poly) {
         }
     }
 
-    // Gaussian elimination with partial pivoting over Q.
-    auto sysop_timeout = ctx.timeout_check_interval(); (void)sysop_timeout;
+    // Gaussian elimination with partial pivoting over Q.  Pure Rational/BigInt
+    // arithmetic, no simplify()/substitute() in the body → not transitively
+    // interruptible: poll per pivot column (A2 / HC-F70-A33, matrix_bareiss
+    // precedent).  Wires the previously-dead timeout stub.
     const std::size_t cols = n_unk + 1U;
     std::size_t pivot_row = 0;
     for (std::size_t col = 0; col < n_unk && pivot_row < n_eq; ++col) {
+        if (auto chk = ctx.check_interrupt(); chk.is_error()) return fail<ExprPtr>(chk.error());
         std::size_t best = pivot_row;
         while (best < n_eq && M[best][col].numerator().is_zero()) ++best;
         if (best == n_eq) {
@@ -412,9 +415,13 @@ risch_extract_rational_coeffs(const algebra::PolyExpr& poly) {
     }
 
     // Gaussian elimination over Q with partial pivoting (full RREF on pivot rows).
+    // Pure-Rational arithmetic, no simplify() in the loop body → poll the
+    // interrupt flag per pivot column to keep the (degree-capped) rational
+    // Risch-DE solver interruptible (A2 / HC-F70-A33).
     const std::size_t cols = n_unk + 1U;
     std::size_t pivot_row = 0;
     for (std::size_t col = 0; col < n_unk && pivot_row < n_eq; ++col) {
+        if (auto chk = ctx.check_interrupt(); chk.is_error()) return fail<ExprPtr>(chk.error());
         std::size_t best = pivot_row;
         while (best < n_eq && M[best][col].numerator().is_zero()) ++best;
         if (best == n_eq) continue;
@@ -469,12 +476,24 @@ risch_extract_rational_coeffs(const algebra::PolyExpr& poly) {
 // risch_parametric.cpp (cap.7).
 Result<ExprPtr> solve_risch_de_q(
     ExprPtr f_expr, ExprPtr g_expr, const Symbol& var, symbolic::CASContext& ctx) {
+    // A2: cancellation must short-circuit the dispatcher and surface as Timeout.
+    // Poll at entry — this building block is also called directly by the
+    // cap.7/cap.8 tower extensions, bypassing the integrate() head poll.
+    if (auto chk = ctx.check_interrupt(); chk.is_error()) return fail<ExprPtr>(chk.error());
+    // Simplify failures are tolerated (use original expr), EXCEPT a cancellation.
     auto f_simp = ctx.simplify(f_expr);
+    if (f_simp.is_error() && f_simp.error().kind == CASErrorKind::Timeout)
+        return fail<ExprPtr>(f_simp.error());
     auto g_simp = ctx.simplify(g_expr);
+    if (g_simp.is_error() && g_simp.error().kind == CASErrorKind::Timeout)
+        return fail<ExprPtr>(g_simp.error());
     if (f_simp.is_ok()) f_expr = f_simp.value();
     if (g_simp.is_ok()) g_expr = g_simp.value();
     auto poly_attempt = solve_risch_de_poly_q(f_expr, g_expr, var, ctx);
     if (poly_attempt.is_ok()) return poly_attempt;
+    // Only fall back to the rational branch for a genuine "no polynomial
+    // solution" dead-end — a cancellation must not be retried as if algebraic.
+    if (poly_attempt.error().kind == CASErrorKind::Timeout) return poly_attempt;
     return solve_risch_de_rational_q(f_expr, g_expr, var, ctx);
 }
 
