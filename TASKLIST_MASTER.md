@@ -32,10 +32,13 @@ Colonna **Refs** = ID nei vecchi tracker (tracciabilità). `git`-anchor = eviden
 
 Ordinati per severità/impatto decrescente. Ogni voce verificata aperta a codice 2026-06-26.
 
-### A1 · Risch RP-2 Hermite reduction parametrica (df>0) — `[E4·C4·S3·R2]`
-- **Stato a codice**: `src/calculus/risch_rde_bronstein_hermite.cpp` è **SCAFFOLD esplicito** → ritorna `Unimplemented`. Il commit `5ad4418` ha solo aggiunto la guardia anti-silent-wrong su `∫e^{±x}·ln x`, NON l'algoritmo.
-- **Cosa**: Hermite parametrica (Bronstein cap 6-8), risoluzione coefficienti via sistemi lineari parametrici. Sblocca integrazione estensioni log annidate (corpus Bronstein 0%→≥60%).
-- **Spec**: `MISSING_FEATURES_SPECS/Risch_Transcendental_Cap8.md`
+### A1 · Risch RP-2 Hermite reduction parametrica (df>0) — AUDIT 2026-06-27 (premessa corretta) — `[E4·C4·S3·R2]`
+- **AUDIT 2026-06-27** (spec `Risch_Transcendental_Cap8.md` + `Risch_Hermite_Cap5.md` lette): la premessa "scaffold da sostituire" era **fuorviante**. Stato reale:
+  - `risch_rde_bronstein_hermite.cpp::risch_rde_hermite_parametric_stub` è **DEAD CODE**: compilato (CMakeLists:220) ma **mai chiamato** da nessuno (grep verificato). NON è il punto attivo.
+  - Il solver parametrico **reale** `solve_risch_de_parametric_field` (`risch_rde_bronstein.cpp:249`) è **già implementato**: denominator bound (Q,B,D), trasformazione `f_new=f−D'/D`, `g_new=g·D`, bound di grado N (Log/Exp, §6.4), ricorsione tower `solve_recursive` con correzioni exp/log. Trial constants **già rimossi** (grep vuoto).
+  - **GAP REALE A1** = ramo **`df > 0`** a `risch_rde_bronstein.cpp:362-368`: `return Unimplemented("df > 0 not implemented in parametric field solver")`. Tutto `df ≤ 0` funziona; manca il caso *non-cancellation* in cui `deg_t(f) > 0` (il termine `f·y` domina): `deg(y)=dg−df`, `lc(y)=lc(g)/lc(f)`, poi ridurre+ricorrere (Bronstein 6.5/7.4/8.4 PolyRischDE).
+- **Next step (definito)**: implementare il ramo df>0 a riga 362 seguendo Bronstein 6.5 (non-cancellation case) nel contesto parametrico (m vettori g simultanei, soluzioni con costanti `c_i`); cross-validare con Maxima. Valutare se rimuovere il dead-code scaffold + relativa riga CMakeLists. Rischio silent-wrong alto → ogni step deve citare il teorema; su indecidibile `Unimplemented` esplicito (mai best-guess).
+- **Spec**: `MISSING_FEATURES_SPECS/Risch_Transcendental_Cap8.md`, `Risch_Hermite_Cap5.md`
 - **Ledger**: HC-F8-PENDING-17 · **Refs**: T-007, Task 17, F5.1, F7.5.B3, CAS-L1-02
 
 ### A2 · Hard-timeout cancellation token su tutti i path integrazione — RISOLTO 2026-06-26 — `[E2·C2·S5·R2]`
