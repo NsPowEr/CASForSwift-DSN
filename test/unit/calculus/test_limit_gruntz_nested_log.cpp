@@ -73,6 +73,19 @@ TEST_F(GruntzNestedLogTest, FractionalPowerBeatsLog) {
     // remaining nested-coefficient work, not covered by this fix.
 }
 
+
+// A11-minor — sum-ratio leading-term sign. (x+log x)/(x-log x) → 1: both num and
+// den are dominated by x, so the ratio of leading terms is x/x = 1 (no spurious
+// sign from the subtracted log term). Regression for Log-vs-Ln recognition in the
+// infinite-limit dispatcher + the leading-term quotient reduction.
+TEST_F(GruntzNestedLogTest, SumRatioLeadingTermSign) {
+    EXPECT_TRUE(is_one(limit_at_pos_inf("(x + log(x)) / (x - log(x))")));
+    EXPECT_TRUE(is_one(limit_at_pos_inf("(x - log(x)) / (x + log(x))")));
+    EXPECT_TRUE(is_one(limit_at_pos_inf("x / (x - log(x))")));
+    EXPECT_TRUE(is_one(limit_at_pos_inf("(x - log(x)) / x")));
+    EXPECT_TRUE(is_one(limit_at_pos_inf("(2*x + log(x)) / (2*x - log(x))")));
+}
+
 // Case 1: lim x→∞ log(log(x)) / x = 0
 TEST_F(GruntzNestedLogTest, LogLogOverX) {
     auto r = limit_at_pos_inf("log(log(x)) / x");
