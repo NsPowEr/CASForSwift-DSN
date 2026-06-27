@@ -358,11 +358,18 @@ Result<std::vector<ParametricRischDeQSolution>> solve_risch_de_parametric_field(
     }
     if (N < 0) N = 0;
     
-    // If df > 0: algebraic matching (fallback for algebraic towers)
+    // df > 0 — non-cancellation parametric PolyRischDE (Bronstein §6.5/§7.4/§8.4):
+    // deg(y)=dg_max−df, lc(y)=lc(g)/lc(f), reduce+recurse; lc(g)=Σ c_i·lc(g_i).
+    // NOT IMPLEMENTED — unreachable from corpus + 16 hand-built tower integrands
+    // (verified 2026-06-27). No test/Maxima check = unverifiable on Risch hot path
+    // → REGOLA ZERO forbids it. Ledger HC-F8-PENDING-17 (build deg_t(f)>0 tower).
     if (df > 0) {
         return make_unimplemented<std::vector<ParametricRischDeQSolution>>(
             "calculus", "solve_risch_de_parametric_field",
-            "df > 0 not implemented in parametric field solver",
+            "parametric PolyRischDE non-cancellation case (deg_t(f) > 0) not "
+            "implemented — Bronstein Symbolic Integration I §6.5/§7.4/§8.4; "
+            "deg(y)=dg-df, lc(y)=lc(g)/lc(f) then reduce+recurse. Unreachable "
+            "from current corpus; see HARDCODE_LEDGER.md HC-F8-PENDING-17",
             cas::error::reason_codes::RISCH_NO_POLYNOMIAL_SOLUTION,
             "Risch DE solver: parametric solver with df > 0 is unimplemented");
     }

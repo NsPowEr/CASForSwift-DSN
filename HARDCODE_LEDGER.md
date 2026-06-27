@@ -1998,6 +1998,20 @@ Vedi `PLAN_TASKS_REMAINING.md` per breakdown completo.
     sistemi lineari parametrici su base algebrica del campo costanti);
   - RP-3: Wiring + corpus Bronstein cap 6-8 (coverage 0% → ≥60%).
 - **Effort**: T3-Opus ~2-3 wk impl + 1 wk test corpus.
+- **AGGIORNAMENTO 2026-06-27 (audit + cleanup)**: lo scaffold dead-code
+  `risch_rde_bronstein_hermite.cpp` (`risch_rde_hermite_parametric_stub`, **mai
+  chiamato**) è stato **RIMOSSO** (file + riga CMakeLists). Non era il punto
+  attivo. Il gap reale è il ramo **`df > 0`** in `solve_risch_de_parametric_field`
+  (`risch_rde_bronstein.cpp:362`): `Unimplemented` esplicito, ora con messaggio
+  strutturato (Bronstein §6.5/§7.4/§8.4, non-cancellation: `deg(y)=dg−df`,
+  `lc(y)=lc(g)/lc(f)`, reduce+recurse). Tutto `df ≤ 0` è implementato; trial
+  constants già rimossi. **Blocco alla chiusura**: il ramo df>0 è **irraggiungibile**
+  dall'intero corpus + 16 integrandi-torre costruiti a mano (verificato
+  instrumentando il sito 2026-06-27, zero hit). Implementarlo senza un test che lo
+  eserciti né cross-check Maxima = codice non verificabile sul hot-path Risch →
+  REGOLA ZERO lo vieta. **Primo step reale**: costruire una torre differenziale la
+  cui RDE abbia `deg_t(f) > 0` (sblocca la verifica), poi implementare. 69/69 test
+  Risch verdi dopo cleanup.
 - **Acceptance**: ≥20 nuovi PASS sul corpus Bronstein integrate, chiusura
   ledger `HC-F75-B-TRIAL-CONSTANTS` (rimozione `{±1, ±1/2, ±2}` trial
   ansatz in `risch_rde_bronstein.cpp`).
