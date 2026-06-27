@@ -119,9 +119,13 @@ Ordinati per severità/impatto decrescente. Ogni voce verificata aperta a codice
   - **Completato 2026-06-26**: prefissi SI algoritmici (decomposizione `GHz→giga·Hz`, `um→micro·m`, set CGPM esaustivo applicato ai simboli prefissabili, exact-match prioritario) + **costanti fisiche esatte 2019-SI** (`make_physical_constant`: speed_of_light, planck_constant, elementary_charge, boltzmann_constant, avogadro_constant, standard_gravity — tutte Rational esatte).
   - 18 UnitsTest + 10 QuantityTest verdi. **Refs**: F6.6
 
-### A16 · solve_inequality boundary `double` → `Rational` — `[E1·C2·S3·R2]`
-- **Stato a codice**: `src/algebra/solve_inequality.cpp:98-100` usa `double low/high/tol` (la logica Sturm è OK, solo il boundary numerico no).
-- **Ledger**: HC-F70-A21-NUMERIC-BOUNDARY · **Refs**: T-018
+### A16 · solve_inequality boundary `double` → `Rational` — 🧊 DEFERITO post-parità (ledgered, era mis-scoped E1) — `[E3·C3·S2·R2]`
+- **AUDIT 2026-06-27** (ledger HC-F70-A21 autoritativo + codice letti): la voce "E1, solo `low/high/tol` double→Rational" era **fuorviante**. Stato reale:
+  - `low/high/tol` (`solve_inequality.cpp:98-100`) sono il **confine numerico Cat-4 deliberato**: bound/tolerance stoccati `long long` in `CASContextParams`, convertiti a `double` SOLO al call-site `find_polynomial_roots_sturm` (layer numeric). REGOLA 1 vieta `double` nel *core simbolico*, lo **ammette ai confini numerici** → non è un debito, è by-design documentato.
+  - Debito reale (più profondo, **non** quello del titolo originale): (a) output radici via `double_to_rational_approx` (riga 115) = boundary **approssimati**, e (b) `InequalityInterval.lower/upper` è `optional<Rational>` → **non può rappresentare radici irrazionali esatte** (√2 ecc.) neppure col fix puro-Rational.
+  - **Fix completo (ledgered, deferito Fase 8 post-parità)**: `find_polynomial_roots_sturm_rational` (bisection puro Rational/BigFloat) per (a); per (b) servirebbe `InequalityInterval` boundary `ExprPtr`+`RootOf` via `find_polynomial_isolating_intervals` (esiste, F8.0-5.4). Re-stima realistica **E3·C3**, non E1.
+  - **Decisione**: NON toccare ora — versione cosmetica `low/high/tol`→Rational = pigra/no-op (REGOLA ZERO), versione vera contraddice il deferral post-parità deciso (goal corrente = parità HP Prime ≥95%, §B). Blast radius contenuto (3 file, nessun chiamante esterno) quando si riprenderà in Fase 8.
+- **Ledger**: HC-F70-A21-NUMERIC-BOUNDARY (PARTIAL, deferral documentato) · **Refs**: T-018
 
 ### A17 · IBP doppia applicazione su `Product(Log,…)` — ✅ FATTO (verificato 2026-06-26, stale) — `[E1·C2·S3·R2]`
 - **Stato a codice**: ledger HC-F75-B1-IBP-DOUBLE-APPLY CHIUSO (fix 2026-06-10 simplify(vdu) pre-ricorsione + T-016 ILATE-class-da-base per `Pow`). Round-trip `IntegrateByPartsTest.{XLogX,XLogXSquared,LogXCubed}` 3/3 verdi 2026-06-26. Voce era stale nel tasklist.
