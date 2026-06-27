@@ -77,9 +77,10 @@ Ordinati per severità/impatto decrescente. Ogni voce verificata aperta a codice
 - **Stato a codice**: `algebraic_tower_primitive_nested.cpp` esiste (F3.4-DEBT-01) ma → `Unimplemented` se la min-poll liftata non è squarefree. Bridge solo 2-level (`detect_two_level_tower`).
 - **Cosa**: nesting multi-β >1 + factor Q(β)[x] reducible. **Refs**: F3.5, F3.D, Task 7, CAS-L3-06
 
-### A10 · Eigenvalues n>3 / catene di Jordan sotto RootOf — PROB. STALE 2026-06-26 — `[E3·C3·S3·R2]`
-- **Stato a codice**: routing RootOf GIÀ presente (`matrix_jordan.cpp:150` → `null_space_over_extension` quando autovalore è `RootOf`). 8/8 test Jordan verdi: `RootOf_Eigenvalues_2x2_Sqrt2`, **`RootOf_Multiplicity2_CompanionDeg4`** (4×4, n>3, catena mult-2 sotto RootOf), `NonDiagonalizable_2x2_Double`. La descrizione "non affidabili" pare obsoleta per i casi testati.
-- **Da fare (verifica)**: probe mirato n≥5 con autovalore RootOf molteplicità ≥3 (catena lunghezza ≥3) per confermare/escludere gap residuo prima di chiudere. **Refs**: CAS-L2-02, F4.4
+### A10 · Eigenvalues n>3 / catene di Jordan sotto RootOf — ✅ FATTO (probe chiuso 2026-06-27) — `[E3·C3·S3·R2]`
+- **Stato a codice**: routing RootOf GIÀ presente (`matrix_jordan.cpp:150` → `null_space_over_extension` quando autovalore è `RootOf`). Algoritmo generale (Filippov `n_k=2d_k−d_{k−1}−d_{k+1}`, catene top-down) senza cap su `n`/molteplicità.
+- **CHIUSO 2026-06-27**: il probe richiesto è verde. `RootOf_Multiplicity3_CompanionDeg6`: companion di `(x²−2)³ = x⁶−6x⁴+12x²−8` (non-derogatoria ⇒ blocco Jordan singolo size 3 per ciascun coniugato ±√2), **n=6>3, autovalore RootOf molteplicità 3, catena lunghezza 3**, certificato `P·J·P⁻¹==A` esatto su Q(√2) (1.3s). Esercita `null_space_over_extension` su `(A−√2·I)^k` fino a k=3. La descrizione storica "non affidabili" era stale. 5/5 JordanCertTest verdi.
+- **Refs**: CAS-L2-02, F4.4
 
 ### A11 · Gruntz MRV growth-rank dinamico — 🧊 FROZEN 2026-06-27 (copertura ottima, residuo C4 deferito) — `[E3·C4·S2·R2]`
 - **Stato a codice**: rank statico GIÀ rimosso (`limit_infinite.cpp` — confronto via `compare_growth` dinamico ricorsivo, Cat-10 chiuso). Torri log annidate (F7.5.D1+D2) funzionanti: 11/11 (incluso C6 `(log x+log log x)/log x=1`, C7).

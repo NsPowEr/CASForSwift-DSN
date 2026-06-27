@@ -92,4 +92,30 @@ TEST_F(JordanCertTest, RootOf_Multiplicity2_CompanionDeg4) {
                 << "P·J·P^-1 mismatch at (" << i << "," << j << ")";
 }
 
+// A10 probe (2026-06-27) — n>3 with a RootOf eigenvalue of algebraic
+// multiplicity 3 and a Jordan chain of length 3, to confirm/exclude a
+// residual gap before closing A10. The companion matrix of (x²−2)³ =
+// x⁶−6x⁴+12x²−8 is non-derogatory, so each conjugate eigenvalue ±√2 gets a
+// single Jordan block of size 3 (geometric mult 1, algebraic mult 3). This
+// exercises null_space_over_extension on (A−√2·I)^k up to k=3 on a 6×6
+// system and the top-down chain construction at full depth.
+TEST_F(JordanCertTest, RootOf_Multiplicity3_CompanionDeg6) {
+    // companion(x⁶−6x⁴+12x²−8): subdiagonal 1s, last column = (−c₀…−c₅)
+    // = (8, 0, −12, 0, 6, 0).
+    auto A = from_rows({{0, 0, 0, 0, 0, 8},
+                        {1, 0, 0, 0, 0, 0},
+                        {0, 1, 0, 0, 0, -12},
+                        {0, 0, 1, 0, 0, 0},
+                        {0, 0, 0, 1, 0, 6},
+                        {0, 0, 0, 0, 1, 0}});
+    auto jd = jordan_normal_form(A, ctx);
+    ASSERT_TRUE(jd.is_ok()) << jd.error().message;
+    auto recon = reconstruct(jd.value());
+    ASSERT_TRUE(recon.is_ok()) << recon.error().message;
+    for (std::size_t i = 0; i < 6; ++i)
+        for (std::size_t j = 0; j < 6; ++j)
+            EXPECT_TRUE(entries_equal(recon.value()(i, j), A(i, j)))
+                << "P·J·P^-1 mismatch at (" << i << "," << j << ")";
+}
+
 }  // namespace
