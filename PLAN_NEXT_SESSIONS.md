@@ -1,3 +1,10 @@
+> # ⚠️ SUPERSEDED — file storico (non aggiornare)
+> Tutti i task di questo file sono stati **consolidati e ri-verificati a codice** in
+> **[`TASKLIST_MASTER.md`](TASKLIST_MASTER.md)** (audit 2026-06-26, single source of truth).
+> Conservato solo come storico/contesto. Le voci di stato qui dentro sono **obsolete**.
+
+---
+
 # Plan Next Sessions — Post-2026-06-12
 
 > Documento operativo per Opus autonomy. Letto in `SESSION_BOOTSTRAP_OPUS.md §2`. Ogni sessione esegue il blocco corrente; al termine sposta items "DONE" sotto §Log e promuove la prossima sessione a "current".

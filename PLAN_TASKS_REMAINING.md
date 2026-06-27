@@ -1,3 +1,10 @@
+> # ⚠️ SUPERSEDED — file storico (non aggiornare)
+> Tutti i task di questo file sono stati **consolidati e ri-verificati a codice** in
+> **[`TASKLIST_MASTER.md`](TASKLIST_MASTER.md)** (audit 2026-06-26, single source of truth).
+> Conservato solo come storico/contesto. Le voci di stato qui dentro sono **obsolete**.
+
+---
+
 # Plan — Task residue F8 (post-sessione 2026-06-12)
 
 Documento operativo per Opus autonomy. Ogni task suddiviso in step ≤1 giornata.

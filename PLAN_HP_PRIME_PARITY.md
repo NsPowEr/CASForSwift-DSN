@@ -1,3 +1,10 @@
+> # ⚠️ SUPERSEDED — file storico (non aggiornare)
+> Tutti i task di questo file sono stati **consolidati e ri-verificati a codice** in
+> **[`TASKLIST_MASTER.md`](TASKLIST_MASTER.md)** (audit 2026-06-26, single source of truth).
+> Conservato solo come storico/contesto. Le voci di stato qui dentro sono **obsolete**.
+
+---
+
 # PIANO IMPLEMENTAZIONE — Parità HP Prime G2
 
 > Obiettivo: portare ogni engine matematico al 100% del dominio CAS production-grade (riferimento: HP Prime G2 / Giac-Xcas baseline).

@@ -1,3 +1,10 @@
+> # ⚠️ SUPERSEDED — file storico (non aggiornare)
+> Tutti i task di questo file sono stati **consolidati e ri-verificati a codice** in
+> **[`TASKLIST_MASTER.md`](TASKLIST_MASTER.md)** (audit 2026-06-26, single source of truth).
+> Conservato solo come storico/contesto. Le voci di stato qui dentro sono **obsolete**.
+
+---
+
 # CAS ENGINE — Sistema Task Unificato
 ## Controllo Avanzamento verso HP Prime G2
 

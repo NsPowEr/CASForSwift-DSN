@@ -78,3 +78,6 @@ rtk
 .claude/settings.local.json
 .claude/worktrees/
 .claude/*.local.json
+
+# Python bytecode cache (scripts/)
+__pycache__/

@@ -1,3 +1,10 @@
+> # ⚠️ SUPERSEDED — file storico (non aggiornare)
+> Tutti i task di questo file sono stati **consolidati e ri-verificati a codice** in
+> **[`TASKLIST_MASTER.md`](TASKLIST_MASTER.md)** (audit 2026-06-26, single source of truth).
+> Conservato solo come storico/contesto. Le voci di stato qui dentro sono **obsolete**.
+
+---
+
 
 # TODO — Phase 8 (F8.x Roadmap)
 > Aggiornato automaticamente dall'agente. Ultimo update: 2026-06-11 (Task 3.3 parziale: Kovacic Case 1)
