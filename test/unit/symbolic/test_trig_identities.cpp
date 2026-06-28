@@ -119,3 +119,43 @@ TEST(TrigIdentitiesTest, CosSquaredPowerReduction) {
     EXPECT_TRUE(trig_simplifies_to("cos(x)^2",
         "1/2 + 1/2 * cos(2*x)"));
 }
+
+// ── B.2: exponential Laurent trig-polynomial equivalence in mathematically_equal.
+// Exercises the product-to-sum class that default simplify leaves un-unified (a
+// product of different-frequency cosines stays a product, while its
+// product-to-sum form is a flat sum), which trig_exponential_zero_diff proves.
+
+[[nodiscard]] static bool trig_equal(const char* a, const char* b) {
+    CASContext ctx;
+    auto ea = parse_expr(a, ctx.arena());
+    auto eb = parse_expr(b, ctx.arena());
+    EXPECT_TRUE(ea.is_ok() && eb.is_ok());
+    auto eq = mathematically_equal(ea.value(), eb.value(), ctx);
+    EXPECT_TRUE(eq.is_ok());
+    return eq.is_ok() && eq.value();
+}
+
+TEST(TrigIdentitiesTest, ProductToSumCosCos) {
+    // cos(x)·cos(2x) = (cos(x) + cos(3x))/2  — product-to-sum, different freqs.
+    EXPECT_TRUE(trig_equal("cos(x)*cos(2*x)", "(cos(x) + cos(3*x))/2"));
+}
+
+TEST(TrigIdentitiesTest, ProductToSumSinSin) {
+    // sin(x)·sin(2x) = (cos(x) − cos(3x))/2.
+    EXPECT_TRUE(trig_equal("sin(x)*sin(2*x)", "(cos(x) - cos(3*x))/2"));
+}
+
+TEST(TrigIdentitiesTest, TrigPolynomialFourierEquivalence) {
+    // sin³x·cos²x linearises to the Fourier sum
+    //   sin³x cos²x = sin(x)/8 + sin(3x)/16 − sin(5x)/16
+    // (verified: x=π/4 → √2/8 on both sides).
+    EXPECT_TRUE(trig_equal("sin(x)^3*cos(x)^2",
+        "sin(x)/8 + sin(3*x)/16 - sin(5*x)/16"));
+}
+
+TEST(TrigIdentitiesTest, ExponentialTrigSoundnessRejectsUnequal) {
+    // Soundness: the fallback must NOT declare unequal trig polynomials equal.
+    EXPECT_FALSE(trig_equal("cos(x)*cos(2*x)", "(cos(x) + cos(3*x))/3"));  // wrong coeff
+    EXPECT_FALSE(trig_equal("sin(2*x)", "sin(x)"));
+    EXPECT_FALSE(trig_equal("cos(x)^2", "sin(x)^2"));
+}
