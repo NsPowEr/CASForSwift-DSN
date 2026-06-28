@@ -65,21 +65,13 @@ Ordinati per severità/impatto decrescente. Ogni voce verificata aperta a codice
 - **Cosa**: Stauduhar 1973 + tabelle transitive-subgroups Hulpke (n=6..10) + resolventi numeriche BigFloat.
 - **Spec**: `MISSING_FEATURES_SPECS/Galois_Groups.md` · **Refs**: T-010, Task 9, F3.6, CAS-L3-18
 
-### A7 · Slater pFq → Meijer G fallback integrator — ⏭️ ENTRY-POINT research prossima sessione (unblocked) — `[E4·C4·S3·R1]`
+### A7 · Slater pFq → Meijer G fallback integrator — 🚧 SPEC-BLOCKED (nessuna spec formale esiste) — `[E4·C4·S3·R1]`
 - **Stato a codice**: `BuiltinOp::MeijerG` **non esiste**. Nessun file Slater/Meijer.
-- **Cosa**: definire `MeijerG`, identità Erdélyi-Slater, trasformazioni Bailey, dispatcher, wiring come passo finale in `integrate_core`. Rete di salvataggio post-Risch.
-- **🧭 RESTART GUIDE (2026-06-28, scelto come prossima direzione research vs A1 che è BLOCCATO)**:
-  - **Perché questo e non A1**: A1 (df>0) è irraggiungibile dal corpus → non verificabile senza prima costruire una torre ad-hoc (vedi A1). A7 è **unblocked**, alto impatto su `integrate()`, ed è una rete di salvataggio *additiva* (non tocca il hot-path Risch esistente → R1 basso).
-  - **REGOLA 0.1 obbligatoria prima di codice**: leggere `MISSING_FEATURES_SPECS/Special_Fn_Identities.md` e dichiarare la frase di conferma. Spec verificata presente 2026-06-28.
-  - **Sequenza incrementale (ogni step = commit + gate verde, mai big-bang)**:
-    1. AST: aggiungere `BuiltinOp::MeijerG` in `include/cas/builtin_functions.hpp` (enum + aritmetà/printer/parser round-trip minimale, niente integrazione ancora). Test: costruzione+print+parse.
-    2. Rappresentazione: `MeijerG[[a_p],[b_q]](z)` con liste parametri esatte (Rational/ExprPtr). Identità di riduzione base (Meijer→funzioni elementari per casi degeneri) come simplify rules.
-    3. Bridge `pFq → MeijerG` (Slater): un riconoscitore che mappa ipergeometriche note alla forma G. Cross-check valori con Maxima (`hgfred`/`makegamma`) via maxima-golden-diff.
-    4. Integratore: `∫ MeijerG dz` via formula di Meijer (l'integrale di una G è una G con indici shiftati) — il cuore del valore.
-    5. **Wiring (ultimo)**: come *passo finale* dopo il fallimento di Risch in `src/calculus/integrate_core.cpp` (chain di fallback); top-level entry `src/calculus/integrate.cpp:421`. Mai prima di Risch (deve restare l'ultima risorsa).
-  - **Verifica**: golden vs Maxima su integrali noti-non-elementari rappresentabili (es. `∫₀^∞ e^{-t} t^{s-1} dt` family, Bessel moments). Oracolo Maxima fork/exec only (CLAUDE.md §6).
-  - **File chiave**: `include/cas/builtin_functions.hpp` (enum), `src/calculus/integrate_core.cpp` (wiring), `src/calculus/integrate.cpp:421` (top-level), spec sopra.
-- **Spec**: `MISSING_FEATURES_SPECS/Special_Fn_Identities.md` · **Refs**: T-013, Task 22-23, F7.A-B
+- **⚠️ CORREZIONE 2026-06-28**: la spec citata in precedenza (`Special_Fn_Identities.md`) **NON è di Meijer-G** — è **F7.5.E1** (identità Γ/B/ζ/erf), task **diverso e di fatto FATTO** (special_fn golden = **100%**, vedi §C). Quindi **A7 non ha spec formale**: scrivere Meijer-G ora violerebbe REGOLA 0.1 ("codice senza spec = INVALIDO") e REGOLA ZERO (formule da memoria = allucinazione). **Bloccante reale**: prima va prodotta/approvata una spec `MISSING_FEATURES_SPECS/Meijer_G_Slater.md` (definizione G, identità Erdélyi-Slater, formula integrale, trasformazioni Bailey, scope) — decisione architetturale, non auto-derivabile.
+- **Cosa (sketch ingegneristico, valido SOLO dopo la spec)**: definire `MeijerG`, dispatcher, wiring come passo finale post-Risch.
+  - Sequenza incrementale (ogni step = commit + gate verde): (1) enum `BuiltinOp::MeijerG` in `include/cas/builtin_functions.hpp` + round-trip print/parse; (2) rappresentazione `MeijerG[[a_p],[b_q]](z)` param esatti + riduzioni degeneri come simplify rules; (3) bridge `pFq→MeijerG` (Slater) con cross-check Maxima (`hgfred`/`makegamma`); (4) `∫ MeijerG dz` (integrale di G = G con indici shiftati); (5) wiring **ultimo** in `src/calculus/integrate_core.cpp` dopo il fallimento Risch (top-level `src/calculus/integrate.cpp:421`), mai prima.
+  - **File chiave**: `include/cas/builtin_functions.hpp`, `src/calculus/integrate_core.cpp`, `src/calculus/integrate.cpp:421`.
+- **Spec**: ❌ DA CREARE (`Meijer_G_Slater.md`) — la vecchia ref era errata · **Refs**: T-013, Task 22-23, F7.A-B
 
 ### A8 · Kovacic Case 3 completo (icosaedrico n=12) — `[E3·C4·S1·R1]`
 - **Stato a codice**: `ode_kovacic_case3.cpp` ha tetraedrico/ottaedrico; n=12 = solo diagnostico (recurrence blow-up).
@@ -183,6 +175,9 @@ Fuori scope deliberato (vedi `PLAN_HP_PRIME` §STATUS PERMANENTI). Parità HP Pr
 | Hypergeometric ₚFq recognition completo | tabelle Wilf-Zeilberger vaste | Gauss ₂F₁, Saalschütz, casi noti | — |
 | Multi-sheet Riemann surface | AST single-valued incompatibile | branch principale (presente) | — |
 
+### B.1 · Golden `simplify`-fail = soundness deliberata (NON fixare alla cieca)
+Audit golden 2026-06-28: i 5 fail `simplify` vs Maxima (`exp(log(x))→x`, `log(x^n)→n·log(x)`, `log(1/x)→−log(x)`, `abs(x^2)→x^2`, `0^x→0`) **non sono bug**: valgono solo sotto ipotesi `x>0` / dominio reale. Maxima sovra-semplifica assumendo dominio reale; il CAS è **complex-aware conservativo** (A14 soundness, `is_known_nonnegative` senza regola even-power perché `x=i⇒x²=−1`). Allinearsi a Maxima = introdurre falsi-positivi (REGOLA ZERO). Il fix corretto sarebbe un **default real-domain configurabile** (decisione architetturale cross-cutting per parità HP Prime, fuori scope sessione singola), non hack per-regola. **Golden aggregate 2026-06-28: 918/22 (97.7%)** — i 22 fail residui = integrate(15, perlopiù forme Weierstrass/half-angle equivalenti ma non canoniche vs Maxima) + simplify(5, questo) + diff(2, idem half-angle).
+
 ---
 
 ## C — FATTO E VERIFICATO (non rifare)
@@ -197,7 +192,9 @@ Confermato a codice 2026-06-26. Elencato per evitare ri-lavoro (i vecchi tracker
 
 **LinAlg**: **Householder QR simbolico razionalizzato** (`matrix_qr.cpp` — *PLAN_HP_PRIME lo dava aperta-perm/MGS, è stale: codice ha risolto l'AST-explosion via reflector `I−2vvᵀ/N` senza √ al denominatore*), Cholesky LDLᵀ, fresh-symbol pervasivo, adaptive G7/K15 quadrature *(commit 5268e90)*.
 
-**Calculus**: Kovacic Case 1 (Laurent √r poli≥4, *commit 709a437, T-008*) + Case 2; Risch trial-constants rimossi (`integrate_risch.cpp:69`), Rothstein-Trager generalizzato, Hermite con D arbitrario; Zeilberger/Gosper/Petkovšek higher-order *(commit 8440ba5, 3addb54, T-027)*; ∫xᵏ/√(c−dx²) *(commit 830f80e, T-055)*, ∫1/√(Ax²+Bx+C) *(6c5ae48)*, inverse-trig IBP, ∫log(x+√(x²+a)) *(ec9e065)*.
+**Calculus**: Kovacic Case 1 (Laurent √r poli≥4, *commit 709a437, T-008*) + Case 2; Risch trial-constants rimossi (`integrate_risch.cpp:69`), Rothstein-Trager generalizzato, Hermite con D arbitrario; Zeilberger/Gosper/Petkovšek higher-order *(commit 8440ba5, 3addb54, T-027)*; ∫xᵏ/√(c−dx²) *(commit 830f80e, T-055)*, ∫1/√(Ax²+Bx+C) *(6c5ae48)*, inverse-trig IBP, ∫log(x+√(x²+a)) *(ec9e065)*; **limit signed-infinity per poli non-polinomiali a punto finito** (`tan(x)/(x−π/2)→−∞` via sign del reciproco, `try_signed_pole_via_reciprocal`, *commit fc537e5*).
+
+**Special functions (F7.5.E1 — Γ/B/ζ/erf identities)**: ✅ **DONE** (verificato golden 2026-06-28: area `special_fn` = **75/0/5 = 100%**, spec target era ≥82%). ζ pari/dispari via **Bernoulli** (no tabella, REGOLA ZERO, `simplify_special_fn.cpp:380-413`), Γ half-integer + functional-eq + poli→ComplexInfinity, Beta→Γ, Digamma/Polygamma/Pochhammer, erf/erfc. *La spec `Special_Fn_Identities.md` era erroneamente citata da A7 (Meijer-G) — sono task diversi.*
 
 **Complex/branch-cut**: BC-1..BC-3 + BC-1b corrections, ln(a+bi) esatto *(commit 89eae9e, T-017)*, cyclotomic↔exp equal *(4597332, T-025)*, extended-real arithmetic *(b145cb9)*, UnwindingNumber builtin.
 
