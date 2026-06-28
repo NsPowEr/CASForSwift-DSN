@@ -3,6 +3,10 @@ build/
 build-*/
 build_*/
 build-ast/
+# CMake FetchContent artifacts. The real dep tree lives under build/_deps
+# (regenerated from the pinned URL/GIT_TAG in CMakeLists.txt); a top-level
+# _deps/ is accidental cruft (never referenced by the build).
+_deps/
 bin/
 lib/
 *.o
