@@ -32,7 +32,8 @@ Colonna **Refs** = ID nei vecchi tracker (tracciabilità). `git`-anchor = eviden
 
 Ordinati per severità/impatto decrescente. Ogni voce verificata aperta a codice 2026-06-26.
 
-### A1 · Risch RP-2 Hermite reduction parametrica (df>0) — AUDIT 2026-06-27 (premessa corretta) — `[E4·C4·S3·R2]`
+### A1 · Risch RP-2 Hermite reduction parametrica (df>0) — 🚧 BLOCCATO (deferito; vedi A7 per la research attiva) — `[E4·C4·S3·R2]`
+> **DEFERRAL 2026-06-28**: NON è la prossima research. Il ramo df>0 è irraggiungibile dal corpus (verificato instrumentando) → impl. alla cieca = codice non verificabile su hot-path Risch (silent-wrong > Unimplemented, REGOLA ZERO). **Sblocco = primo step sotto** (costruire una torre differenziale con `deg_t(f)>0`); solo allora implementare Bronstein §6.5 con cross-check Maxima. Direzione research scelta ora = **[[A7]]** (unblocked, additiva, R1). Riprendere A1 solo dopo aver costruito il caso-test che esercita il sito.
 - **AUDIT 2026-06-27** (spec `Risch_Transcendental_Cap8.md` + `Risch_Hermite_Cap5.md` lette): la premessa "scaffold da sostituire" era **fuorviante**. Stato reale:
   - `risch_rde_bronstein_hermite.cpp::risch_rde_hermite_parametric_stub` è **DEAD CODE**: compilato (CMakeLists:220) ma **mai chiamato** da nessuno (grep verificato). NON è il punto attivo.
   - Il solver parametrico **reale** `solve_risch_de_parametric_field` (`risch_rde_bronstein.cpp:249`) è **già implementato**: denominator bound (Q,B,D), trasformazione `f_new=f−D'/D`, `g_new=g·D`, bound di grado N (Log/Exp, §6.4), ricorsione tower `solve_recursive` con correzioni exp/log. Trial constants **già rimossi** (grep vuoto).
@@ -64,9 +65,20 @@ Ordinati per severità/impatto decrescente. Ogni voce verificata aperta a codice
 - **Cosa**: Stauduhar 1973 + tabelle transitive-subgroups Hulpke (n=6..10) + resolventi numeriche BigFloat.
 - **Spec**: `MISSING_FEATURES_SPECS/Galois_Groups.md` · **Refs**: T-010, Task 9, F3.6, CAS-L3-18
 
-### A7 · Slater pFq → Meijer G fallback integrator — `[E4·C4·S3·R1]`
+### A7 · Slater pFq → Meijer G fallback integrator — ⏭️ ENTRY-POINT research prossima sessione (unblocked) — `[E4·C4·S3·R1]`
 - **Stato a codice**: `BuiltinOp::MeijerG` **non esiste**. Nessun file Slater/Meijer.
 - **Cosa**: definire `MeijerG`, identità Erdélyi-Slater, trasformazioni Bailey, dispatcher, wiring come passo finale in `integrate_core`. Rete di salvataggio post-Risch.
+- **🧭 RESTART GUIDE (2026-06-28, scelto come prossima direzione research vs A1 che è BLOCCATO)**:
+  - **Perché questo e non A1**: A1 (df>0) è irraggiungibile dal corpus → non verificabile senza prima costruire una torre ad-hoc (vedi A1). A7 è **unblocked**, alto impatto su `integrate()`, ed è una rete di salvataggio *additiva* (non tocca il hot-path Risch esistente → R1 basso).
+  - **REGOLA 0.1 obbligatoria prima di codice**: leggere `MISSING_FEATURES_SPECS/Special_Fn_Identities.md` e dichiarare la frase di conferma. Spec verificata presente 2026-06-28.
+  - **Sequenza incrementale (ogni step = commit + gate verde, mai big-bang)**:
+    1. AST: aggiungere `BuiltinOp::MeijerG` in `include/cas/builtin_functions.hpp` (enum + aritmetà/printer/parser round-trip minimale, niente integrazione ancora). Test: costruzione+print+parse.
+    2. Rappresentazione: `MeijerG[[a_p],[b_q]](z)` con liste parametri esatte (Rational/ExprPtr). Identità di riduzione base (Meijer→funzioni elementari per casi degeneri) come simplify rules.
+    3. Bridge `pFq → MeijerG` (Slater): un riconoscitore che mappa ipergeometriche note alla forma G. Cross-check valori con Maxima (`hgfred`/`makegamma`) via maxima-golden-diff.
+    4. Integratore: `∫ MeijerG dz` via formula di Meijer (l'integrale di una G è una G con indici shiftati) — il cuore del valore.
+    5. **Wiring (ultimo)**: come *passo finale* dopo il fallimento di Risch in `src/calculus/integrate_core.cpp` (chain di fallback); top-level entry `src/calculus/integrate.cpp:421`. Mai prima di Risch (deve restare l'ultima risorsa).
+  - **Verifica**: golden vs Maxima su integrali noti-non-elementari rappresentabili (es. `∫₀^∞ e^{-t} t^{s-1} dt` family, Bessel moments). Oracolo Maxima fork/exec only (CLAUDE.md §6).
+  - **File chiave**: `include/cas/builtin_functions.hpp` (enum), `src/calculus/integrate_core.cpp` (wiring), `src/calculus/integrate.cpp:421` (top-level), spec sopra.
 - **Spec**: `MISSING_FEATURES_SPECS/Special_Fn_Identities.md` · **Refs**: T-013, Task 22-23, F7.A-B
 
 ### A8 · Kovacic Case 3 completo (icosaedrico n=12) — `[E3·C4·S1·R1]`
@@ -191,7 +203,7 @@ Confermato a codice 2026-06-26. Elencato per evitare ri-lavoro (i vecchi tracker
 
 **Numerica**: fsolve tolerance ctx-param (`fsolve_tolerance_bits`, T-019), solve_inequality via Sturm, RootOf isolation bounds, Bessel identities *(ade20ff)*, statistics package (`src/statistics/`).
 
-**Infra**: **Phase-7 anti-monolith DONE** — tutti i 23 file ex >500 LOC ora <500 *(commit 7aa5f2e + T-046..050, T-029..051)*; flaky cos(7π/16) fixed via co-function *(d03ff6d, T-004)*; rapidcheck property tests; golden aggregate **94.5%** (F7.5).
+**Infra**: **Phase-7 anti-monolith DONE** — tutti i 23 file ex >500 LOC ora <500 *(commit 7aa5f2e + T-046..050, T-029..051)*; flaky cos(7π/16) fixed via co-function *(d03ff6d, T-004)*; rapidcheck property tests; golden aggregate **94.5%** (F7.5); **A2 hard-timeout RDE solver interrompibile** *(commit 388f6f5)*; **untracked top-level `_deps/` cruft + gitlink rotto rimossi, `_deps/` gitignored** — il dep tree reale è `build/_deps` da FetchContent *(2026-06-28)*; `ledger_index.py` 3-tier classifier + `doctor` *(03928f7)*.
 
 ---
 
@@ -207,12 +219,16 @@ A16..A24 (debiti minori) — indipendenti, inframmezzabili
 
 ## E — Ordine raccomandato
 
-1. **A2** (hard-timeout S5 — rischio hang produzione) + **A3** (perf-hang)
-2. Debiti rapidi E1: **A16, A17, A18, A23, A24**
-3. **A5** (Frobenius) · **A13** (residue) · **A4** (Smith Q[x]) — gap funzionali medi
-4. **A1** (Risch RP-2) → **A7** (Slater/Meijer) — research calculus, alto impatto integrate
-5. **A6** (Stauduhar) · **A9** (tower≥3) · **A10/A11/A12/A14** — research algebra/limit
-6. **A15** (Units SI) · **A8** (Kovacic n=12) · **A19-A22** — bassa priorità
+> **Avanzamento 2026-06-28**: A2 ✅ (388f6f5) · A10 ✅ chiuso con probe (156b18a) · A16 chiarito = deferral ledgered post-parità (non E1) · A4/A12/A14/A15/A17/A24 = già FATTO/stale. **Quick-win esauriti** (done-stale o ledger-deferred). **Prossima direzione = research C4**: entry-point **A7** (unblocked, vedi RESTART GUIDE in A7); A1 resta BLOCCATO (richiede prima la torre-test deg_t(f)>0).
+>
+> ⬇️ ordine storico (pre-sessione 2026-06-28), conservato per contesto:
+
+1. ~~**A2**~~ ✅ + **A3** (perf-hang C4, hard)
+2. Debiti rapidi E1: ~~A16~~ (deferral) · ~~A17/A24~~ (done) · A18 (ledger-deferred) · **A23** (structured Unimplemented, S1, broad)
+3. **A5** (Frobenius, residuo by-design) · **A13** (residue, residuo by-design) · ~~A4~~ (done)
+4. **A7** (Slater/Meijer) ← **prossima research, entry-point** · A1 (Risch RP-2) BLOCCATO
+5. **A6** (Stauduhar) · **A9** (tower≥3) · ~~A10~~ ✅ · A11 (FROZEN) / A12 (done) / A14 (done)
+6. **A15** (done) · **A8** (Kovacic n=12) · **A19-A22** — bassa priorità
 
 ---
 
