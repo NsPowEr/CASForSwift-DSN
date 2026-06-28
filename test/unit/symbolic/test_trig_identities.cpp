@@ -159,3 +159,30 @@ TEST(TrigIdentitiesTest, ExponentialTrigSoundnessRejectsUnequal) {
     EXPECT_FALSE(trig_equal("sin(2*x)", "sin(x)"));
     EXPECT_FALSE(trig_equal("cos(x)^2", "sin(x)^2"));
 }
+
+// ── B.2 (rational extension): trig in the DENOMINATOR / negative powers.
+// The exponential form now models N(z)/D(z), so trig RATIONALS (and the
+// negative half-angle powers produced by differentiating a `ln|tan(x/2)|`-style
+// antiderivative) reduce to a single cleared numerator and prove equal.
+
+TEST(TrigIdentitiesTest, TrigRationalCscEquivalence) {
+    // 1/sin(x) = 1/(2·sin(x/2)·cos(x/2))  — double-angle in the denominator.
+    EXPECT_TRUE(trig_equal("1/sin(x)", "1/(2*sin(x/2)*cos(x/2))"));
+}
+
+TEST(TrigIdentitiesTest, TrigRationalCotHalfAngle) {
+    // cot(x/2) = (1+cos(x))/sin(x): the half-angle rational identity that the
+    // derivative of ln|tan(x/2)| collapses to. Negative-power form.
+    EXPECT_TRUE(trig_equal("cos(x/2)/sin(x/2)", "(1 + cos(x))/sin(x)"));
+}
+
+TEST(TrigIdentitiesTest, TrigRationalTanSquaredIdentity) {
+    // sin(x)^2/cos(x)^2 = (1 − cos(2x))/(1 + cos(2x)).
+    EXPECT_TRUE(trig_equal("sin(x)^2/cos(x)^2", "(1 - cos(2*x))/(1 + cos(2*x))"));
+}
+
+TEST(TrigIdentitiesTest, TrigRationalSoundnessRejectsUnequal) {
+    // Soundness on the rational path: wrong denominator must NOT compare equal.
+    EXPECT_FALSE(trig_equal("1/sin(x)", "1/(sin(x/2)*cos(x/2))"));   // missing factor 2
+    EXPECT_FALSE(trig_equal("cos(x)/sin(x)", "sin(x)/cos(x)"));      // cot ≠ tan
+}
