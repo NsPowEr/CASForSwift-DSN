@@ -186,3 +186,42 @@ TEST(TrigIdentitiesTest, TrigRationalSoundnessRejectsUnequal) {
     EXPECT_FALSE(trig_equal("1/sin(x)", "1/(sin(x/2)*cos(x/2))"));   // missing factor 2
     EXPECT_FALSE(trig_equal("cos(x)/sin(x)", "sin(x)/cos(x)"));      // cot ≠ tan
 }
+
+// ── Non-enumerated named functions must survive simplify with their name.
+// asinh/acosh/atanh carry func_id == Unknown; rebuilding from func_id alone
+// corrupted them into the literal `unknown(...)` (e.g. ∫√(x²−1)'s acosh term).
+TEST(TrigIdentitiesTest, SimplifyPreservesInverseHyperbolicName) {
+    for (const char* fn : {"acosh", "asinh", "atanh"}) {
+        CASContext ctx;
+        auto e = parse_expr(std::string(fn) + "(x + 1)", ctx.arena());
+        ASSERT_TRUE(e.is_ok());
+        auto s = ctx.simplify(e.value());
+        ASSERT_TRUE(s.is_ok());
+        const auto* fc = expr_cast<FuncCall>(s.value());
+        ASSERT_NE(fc, nullptr) << fn;
+        EXPECT_EQ(fc->name, fn) << "simplify corrupted " << fn << " to " << fc->name;
+    }
+}
+
+// ── B.2 (algebraic): single square-root extension Q(x)(√p) equivalence.
+// Antiderivatives that differ by a constant but whose derivatives carry √p in a
+// denominator — the ∫√(x²−1) acosh-form vs Maxima log-form family.
+TEST(TrigIdentitiesTest, RadicalDerivativeEquivalence) {
+    // d/dx of the two ∫√(x²−1) antiderivatives. Both equal √(x²−1); the Maxima
+    // form keeps √(x²−1) in a denominator the linear simplifier won't clear.
+    EXPECT_TRUE(trig_equal(
+        "sqrt(x^2-1)",
+        "(1/2)*x^2/sqrt(x^2-1) - 1/(2*x + 2*sqrt(x^2-1)) "
+        "- x/((2*x + 2*sqrt(x^2-1))*sqrt(x^2-1)) + (1/2)*sqrt(x^2-1)"));
+}
+
+TEST(TrigIdentitiesTest, RadicalEquivalenceRationalised) {
+    // x²/√(x²−1) = √(x²−1) + 1/√(x²−1)  (clear the radical denominator).
+    EXPECT_TRUE(trig_equal("x^2/sqrt(x^2-1)", "sqrt(x^2-1) + 1/sqrt(x^2-1)"));
+}
+
+TEST(TrigIdentitiesTest, RadicalSoundnessRejectsUnequal) {
+    // Soundness: a genuinely unequal single-radical pair must NOT compare equal.
+    EXPECT_FALSE(trig_equal("x^2/sqrt(x^2-1)", "sqrt(x^2-1) + 2/sqrt(x^2-1)"));
+    EXPECT_FALSE(trig_equal("sqrt(x^2-1)", "sqrt(x^2+1)"));
+}

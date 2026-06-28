@@ -354,6 +354,7 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/algebraic_equal_weierstrass.cpp
     src/algebra/algebraic_equal_trig_exp.cpp
     src/algebra/algebraic_equal_subset_risch.cpp
+    src/algebra/algebraic_equal_radical.cpp
     src/algebra/hyperbolic_normalize.cpp
     src/algebra/polynomial_integer.cpp
     src/algebra/polynomial_conversions.cpp

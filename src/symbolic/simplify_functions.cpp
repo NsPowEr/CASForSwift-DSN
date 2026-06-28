@@ -30,14 +30,26 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const FuncCall& node
         args.push_back(res.value());
     }
 
+    // Reconstruct a FuncCall preserving identity. Non-enumerated named functions
+    // (asinh/acosh/atanh, sech/csch, …) carry func_id == Unknown but a real
+    // `name`; rebuilding them from func_id alone collapses the name to the
+    // literal "unknown" (BuiltinOp::Unknown → "unknown"), silently corrupting
+    // e.g. ∫√(x²−1)'s acosh term into `unknown(x)`. Keep the name string when
+    // the op is not enumerated.
+    auto rebuild_call = [&](std::vector<ExprPtr> a) -> ExprPtr {
+        return node.func_id == BuiltinOp::Unknown
+            ? arena_.make<FuncCall>(node.name, std::move(a))
+            : arena_.make<FuncCall>(node.func_id, std::move(a));
+    };
+
     const ExprPtr target_before = expr_ptr_sequence_identical(args, node.args)
         ? original
-        : (trace_enabled_ ? arena_.make<FuncCall>(node.func_id, args) : ExprPtr{});
+        : (trace_enabled_ ? rebuild_call(args) : ExprPtr{});
 
     if (rewrite_provider_ != nullptr && may_rewrite_function_call(node.func_id, args)) {
         ExprPtr rewrite_target = expr_ptr_sequence_identical(args, node.args)
             ? original
-            : arena_.make<FuncCall>(node.func_id, args);
+            : rebuild_call(args);
         auto rewritten = rewrite_provider_->try_rewrite(
             rewrite_target, arena_, assumptions_, context_);
         if (rewritten.is_ok() && rewritten.value() != rewrite_target) {
@@ -223,7 +235,7 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const FuncCall& node
     }
 
     if (expr_ptr_sequence_identical(args, node.args)) return ok(original);
-    return ok(arena_.make<FuncCall>(node.func_id, std::move(args)));
+    return ok(rebuild_call(std::move(args)));
 }
 
 // ── Other node types ──────────────────────────────────────────────────────────

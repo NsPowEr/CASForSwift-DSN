@@ -15,6 +15,7 @@ namespace cas::symbolic {
 // Implemented in algebraic_equal_weierstrass.cpp.
 [[nodiscard]] bool weierstrass_zero_diff(ExprPtr diff_expr, CASContext& ctx);
 [[nodiscard]] bool trig_exponential_zero_diff(ExprPtr diff_expr, CASContext& ctx);
+[[nodiscard]] bool radical_zero_diff(ExprPtr diff_expr, CASContext& ctx);
 
 Result<bool> mathematically_equal(ExprPtr lhs, ExprPtr rhs, CASContext& context) {
     const bool owns_operation = !context.operation_active_;
@@ -51,6 +52,32 @@ Result<bool> mathematically_equal(ExprPtr lhs, ExprPtr rhs, CASContext& context)
     if (structural_equal(lhs_s.value(), rhs_s.value())) {
         finalize();
         return ok(true);
+    }
+
+    // F7.5 (B.2 algebraic): single square-root extension Q(x)(√p). Proves
+    // equality of antiderivatives that differ by a constant but whose
+    // derivatives carry √p in a denominator (e.g. ∫√(x²−1): CAS acosh-form vs
+    // Maxima log-form). Placed BEFORE the RootOf dispatch: a √(quadratic) is a
+    // RootOf of t²−p, so `try_rootof_decision` would otherwise short-circuit
+    // these to `false`. Sound: bails on anything outside the single-radical
+    // class, the zero test needs both Q[x] coordinates of the numerator to
+    // vanish, so it can only ever prove equality.
+    {
+        auto radical_diff = context.arena().make<Binary>(
+            BinaryOp::Sub, lhs_s.value(), rhs_s.value());
+        // Run the radical zero test as a fresh top-level operation: its
+        // `polynomial_normal_form`/`expand` normalisation is not idempotent under
+        // an already active operation (we re-simplified the operands above), which
+        // would leave the coordinate polynomials un-reduced and the test would
+        // spuriously fail. Restore the flag afterwards.
+        const bool saved_active = context.operation_active_;
+        context.operation_active_ = false;
+        const bool radical_eq = radical_zero_diff(radical_diff, context);
+        context.operation_active_ = saved_active;
+        if (radical_eq) {
+            finalize();
+            return ok(true);
+        }
     }
 
     // F7.5.A1 / HC-F75-CYCLOTOMIC-ROOTOF: RootOf-specific decisions.
