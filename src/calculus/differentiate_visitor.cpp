@@ -10,7 +10,11 @@ struct Differentiator::Visitor {
     [[nodiscard]] Result<ExprPtr> operator()(const RationalLit&) const { return ok(make_integer(self.arena_, 0)); }
     [[nodiscard]] Result<ExprPtr> operator()(const Constant&) const { return ok(make_integer(self.arena_, 0)); }
     [[nodiscard]] Result<ExprPtr> operator()(const DecimalLit&) const { return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Decimal literals are not supported in symbolic differentiation")); }
-    [[nodiscard]] Result<ExprPtr> operator()(const ComplexLit&) const { return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Complex literals differentiation not implemented")); }
+    // A ComplexLit is a numeric constant (e.g. the imaginary unit −i emitted by
+    // the rational integrator); it carries no variable, so d/dx ≡ 0 like any
+    // other literal. Bailing here blocked verifying complex-form antiderivatives
+    // such as ∫x²/(x²−1) = x − i·arctan(−i·x).
+    [[nodiscard]] Result<ExprPtr> operator()(const ComplexLit&) const { return ok(make_integer(self.arena_, 0)); }
     [[nodiscard]] Result<ExprPtr> operator()(const Symbol& symbol) const { return ok(make_integer(self.arena_, symbol.name == var.name ? 1 : 0)); }
     [[nodiscard]] Result<ExprPtr> operator()(const Unary& unary) const { return self.differentiate_unary(unary, var); }
     [[nodiscard]] Result<ExprPtr> operator()(const Binary& binary) const { return self.differentiate_binary(binary, var); }

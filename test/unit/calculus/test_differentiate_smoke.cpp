@@ -94,4 +94,31 @@ TEST_F(DifferentiateSmokeTest, ConstantDifferentiatesToZero) {
     EXPECT_TRUE(lit->value.is_zero());
 }
 
+// A ComplexLit is a numeric constant; its derivative must be 0 (not Unimplemented).
+TEST_F(DifferentiateSmokeTest, ComplexLiteralDifferentiatesToZero) {
+    ExprPtr i_unit = ctx.arena().make<ComplexLit>(
+        BigInt(0), BigInt(1), BigInt(1), BigInt(1));  // 0 + 1·i
+    auto d = calculus::diff(i_unit, x, 1U, ctx);
+    ASSERT_TRUE(d.is_ok()) << d.error().message;
+    auto s = ctx.simplify(d.value());
+    ASSERT_TRUE(s.is_ok());
+    auto* lit = expr_cast<IntegerLit>(s.value());
+    ASSERT_NE(lit, nullptr);
+    EXPECT_TRUE(lit->value.is_zero());
+}
+
+// End-to-end: the rational integrator emits a complex closed form
+// ∫x²/(x²−1) dx = x − i·arctan(−i·x). Differentiating it (which now traverses
+// the ComplexLit constant) must recover the integrand.
+TEST_F(DifferentiateSmokeTest, DiffOfComplexAntiderivativeRecoversIntegrand) {
+    ExprPtr integrand = parse("x^2/(x^2-1)");
+    auto F = calculus::integrate(integrand, x, ctx);
+    ASSERT_TRUE(F.is_ok()) << F.error().message;
+    auto D = calculus::diff(F.value(), x, 1U, ctx);
+    ASSERT_TRUE(D.is_ok()) << D.error().message;
+    auto eq = symbolic::mathematically_equal(D.value(), integrand, ctx);
+    ASSERT_TRUE(eq.is_ok());
+    EXPECT_TRUE(eq.value());
+}
+
 }  // namespace
