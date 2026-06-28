@@ -44,6 +44,16 @@ public:
         unsigned int depth,
         const QuotientView& quotient);
 
+    // Signed infinity of a pole numerator/denominator at a finite point, recovered
+    // from the reciprocal denominator/numerator → 0 (general; nullopt when the
+    // sign cannot be decided exactly).
+    [[nodiscard]] std::optional<Result<ExprPtr>> try_signed_pole_via_reciprocal(
+        ExprPtr numerator,
+        ExprPtr denominator,
+        const Symbol& var,
+        ExprPtr point,
+        LimitDirection dir);
+
 private:
     symbolic::CASContext& context_;
     AstArena& arena_;

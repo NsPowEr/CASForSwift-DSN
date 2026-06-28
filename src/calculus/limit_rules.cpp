@@ -44,6 +44,80 @@ std::optional<Result<ExprPtr>> LimitEngine::try_log_log_limit(
     return ok(limit_make_integer(arena_, 1));
 }
 
+std::optional<Result<ExprPtr>> LimitEngine::try_signed_pole_via_reciprocal(
+    ExprPtr numerator, ExprPtr denominator, const Symbol& var, ExprPtr point,
+    LimitDirection dir) {
+    // expr = numerator/denominator diverges at a finite `point` (denominator→0,
+    // numerator↛0). Recover the *sign* of the infinity from the reciprocal
+    // r = denominator/numerator → 0:  expr→+∞ ⟺ r→0⁺,  expr→−∞ ⟺ r→0⁻.
+    // The one-sided sign of r→0 is the sign of its first non-vanishing Taylor
+    // coefficient c_k = r^(k)(point)/k! : an even valuation k keeps that sign on
+    // both sides, an odd k flips it on the left. This generalises the polynomial
+    // pole analysis (try_polynomial_pole_limit) to any pole whose reciprocal is
+    // smooth at the point (e.g. tan(x)/(x−π/2), whose reciprocal (x−π/2)·cot(x)
+    // is regular there). Returns nullopt whenever the sign cannot be decided
+    // exactly — the caller must never guess (REGOLA ZERO).
+    ExprPtr r_expr = arena_.make<Binary>(BinaryOp::Div, denominator, numerator);
+    auto r_simp = context_.simplify(r_expr);
+    if (r_simp.is_error()) return std::nullopt;
+    ExprPtr r = r_simp.value();
+
+    // r must actually vanish at the point (confirms a genuine pole of expr).
+    auto r_at = substitute_and_simplify(r, var, point);
+    if (r_at.is_error() || !limit_is_zero(r_at.value())) return std::nullopt;
+
+    // Exact sign of a fully-simplified rational literal (incl. −literal); 0 when
+    // the value is zero or the sign is not exactly decidable.
+    auto exact_sign = [](ExprPtr e) -> int {
+        if (const auto* il = expr_cast<IntegerLit>(e))
+            return il->value.is_zero() ? 0 : (il->value.is_negative() ? -1 : 1);
+        if (const auto* rl = expr_cast<RationalLit>(e))
+            return rl->numerator.is_zero() ? 0 : (rl->numerator.is_negative() ? -1 : 1);
+        if (const auto* u = expr_cast<Unary>(e); u != nullptr && u->op == UnaryOp::Neg) {
+            if (const auto* il = expr_cast<IntegerLit>(u->operand))
+                return il->value.is_zero() ? 0 : (il->value.is_negative() ? 1 : -1);
+            if (const auto* rl = expr_cast<RationalLit>(u->operand))
+                return rl->numerator.is_zero() ? 0 : (rl->numerator.is_negative() ? 1 : -1);
+        }
+        return 0;
+    };
+
+    auto make_signed_inf = [&](int s) -> ExprPtr {
+        ExprPtr inf = arena_.make<Constant>(MathConstant::Infinity);
+        return s < 0 ? static_cast<ExprPtr>(arena_.make<Unary>(UnaryOp::Neg, inf)) : inf;
+    };
+
+    // Valuation scan: first k with r^(k)(point) ≠ 0 gives the leading behaviour.
+    // Bound by the engine's depth budget (no fresh magic constant); exceeding it
+    // → nullopt (diagnostic fall-through, never a wrong sign).
+    for (unsigned int k = 1U; k <= max_depth_budget_; ++k) {
+        auto dk = diff(r, var, k, context_);
+        if (dk.is_error()) return std::nullopt;
+        auto ck = substitute_and_simplify(dk.value(), var, point);
+        if (ck.is_error()) return std::nullopt;
+        if (limit_is_zero(ck.value())) continue;
+        const int csign = exact_sign(ck.value());
+        if (csign == 0) return std::nullopt;  // undecidable sign → no guess
+
+        auto side_sign = [&](LimitDirection side) -> int {
+            if ((k % 2U) == 0U) return csign;
+            return side == LimitDirection::Left ? -csign : csign;
+        };
+
+        if (dir == LimitDirection::Both) {
+            const int ls = side_sign(LimitDirection::Left);
+            const int rs = side_sign(LimitDirection::Right);
+            if (ls != rs)
+                return std::optional<Result<ExprPtr>>(fail<ExprPtr>(CASError{
+                    .kind = CASErrorKind::Undefined,
+                    .message = "Limite bilaterale: il polo diverge con segno opposto sui due lati"}));
+            return std::optional<Result<ExprPtr>>(ok(make_signed_inf(ls)));
+        }
+        return std::optional<Result<ExprPtr>>(ok(make_signed_inf(side_sign(dir))));
+    }
+    return std::nullopt;
+}
+
 Result<ExprPtr> LimitEngine::compute_quotient_limit(
     ExprPtr /*expr*/,
     const Symbol& var,
@@ -106,7 +180,12 @@ Result<ExprPtr> LimitEngine::compute_quotient_limit(
     
     if (!zero_over_zero && !infinity_over_infinity) {
         if (limit_is_zero(denominator_at_point.value()) && !limit_is_zero(numerator_at_point.value())) {
-            // Pole: x/0 -> Inf
+            // Pole: numerator/0 → ±∞. Recover the sign from the reciprocal when
+            // it is exactly decidable; otherwise fall back to the (unsigned)
+            // magnitude as before (no regression on cases that only assert ∞).
+            if (auto signed_pole = try_signed_pole_via_reciprocal(
+                    quotient.numerator, quotient.denominator, var, point, dir))
+                return *signed_pole;
             return ok(arena_.make<Constant>(MathConstant::Infinity));
         }
         if (direct.is_ok()) return direct;
