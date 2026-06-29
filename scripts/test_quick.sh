@@ -46,7 +46,6 @@ SLOW_OK=(
     FactorizationTowerNTest.SplitsX2Minus5_Over_Q_Sqrt2_Sqrt3_Sqrt5       # >240s
     PrimitiveElementTest.RedundantMixedTower_Sqrt2_Sqrt3_Sqrt5_Sqrt6      # >60s (oggi DISABLED_)
     PrimitiveElementTest.DetectTowerNLevel_SqrtTwoSqrtThreeSqrtFive       # 31s
-    VanHoeijFactorTest.AcceptanceGate_AG2_SwinnertonDyer_SD3_Irreducible  # Swinnerton-Dyer, lento
 )
 
 # Quarantena (noti-rossi) — caricata dal file governato.

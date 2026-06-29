@@ -237,6 +237,20 @@ public:
     void clear_interrupt() noexcept { interrupted_ = false; }
     [[nodiscard]] bool is_interrupted() const noexcept { return interrupted_; }
 
+    // Opt-in wall-clock deadline for long-running combinatorial routines
+    // (e.g. Kronecker recombination) that have no internal step budget.  A
+    // caller that owns a wall-clock budget — currently the composite Trager
+    // tower shift search, which derives its budget from ctx.timeout() — sets
+    // this so inner routines abort instead of running past it; unset (the
+    // default) means UNBOUNDED, preserving the historical behaviour of direct
+    // factorisation calls that legitimately run far longer than ctx.timeout().
+    void set_hard_deadline(std::chrono::steady_clock::time_point tp) noexcept { hard_deadline_ = tp; }
+    void clear_hard_deadline() noexcept { hard_deadline_ = std::chrono::steady_clock::time_point::max(); }
+    [[nodiscard]] std::chrono::steady_clock::time_point hard_deadline() const noexcept { return hard_deadline_; }
+    [[nodiscard]] bool past_hard_deadline() const noexcept {
+        return interrupted_ || std::chrono::steady_clock::now() >= hard_deadline_;
+    }
+
     // F7.0-A3.3: poll-point helper for heavy non-simplify loops
     // (polynomial GCD, Groebner, factorization, matrix Bareiss, etc.).
     // Returns a Timeout error with explicit "cancelled" message if the
@@ -308,6 +322,7 @@ public:
     ComputationTrace trace_;
     std::chrono::milliseconds timeout_{1000};
     std::chrono::steady_clock::time_point operation_started_at_{};
+    std::chrono::steady_clock::time_point hard_deadline_{std::chrono::steady_clock::time_point::max()};
     std::uint64_t ops_count_{0};
     std::uint64_t fresh_symbol_counter_{0U};
     PostSimplifyHook post_simplify_hook_{nullptr};

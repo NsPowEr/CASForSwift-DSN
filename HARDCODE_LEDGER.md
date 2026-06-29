@@ -390,8 +390,30 @@
   EXCLUDE list i 4 test affetti FactorizationTowerTest +
   FactorizationTowerNTest.IrreducibleX2Minus7.  Tutti restano abilitati
   via `--slow` o gtest_filter esplicito; profile dedicato consigliato.
-- **STATO**: APERTO — perf debt suspetta-causa identificata, profilatura
-  + fix in sessione dedicata.
+- **RISOLUZIONE 2026-06-29 (A3)**: la diagnosi "suspect introducer 5c72bc0 /
+  together() GCD" era **ERRATA** (confutata profilando `sample`). Due cause reali,
+  entrambe fixate:
+  (1) **Kronecker non-cancellabile**: per una torre irriducibile la norma di Trager
+  è un *perfect power* di un irriducibile Q[x] → il recombination cade su
+  `factorize_kronecker` (ricerca combinatoria divisor-tuple esponenziale) che NON
+  pollava alcuna cancellazione → blocco oltre ogni budget. Fix: `factorize_kronecker`
+  polla `ctx.past_hard_deadline()` (deadline **opt-in** posseduta dal chiamante;
+  default = illimitato per non rompere le factorizzazioni lente-ma-legittime, es.
+  Trager su Q(∛2) ~27s) e propaga `Timeout` invece di restituire "irriducibile".
+  `factor_polynomial_tower[_n]` pubblica `ctx.set_hard_deadline(now()+ctx.timeout())`.
+  (2) **LLL a frazioni Rational**: `lll_reduction` rifaceva la Gram-Schmidt completa
+  per ogni swap con coefficienti `Rational` → esplosione frazioni su reticoli van
+  Hoeij. Sostituito con **LLL intero fraction-free** (Cohen 2.6.7 / de Weger): d[i],
+  λ[i][j] interi Hadamard-bounded. Rationale fallback solo per basi rank-deficient.
+  **Esito**: AntiHardcode 3.2s, PreservesLeadingCoeff 5.8s, IrreducibleX2Minus7 3.5s,
+  SplitsX2Minus3 4.5s — rimossi dalla quarantena. 239 test factor/poly/LLL/Galois +
+  327 consumer (integrate/simplify/solve) verdi.
+- **RESIDUO APERTO**: i due splitter deg-4 → norma **deg-16** (`SplitsProductOfQuadratics`,
+  `SplitsX4Minus10X2Plus1`) restano lenti (>200s): col LLL risolto il collo di
+  bottiglia si è spostato sull'**Hensel-lift** mod-p^k della norma deg-16 a coefficienti
+  enormi (profilo: `hensel_lift`/`quadratic_step`/`poly_*_mod`). Facet distinto, restano
+  in quarantena. `PrimitiveElementTest.SqrtTwoSqrtThreeSqrtFive` non toccato.
+- **STATO**: PARZIALMENTE RISOLTO (tower hang + LLL chiusi; Hensel-lift deg-16 aperto).
 
 ### HC-F8-FACTORIZATIONTOWER-AntiHardcode-X2Minus2-Sqrt3Sqrt5 — Hang >500s
 - **File**: `test/unit/algebra/test_factorization_tower.cpp`
@@ -409,15 +431,43 @@
 - **Workaround applicato 2026-06-14**: aggiunto a `scripts/test_quick.sh`
   EXCLUDE list. Test resta abilitato via `--slow` cap 1800s o via
   invocazione esplicita.
-- **STATO**: APERTO (perf debt, baseline pre-esistente, non bloccante).
+- **STATO**: ✅ RISOLTO 2026-06-29 (A3). Root cause = `factorize_kronecker`
+  non-cancellabile sulla norma perfect-power (vedi HC-F8-FACTORIZATIONTOWER-PERF
+  risoluzione). Ora `factor_polynomial_tower` pubblica `ctx.set_hard_deadline()`
+  e Kronecker lo polla → termina in 3.2s (Unimplemented entro budget). Rimosso
+  dalla quarantena.
 
 ### HC-F8-SD3-VANHOEIJ-SLOW — VanHoeij SD3 Swinnerton-Dyer >400s
 - **File**: `test/unit/algebra/test_factorization_lll.cpp:551` (`VanHoeijFactorTest.AcceptanceGate_AG2_SwinnertonDyer_SD3_Irreducible`).
 - **Categoria CLAUDE.md**: nessuna (performance debt, non hardcode codice).
 - **Sintomo**: test hangs >400s su clean baseline (verificato 2026-06-13 via `git stash` + rerun) — quindi NON regressione di Phase A/B. SD3 esercita van Hoeij LLL su polinomio Swinnerton-Dyer di grado 9 (3 quadratiche irriducibili stack via field extension nesting).
 - **Fix corretto**: investigare costo LLL knapsack su densità SD3 specifica; possibile bound enumeration troppo largo, oppure profilo lattice mal-condizionato.
-- **Workaround applicato 2026-06-13**: aggiunto a `scripts/test_quick.sh` EXCLUDE list (linea 42). Test resta abilitato via `--slow` (cap 1800s) e nelle sessioni pre-commit.
-- **STATO**: APERTO (perf debt, non bloccante).
+- **AGGIORNAMENTO 2026-06-29 (A3)**: la diagnosi "LLL lento" era corretta ma parziale.
+  Il **costo LLL è risolto** dal nuovo LLL intero fraction-free (vedi
+  HC-F8-FACTORIZATIONTOWER-PERF): la Gram-Schmidt Rational esplodeva in frazioni.
+  MA SD3 (Swinnerton-Dyer **grado 8**, non 9, irriducibile) **resta lento**: con LLL
+  veloce van Hoeij prova correttamente l'irriducibilità (nessun fattore), ma
+  `factorize_univariate_hensel_or_kronecker` non si fida del verdetto e — essendo
+  `deg 8 ≤ kronecker_max_degree(8)` — cade su `factorize_kronecker` **illimitato**
+  (SD3 è path diretto `factor_over_integers`, NON tower → nessun `hard_deadline`).
+  Kronecker su irriducibile = ricerca esaustiva senza fattore = lentissima.
+- **✅ RISOLTO 2026-06-29 (A3, fase 2) — lucky-prime + verdetto esaustivo**. Diagnosi affinata
+  instrumentando il path (`[WANG]` trace su RedundantGenerator): **tutti i primi candidati sono
+  lucky** (`f` squarefree mod p) e la recombination **Hensel esaustiva** (`recombine_from`,
+  completa fino a grado n/2) è in realtà **affidabile** — concorda con Kronecker (deg-8 splitta
+  `found=1`, deg-4 genuinamente irriducibile su entrambi). Il fallimento del primo tentativo (a)
+  era un **BUG d'implementazione**: avevo fatto fidare il caller del verdetto di **van Hoeij**
+  (incompleto: può mancare fattori anche su primo lucky) **saltando il fallback esaustivo**.
+  Fix corretto: il caller (`factorization_wang_eez.cpp`) si fida **solo** del verdetto della
+  recombination **esaustiva** (che gira già come fallback quando van Hoeij non trova nulla) e
+  **solo su primo lucky** (`integer_poly_squarefree_mod_p`, check `gcd(f,f') mod p` costante).
+  "Nessun fattore su lucky prime via ricerca esaustiva" = prova di irriducibilità → ritorna `{f}`
+  invece di cadere su Kronecker illimitato. Primo unlucky (`p|disc`) → `bad_primes++`, prova
+  altro primo; se tutti unlucky (patologico) → resta il fallback Kronecker.
+- **Esito**: SD3 **219ms** (era hang >400s). RedundantGenerator **2003ms = 2 fattori corretti**
+  (niente silent-wrong). 243 factor/poly/LLL/Galois/Trager + 352 consumer (integrate/simplify/
+  solve/residue) verdi, 0 regressioni. Rimosso da `test_quick.sh` SLOW_OK.
+- **STATO**: ✅ RISOLTO (LLL fraction-free + verdetto irriducibilità lucky-prime esaustivo).
 
 ## Voci aperte
 

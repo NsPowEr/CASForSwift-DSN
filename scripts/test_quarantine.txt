@@ -21,12 +21,15 @@
 # Stato reale dei quarantenati (hang → fail veloce, per-test timeout):
 #   bash scripts/test_quick.sh --quarantine
 #
-CEILING: 7
+CEILING: 4
+#
+# Risolti 2026-06-29 (A3: integer fraction-free LLL + opt-in Kronecker hard-deadline
+# nel tower) — rimossi dalla quarantena, terminano in <6s:
+#   - FactorizationTowerTest.AntiHardcodeIrreducibleX2Minus2OverQSqrt3Sqrt5 (3.2s)
+#   - FactorizationTowerTest.PreservesLeadingCoefficientAsContent (5.8s)
+#   - FactorizationTowerNTest.IrreducibleX2Minus7_Over_Q_Sqrt2_Sqrt3 (3.5s, contratto allineato ad AntiHardcode)
 #
 F2GateBenchmark.FactorOneHundredRandomZxUnderBudget	HC-F8-F2GATE-BENCHMARK-FAIL	fail permanente ~155s (budget factorizzazione Z[x])
-FactorizationTowerTest.AntiHardcodeIrreducibleX2Minus2OverQSqrt3Sqrt5	HC-F8-FACTORIZATIONTOWER-AntiHardcode-X2Minus2-Sqrt3Sqrt5	hang >500s, 2-level Trager
-FactorizationTowerTest.PreservesLeadingCoefficientAsContent	HC-F8-FACTORIZATIONTOWER-PERF	regressione perf famiglia tower 2-level
-FactorizationTowerTest.SplitsProductOfQuadraticsOverQSqrt2Sqrt3	HC-F8-FACTORIZATIONTOWER-PERF	regressione perf famiglia tower 2-level
-FactorizationTowerTest.SplitsX4Minus10X2Plus1OverQSqrt2Sqrt3	HC-F8-FACTORIZATIONTOWER-PERF	regressione perf famiglia tower 2-level
-FactorizationTowerNTest.IrreducibleX2Minus7_Over_Q_Sqrt2_Sqrt3	HC-F8-FACTORIZATIONTOWER-PERF	regressione perf famiglia towerN
+FactorizationTowerTest.SplitsProductOfQuadraticsOverQSqrt2Sqrt3	HC-F8-FACTORIZATIONTOWER-PERF	deg-16 norm: collo di bottiglia ora Hensel-lift (LLL risolto)
+FactorizationTowerTest.SplitsX4Minus10X2Plus1OverQSqrt2Sqrt3	HC-F8-FACTORIZATIONTOWER-PERF	deg-16 norm: collo di bottiglia ora Hensel-lift (LLL risolto)
 PrimitiveElementTest.SqrtTwoSqrtThreeSqrtFive	HC-F8-FACTORIZATIONTOWER-PERF	regressione perf primitive element 3-level

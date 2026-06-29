@@ -48,9 +48,15 @@ Ordinati per severità/impatto decrescente. Ogni voce verificata aperta a codice
 - **Residuo non bloccante**: fedeltà error-kind su interrupt asincrono *durante* `parse_polynomial` interno a un ramo (rietichettato Unimplemented, finestra ~µs, nessun hang) — vedi ledger HC-F70-A33.
 - **Ledger**: HC-F75-A3-HARD-TIMEOUT (chiuso), HC-F70-A33-POLL-COVERAGE (aggiornato 2026-06-26) · **Refs**: T-015, T-024
 
-### A3 · Perf-hang fattorizzazione torri / VanHoeij — `[E3·C4·S2·R2]`
-- **Stato a codice**: hang >400-500s su `Q(√2,√3,√5)` factorization e VanHoeij SD3 Swinnerton-Dyer.
-- **Ledger**: HC-F8-FACTORIZATIONTOWER-PERF, HC-F8-FACTORIZATIONTOWER-AntiHardcode-X2Minus2-Sqrt3Sqrt5, HC-F8-SD3-VANHOEIJ-SLOW · **Refs**: BUG-HANG-002
+### A3 · Perf-hang fattorizzazione torri / VanHoeij — 🔨 QUASI-FATTO 2026-06-29 (solo deg-16 Hensel residuo) — `[E3·C4·S2·R2]`
+- **FATTO 2026-06-29** (analisi `sample` + instrumentazione `[WANG]`, spec `Hensel_Lifting.md` letta): la diagnosi vecchia ("suspect 5c72bc0 / together() GCD") era **ERRATA**. Tre fix reali, zero debito, zero hardcode:
+  - **(1) LLL intero fraction-free** (`lattice_lll.cpp`, Cohen 2.6.7 / de Weger): la Gram-Schmidt `Rational` rifatta per-swap esplodeva in frazioni sui reticoli van Hoeij. Ora d[i]/λ[i][j] interi Hadamard-bounded; fallback Rational solo per basi rank-deficient. 25 test LLL/VanHoeij correttezza verdi.
+  - **(2) Kronecker cancellabile** (`factorize_kronecker.cpp`): per norma torre perfect-power il recombination cade su ricerca combinatoria esponenziale che non pollava cancellazione → hang. Ora polla `ctx.past_hard_deadline()` (deadline **opt-in** del chiamante; default illimitato per non rompere factor lente-legittime, es. Trager Q(∛2) 27s) + propaga Timeout. `factor_polynomial_tower[_n]` pubblica `set_hard_deadline(now()+ctx.timeout())`.
+  - **(3) Verdetto irriducibilità lucky-prime** (`factorization_wang_eez.cpp`, HC-F8-SD3-VANHOEIJ-SLOW ✅): su primo **lucky** (`f` squarefree mod p, check `gcd(f,f') mod p` costante) la recombination **Hensel esaustiva** è completa → "nessun fattore" = prova di irriducibilità → ritorna `{f}` invece di cadere su Kronecker illimitato. Si fida **solo** del verdetto esaustivo (NON di van Hoeij, incompleto) e **solo su lucky prime**. Un primo tentativo "trust van Hoeij" era stato revertito (silent-wrong su RedundantGenerator) — il bug era saltare il fallback esaustivo; risolto.
+  - **Esito**: quarantena 7→4. SD3 **219ms** (era hang >400s, rimosso da SLOW_OK). AntiHardcode 3.2s, PreservesLeadingCoeff 5.8s, IrreducibleX2Minus7 3.5s. **243** factor/poly/LLL/Galois/Trager + **352** consumer (integrate/simplify/solve/residue) verdi, **0 regressioni**.
+- **🔧 RESIDUO APERTO (1 facet, perf, in quarantena)**:
+  - **deg-16 Hensel-lift**: gli splitter `SplitsProductOfQuadratics`/`SplitsX4Minus10X2Plus1` (norma deg-16 coeff enormi) ora collo-di-bottiglia su `hensel_lift`/mod-p^k (LLL + Kronecker risolti). Ottimizzazione Hensel-lift mod-p^k (es. quadratic Hensel / aritmetica più veloce), R2/R3, sessione dedicata. Non correttezza (le antiderivate/fattorizzazioni sono giuste, solo lento).
+- **Ledger**: HC-F8-FACTORIZATIONTOWER-PERF (PARZIALE: solo deg-16 Hensel), HC-F8-FACTORIZATIONTOWER-AntiHardcode-X2Minus2-Sqrt3Sqrt5 (✅ RISOLTO), HC-F8-SD3-VANHOEIJ-SLOW (✅ RISOLTO) · **Refs**: BUG-HANG-002
 
 ### A4 · Smith Normal Form su Q[x] PID generale — ✅ FATTO (verificato 2026-06-26, stale) — `[E3·C3·S3·R2]`
 - **Stato a codice**: già implementato in `src/linalg/matrix_smith_qx.cpp` (`smith_normal_form_qx`): algoritmo PID Bezout-based completo (row/col ops con `polynomial_bezout` + `polynomial_exact_divide`, catena divisibilità, normalizzazione monica). Dispatch automatico da `matrix_smith.cpp:163` quando entrate single-var poly. I citati `:166/:216` sono il bail multivar (correttamente NON-PID) e il guard Z-path — non gap. Q[x] è Euclideo ⇒ no Storjohann/LLL necessario. Coverage rafforzata 2026-06-26: +test non-diagonale `[[x,1],[−1,x]]` → `diag(1, x²+1)` con certificato `U·A·V==S`. 4/4 SmithQxTest.
@@ -237,6 +243,24 @@ A16..A24 (debiti minori) — indipendenti, inframmezzabili
 4. **A7** (Slater/Meijer) ← **prossima research, entry-point** · A1 (Risch RP-2) BLOCCATO
 5. **A6** (Stauduhar) · **A9** (tower≥3) · ~~A10~~ ✅ · A11 (FROZEN) / A12 (done) / A14 (done)
 6. **A15** (done) · **A8** (Kovacic n=12) · **A19-A22** — bassa priorità
+
+
+
+---
+
+## F — ESTENSIONI ARCHITETTURALI XCAS / GIAC (lungo termine)
+
+> Macro-aree per il raggiungimento della parità applicativa completa con XCAS/Giac.
+> Ogni task richiede la redazione e approvazione di una spec formale prima dell'implementazione (REGOLA 0.1).
+
+| ID | Area | Titolo / Descrizione Algoritmica | Codici | Dipendenze | Stato |
+|---|---|---|---|---|---|
+| XCAS-EXT-01 | Scripting | **Interprete e Control Flow**: execution engine su AST per blocchi `if/then/else`, cicli `for`/`while`, scope locale/globale e definizioni `proc(args)`. | `[E4·C3·S3·R1]` | Lexer/Parser | Pianificato |
+| XCAS-EXT-02 | Calculus | **Trasformate Fourier & Z**: integratore di kernel trascendente ($e^{-i\omega t}$ / $z^{-n}$), tabelle identità, proprietà di convoluzione e traslazione. | `[E3·C3·S3·R1]` | Calculus core | Pianificato |
+| XCAS-EXT-03 | Tensor | **Calcolo Tensoriale & Geometria Diff**: oggetti n-dimensionali, indici covarianti/controvarianti, contrazione di Einstein, simboli di Christoffel e operatori vettoriali ($\nabla \times, \nabla \cdot$). | `[E4·C4·S3·R1]` | LinAlg/Symbolic | Pianificato |
+| XCAS-EXT-04 | Optimization | **Ottimizzazione & Simplesso**: algoritmo del Simplesso esatto (su Rational) e numerico, solutore moltiplicatori di Lagrange per minimi/massimi vincolati. | `[E3·C3·S2·R1]` | LinAlg esatta | Pianificato |
+| XCAS-EXT-05 | Graphics | **Motore Plotting Adattivo**: campionamento adattivo di funzioni cartesiane/parametriche/polari 2D e superfici 3D, generatore di maglie (mesh) agnostico da UI. | `[E4·C3·S2·R1]` | Evaluator numerico | Pianificato |
+| XCAS-EXT-06 | Geometry | **Geometria Dinamica & Vincoli**: primitive algebriche (rette, coniche), intersezioni esatte e risolutore di vincoli (incidenza, tangenza) via Basi di Gröbner. | `[E5·C4·S2·R1]` | Gröbner/Resultanti | Pianificato |
 
 ---
 

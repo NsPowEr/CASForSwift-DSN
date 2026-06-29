@@ -361,6 +361,14 @@ Result<Factorization> factor_polynomial_tower_n(
     const std::size_t max_attempts = (user_bound > 0U) ? user_bound : default_bound;
     const auto deadline = std::chrono::steady_clock::now() + ctx.timeout();
 
+    // Opt-in hard deadline so inner Kronecker honours the tower budget, restored on exit (HC-F8-FACTORIZATIONTOWER-PERF).
+    struct DeadlineGuard {
+        symbolic::CASContext& c;
+        std::chrono::steady_clock::time_point prev;
+        ~DeadlineGuard() { c.set_hard_deadline(prev); }
+    } deadline_guard{ctx, ctx.hard_deadline()};
+    ctx.set_hard_deadline(std::min(ctx.hard_deadline(), deadline));
+
     for (std::size_t s_val = 0U; s_val <= max_attempts; ++s_val) {
         if (std::chrono::steady_clock::now() >= deadline) {
             return fail<Factorization>(nfact_error(
