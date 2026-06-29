@@ -620,6 +620,7 @@ if(CAS_ENABLE_TESTING)
         test/fuzz/test_symbolic_fuzz.cpp
         test/unit/error/test_diagnostic.cpp
         test/unit/error/test_unimplemented_payload.cpp
+        test/unit/error/test_unimplemented_info.cpp
 
         # T-053: reactivated orphan tests (were on disk but not wired → 0 coverage)
         test/unit/numtheory/test_miller_rabin.cpp
@@ -674,6 +675,7 @@ test/unit/algebra/test_cyclotomic_rootof_d2.cpp
         test/unit/symbolic/test_rootof_auto_trigger.cpp
         test/unit/calculus/test_integrate_risch_exp_mix.cpp
         test/unit/calculus/test_risch_parametric.cpp
+        test/unit/calculus/test_risch_parametric_tower.cpp
         test/unit/calculus/test_risch_de_extensions.cpp
         test/unit/calculus/test_risch_exp_expand.cpp
         test/unit/calculus/test_z_transform.cpp

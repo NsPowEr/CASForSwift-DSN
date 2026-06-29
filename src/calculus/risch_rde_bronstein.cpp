@@ -360,16 +360,18 @@ Result<std::vector<ParametricRischDeQSolution>> solve_risch_de_parametric_field(
     
     // df > 0 — non-cancellation parametric PolyRischDE (Bronstein §6.5/§7.4/§8.4):
     // deg(y)=dg_max−df, lc(y)=lc(g)/lc(f), reduce+recurse; lc(g)=Σ c_i·lc(g_i).
-    // NOT IMPLEMENTED — unreachable from corpus + 16 hand-built tower integrands
-    // (verified 2026-06-27). No test/Maxima check = unverifiable on Risch hot path
-    // → REGOLA ZERO forbids it. Ledger HC-F8-PENDING-17 (build deg_t(f)>0 tower).
+    // NOT IMPLEMENTED (A1).  Now deterministically REACHABLE + reproduced by
+    // ParametricTowerTest.Log_FEqualsTheta_DfPositive_ReachesNonCancellation
+    // (A26 harness, f=log(x) over Q(x,log x)); when Bronstein §6.5 lands, that
+    // test flips from Unimplemented to a back-substitution check.  Contract:
+    // diagnostic Unimplemented, never a hang nor a silent wrong answer.
     if (df > 0) {
         return make_unimplemented<std::vector<ParametricRischDeQSolution>>(
             "calculus", "solve_risch_de_parametric_field",
             "parametric PolyRischDE non-cancellation case (deg_t(f) > 0) not "
             "implemented — Bronstein Symbolic Integration I §6.5/§7.4/§8.4; "
-            "deg(y)=dg-df, lc(y)=lc(g)/lc(f) then reduce+recurse. Unreachable "
-            "from current corpus; see HARDCODE_LEDGER.md HC-F8-PENDING-17",
+            "deg(y)=dg-df, lc(y)=lc(g)/lc(f) then reduce+recurse. See "
+            "HARDCODE_LEDGER.md HC-F8-PENDING-17 / task A1",
             cas::error::reason_codes::RISCH_NO_POLYNOMIAL_SOLUTION,
             "Risch DE solver: parametric solver with df > 0 is unimplemented");
     }
@@ -378,10 +380,14 @@ Result<std::vector<ParametricRischDeQSolution>> solve_risch_de_parametric_field(
     ExprPtr f_0 = leading_coefficient(f_poly);
     if (!f_0) f_0 = arena.make<IntegerLit>(BigInt(0));
     
-    // We start at i = N.
+    // We start at i = N.  Bind a const& so the bounds-checked const operator[]
+    // is selected (the non-const overload is unchecked, std-vector style):
+    // N = dg_max+1 routinely exceeds deg(g_s), and OOB must read as the zero
+    // coefficient (nullptr → 0), not a heap-buffer-overflow.
     std::vector<ExprPtr> H_vec(m);
     for (std::size_t s = 0; s < m; ++s) {
-        ExprPtr coeff = g_polys[s][static_cast<std::size_t>(N)];
+        const algebra::PolyExpr& gp = g_polys[s];
+        ExprPtr coeff = gp[static_cast<std::size_t>(N)];
         H_vec[s] = coeff ? coeff : arena.make<IntegerLit>(BigInt(0));
     }
     
@@ -418,7 +424,8 @@ Result<std::vector<ParametricRischDeQSolution>> solve_risch_de_parametric_field(
             const auto& sol = sols[r];
             std::vector<ExprPtr> terms;
             for (std::size_t s = 0; s < H_current.size(); ++s) {
-                ExprPtr g_val = g_polys[s][static_cast<std::size_t>(i - 1)];
+                const algebra::PolyExpr& gp = g_polys[s];  // const& → bounds-checked operator[]
+                ExprPtr g_val = gp[static_cast<std::size_t>(i - 1)];
                 if (!g_val) g_val = arena.make<IntegerLit>(BigInt(0));
                 
                 if (sol.c[s].numerator().is_zero()) continue;
@@ -429,6 +436,13 @@ Result<std::vector<ParametricRischDeQSolution>> solve_risch_de_parametric_field(
                             (terms.size() == 1U ? terms[0] : arena.make<Sum>(std::move(terms)));
             
             if (ext.type == ExtensionType::Logarithmic) {
+                // PRIMITIVE-CASE GAP (HC-A26-PRIMITIVE-PARAMQ-RATIONAL): the
+                // correction i·y·θ' with θ' = D(t) = u'/u re-introduces a
+                // denominator, so H_next can be rational in the lower field.
+                // The base case solve_risch_de_parametric_q is polynomial-only
+                // (Q[x]) and will return a diagnostic Unimplemented for such a
+                // forcing.  Completing this needs ParamRischDE over Q(x)
+                // (weak-normalizer + denominator bound, Bronstein §5.12/§6.5).
                 ExprPtr i_coef = arena.make<IntegerLit>(BigInt(static_cast<std::int64_t>(i)));
                 ExprPtr corr = arena.make<Product>(std::vector<ExprPtr>{i_coef, sol.y, theta_prime});
                 ExprPtr val = arena.make<Binary>(BinaryOp::Sub, sum_g, corr);

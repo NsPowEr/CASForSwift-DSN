@@ -472,6 +472,15 @@
 
 ## Voci aperte
 
+### HC-A26-PRIMITIVE-PARAMQ-RATIONAL — ParamRischDE primitivo: base case solo Q[x], serve Q(x) razionale
+- **File**: `src/calculus/risch_rde_bronstein.cpp` (ramo `ExtensionType::Logarithmic` in `solve_risch_de_parametric_field`, correzione `i·y·θ'`) + base case `src/calculus/risch_parametric.cpp::solve_risch_de_parametric_q`.
+- **Categoria**: 4 (bail-out su tipo: forzante razionale rifiutata da un solver polinomiale-only — esplicito e diagnostico, non silenzioso).
+- **Aperta da**: A26 (2026-06-29), durante il wire-in/validazione del solver parametrico tower-level.
+- **Sintomo**: nel caso primitivo (estensione log, `D(t)=u'/u`), la ricorsione genera dalla correzione `i·y·θ'` una forzante **razionale** nel campo inferiore (es. `1/x`). Il base case `solve_risch_de_parametric_q` accetta solo polinomi `Q[x]` (parse_polynomial + extract_q_coeffs) → ritorna `Unimplemented (RISCH_NO_POLYNOMIAL_SOLUTION)`. Esempio: `solve_risch_de_parametric_field(f=0, g={1})` su `Q(x, log x)` — la soluzione `y=c·x` esiste ma non viene trovata. **NON è silent-wrong né hang**: contratto REGOLA ZERO rispettato (diagnostico esplicito). Riproduzione: `ParametricTowerTest.Log_PrimitiveDescent_RationalForcing_CleanDiagnostic`.
+- **Fix corretto**: estendere il base case a **ParamRischDE su `Q(x)` razionale** — weak-normalizer (Bronstein 6.1.1) + denominator bound, NON solo `Q[x]`. Bronstein *Symbolic Integration I* §5.12 (limited-integration / IntegratePrimitivePolynomial) + §6.5. Subordinato a REGOLA 0.1 (rileggere spec prima dell'impl).
+- **Esito parziale 2026-06-29 (A26)**: (a) **✅ FIX MEMORY-SAFETY**: heap-buffer-overflow ASan a `risch_rde_bronstein.cpp:384/425` (`g_polys[s][N]` con `N>deg(g_s)` selezionava l'`operator[]` non-const non-bounds-checked) — corretto bindando `const PolyExpr&` → overload const bounds-checked (OOB→0). Verificato sotto ASan. (b) **✅ ramo esponenziale validato sound** (`Exp_F0_GExp_AllSound`, back-substitution `D(y)+f·y≡Σc_i g_i`). (c) il ramo primitivo resta il gap qui descritto.
+- **STATO**: APERTO (perf/completezza; non blocca path live — la funzione resta non-wired in integrate() finché il primitivo non è completo). **Refs**: A26, A1, HC-F8-PENDING-17.
+
 ### HC-F75-B1-IBP-DOUBLE-APPLY — Integration by parts applica regola due volte su Product Log·Pow
 - **File**: `src/calculus/integrate_parts.cpp` + `simplify` su Product post-IBP.
 - **Categoria**: 2 (costanti magiche → in realtà falsa simmetria nel dispatch).
