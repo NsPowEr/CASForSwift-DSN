@@ -413,7 +413,8 @@
   bottiglia si è spostato sull'**Hensel-lift** mod-p^k della norma deg-16 a coefficienti
   enormi (profilo: `hensel_lift`/`quadratic_step`/`poly_*_mod`). Facet distinto, restano
   in quarantena. `PrimitiveElementTest.SqrtTwoSqrtThreeSqrtFive` non toccato.
-- **STATO**: PARZIALMENTE RISOLTO (tower hang + LLL chiusi; Hensel-lift deg-16 aperto).
+  **Tracciato come task separato A25** (TASKLIST_MASTER, perf-only `[E3·C3·S2·R3]`, ⏸️ in pausa).
+- **STATO**: PARZIALMENTE RISOLTO (tower hang + LLL chiusi; Hensel-lift deg-16 = A25, in pausa).
 
 ### HC-F8-FACTORIZATIONTOWER-AntiHardcode-X2Minus2-Sqrt3Sqrt5 — Hang >500s
 - **File**: `test/unit/algebra/test_factorization_tower.cpp`
