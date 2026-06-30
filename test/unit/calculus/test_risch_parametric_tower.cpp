@@ -352,6 +352,30 @@ TEST_F(ParametricTowerTest, WeakNormalizer_ResidueTwo_ShiftedPole) {
         << "expected homogeneous y = 1/(x−1)² via WeakNormalizer inflation at x=1";
 }
 
+// Irreducible QUADRATIC pole (complex-conjugate poles): f = 4x/(x²+1), residue
+// +2.  y_h satisfies y_h'/y_h = −4x/(x²+1) ⇒ y_h = (x²+1)^{−2}.  Proves the
+// inflation is generic over squarefree factors (gcd(fn−n·fd', s)), not anchored
+// to linear poles: D must be lifted (x²+1) → (x²+1)².
+TEST_F(ParametricTowerTest, WeakNormalizer_ResidueTwo_IrreducibleQuadraticPole) {
+    auto f = parse_expr("4*x/(x^2+1)", ctx.arena());
+    std::vector<ExprPtr> g = {parse_expr("1", ctx.arena())};
+    auto res = solve_param_risch_de_rational_q(f, g, x, ctx);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+    DifferentialField bf = base_field_qx(x);
+    bool found_pole = false;
+    for (const auto& sol : res.value()) {
+        EXPECT_TRUE(verify_field_de(sol.y, f, g, sol.c, bf, ctx)) << "unsound (4x/(x²+1), 1)";
+        bool c_zero = true;
+        for (const auto& ci : sol.c) if (!ci.numerator().is_zero()) c_zero = false;
+        if (c_zero) {
+            if (const auto* il = expr_cast<IntegerLit>(sol.y); !il || !il->value.is_zero())
+                found_pole = true;
+        }
+    }
+    EXPECT_TRUE(found_pole)
+        << "expected homogeneous y = 1/(x²+1)² via WeakNormalizer at the quadratic pole";
+}
+
 // Wiring: full parametric Risch DE reachable through the field-solver base case
 // (ext_idx == 0, f ≠ 0 rational).  f = 1/x, g = {2} → y = x, c = 1.
 TEST_F(ParametricTowerTest, RationalRischDE_ReachedThroughFieldBaseCase) {

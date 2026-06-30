@@ -268,8 +268,9 @@ solve_param_limited_integration_rational_q(
         return make_unimplemented<std::vector<ParametricRischDeQSolution>>(
             "calculus", "solve_param_limited_integration_rational_q", msg,
             cas::error::reason_codes::RISCH_NO_POLYNOMIAL_SOLUTION,
-            "Rational limited integration: only rational residues handled; general "
-            "f != 0 rational ParamRischDE pending (HC-A26-PRIMITIVE-PARAMQ-RATIONAL)",
+            "Rational limited integration (f = 0): each forcing g_i must integrate "
+            "to a rational part + Σ c·log/arctan atoms; a non-elementary or "
+            "non-engine-integrable g_i is reported here (HC-A26-PRIMITIVE-PARAMQ-RATIONAL)",
             "HC-A26-PRIMITIVE-PARAMQ-RATIONAL");
     };
     if (m == 0U) return fail_unimpl("empty forcing vector");
