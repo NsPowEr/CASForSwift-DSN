@@ -485,6 +485,16 @@
 - **🔧 RESIDUO APERTO (incompletezza condivisa col solver non-parametrico)**: l'ansatz `y=P/D` trova solo soluzioni con `den(y) | lcm(den f, den g_i)`. **Poli semplici di f con residuo intero-negativo** (WeakNormalizer, Bronstein 6.1.1) → polo di ordine maggiore, silenziosamente assenti (incompletezza, MAI sbagliato). Residui **algebrici** (non razionali) → Unimplemented pulito. Stessa limitazione di `solve_risch_de_rational_q` non-parametrico. Wiring in `integrate()` reale subordinato a questo + df>0 (A1).
 - **STATO**: 🔨 PARZIALE (f=0 ✅ + f≠0 razionale ✅ wired+sound; aperti: WeakNormalizer/residui-interi-negativi, residui algebrici, bug-simplify motore, df>0=A1). **Refs**: A26, A1, HC-F8-PENDING-17.
 
+### HC-SIMPLIFY-RATCOEFF-OVER-POWER — simplify/together/diff perdono coeff razionale in (c·monomio)/potenza
+- **File**: `src/symbolic/simplify_core.cpp` / `simplify_impl.hpp` + `algebra::together` (path razionale). Da localizzare con precisione.
+- **Categoria**: bug di **correttezza** del core simbolico (non un hardcode classico) — il più grave tipo: silent-wrong su semplificazione razionale.
+- **Aperta da**: A26 fase 3 (2026-06-30), durante la verifica di `solve_param_risch_de_rational_q`.
+- **Sintomo**: una frazione con numeratore `(coefficiente razionale)·(monomio)` su una potenza viene semplificata perdendo il coefficiente. Esempio riprodotto: `(−x/2)/x²` → `simplify`/`together`/`diff` danno `−1/x` invece di `−1/(2x)` (il fattore `1/2` sparisce). Confermato con confronto strutturale (`simplifies_to_zero(y − (−1/x))` vero per il risultato corrotto). **SILENT-WRONG**: nessun errore, risultato matematicamente sbagliato → viola REGOLA ZERO.
+- **Impatto**: potenzialmente qualunque calcolo che semplifichi frazioni razionali con coefficienti non interi al numeratore (integrazione, ODE, residui, …). **Da investigare l'ampiezza.**
+- **Workaround in A26**: il solver f≠0 (a) verifica via residuo polinomiale in aritmetica Q esatta (mai il simplifier), (b) emette `y` in forma integer-cleared `(L·P)/(L·D)` per non innescare il bug a valle.
+- **Fix corretto**: localizzare e correggere la normalizzazione di `Div`/`Product` con coefficiente razionale e fattore-potenza in `simplify_core` (probabile path che fonde l'esponente del monomio ma scarta il coefficiente). Aggiungere golden-test mirato (cross-check Maxima).
+- **STATO**: 🆕 APERTO (priorità alta — correttezza core). **Refs**: HC-A26-PRIMITIVE-PARAMQ-RATIONAL.
+
 ### HC-F75-B1-IBP-DOUBLE-APPLY — Integration by parts applica regola due volte su Product Log·Pow
 - **File**: `src/calculus/integrate_parts.cpp` + `simplify` su Product post-IBP.
 - **Categoria**: 2 (costanti magiche → in realtà falsa simmetria nel dispatch).
