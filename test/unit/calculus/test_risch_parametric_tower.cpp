@@ -37,6 +37,7 @@ ExprPtr parse_expr(const std::string& s, AstArena& arena) {
 }
 
 
+
 // Verifica SOUND nel campo: D(y) + f·y - Σ c_i·g_i  semplifica a 0.
 // Tutti gli argomenti sono in *forma generatore* (polinomi/razionali in x e t_i);
 // la derivazione usa field.derive che conosce D(t_i).
@@ -232,19 +233,20 @@ TEST_F(ParametricTowerTest, RationalRischDE_FirstOrder_PolynomialSolution) {
 
 // f = −1/x, g = {1/x²}.  y' − y/x = c/x² has the particular solution
 // y = −1/(2x), c = 1 (den(y)=x divides lcm(x, x²)=x², in scope for the P/D
-// ansatz).  Soundness is guaranteed by the solver's exact Q-residual check, so
-// the test confirms the expected (nontrivial-c) solution is present.  NOTE: we
-// deliberately do NOT call verify_field_de here — its symbolic field.derive +
-// simplify path mishandles pole fractions ((−x/2)/x² → −1/x in the simplifier),
-// which would corrupt a correct y; the Q-residual verification is engine-clean.
+// ansatz).  Each returned solution is independently confirmed by the symbolic
+// field check (D(y)+f·y ≡ Σ c_i g_i), and the expected nontrivial-c solution
+// must be present.
 TEST_F(ParametricTowerTest, RationalRischDE_PoleSolution_DenDividesLcm) {
     auto f = parse_expr("-1/x", ctx.arena());
     std::vector<ExprPtr> g = {parse_expr("1/x^2", ctx.arena())};
     auto res = solve_param_risch_de_rational_q(f, g, x, ctx);
     ASSERT_TRUE(res.is_ok()) << res.error().message;
+    DifferentialField bf = base_field_qx(x);
     bool found_particular = false;
-    for (const auto& sol : res.value())
+    for (const auto& sol : res.value()) {
+        EXPECT_TRUE(verify_field_de(sol.y, f, g, sol.c, bf, ctx)) << "unsound (-1/x, 1/x²)";
         if (!sol.c.empty() && !sol.c[0].numerator().is_zero()) found_particular = true;
+    }
     EXPECT_TRUE(found_particular) << "expected the particular solution with c ≠ 0";
 }
 
@@ -256,8 +258,10 @@ TEST_F(ParametricTowerTest, RationalRischDE_HomogeneousRationalSolution) {
     std::vector<ExprPtr> g = {parse_expr("1", ctx.arena())};
     auto res = solve_param_risch_de_rational_q(f, g, x, ctx);
     ASSERT_TRUE(res.is_ok()) << res.error().message;
+    DifferentialField bf = base_field_qx(x);
     bool found_homogeneous = false;
     for (const auto& sol : res.value()) {
+        EXPECT_TRUE(verify_field_de(sol.y, f, g, sol.c, bf, ctx)) << "unsound (-2/x, 1)";
         bool c_zero = true;
         for (const auto& ci : sol.c) if (!ci.numerator().is_zero()) c_zero = false;
         if (c_zero) {

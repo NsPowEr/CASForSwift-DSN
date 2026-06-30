@@ -475,12 +475,12 @@ solve_param_risch_de_rational_q(
     auto pivots = row_echelon(Mtx, n_unk);
     auto basis = null_space_basis(Mtx, pivots, n_unk);
 
-    // Exact, engine-independent verification of a candidate (P, c): the residual
-    // polynomial  D·P' + H·P − Σ_i c_i (Gn_i·D)  must vanish identically.  This
-    // is the very identity the null-space enforces, recomputed in pure Q-rational
-    // arithmetic so the check never routes through the symbolic simplifier (which
-    // mishandles (rational·monomial)/power fractions, e.g. (−x/2)/x² → −1/x).
-    // Sound by construction (REGOLA ZERO): a candidate failing this is dropped.
+    // Exact verification of a candidate (P, c): the residual polynomial
+    // D·P' + H·P − Σ_i c_i (Gn_i·D)  must vanish identically.  This is the very
+    // identity the null-space enforces, recomputed in pure Q-rational arithmetic
+    // — exact and independent of the symbolic simplifier, so it stays sound even
+    // for high-degree / many-forcing systems.  Sound by construction (REGOLA
+    // ZERO): a candidate failing this is dropped.
     auto residual_is_zero = [&](const std::vector<Rational>& P,
                                 const std::vector<Rational>& c) -> bool {
         std::size_t maxd = D.size() + P.size() + 2U;
@@ -518,10 +518,8 @@ solve_param_risch_de_rational_q(
         if (!residual_is_zero(P, c)) continue;
 
         // Emit y as a cleared-integer-numerator fraction  (L·P)(x) / (L·D(x)),
-        // where L is a common denominator of P's coefficients.  This keeps the
-        // numerator's coefficients integral, sidestepping the symbolic
-        // simplifier's (rational·monomial)/power drop, so the returned y is a
-        // structurally faithful representation of the (exactly verified) solution.
+        // where L is a common denominator of P's coefficients — a canonical
+        // integer-coefficient representation of the (exactly verified) solution.
         BigInt L(1);
         for (const auto& pk : P) L = L * pk.denominator();
         std::vector<Rational> P_int(P.size(), Rational(BigInt(0)));
