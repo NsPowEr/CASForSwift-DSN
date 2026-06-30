@@ -236,6 +236,19 @@ solve_param_limited_integration_rational_q(
     const Symbol& var,
     symbolic::CASContext& ctx);
 
+/// @brief Full parametric Risch DE over Q(x), f ≠ 0 case:  solve
+/// y' + f·y = Σ_i c_i·g_i  for c_i ∈ Q and y ∈ Q(x), with f, g_i rational.
+/// Ansatz y = P/D (D = lcm of denominators) → homogeneous Q-linear system →
+/// null-space basis, each verified by back-substitution.  Complements
+/// solve_param_limited_integration_rational_q (f = 0).  Sound by construction.
+/// (A26 / HC-A26-PRIMITIVE-PARAMQ-RATIONAL.)
+[[nodiscard]] Result<std::vector<ParametricRischDeQSolution>>
+solve_param_risch_de_rational_q(
+    ExprPtr f_expr,
+    const std::vector<ExprPtr>& g_vec,
+    const Symbol& var,
+    symbolic::CASContext& ctx);
+
 /// @brief Limited Integration in Q[x] (Bronstein §7.2 caso polinomiale).
 /// Dato f ∈ Q[var], trova rappresentazione  f = g' + Σ_i c_i · h_i
 /// dove g ∈ Q[var] è "elementary" (antiderivata esatta della parte ridotta) e

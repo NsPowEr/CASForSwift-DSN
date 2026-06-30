@@ -259,11 +259,13 @@ Result<std::vector<ParametricRischDeQSolution>> solve_risch_de_parametric_field(
     if (ext_idx == 0U) {
         auto poly_res = solve_risch_de_parametric_q(f, g_vec, field.base_var(), ctx);
         if (poly_res.is_ok()) return poly_res;
-        // The Q[x] solver bailed (typically a rational g, which the primitive
-        // tower descent produces).  When f == 0 this is the rational limited-
-        // integration problem over Q(x); solve it via the engine's complete
-        // rational integrator (A26 / HC-A26-PRIMITIVE-PARAMQ-RATIONAL).  For
-        // f != 0 rational, propagate the diagnostic — that case is still pending.
+        // The Q[x] solver bailed (typically a rational f or g, which the
+        // primitive tower descent produces).  Split by f:
+        //   f == 0 → rational limited integration (integrate each g_i, split
+        //            rational + log/arctan atoms);
+        //   f != 0 → full parametric Risch DE over Q(x) via the P/D ansatz.
+        // Both are sound by construction (back-substitution verified).
+        // (A26 / HC-A26-PRIMITIVE-PARAMQ-RATIONAL.)
         ExprPtr f_s = f;
         if (auto s = ctx.simplify(f); s.is_ok()) f_s = s.value();
         bool f_is_zero = false;
@@ -271,6 +273,8 @@ Result<std::vector<ParametricRischDeQSolution>> solve_risch_de_parametric_field(
         if (const auto* rl = expr_cast<RationalLit>(f_s)) f_is_zero = rl->numerator.is_zero();
         if (f_is_zero)
             return solve_param_limited_integration_rational_q(g_vec, field.base_var(), ctx);
+        auto rat = solve_param_risch_de_rational_q(f, g_vec, field.base_var(), ctx);
+        if (rat.is_ok()) return rat;
         return poly_res;
     }
     
@@ -383,8 +387,7 @@ Result<std::vector<ParametricRischDeQSolution>> solve_risch_de_parametric_field(
         return make_unimplemented<std::vector<ParametricRischDeQSolution>>(
             "calculus", "solve_risch_de_parametric_field",
             "parametric PolyRischDE non-cancellation case (deg_t(f) > 0) not "
-            "implemented — Bronstein Symbolic Integration I §6.5/§7.4/§8.4; "
-            "deg(y)=dg-df, lc(y)=lc(g)/lc(f) then reduce+recurse. See "
+            "implemented — Bronstein Symbolic Integration I §6.5/§7.4/§8.4. See "
             "HARDCODE_LEDGER.md HC-F8-PENDING-17 / task A1",
             cas::error::reason_codes::RISCH_NO_POLYNOMIAL_SOLUTION,
             "Risch DE solver: parametric solver with df > 0 is unimplemented");
