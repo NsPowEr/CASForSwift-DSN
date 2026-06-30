@@ -215,6 +215,46 @@ poly_coeffs_q(ExprPtr e, const Symbol& var, symbolic::CASContext& ctx) {
     return arena.make<Sum>(std::move(terms));
 }
 
+// WeakNormalizer-style denominator inflation (Bronstein 6.1.1).  At a SIMPLE
+// pole of f (squarefree factor s | den(f), multiplicity 1) with positive-integer
+// residue n, the homogeneous solution y = (s)^−n has a pole of order n, but
+// lcm(den f, den g_i) carries s only to order 1.  Residue n at the roots of
+// s_n = gcd(fn − n·fd', s) (Rothstein-Trager), so multiply D by s_n^(n−1) to
+// bring those solutions into the ansatz.  Order-≥2 poles of f are already
+// covered by lcm and skipped.  Sound regardless: back-substitution rejects any
+// non-solution, so an imperfect inflation only affects completeness.
+[[nodiscard]] ExprPtr inflate_denominator(
+    ExprPtr D_expr, ExprPtr fn, ExprPtr fd, const Symbol& var, symbolic::CASContext& ctx) {
+    AstArena& arena = ctx.arena();
+    auto sqf = algebra::square_free_factorization(fd, var, ctx);
+    auto fdp = diff(fd, var, 1U, ctx);
+    if (sqf.is_error() || fdp.is_error()) return D_expr;
+    const std::size_t cap = ctx.max_risch_rational_ansatz_degree();
+    ExprPtr result = D_expr;
+    for (const auto& sf : sqf.value().factors) {
+        if (sf.multiplicity != 1U || !depends_on(sf.factor, var)) continue;
+        for (std::size_t n = 2; n <= cap; ++n) {
+            ExprPtr nfdp = arena.make<Binary>(BinaryOp::Mul,
+                arena.make<IntegerLit>(BigInt(static_cast<std::int64_t>(n))), fdp.value());
+            ExprPtr cand = arena.make<Binary>(BinaryOp::Sub, fn, nfdp);
+            ExprPtr v;
+            if (auto cs = ctx.simplify(cand); cs.is_ok() &&
+                    expr_cast<IntegerLit>(cs.value()) &&
+                    expr_cast<IntegerLit>(cs.value())->value.is_zero()) {
+                v = sf.factor;                       // residue n on all of s
+            } else {
+                auto g = algebra::polynomial_gcd(cand, sf.factor, var, ctx);
+                if (g.is_error() || !depends_on(g.value(), var)) continue;
+                v = g.value();
+            }
+            for (std::size_t e = 0; e + 1U < n; ++e)
+                result = arena.make<Binary>(BinaryOp::Mul, result, v);
+        }
+    }
+    auto s = ctx.simplify(result);
+    return s.is_ok() ? s.value() : result;
+}
+
 }  // namespace
 
 Result<std::vector<ParametricRischDeQSolution>>
@@ -311,11 +351,16 @@ solve_param_limited_integration_rational_q(
 // basis vector (P, c) yields y = P/D, VERIFIED by back-substitution
 // D(y)+f·y ≡ Σ c_i g_i (sound by construction — unverified candidates dropped).
 //
-// LIMITATION (shared verbatim with the non-parametric solve_risch_de_rational_q):
-// the ansatz finds only solutions whose denominator divides D.  Negative-integer
-// residues at simple poles of f (WeakNormalizer, Bronstein 6.1.1) can give y a
-// higher-order pole than den(f) carries; such solutions are silently absent —
-// incompleteness, never a wrong answer.  Tracked as an engine-wide gap.
+// DENOMINATOR BOUND (WeakNormalizer, Bronstein 6.1.1).  The ansatz finds only
+// solutions whose denominator divides D.  At a SIMPLE pole of f with positive-
+// integer residue n the homogeneous solution y_h has a pole of order n while
+// lcm(den f, den g_i) carries it only to order 1; inflate_denominator() lifts D
+// by the Rothstein-Trager factor (residue n at the roots of gcd(fn−n·fd', s)) so
+// those solutions enter the ansatz (verified below: WeakNormalizer_* tests).
+// Residual incompleteness (never a wrong answer — back-substitution drops any
+// non-solution): poles of f of MULTIPLICITY ≥ 2, residues that are not integers
+// in [2, cap], and algebraic (non-rational) residues.  The non-parametric
+// solve_risch_de_rational_q does NOT yet inflate — it carries the order-1 gap.
 Result<std::vector<ParametricRischDeQSolution>>
 solve_param_risch_de_rational_q(
     ExprPtr f_expr, const std::vector<ExprPtr>& g_vec, const Symbol& var,
@@ -328,8 +373,9 @@ solve_param_risch_de_rational_q(
         return make_unimplemented<std::vector<ParametricRischDeQSolution>>(
             "calculus", "solve_param_risch_de_rational_q", msg,
             cas::error::reason_codes::RISCH_NO_POLYNOMIAL_SOLUTION,
-            "Parametric Risch DE over Q(x): den(y) must divide lcm(den f, den g_i); "
-            "negative-integer-residue poles (WeakNormalizer, Bronstein 6.1.1) unhandled",
+            "Parametric Risch DE over Q(x): WeakNormalizer (Bronstein 6.1.1) "
+            "inflates D for simple positive-integer-residue poles; residual cases "
+            "are multiplicity-≥2 poles, residue beyond cap, and algebraic residues",
             "HC-A26-PRIMITIVE-PARAMQ-RATIONAL");
     };
     if (m == 0U) return fail_unimpl("empty forcing vector");
@@ -361,6 +407,9 @@ solve_param_risch_de_rational_q(
             D_expr = s.value();
         }
     }
+
+    // Inflate D to cover positive-integer-residue simple poles (WeakNormalizer).
+    D_expr = inflate_denominator(D_expr, fn, fd, var, ctx);
 
     // Fn = fn·(D/fd) ; Gn_i = gn_i·(D/gd_i)  (polynomial since fd, gd_i | D).
     auto mul_div = [&](ExprPtr num, ExprPtr den) -> Result<ExprPtr> {
@@ -483,7 +532,14 @@ solve_param_risch_de_rational_q(
     // ZERO): a candidate failing this is dropped.
     auto residual_is_zero = [&](const std::vector<Rational>& P,
                                 const std::vector<Rational>& c) -> bool {
-        std::size_t maxd = D.size() + P.size() + 2U;
+        // Verify up to the exact degree of the residual D·P' + H·P − Σ c_i Gd_i:
+        // deg(D·P')=deg_D+deg_P−1 (size D.size()+P.size()−1), deg(H·P)=deg_H+deg_P
+        // (size H.size()+P.size()−1), and each Gd_i term.  Derived bound, no padding.
+        std::size_t maxd = 0;
+        if (!P.empty()) {
+            maxd = std::max(maxd, D.size() + P.size() - 1U);
+            if (!H.empty()) maxd = std::max(maxd, H.size() + P.size() - 1U);
+        }
         for (std::size_t i = 0; i < m; ++i) maxd = std::max(maxd, Gd[i].size());
         for (std::size_t j = 0; j < maxd; ++j) {
             Rational r(BigInt(0));

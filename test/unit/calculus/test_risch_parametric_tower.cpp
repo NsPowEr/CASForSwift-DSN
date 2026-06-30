@@ -272,6 +272,86 @@ TEST_F(ParametricTowerTest, RationalRischDE_HomogeneousRationalSolution) {
     EXPECT_TRUE(found_homogeneous) << "expected homogeneous y = x² (c = 0)";
 }
 
+// --- WeakNormalizer (Bronstein 6.1.1): den(y) STRICTLY exceeds lcm. ---
+//
+// These are the residuo A26 closes.  At a SIMPLE pole of f with positive-integer
+// residue n (convention y'+f·y=g ⇒ homogeneous y_h satisfies y_h'/y_h = −f, so a
+// residue +n gives y_h = (x−α)^{−n}, a pole of order n), the solution denominator
+// is x^n while lcm(den f, den g_i) only carries x^1.  Without WeakNormalizer
+// denominator inflation the P/D ansatz cannot represent y and the solution is
+// silently absent.  inflate_denominator (Rothstein-Trager residue n at the roots
+// of gcd(fn−n·fd', s)) lifts D to x^n, bringing it into scope.  Each returned
+// candidate is still independently confirmed by the symbolic field check, so the
+// inflation can only affect completeness, never soundness.
+
+// f = 2/x (residue +2 at x=0), g = {1}.  Homogeneous y' + 2y/x = 0 has the
+// rational solution y = 1/x² (c = 0): den(y)=x² > lcm(den f=x, den g=1)=x.
+// Found ONLY because D is inflated x → x².
+TEST_F(ParametricTowerTest, WeakNormalizer_ResidueTwo_HomogeneousPoleBeyondLcm) {
+    auto f = parse_expr("2/x", ctx.arena());
+    std::vector<ExprPtr> g = {parse_expr("1", ctx.arena())};
+    auto res = solve_param_risch_de_rational_q(f, g, x, ctx);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+    DifferentialField bf = base_field_qx(x);
+    bool found_pole = false;
+    for (const auto& sol : res.value()) {
+        EXPECT_TRUE(verify_field_de(sol.y, f, g, sol.c, bf, ctx)) << "unsound (2/x, 1)";
+        bool c_zero = true;
+        for (const auto& ci : sol.c) if (!ci.numerator().is_zero()) c_zero = false;
+        // A non-constant rational homogeneous solution (den exceeds lcm).
+        if (c_zero) {
+            if (const auto* il = expr_cast<IntegerLit>(sol.y); !il || !il->value.is_zero())
+                found_pole = true;
+        }
+    }
+    EXPECT_TRUE(found_pole)
+        << "expected homogeneous y = 1/x² (den x² > lcm x) via WeakNormalizer inflation";
+}
+
+// f = 3/x (residue +3), g = {1}.  Homogeneous y = 1/x³ (c = 0): den order 3,
+// needs D inflated x → x³ (two extra factors).  Exercises the n=3 inflation loop.
+TEST_F(ParametricTowerTest, WeakNormalizer_ResidueThree_HigherOrderPole) {
+    auto f = parse_expr("3/x", ctx.arena());
+    std::vector<ExprPtr> g = {parse_expr("1", ctx.arena())};
+    auto res = solve_param_risch_de_rational_q(f, g, x, ctx);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+    DifferentialField bf = base_field_qx(x);
+    bool found_pole = false;
+    for (const auto& sol : res.value()) {
+        EXPECT_TRUE(verify_field_de(sol.y, f, g, sol.c, bf, ctx)) << "unsound (3/x, 1)";
+        bool c_zero = true;
+        for (const auto& ci : sol.c) if (!ci.numerator().is_zero()) c_zero = false;
+        if (c_zero) {
+            if (const auto* il = expr_cast<IntegerLit>(sol.y); !il || !il->value.is_zero())
+                found_pole = true;
+        }
+    }
+    EXPECT_TRUE(found_pole)
+        << "expected homogeneous y = 1/x³ (den x³ > lcm x) via WeakNormalizer inflation";
+}
+
+// Residue at a shifted simple pole: f = 2/(x−1), g = {1}.  y_h = 1/(x−1)².
+// Confirms inflation is anchored at the actual pole, not hardcoded to x.
+TEST_F(ParametricTowerTest, WeakNormalizer_ResidueTwo_ShiftedPole) {
+    auto f = parse_expr("2/(x-1)", ctx.arena());
+    std::vector<ExprPtr> g = {parse_expr("1", ctx.arena())};
+    auto res = solve_param_risch_de_rational_q(f, g, x, ctx);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+    DifferentialField bf = base_field_qx(x);
+    bool found_pole = false;
+    for (const auto& sol : res.value()) {
+        EXPECT_TRUE(verify_field_de(sol.y, f, g, sol.c, bf, ctx)) << "unsound (2/(x-1), 1)";
+        bool c_zero = true;
+        for (const auto& ci : sol.c) if (!ci.numerator().is_zero()) c_zero = false;
+        if (c_zero) {
+            if (const auto* il = expr_cast<IntegerLit>(sol.y); !il || !il->value.is_zero())
+                found_pole = true;
+        }
+    }
+    EXPECT_TRUE(found_pole)
+        << "expected homogeneous y = 1/(x−1)² via WeakNormalizer inflation at x=1";
+}
+
 // Wiring: full parametric Risch DE reachable through the field-solver base case
 // (ext_idx == 0, f ≠ 0 rational).  f = 1/x, g = {2} → y = x, c = 1.
 TEST_F(ParametricTowerTest, RationalRischDE_ReachedThroughFieldBaseCase) {
