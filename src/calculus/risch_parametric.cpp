@@ -17,6 +17,7 @@
 // "Limited Integration".
 
 #include "calculus_internal.hpp"
+#include "risch_parametric_internal.hpp"
 
 #include "cas/algebra.hpp"
 #include "cas/error_helpers.hpp"
@@ -34,16 +35,9 @@ namespace cas::calculus {
 
 namespace {
 
-// Estrae un Rational da un letterale o da un Neg di letterale.
-[[nodiscard]] std::optional<Rational> as_rational(ExprPtr e) {
-    if (const auto* lit = expr_cast<IntegerLit>(e)) return Rational(lit->value);
-    if (const auto* lit = expr_cast<RationalLit>(e))
-        return Rational(lit->numerator, lit->denominator);
-    if (const auto* un = expr_cast<Unary>(e); un && un->op == UnaryOp::Neg) {
-        if (auto inner = as_rational(un->operand)) return -*inner;
-    }
-    return std::nullopt;
-}
+using detail::as_rational;
+using detail::null_space_basis;
+using detail::row_echelon;
 
 // Estrae vettore di coefficienti razionali da un PolyExpr ExprPtr-coefficient.
 [[nodiscard]] std::optional<std::vector<Rational>>
@@ -105,63 +99,6 @@ void strip_trailing(std::vector<Rational>& v) {
     // deg(f·y) = deg_f + e domina deg(y') = e - 1; uguagliando a deg_g_max:
     //   deg_f + e = deg_g_max  →  e = deg_g_max - deg_f.
     return std::max(0, deg_g_max - deg_f);
-}
-
-// Riduce a forma row-echelon (non ridotta) e ritorna i pivot column indices.
-// Modifica M in place.  rank = pivots.size().
-std::vector<std::size_t> row_echelon(
-    std::vector<std::vector<Rational>>& M, std::size_t n_cols) {
-    std::vector<std::size_t> pivots;
-    std::size_t row = 0;
-    const std::size_t n_rows = M.size();
-    for (std::size_t col = 0; col < n_cols && row < n_rows; ++col) {
-        std::size_t best = row;
-        while (best < n_rows && M[best][col].numerator().is_zero()) ++best;
-        if (best == n_rows) continue;  // colonna libera (no pivot).
-        if (best != row) std::swap(M[best], M[row]);
-        Rational pivot = M[row][col];
-        for (std::size_t c = col; c < n_cols; ++c) M[row][c] = M[row][c] / pivot;
-        for (std::size_t r = 0; r < n_rows; ++r) {
-            if (r == row) continue;
-            Rational f = M[r][col];
-            if (f.numerator().is_zero()) continue;
-            for (std::size_t c = col; c < n_cols; ++c) {
-                M[r][c] = M[r][c] - f * M[row][c];
-            }
-        }
-        pivots.push_back(col);
-        ++row;
-    }
-    return pivots;
-}
-
-// Calcola base dello spazio nullo del sistema omogeneo M · x = 0 dato il
-// vettore dei pivot column indices (output di row_echelon).  Ogni colonna
-// libera produce un vettore della base: assegna x_free = 1, x_other_free = 0,
-// e back-sostituisce le variabili pivot da M.
-std::vector<std::vector<Rational>> null_space_basis(
-    const std::vector<std::vector<Rational>>& M,
-    const std::vector<std::size_t>& pivots,
-    std::size_t n_cols) {
-    std::vector<bool> is_pivot(n_cols, false);
-    for (auto p : pivots) is_pivot[p] = true;
-    std::vector<std::size_t> free_cols;
-    for (std::size_t c = 0; c < n_cols; ++c) if (!is_pivot[c]) free_cols.push_back(c);
-
-    std::vector<std::vector<Rational>> basis;
-    basis.reserve(free_cols.size());
-    for (std::size_t f : free_cols) {
-        std::vector<Rational> v(n_cols, Rational(BigInt(0)));
-        v[f] = Rational(BigInt(1));
-        // Per ogni pivot row r con pivot column p, applichi:
-        //   x_p = -Σ_{c free} M[r][c] · x_c
-        for (std::size_t r = 0; r < pivots.size(); ++r) {
-            std::size_t p = pivots[r];
-            v[p] = -M[r][f];
-        }
-        basis.push_back(std::move(v));
-    }
-    return basis;
 }
 
 }  // namespace

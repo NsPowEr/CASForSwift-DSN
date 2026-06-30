@@ -257,7 +257,21 @@ Result<std::vector<ParametricRischDeQSolution>> solve_risch_de_parametric_field(
     
     // Base case: Q(x)
     if (ext_idx == 0U) {
-        return solve_risch_de_parametric_q(f, g_vec, field.base_var(), ctx);
+        auto poly_res = solve_risch_de_parametric_q(f, g_vec, field.base_var(), ctx);
+        if (poly_res.is_ok()) return poly_res;
+        // The Q[x] solver bailed (typically a rational g, which the primitive
+        // tower descent produces).  When f == 0 this is the rational limited-
+        // integration problem over Q(x); solve it via the engine's complete
+        // rational integrator (A26 / HC-A26-PRIMITIVE-PARAMQ-RATIONAL).  For
+        // f != 0 rational, propagate the diagnostic — that case is still pending.
+        ExprPtr f_s = f;
+        if (auto s = ctx.simplify(f); s.is_ok()) f_s = s.value();
+        bool f_is_zero = false;
+        if (const auto* il = expr_cast<IntegerLit>(f_s)) f_is_zero = il->value.is_zero();
+        if (const auto* rl = expr_cast<RationalLit>(f_s)) f_is_zero = rl->numerator.is_zero();
+        if (f_is_zero)
+            return solve_param_limited_integration_rational_q(g_vec, field.base_var(), ctx);
+        return poly_res;
     }
     
     // Topmost extension at this level

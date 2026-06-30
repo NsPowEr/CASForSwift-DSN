@@ -117,28 +117,94 @@ TEST_F(ParametricTowerTest, Exp_F0_GExp_AllSound) {
     EXPECT_TRUE(any_nontrivial) << "expected y = c*t solution (c != 0)";
 }
 
-// --- Caso primitivo (log): gap noto, ramo incompleto (A26 sub-gap). ---
+// --- Caso primitivo (log): risolto via rational limited integration (A26). ---
 
-// Log tower, f = 0, g = {1}.  Esiste matematicamente la soluzione y = c·x, c=1.
-// Ma il ramo primitivo della ricorsione genera, dalla correzione i·y·D(t) con
-// D(t)=1/x, una forzante RAZIONALE che la base parametric_q (solo Q[x] polinomi)
-// non gestisce → ritorna Unimplemented.  Questo NON è un bug silenzioso: il
-// contratto REGOLA ZERO (diagnostico esplicito, mai hang/crash/silent-wrong) è
-// rispettato.  Il completamento (ParamRischDE su Q(x) razionale, weak-normalizer
-// + denominator bound, Bronstein §5.12/§6.5) è la voce ledger HC-A26-PRIMITIVE-
-// PARAMQ-RATIONAL.  Quando implementato, questo test passerà a verify_field_de.
-TEST_F(ParametricTowerTest, Log_PrimitiveDescent_RationalForcing_CleanDiagnostic) {
+// Log tower, f = 0, g = {1}.  La ricorsione primitiva genera, dalla correzione
+// i·y·D(t) con D(t)=1/x, una forzante RAZIONALE; il base case ora la risolve via
+// solve_param_limited_integration_rational_q (HC-A26-PRIMITIVE-PARAMQ-RATIONAL).
+// Soluzione attesa: y = x, c = 1 (D(x) = 1 = c·1).  Ogni soluzione DEVE essere
+// sound (back-substitution) e ne deve esistere almeno una non banale.
+TEST_F(ParametricTowerTest, Log_F0_G1_PrimitiveDescent_SolvedSound) {
     DifferentialField field = log_tower();
     auto f = parse_expr("0", ctx.arena());
     std::vector<ExprPtr> g = {parse_expr("1", ctx.arena())};
     auto res = solve_risch_de_parametric_field(f, g, field.extensions().size(), field, ctx);
-    ASSERT_TRUE(res.is_error())
-        << "primitive descent currently incomplete: must return a diagnostic, "
-           "not a (possibly unsound) solution";
-    EXPECT_EQ(res.error().kind, CASErrorKind::Unimplemented)
-        << "primitive-case gap must be a clean Unimplemented (no hang/crash/"
-           "silent-wrong), got kind=" << static_cast<int>(res.error().kind)
-        << " msg=" << res.error().message;
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+    bool any_nontrivial = false;
+    for (const auto& sol : res.value()) {
+        EXPECT_TRUE(verify_field_de(sol.y, f, g, sol.c, field, ctx))
+            << "unsound solution in primitive (log) descent";
+        any_nontrivial |= is_nontrivial(sol);
+    }
+    EXPECT_TRUE(any_nontrivial)
+        << "expected the nontrivial solution y = x, c = 1 (∫1 = x is rational)";
+}
+
+// --- Direct tests of rational limited integration over Q(x) (A26 helper). ---
+
+// y' = Σ c_i g_i back-substitution check over Q(x) (base field, real diff).
+[[nodiscard]] bool verify_base_de(
+    ExprPtr y, const std::vector<ExprPtr>& g, const std::vector<Rational>& c,
+    const Symbol& var, symbolic::CASContext& ctx) {
+    AstArena& arena = ctx.arena();
+    auto dy = diff(y, var, 1U, ctx);
+    if (dy.is_error()) return false;
+    ExprPtr rhs = arena.make<IntegerLit>(BigInt(0));
+    for (std::size_t i = 0; i < g.size(); ++i) {
+        if (c[i].numerator().is_zero()) continue;
+        ExprPtr ce = arena.make<RationalLit>(c[i].numerator(), c[i].denominator());
+        rhs = arena.make<Binary>(BinaryOp::Add, rhs, arena.make<Binary>(BinaryOp::Mul, ce, g[i]));
+    }
+    ExprPtr delta = arena.make<Binary>(BinaryOp::Sub, dy.value(), rhs);
+    auto tog = algebra::together(delta, ctx);
+    auto s = ctx.simplify(tog.is_ok() ? tog.value() : delta);
+    if (s.is_error()) return false;
+    if (const auto* il = expr_cast<IntegerLit>(s.value())) return il->value.is_zero();
+    if (const auto* rl = expr_cast<RationalLit>(s.value())) return rl->numerator.is_zero();
+    return false;
+}
+
+// Pure rational forcing (no log/arctan): every g_i directly integrable.
+// g = {2x} → y = x², c = 1.
+TEST_F(ParametricTowerTest, RationalLimited_PureRational_DirectAntiderivative) {
+    std::vector<ExprPtr> g = {parse_expr("2*x", ctx.arena())};
+    auto res = solve_param_limited_integration_rational_q(g, x, ctx);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+    bool any_nontrivial = false;
+    for (const auto& sol : res.value()) {
+        EXPECT_TRUE(verify_base_de(sol.y, g, sol.c, x, ctx)) << "unsound (2x)";
+        any_nontrivial |= is_nontrivial(sol);
+    }
+    EXPECT_TRUE(any_nontrivial) << "expected y = x², c = 1";
+}
+
+// Log cancellation: g = {1/x, 1/x} → ∫ both = log(x); c = (1, −1) gives y = 0.
+TEST_F(ParametricTowerTest, RationalLimited_LogCancellation_NontrivialC) {
+    std::vector<ExprPtr> g = {parse_expr("1/x", ctx.arena()),
+                              parse_expr("1/x", ctx.arena())};
+    auto res = solve_param_limited_integration_rational_q(g, x, ctx);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+    bool found_cancel = false;
+    for (const auto& sol : res.value()) {
+        EXPECT_TRUE(verify_base_de(sol.y, g, sol.c, x, ctx)) << "unsound cancellation";
+        if (sol.c.size() == 2U && !sol.c[0].numerator().is_zero() &&
+            !sol.c[1].numerator().is_zero())
+            found_cancel = true;
+    }
+    EXPECT_TRUE(found_cancel) << "expected nontrivial c = (1, −1) with y = 0";
+}
+
+// Single surviving log: g = {1/x} → ∫ = log(x), no rational antiderivative for
+// c ≠ 0, so the only admissible constant is c = 0 (null space is trivial).
+TEST_F(ParametricTowerTest, RationalLimited_SingleLog_NoNontrivialSolution) {
+    std::vector<ExprPtr> g = {parse_expr("1/x", ctx.arena())};
+    auto res = solve_param_limited_integration_rational_q(g, x, ctx);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+    for (const auto& sol : res.value()) {
+        EXPECT_TRUE(verify_base_de(sol.y, g, sol.c, x, ctx)) << "unsound single-log";
+        EXPECT_TRUE(sol.c[0].numerator().is_zero())
+            << "c ≠ 0 would require ∫ c/x = c·log(x) to be rational — impossible";
+    }
 }
 
 // --- df > 0 : ramo non-cancellation (A1).  Deterministicamente raggiunto. ---
