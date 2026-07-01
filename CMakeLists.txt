@@ -216,6 +216,7 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/integrate_risch_hermite.cpp
     src/calculus/risch_parametric.cpp
     src/calculus/risch_parametric_rational.cpp
+    src/calculus/risch_param_nocancel.cpp
     src/calculus/risch_de_extensions.cpp
     src/calculus/risch_rde_bronstein.cpp
     src/calculus/risch_log_expand.cpp

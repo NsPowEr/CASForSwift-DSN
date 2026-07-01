@@ -1,6 +1,6 @@
-// A26 — Tests per solve_risch_de_parametric_field (parametric Risch DE su torre
-// differenziale K(x, t_1, ..., t_n)).  Bronstein, "Symbolic Integration I",
-// §6.5 / §7.4 / §8.4 (PolyRischDE parametrico).
+// A26/A1 — Tests per solve_risch_de_parametric_field (parametric Risch DE su
+// torre differenziale K(x, t_1, ..., t_n)).  Bronstein, "Symbolic Integration
+// I", §6.4 SPDE / §6.5 non-cancellation / §7.1 parametric PolyRischDE.
 //
 // Scopo (A26): la funzione `solve_risch_de_parametric_field` era *entry-orphan*
 // (raggiungibile solo dalla propria ricorsione `ext_idx-1`, mai invocata
@@ -8,9 +8,9 @@
 // e testata in isolamento, verificando la correttezza per back-substitution
 // SOUND nel campo differenziale:  D(y) + f·y  ≡  Σ_i c_i·g_i.
 //
-// Inoltre costruisce deterministicamente un input con deg_t(f) > 0 (il ramo
-// "non-cancellation" tuttora Unimplemented) = riproduzione concreta del gap A1,
-// che 16 integrandi-torre costruiti a mano non riuscivano a raggiungere.
+// Il ramo deg_t(f) > 0 ("non-cancellation") — gap A1 — è ora IMPLEMENTATO
+// (solve_param_poly_risch_de_nocancel1, Bronstein §7.1 ParamPolyRischDENoCancel1):
+// vedi i test Log_/Exp_FEqualsTheta_DfPositive_*.
 
 #include "../../../src/calculus/calculus_internal.hpp"
 
@@ -394,22 +394,59 @@ TEST_F(ParametricTowerTest, RationalRischDE_ReachedThroughFieldBaseCase) {
 
 // --- df > 0 : ramo non-cancellation (A1).  Deterministicamente raggiunto. ---
 
+// --- df > 0 : ramo non-cancellation (A1) — IMPLEMENTATO (Bronstein §7.1). ---
+
 // Log tower, f = t (= log(x)), g = {1}.  Dopo il denominator-clearing f_new = t,
-// deg_t(f) = 1 > 0 → ramo non-cancellation.  ATTUALMENTE Unimplemented (gap A1).
-// Questo test e' la riproduzione concreta che sblocca A1: quando Bronstein §6.5
-// sara' implementato, l'asserzione passera' a verify_field_de.
-TEST_F(ParametricTowerTest, Log_FEqualsTheta_DfPositive_ReachesNonCancellation) {
+// deg_t(f) = 1 > 0 → ramo non-cancellation (ParamPolyRischDENoCancel1).  Qui la
+// DE  D(y) + log(x)·y = c·1  NON ha soluzione elementare razionale per c ≠ 0
+// (la soluzione omogenea exp(−∫log x) non è nella torre), quindi lo spazio
+// soluzione è banale (solo c = 0).  Il solver DEVE ritornare OK (non più
+// Unimplemented) con nessuna soluzione non-banale, e ogni soluzione sound.
+TEST_F(ParametricTowerTest, Log_FEqualsTheta_DfPositive_NonCancellation_OnlyTrivial) {
     DifferentialField field = log_tower();
     auto f = parse_expr("t", ctx.arena());           // f = log(x), deg_t = 1
     std::vector<ExprPtr> g = {parse_expr("1", ctx.arena())};
     auto res = solve_risch_de_parametric_field(f, g, field.extensions().size(), field, ctx);
-    // Il ramo df>0 e' raggiunto: contratto attuale = Unimplemented esplicito,
-    // MAI hang ne' risultato sbagliato silenzioso (REGOLA ZERO).
-    ASSERT_TRUE(res.is_error())
-        << "deg_t(f)>0 branch must currently return Unimplemented, not a solution";
-    EXPECT_EQ(res.error().kind, CASErrorKind::Unimplemented)
-        << "df>0 must be a diagnostic Unimplemented (Bronstein 6.5 gap, A1), got kind="
-        << static_cast<int>(res.error().kind) << " msg=" << res.error().message;
+    ASSERT_TRUE(res.is_ok()) << "df>0 non-cancellation now implemented: " << res.error().message;
+    for (const auto& sol : res.value()) {
+        EXPECT_TRUE(verify_field_de(sol.y, f, g, sol.c, field, ctx)) << "unsound df>0 solution";
+        EXPECT_FALSE(is_nontrivial(sol))
+            << "D(y)+log(x)·y = c has no elementary rational solution for c ≠ 0";
+    }
+}
+
+// Log tower, f = t, g = {t}.  D(y) + log(x)·y = c·log(x) has y = 1, c = 1
+// (D(1)+log(x)·1 = log(x)).  POSITIVE non-cancellation solve (h_1 peeled at
+// n=0, empty residual → c free).
+TEST_F(ParametricTowerTest, Log_FEqualsTheta_DfPositive_ConstantSolution) {
+    DifferentialField field = log_tower();
+    auto f = parse_expr("t", ctx.arena());
+    std::vector<ExprPtr> g = {parse_expr("t", ctx.arena())};
+    auto res = solve_risch_de_parametric_field(f, g, field.extensions().size(), field, ctx);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+    bool any_nontrivial = false;
+    for (const auto& sol : res.value()) {
+        EXPECT_TRUE(verify_field_de(sol.y, f, g, sol.c, field, ctx)) << "unsound (log t, {t})";
+        any_nontrivial |= is_nontrivial(sol);
+    }
+    EXPECT_TRUE(any_nontrivial) << "expected y = 1, c = 1";
+}
+
+// Exp tower, f = t (= exp(x)), g = {t² + t}.  D(y) + exp(x)·y = c·(t²+t) has
+// y = t, c = 1  (D(t)+t·t = t + t² = t²+t).  POSITIVE non-cancellation solve
+// with N = 1 (two peeling passes n=1,0), exercises D(s·t^n) with D(t)=t.
+TEST_F(ParametricTowerTest, Exp_FEqualsTheta_DfPositive_ExpSolution) {
+    DifferentialField field = exp_tower();
+    auto f = parse_expr("t", ctx.arena());
+    std::vector<ExprPtr> g = {parse_expr("t^2 + t", ctx.arena())};
+    auto res = solve_risch_de_parametric_field(f, g, field.extensions().size(), field, ctx);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+    bool any_nontrivial = false;
+    for (const auto& sol : res.value()) {
+        EXPECT_TRUE(verify_field_de(sol.y, f, g, sol.c, field, ctx)) << "unsound (exp t, {t²+t})";
+        any_nontrivial |= is_nontrivial(sol);
+    }
+    EXPECT_TRUE(any_nontrivial) << "expected y = t (= exp x), c = 1";
 }
 
 }  // namespace

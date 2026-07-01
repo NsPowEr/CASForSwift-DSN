@@ -376,23 +376,29 @@ Result<std::vector<ParametricRischDeQSolution>> solve_risch_de_parametric_field(
     }
     if (N < 0) N = 0;
     
-    // df > 0 — non-cancellation parametric PolyRischDE (Bronstein §6.5/§7.4/§8.4):
-    // deg(y)=dg_max−df, lc(y)=lc(g)/lc(f), reduce+recurse; lc(g)=Σ c_i·lc(g_i).
-    // NOT IMPLEMENTED (A1).  Now deterministically REACHABLE + reproduced by
-    // ParametricTowerTest.Log_FEqualsTheta_DfPositive_ReachesNonCancellation
-    // (A26 harness, f=log(x) over Q(x,log x)); when Bronstein §6.5 lands, that
-    // test flips from Unimplemented to a back-substitution check.  Contract:
-    // diagnostic Unimplemented, never a hang nor a silent wrong answer.
+    // df > 0 — non-cancellation parametric PolyRischDE (A1).  For the log/exp
+    // monomials here, deg_t(f_new) > 0 ⇒ deg(b) > max(0, δ(t)−1), i.e. the
+    // "deg(b) is Large Enough" case: Bronstein Symbolic Integration I §7.1,
+    // ParamPolyRischDENoCancel1.  Solve  D(q) + f_new·q = Σ c_i·g_new_i  in
+    // K[t], then divide the polynomial solutions q by D (as the df≤0 tail does).
+    // Sound: solve_param_poly_risch_de_nocancel1 verifies each candidate by
+    // field back-substitution.  Deeper-tower ConstantSystem → Unimplemented.
     if (df > 0) {
-        return make_unimplemented<std::vector<ParametricRischDeQSolution>>(
-            "calculus", "solve_risch_de_parametric_field",
-            "parametric PolyRischDE non-cancellation case (deg_t(f) > 0) not "
-            "implemented — Bronstein Symbolic Integration I §6.5/§7.4/§8.4. See "
-            "HARDCODE_LEDGER.md HC-F8-PENDING-17 / task A1",
-            cas::error::reason_codes::RISCH_NO_POLYNOMIAL_SOLUTION,
-            "Risch DE solver: parametric solver with df > 0 is unimplemented");
+        auto nc = solve_param_poly_risch_de_nocancel1(f_new, g_new_vec, N, t, field, ctx);
+        if (nc.is_error()) return nc;
+        std::vector<ParametricRischDeQSolution> out_sols;
+        out_sols.reserve(nc.value().size());
+        for (auto& sol : nc.value()) {
+            ExprPtr y = arena.make<Binary>(BinaryOp::Div, sol.y, D);
+            auto y_tog = algebra::together(y, ctx);
+            if (y_tog.is_ok()) {
+                if (auto s = ctx.simplify(y_tog.value()); s.is_ok()) y = s.value();
+            }
+            out_sols.push_back({y, std::move(sol.c)});
+        }
+        return ok(std::move(out_sols));
     }
-    
+
     // df <= 0. f_new is f_0 in lower field.
     ExprPtr f_0 = leading_coefficient(f_poly);
     if (!f_0) f_0 = arena.make<IntegerLit>(BigInt(0));

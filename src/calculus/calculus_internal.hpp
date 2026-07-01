@@ -392,4 +392,18 @@ using MRVSet = std::set<ExprPtr, MRVCompare>;
 [[nodiscard]] Result<std::vector<ParametricRischDeQSolution>> solve_risch_de_parametric_field(
     ExprPtr f, const std::vector<ExprPtr>& g_vec, std::size_t ext_idx, const DifferentialField& field, symbolic::CASContext& ctx);
 
+/// @brief Parametric PolyRischDE, non-cancellation case (Bronstein §7.1,
+/// ParamPolyRischDENoCancel1 — "When deg(b) is Large Enough").  Solves the
+/// cleared parametric equation  D(q) + f_new·q = Σ_i c_i·g_new_i  for q ∈ K[t]
+/// (deg ≤ N) and c_i ∈ Const(K)=Q, in the regime deg_t(f_new) > max(0,δ(t)−1)
+/// (df>0 for log/exp towers).  This is the df>0 branch of A1.  Sound: every
+/// candidate is verified by field back-substitution.  Reached from the df>0
+/// site of solve_risch_de_parametric_field.  Returns solutions as {q, c} (the
+/// caller divides q by the denominator D).  ConstantSystem over deeper towers
+/// (K ⊋ Q(x)) → diagnostic Unimplemented (HC-F8-PENDING-17).
+[[nodiscard]] Result<std::vector<ParametricRischDeQSolution>>
+solve_param_poly_risch_de_nocancel1(
+    ExprPtr f_new, const std::vector<ExprPtr>& g_new_vec, int N,
+    const Symbol& t, const DifferentialField& field, symbolic::CASContext& ctx);
+
 }  // namespace cas::calculus

@@ -2042,7 +2042,11 @@ Vedi `PLAN_TASKS_REMAINING.md` per breakdown completo.
 - **Cert confermato**: `QRTest.SymbolicQR_DefaultSignConvention_2x2` un-SKIPped → `EXPECT_TRUE(entries_equal(...))` PASS (1875 ms). Bailout euristico `symbolic_qr_max_norm_complexity` resta come perf-guard configurabile (non più causa di SKIP).
 - **Test di regressione**: `QRTest.*` (7/7 PASS), `TogetherGcdTest.*` (8/8 PASS), suite algebra+linalg+simplify mirata (260/260 PASS).
 
-### HC-F8-PENDING-17 — Risch parametric solver df>0 — SCAFFOLD (2026-06-14)
+### HC-F8-PENDING-17 — Risch parametric solver df>0 — ✅ RISOLTO 2026-07-01 (Bronstein §7.1)
+- **✅ CHIUSURA 2026-07-01 (A1, sbloccato da A26)**: il ramo `df>0` di `solve_risch_de_parametric_field` è implementato. Nuovo `solve_param_poly_risch_de_nocancel1` (`src/calculus/risch_param_nocancel.cpp`) = **ParamPolyRischDENoCancel1 verbatim** (Bronstein *Symbolic Integration I* §7.1, "When deg(b) is Large Enough"; spec self-contained `MISSING_FEATURES_SPECS/Symbolic_Integration_I.md` letta, REGOLA 0.1). Per torri log(δ=0)/exp(δ=1), `df>0 ⇒ deg(b)>max(0,δ−1)` ⇒ sempre non-cancellation → NoCancel1 unico algoritmo necessario. Peel top-down `s_i=coeff(g_i,t^{n+d_b})/lc(b)`, `h_i+=s_i t^n`, `g_i←g_i−D(s_i t^n)−b s_i t^n`; residuo `Σc_i g_i=0` → ConstantSystem su K=Q(x) (clear-den + Q-coords x-power) → null space → `q=Σc_i h_i`, `y=q/D`. **SOUND** (back-substitution field `D(q)+f_new·q≡Σc_i g_i` in K[t], candidati non-verificati scartati). Cap/degree bound = param del chiamante (già derivato Lemma 6.3.x), zero magic. **Audit hardcode: 0 violazioni**. Test df>0 flippati: log `f=t,g={t}`→`y=1,c=1`; exp `f=t,g={t²+t}`→`y=t,c=1`; log `f=t,g={1}`→solo triviale (nessuna soluzione elementare = corretto). 17 ParametricTower + 168 risch/integrate verdi, 0 regressioni. Wiring in `risch_rde_bronstein.cpp` (df>0 → helper + divide per D); rimosso l'Unimplemented (file ora A23-independent).
+- **🔧 RESIDUO (boundary reale, non debito nascosto)**: ConstantSystem su **torri profonde** K⊋Q(x) → Unimplemented pulito (serve la riduzione derivation-based generale §7.1). NoCancel2/3 non occorrono per df>0 su log/exp. Wiring nel path `integrate()` reale = passo successivo.
+- **STORICO (pre-chiusura) ↓**
+### HC-F8-PENDING-17 (storico) — Risch parametric solver df>0 — SCAFFOLD (2026-06-14)
 - **Task ID**: 17
 - **File**: `src/calculus/risch_rde_bronstein.cpp`
   (`solve_risch_de_parametric_field` existing trial-constant path),
