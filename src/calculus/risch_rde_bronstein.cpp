@@ -382,7 +382,8 @@ Result<std::vector<ParametricRischDeQSolution>> solve_risch_de_parametric_field(
     // ParamPolyRischDENoCancel1.  Solve  D(q) + f_new·q = Σ c_i·g_new_i  in
     // K[t], then divide the polynomial solutions q by D (as the df≤0 tail does).
     // Sound: solve_param_poly_risch_de_nocancel1 verifies each candidate by
-    // field back-substitution.  Deeper-tower ConstantSystem → Unimplemented.
+    // field back-substitution.  The residual constant system is solved for any
+    // tower K ⊇ Q(x) via ConstantSystem (Bronstein §7.1, Lemma 7.1.2).
     if (df > 0) {
         auto nc = solve_param_poly_risch_de_nocancel1(f_new, g_new_vec, N, t, field, ctx);
         if (nc.is_error()) return nc;

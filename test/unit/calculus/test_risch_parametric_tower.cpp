@@ -490,23 +490,46 @@ TEST_F(ParametricTowerTest, TwoLevel_ExpExp_DfPositive_ConstantSolution_Sound) {
 
 // f = t2, g = {t2²}.  Peeling leaves a residual whose t-coefficient is a
 // polynomial in the LOWER generator t1 (D(t2²)=2·t1·t2²), so the constant system
-// lives in K = Q(x, t1) ⊋ Q(x).  The general derivation-based ConstantSystem
-// (Bronstein §7.1) is not yet built, so the solver MUST decline with a diagnostic
-// Unimplemented — never silently return "no solution" (which is exactly what the
-// broken derivation did before).  This test is the executable oracle for the next
-// task: implementing the deep-tower ConstantSystem.
-TEST_F(ParametricTowerTest, TwoLevel_ExpExp_DfPositive_DeepConstantSystem_Unimplemented) {
+// lives in K = Q(x, t1) ⊋ Q(x).  The derivation-based ConstantSystem (Bronstein
+// §7.1, Lemma 7.1.2) reduces it and correctly DECIDES that no elementary rational
+// solution exists for c ≠ 0 (the particular b=−c·t1 would need b'=0, forcing c=0).
+// Before ConstantSystem this deep-tower residual was a diagnostic Unimplemented;
+// now the solver returns OK with only the trivial solution, each sound.
+TEST_F(ParametricTowerTest, TwoLevel_ExpExp_DfPositive_DeepConstantSystem_DecidesTrivial) {
     DifferentialField field = exp_exp_tower();
     auto f = parse_expr("t2", ctx.arena());
     std::vector<ExprPtr> g = {parse_expr("t2^2", ctx.arena())};
     auto res = solve_risch_de_parametric_field(f, g, field.extensions().size(), field, ctx);
-    ASSERT_TRUE(res.is_error())
-        << "residual in Q(x, t1) ⊋ Q(x) must reach the deep-tower ConstantSystem "
-           "boundary, not silently return an empty solution set";
-    EXPECT_EQ(res.error().kind, CASErrorKind::Unimplemented);
-    EXPECT_NE(res.error().message.find("ConstantSystem"), std::string::npos)
-        << "the diagnostic must name the deep-tower ConstantSystem gap; got: "
-        << res.error().message;
+    ASSERT_TRUE(res.is_ok())
+        << "deep-tower ConstantSystem must decide, not decline: " << res.error().message;
+    for (const auto& sol : res.value()) {
+        EXPECT_TRUE(verify_field_de(sol.y, f, g, sol.c, field, ctx)) << "unsound df>0 depth-2";
+        EXPECT_FALSE(is_nontrivial(sol))
+            << "D(y)+t2·y = c·t2² has no elementary rational solution for c ≠ 0";
+    }
+}
+
+// f = t2, g = {t2², 3·t2² + t2}.  The t1-bearing residuals of the two forcings
+// (from D(t2²)=2·t1·t2²) are Q-linearly dependent, so the ConstantSystem's
+// column-clearing row R_{m+1}=D(R_i)/D(a_ij) — dividing by the NON-constant pivot
+// living in Q(x,t1)⊋Q(x) — exposes the constant relation c = (−3, 1).  Then
+// −3·t2² + (3·t2² + t2) = t2, and D(1)+t2·1 = t2, so y = 1.  A genuinely non-
+// proportional deep-tower solve: unreachable by the old Q(x)-only shortcut.
+TEST_F(ParametricTowerTest, TwoLevel_ExpExp_DfPositive_DeepConstantSystem_NontrivialCoupling) {
+    DifferentialField field = exp_exp_tower();
+    auto f = parse_expr("t2", ctx.arena());
+    std::vector<ExprPtr> g = {parse_expr("t2^2", ctx.arena()),
+                              parse_expr("3*t2^2 + t2", ctx.arena())};
+    auto res = solve_risch_de_parametric_field(f, g, field.extensions().size(), field, ctx);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+    bool any_nontrivial = false;
+    for (const auto& sol : res.value()) {
+        EXPECT_TRUE(verify_field_de(sol.y, f, g, sol.c, field, ctx))
+            << "unsound deep-tower coupled solution";
+        any_nontrivial |= is_nontrivial(sol);
+    }
+    EXPECT_TRUE(any_nontrivial)
+        << "expected the nontrivial constant relation c=(−3,1), y=1 via ConstantSystem";
 }
 
 }  // namespace

@@ -399,11 +399,27 @@ using MRVSet = std::set<ExprPtr, MRVCompare>;
 /// (df>0 for log/exp towers).  This is the df>0 branch of A1.  Sound: every
 /// candidate is verified by field back-substitution.  Reached from the df>0
 /// site of solve_risch_de_parametric_field.  Returns solutions as {q, c} (the
-/// caller divides q by the denominator D).  ConstantSystem over deeper towers
-/// (K ⊋ Q(x)) → diagnostic Unimplemented (HC-F8-PENDING-17).
+/// caller divides q by the denominator D).  The residual constant system is
+/// solved for any tower K = k(t_1,…,t_j) via constant_system_nullspace
+/// (Bronstein §7.1 ConstantSystem), not just K = Q(x).
 [[nodiscard]] Result<std::vector<ParametricRischDeQSolution>>
 solve_param_poly_risch_de_nocancel1(
     ExprPtr f_new, const std::vector<ExprPtr>& g_new_vec, int N,
     const Symbol& t, const DifferentialField& field, symbolic::CASContext& ctx);
+
+/// @brief Bronstein §7.1 ConstantSystem (Fig 7.1) / Lemma 7.1.2.  Given a
+/// homogeneous linear system A·c = 0 whose entries live in a differential field K
+/// (ExprPtr rational functions of the base variable and the lower tower
+/// generators), reduce it — by row operations plus the derivation-generated rows
+/// R_{m+1} = D(R_i)/D(a_ij) — to the system for its CONSTANT solutions, and return
+/// a null-space basis over Const(K)=Q.  The right side is 0 throughout (u=0 ⇒
+/// v=0).  Terminates in ≤ m column-clearing passes.  Declines with Unimplemented
+/// only if a reduced constant entry is not rational over Q (Const(K) ⊋ Q — not
+/// produced by log/exp towers).  Generalises the Q(x)-only clear-denominators
+/// shortcut, enabling deep towers K ⊋ Q(x) (closes HC-F8-PENDING-17).
+[[nodiscard]] Result<std::vector<std::vector<Rational>>>
+constant_system_nullspace(
+    std::vector<std::vector<ExprPtr>> A, std::size_t m,
+    const DifferentialField& field, symbolic::CASContext& ctx);
 
 }  // namespace cas::calculus

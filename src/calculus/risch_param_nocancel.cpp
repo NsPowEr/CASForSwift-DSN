@@ -21,8 +21,9 @@
 // homogeneous linear system on the constants c_i — Bronstein's ConstantSystem.
 // Here K = Q(x): each residual t-coefficient is a rational function of x, so
 // clearing denominators and equating x-power coefficients gives Q-linear rows.
-// Its null space parametrises q = Σ_i c_i·h_i.  Deeper towers (K ⊋ Q(x)) need
-// the full derivation-based ConstantSystem → diagnostic Unimplemented.
+// Its null space parametrises q = Σ_i c_i·h_i.  The reduction to a constant
+// system is done for any tower K = k(t_1,…,t_j) by constant_system_nullspace
+// (Bronstein §7.1 ConstantSystem / Lemma 7.1.2), not just K = Q(x).
 //
 // SOUNDNESS (REGOLA ZERO).  Every candidate (q, c) is verified by field
 // back-substitution D(q) + b·q ≡ Σ_i c_i·g_i in K[t]; unverified candidates are
@@ -49,8 +50,6 @@ namespace cas::calculus {
 namespace {
 
 using detail::as_rational;
-using detail::null_space_basis;
-using detail::row_echelon;
 
 [[nodiscard]] ExprPtr int_lit(std::int64_t v, AstArena& arena) {
     return arena.make<IntegerLit>(BigInt(v));
@@ -154,9 +153,11 @@ solve_param_poly_risch_de_nocancel1(
         }
     }
 
-    // Residual constraint Σ_i c_i·g_i(t) ≡ 0.  For each t-power j, the K-linear
-    // form Σ_i c_i·coeff_j(g_i) must vanish; over K = Q(x) clear denominators and
-    // equate x-power coefficients → Q-linear rows on (c_1..c_m).
+    // Residual constraint Σ_i c_i·g_i(t) ≡ 0 in K[t].  For each t-power j the
+    // K-linear form Σ_i c_i·coeff_j(g_i) must vanish, giving a homogeneous system
+    // A·c = 0 with entries in K.  ConstantSystem (Bronstein §7.1, Lemma 7.1.2)
+    // reduces it to the system for its constant solutions and returns a Q null-
+    // space basis — valid for any tower K = k(t_1,…,t_j), not just K = Q(x).
     std::vector<algebra::PolyExpr> res;
     res.reserve(m);
     std::size_t max_tdeg = 0;
@@ -167,53 +168,17 @@ solve_param_poly_risch_de_nocancel1(
         res.push_back(rp.value());
     }
 
-    std::vector<std::vector<Rational>> M;
+    std::vector<std::vector<ExprPtr>> A;
+    A.reserve(max_tdeg);
     for (std::size_t j = 0; j < max_tdeg; ++j) {
-        std::vector<ExprPtr> num(m), den(m);
-        ExprPtr L = int_lit(1, arena);
-        for (std::size_t i = 0; i < m; ++i) {
-            auto pr = algebra::apart_num_den(poly_coeff(res[i], j, arena), ctx);
-            if (pr.is_error()) return fail_unimpl("residual coefficient not rational in x");
-            num[i] = pr.value().numerator;
-            den[i] = pr.value().denominator;
-            L = arena.make<Binary>(BinaryOp::Mul, L, den[i]);
-        }
-        std::vector<std::vector<Rational>> ncoef(m);
-        std::size_t width = 0;
-        for (std::size_t i = 0; i < m; ++i) {
-            ExprPtr scaled = arena.make<Binary>(BinaryOp::Mul, num[i],
-                                 arena.make<Binary>(BinaryOp::Div, L, den[i]));
-            if (auto s = ctx.simplify(scaled); s.is_ok()) scaled = s.value();
-            auto cc = qx_coeffs(scaled, base, ctx);
-            if (!cc)
-                return fail_unimpl("residual over a deeper tower K ⊋ Q(x): general "
-                                   "ConstantSystem (Bronstein 7.1) not implemented");
-            width = std::max(width, cc->size());
-            ncoef[i] = std::move(*cc);
-        }
-        for (std::size_t p = 0; p < width; ++p) {
-            std::vector<Rational> row(m, Rational(BigInt(0)));
-            bool nonzero = false;
-            for (std::size_t i = 0; i < m; ++i)
-                if (p < ncoef[i].size()) {
-                    row[i] = ncoef[i][p];
-                    if (!row[i].numerator().is_zero()) nonzero = true;
-                }
-            if (nonzero) M.push_back(std::move(row));
-        }
+        std::vector<ExprPtr> row(m);
+        for (std::size_t i = 0; i < m; ++i) row[i] = poly_coeff(res[i], j, arena);
+        A.push_back(std::move(row));
     }
 
-    std::vector<std::vector<Rational>> basis;
-    if (M.empty()) {
-        for (std::size_t i = 0; i < m; ++i) {
-            std::vector<Rational> e(m, Rational(BigInt(0)));
-            e[i] = Rational(BigInt(1));
-            basis.push_back(std::move(e));
-        }
-    } else {
-        auto piv = row_echelon(M, m);
-        basis = null_space_basis(M, piv, m);
-    }
+    auto basis_res = constant_system_nullspace(std::move(A), m, field, ctx);
+    if (basis_res.is_error()) return fail<std::vector<ParametricRischDeQSolution>>(basis_res.error());
+    const std::vector<std::vector<Rational>>& basis = basis_res.value();
 
     // Verify a candidate (q, c) by field back-substitution: the residual
     // D(q) + f_new·q − Σ_i c_i·g_new_i must vanish identically in K[t].
