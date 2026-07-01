@@ -14,6 +14,7 @@
 
 #include <gtest/gtest.h>
 
+#include "cas/algebra.hpp"
 #include "cas/calculus.hpp"
 #include "cas/differential_algebra.hpp"
 #include "cas/formatter.hpp"
@@ -36,7 +37,74 @@ protected:
         EXPECT_TRUE(r.is_ok()) << s;
         return r.value();
     }
+
+    // A two-level Liouvillian tower: t1 = exp(x) (D(t1)=t1), t2 = exp(t1)
+    // (D(t2)=t2·D(t1)=t1·t2).  Derivatives of composite generator expressions
+    // exercise the product/power rules of DifferentialField::derive.
+    [[nodiscard]] DifferentialField exp_exp_tower() {
+        DifferentialExtension e1{ExtensionType::Exponential, parse("x"), Symbol{"t1"}};
+        DifferentialExtension e2{ExtensionType::Exponential, parse("t1"), Symbol{"t2"}};
+        return DifferentialField(x, {e1, e2});
+    }
+
+    // Mathematically validate D(expr) == expected by checking the difference
+    // simplifies to 0 in the field (structural, not toString — CLAUDE.md).
+    [[nodiscard]] bool derivative_equals(const DifferentialField& field,
+                                         const std::string& expr,
+                                         const std::string& expected) {
+        auto d = field.derive(parse(expr), ctx);
+        EXPECT_TRUE(d.is_ok()) << "D(" << expr << "): " << (d.is_error() ? d.error().message : "");
+        if (d.is_error()) return false;
+        ExprPtr delta = ctx.arena().make<Binary>(BinaryOp::Sub, d.value(), parse(expected));
+        auto tog = algebra::together(delta, ctx);
+        auto s = ctx.simplify(tog.is_ok() ? tog.value() : delta);
+        if (s.is_error()) return false;
+        if (const auto* il = expr_cast<IntegerLit>(s.value())) return il->value.is_zero();
+        if (const auto* rl = expr_cast<RationalLit>(s.value())) return rl->numerator.is_zero();
+        return false;
+    }
 };
+
+// --- Composite-generator derivation over a two-level tower (product/power/quotient
+// rules).  Before this was fixed, DifferentialField::derive fell through to
+// diff(_, base_var) for any non-bare-symbol, treating generators as constants and
+// returning 0 for D(t1·t2), D(t2²), D(−t1) — a silent-wrong derivation that made
+// the parametric Risch solver spuriously report "no solution" instead of reaching
+// the deep-tower ConstantSystem boundary.  These pin the corrected rules. ---
+
+TEST_F(DifferentialFieldProbeTest, DeriveBareGeneratorsTwoLevel) {
+    DifferentialField field = exp_exp_tower();
+    EXPECT_TRUE(derivative_equals(field, "t1", "t1"));        // D(exp x) = exp x
+    EXPECT_TRUE(derivative_equals(field, "t2", "t1*t2"));     // D(exp(t1)) = t1·t2
+}
+
+TEST_F(DifferentialFieldProbeTest, DeriveProductRuleTwoLevel) {
+    DifferentialField field = exp_exp_tower();
+    // D(t1·t2) = D(t1)·t2 + t1·D(t2) = t1·t2 + t1·(t1·t2) = t1·t2 + t1²·t2.
+    EXPECT_TRUE(derivative_equals(field, "t1*t2", "t1*t2 + t1^2*t2"));
+}
+
+TEST_F(DifferentialFieldProbeTest, DerivePowerRuleTwoLevel) {
+    DifferentialField field = exp_exp_tower();
+    // D(t2²) = 2·t2·D(t2) = 2·t2·(t1·t2) = 2·t1·t2².
+    EXPECT_TRUE(derivative_equals(field, "t2^2", "2*t1*t2^2"));
+}
+
+TEST_F(DifferentialFieldProbeTest, DeriveNegationAndQuotientTwoLevel) {
+    DifferentialField field = exp_exp_tower();
+    EXPECT_TRUE(derivative_equals(field, "-t1", "-t1"));           // D(−t1) = −t1
+    // D(t2/t1) = (D(t2)·t1 − t2·D(t1))/t1² = (t1²·t2 − t1·t2)/t1² = t2 − t2/t1.
+    EXPECT_TRUE(derivative_equals(field, "t2/t1", "t2 - t2/t1"));
+}
+
+// A base-variable-dependent exponent over a generator needs log(base) ∉ K:
+// the derivation must decline with a diagnostic, never a silent wrong value.
+TEST_F(DifferentialFieldProbeTest, DerivePowerNonConstantExponentIsUnimplemented) {
+    DifferentialField field = exp_exp_tower();
+    auto d = field.derive(parse("t1^x"), ctx);
+    ASSERT_TRUE(d.is_error());
+    EXPECT_EQ(d.error().kind, CASErrorKind::Unimplemented);
+}
 
 // Build a field K(ln(x), exp(x)) and check tower contains 2 extensions.
 TEST_F(DifferentialFieldProbeTest, BuildsLogExpTower) {

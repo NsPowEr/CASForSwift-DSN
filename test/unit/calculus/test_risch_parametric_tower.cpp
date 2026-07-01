@@ -98,6 +98,18 @@ protected:
                                   parse_expr("x", ctx.arena()), Symbol{"t"}};
         return DifferentialField(x, {ext});
     }
+
+    // Two-level Liouvillian tower: t1 = exp(x) (D(t1)=t1), t2 = exp(t1)
+    // (D(t2)=t1·t2).  The top extension t2 drives the df>0 non-cancellation
+    // branch, while its derivation pulls in the lower generator t1 — so the
+    // residual ConstantSystem lives in K = Q(x, t1) ⊋ Q(x).
+    DifferentialField exp_exp_tower() {
+        DifferentialExtension e1{ExtensionType::Exponential,
+                                 parse_expr("x", ctx.arena()), Symbol{"t1"}};
+        DifferentialExtension e2{ExtensionType::Exponential,
+                                 parse_expr("t1", ctx.arena()), Symbol{"t2"}};
+        return DifferentialField(x, {e1, e2});
+    }
 };
 
 // --- df <= 0, caso esponenziale : il solver DEVE risolvere, soluzioni sound. ---
@@ -447,6 +459,54 @@ TEST_F(ParametricTowerTest, Exp_FEqualsTheta_DfPositive_ExpSolution) {
         any_nontrivial |= is_nontrivial(sol);
     }
     EXPECT_TRUE(any_nontrivial) << "expected y = t (= exp x), c = 1";
+}
+
+// --- df > 0 on a TWO-LEVEL tower K(x, t1, t2), t1=exp(x), t2=exp(t1). ---
+//
+// These exercise the field solver's df>0 non-cancellation branch at depth 2,
+// where the derivation D(t2)=t1·t2 pulls the lower generator t1 into the peeled
+// residual.  Both rely on the corrected DifferentialField::derive (product/power
+// rules over the tower): with the old bare-symbol-only shim D(t2²)=0, so the
+// residual cancelled spuriously and the solver returned an empty (false-green)
+// solution set instead of either solving or reaching the deep-tower boundary.
+
+// f = t2, g = {t2}.  D(y) + exp(exp x)·y = c·exp(exp x) has y = 1, c = 1
+// (D(1)+t2 = t2).  The residual peels to zero, so the ConstantSystem is trivial
+// and the solve stays inside the implemented Q(x) path — a genuine depth-2 solve.
+TEST_F(ParametricTowerTest, TwoLevel_ExpExp_DfPositive_ConstantSolution_Sound) {
+    DifferentialField field = exp_exp_tower();
+    auto f = parse_expr("t2", ctx.arena());
+    std::vector<ExprPtr> g = {parse_expr("t2", ctx.arena())};
+    auto res = solve_risch_de_parametric_field(f, g, field.extensions().size(), field, ctx);
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+    bool any_nontrivial = false;
+    for (const auto& sol : res.value()) {
+        EXPECT_TRUE(verify_field_de(sol.y, f, g, sol.c, field, ctx))
+            << "unsound solution on the two-level tower";
+        any_nontrivial |= is_nontrivial(sol);
+    }
+    EXPECT_TRUE(any_nontrivial) << "expected y = 1, c = 1 at depth 2";
+}
+
+// f = t2, g = {t2²}.  Peeling leaves a residual whose t-coefficient is a
+// polynomial in the LOWER generator t1 (D(t2²)=2·t1·t2²), so the constant system
+// lives in K = Q(x, t1) ⊋ Q(x).  The general derivation-based ConstantSystem
+// (Bronstein §7.1) is not yet built, so the solver MUST decline with a diagnostic
+// Unimplemented — never silently return "no solution" (which is exactly what the
+// broken derivation did before).  This test is the executable oracle for the next
+// task: implementing the deep-tower ConstantSystem.
+TEST_F(ParametricTowerTest, TwoLevel_ExpExp_DfPositive_DeepConstantSystem_Unimplemented) {
+    DifferentialField field = exp_exp_tower();
+    auto f = parse_expr("t2", ctx.arena());
+    std::vector<ExprPtr> g = {parse_expr("t2^2", ctx.arena())};
+    auto res = solve_risch_de_parametric_field(f, g, field.extensions().size(), field, ctx);
+    ASSERT_TRUE(res.is_error())
+        << "residual in Q(x, t1) ⊋ Q(x) must reach the deep-tower ConstantSystem "
+           "boundary, not silently return an empty solution set";
+    EXPECT_EQ(res.error().kind, CASErrorKind::Unimplemented);
+    EXPECT_NE(res.error().message.find("ConstantSystem"), std::string::npos)
+        << "the diagnostic must name the deep-tower ConstantSystem gap; got: "
+        << res.error().message;
 }
 
 }  // namespace
