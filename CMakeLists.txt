@@ -681,6 +681,7 @@ test/unit/algebra/test_cyclotomic_rootof_d2.cpp
         test/unit/calculus/test_risch_parametric_tower.cpp
         test/unit/calculus/test_risch_de_extensions.cpp
         test/unit/calculus/test_risch_exp_expand.cpp
+        test/unit/calculus/test_risch_nested_transcendental.cpp
         test/unit/calculus/test_z_transform.cpp
         test/unit/calculus/test_mellin_transform.cpp
         test/unit/calculus/test_inverse_laplace_residue.cpp

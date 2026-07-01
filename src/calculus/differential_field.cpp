@@ -457,11 +457,19 @@ Result<ExprPtr> DifferentialField::to_field_generators(ExprPtr expr, symbolic::C
     ExprPtr current = expr;
     AstArena& arena = ctx.arena();
 
-    for (const auto& ext : extensions_) {
-        std::string func_name = (ext.type == ExtensionType::Logarithmic) ? "ln" : "exp";
-        ExprPtr pattern = arena.make<FuncCall>(func_name, std::vector<ExprPtr>{ext.argument});
-        ExprPtr replacement = arena.make<Symbol>(ext.t_var.name);
-        
+    // Substitute OUTERMOST generators first (reverse tower order).  A higher
+    // generator's pattern is a function whose argument still contains the lower
+    // generators' original forms (e.g. t_1 = exp(exp(x)) has pattern exp(exp(x)),
+    // which embeds t_0 = exp(x)).  Replacing t_0 first would rewrite the inner
+    // exp(x) → t_0 *inside* that pattern, turning exp(exp(x)) into exp(t_0) so the
+    // t_1 pattern no longer matches — leaving the outer transcendental unmapped
+    // (silent-wrong: it is then mis-integrated as a constant coefficient).
+    // from_field_generators already unwinds in this same reverse order.
+    for (auto it = extensions_.rbegin(); it != extensions_.rend(); ++it) {
+        std::string func_name = (it->type == ExtensionType::Logarithmic) ? "ln" : "exp";
+        ExprPtr pattern = arena.make<FuncCall>(func_name, std::vector<ExprPtr>{it->argument});
+        ExprPtr replacement = arena.make<Symbol>(it->t_var.name);
+
         current = substitute_pattern(current, pattern, replacement, arena);
     }
     return ok(current);
