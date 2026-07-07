@@ -7,6 +7,8 @@
 #include "cas/ast.hpp"
 #include "cas/bigint.hpp"
 #include "cas/rational.hpp"
+#include "cas/symbolic.hpp"
+#include "../algebra/polynomial_internal.hpp"
 
 #include <cstddef>
 #include <optional>
@@ -73,6 +75,30 @@ namespace cas::calculus::detail {
         basis.push_back(std::move(v));
     }
     return basis;
+}
+
+// Rational constant as an ExprPtr literal (IntegerLit when denominator is 1).
+[[nodiscard]] inline ExprPtr rational_to_expr(const Rational& c, AstArena& arena) {
+    return (c.denominator() == BigInt(1))
+        ? static_cast<ExprPtr>(arena.make<IntegerLit>(c.numerator()))
+        : static_cast<ExprPtr>(arena.make<RationalLit>(c.numerator(), c.denominator()));
+}
+
+// Q-coefficient vector of a polynomial-in-var ExprPtr (nullopt if not a
+// polynomial over Q in var).
+[[nodiscard]] inline std::optional<std::vector<Rational>>
+poly_coeffs_q(ExprPtr e, const Symbol& var, symbolic::CASContext& ctx) {
+    auto pr = algebra::parse_polynomial(e, var, ctx);
+    if (pr.is_error()) return std::nullopt;
+    std::vector<Rational> out;
+    out.reserve(pr.value().size());
+    for (ExprPtr c : pr.value().coefficients()) {
+        auto r = as_rational(c);
+        if (!r) { if (auto s = ctx.simplify(c); s.is_ok()) r = as_rational(s.value()); }
+        if (!r) return std::nullopt;
+        out.push_back(*r);
+    }
+    return out;
 }
 
 }  // namespace cas::calculus::detail

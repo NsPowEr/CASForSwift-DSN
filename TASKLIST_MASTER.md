@@ -210,9 +210,14 @@ Ordinati per severità/impatto decrescente. Ogni voce verificata aperta a codice
 - **Fix**: iterazione **reverse** (`rbegin()/rend()`, outermost-first), simmetrica a `from_field_generators` che già svolgeva in quest'ordine. Nessun hardcode: stessa logica generale, solo ordine di iterazione corretto sulla torre.
 - **Verifica**: nuovo test `test/unit/calculus/test_risch_nested_transcendental.cpp` (4 casi) — i 3 integrandi non-elementari ora ritornano `Unimplemented` (bail pulito, REGOLA 0.2 rispettata) invece di risposta sbagliata silenziosa; il caso elementare `exp(exp(x))·exp(x)` resta correttamente risolto (nessuna regressione). Gate: quick pieno 2551 PASS, 0 regressioni, 2 skip pre-esistenti.
 
-### A29 · Anti-monolito: split `risch_rde_bronstein.cpp` (538 LOC) + `risch_parametric_rational.cpp` (593 LOC) — 🆕 APERTO 2026-07-07 (alias SPLIT-RISCH-RDE) — `[E1·C1·S2·R2]`
-- **Stato**: entrambi oltre il limite 500 (il secondo oltre l'hard block 550), whitelisted temporaneamente in `scripts/file_size_whitelist.txt` con rif. a questo task.
-- **Cosa**: split per unità funzionale (es. denominator-bound/degree-bound vs solve loop; limited-integration vs ParamRischDE generale), zero cambi di logica, gate verde per ogni split. Rimuovere le due voci di whitelist alla chiusura (pre-commit Gate 3 blocca whitelist stale).
+### A29 · Anti-monolito: split `risch_rde_bronstein.cpp` (538 LOC) + `risch_parametric_rational.cpp` (593 LOC) — ✅ FATTO 2026-07-07 (alias SPLIT-RISCH-RDE) — `[E1·C1·S2·R2]`
+- **Chiusura**: split per unità funzionale, zero cambi di logica. `risch_rde_bronstein.cpp` (252) + nuovo `risch_rde_parametric_field.cpp` (306, tower descent parametrico); `risch_parametric_rational.cpp` (352, f≠0 P/D-ansatz) + nuovo `risch_parametric_limited.cpp` (248, f=0 limited integration). Helper condivisi (`poly_coeffs_q`, `rational_to_expr`) promossi inline in `risch_parametric_internal.hpp`. Whitelist svuotata. Gate: 97/97 test Risch mirati verdi, build -Werror pulita.
+
+### A30 · Budget wall-clock `CASContext::timeout_{1000}` → risultati load-dependent (test flaky sotto carico) — 🆕 APERTO 2026-07-07 — `[E3·C3·S3·R2]`
+- **Sintomo**: `ChebyshevTrigTest.CosTwoPiOverSeven_StackGuard_RootOf` e `DefiniteSummationTest.AbramovMultiAtom_RationalDecomposition` passano isolati, falliscono nella quick suite piena in modo intermittente. Riproduzione deterministica: con 8 processi CPU-hog entrambi falliscono a ogni repeat (stesso binario). Meccanismo: timeout wall-clock 1000ms default (da commit iniziale 145715f) → sotto carico una simplify marginale sfora → l'algoritmo ripiega (Chebyshev: niente RootOf; Abramov: `SUMMATION_GENERAL` table-miss). Mai risposta sbagliata — solo incompletezza load-dependent.
+- **Perché è debito** (CLAUDE.md hardcode cat. 1+9): il budget per operazione è tempo-parete fisso, non adattivo al costo reale né deterministico → l'esito matematico dipende dal carico macchina. Vietato "fixare" alzando la costante o skippando i test (REGOLA 0.2).
+- **Fix corretto**: budget deterministico basato su ops-count/nodi visitati (già esiste `ops_count_` nel Simplifier) come gate primario, wall-clock solo come salvagente esterno; oppure CPU-time thread-based. I test heavy fissano il budget esplicito via `CASContext`, non ereditano un default tarato per interattività.
+- **Nota gate**: fino alla chiusura, un rosso su questi due test in suite piena sotto carico NON è di per sé una regressione — verificare in isolamento prima di attribuire.
 
 ---
 

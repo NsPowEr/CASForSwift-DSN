@@ -53,8 +53,8 @@
 # polynomial_gcd_fp_recursive, polynomial_gcd_brown_modular, polynomial_groebner_fglm,
 # cas_context_params.hpp, ode_solver_frobenius, summation_abramov.
 
-# Temporary whitelist pending split task A29 (TASKLIST_MASTER.md, SPLIT-RISCH-RDE):
-# risch_rde_bronstein.cpp 538 LOC, risch_parametric_rational.cpp 593 LOC.
-src/calculus/risch_rde_bronstein.cpp
-src/calculus/risch_parametric_rational.cpp
+# A29 (SPLIT-RISCH-RDE) — SPLIT DONE 2026-07-07: risch_rde_bronstein.cpp →
+#   + risch_rde_parametric_field.cpp; risch_parametric_rational.cpp →
+#   + risch_parametric_limited.cpp (shared helpers in risch_parametric_internal.hpp).
+#   All four TUs now ≤500 LOC. No whitelist entries needed.
 
