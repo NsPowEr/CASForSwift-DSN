@@ -86,11 +86,11 @@ namespace cas::linalg {
  */
 struct PivotScore {
     int certainty;
-    int neg_total_degree;
     int neg_complexity;
+    int neg_total_degree;
 
     [[nodiscard]] auto as_tuple() const noexcept {
-        return std::tie(certainty, neg_total_degree, neg_complexity);
+        return std::tie(certainty, neg_complexity, neg_total_degree);
     }
     [[nodiscard]] bool operator<(const PivotScore& other) const noexcept {
         return as_tuple() < other.as_tuple();

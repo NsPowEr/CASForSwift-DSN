@@ -119,7 +119,6 @@ namespace {
             if (pivot_row == n || s > best) {
                 best = s;
                 pivot_row = i;
-                if (s.certainty == 3) break;
             }
         }
         if (pivot_row == n || best.certainty < 0) {

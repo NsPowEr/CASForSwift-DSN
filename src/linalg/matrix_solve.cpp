@@ -72,7 +72,6 @@ Result<MatrixExpr> rref(const MatrixExpr& matrix, symbolic::CASContext& ctx) {
             if (sel_row == rows || score > best_score) {
                 best_score = score;
                 sel_row = i;
-                if (score.certainty == 3) break;
             }
         }
 

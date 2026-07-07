@@ -66,36 +66,57 @@ std::optional<BigInt> try_get_bigint(ExprPtr expr) {
 std::size_t estimate_complexity(ExprPtr expr) {
     if (!expr) return 0;
     switch (expr->kind) {
-    case ExprKind::IntegerLit:
-    case ExprKind::RationalLit:
+    case ExprKind::IntegerLit: {
+        const auto* il = expr_cast<IntegerLit>(expr);
+        if (il->value == BigInt(1) || il->value == BigInt(-1)) return 1;
+        return 2;
+    }
+    case ExprKind::RationalLit: {
+        const auto* rl = expr_cast<RationalLit>(expr);
+        if (rl->numerator == BigInt(1) && rl->denominator == BigInt(1)) return 1;
+        if (rl->numerator == BigInt(-1) && rl->denominator == BigInt(1)) return 1;
+        return 2;
+    }
     case ExprKind::DecimalLit:
     case ExprKind::Constant:
-        return 1;
-    case ExprKind::Symbol:
         return 2;
+    case ExprKind::Symbol:
+        return 4;
     case ExprKind::Unary:
         return 1 + estimate_complexity(expr_cast<Unary>(expr)->operand);
     case ExprKind::Binary: {
         const auto* b = expr_cast<Binary>(expr);
-        return 1 + estimate_complexity(b->left) + estimate_complexity(b->right);
+        switch (b->op) {
+        case BinaryOp::Mul:
+            return 2 + estimate_complexity(b->left) + estimate_complexity(b->right);
+        case BinaryOp::Div:
+            return 3 + estimate_complexity(b->left) + estimate_complexity(b->right);
+        case BinaryOp::Add:
+        case BinaryOp::Sub:
+            return 10 + 2 * (estimate_complexity(b->left) + estimate_complexity(b->right));
+        case BinaryOp::Pow:
+            return 4 + estimate_complexity(b->left) + estimate_complexity(b->right);
+        default:
+            return 5 + estimate_complexity(b->left) + estimate_complexity(b->right);
+        }
     }
     case ExprKind::Sum: {
-        std::size_t c = 1;
-        for (auto t : expr_cast<Sum>(expr)->terms) c += estimate_complexity(t);
+        std::size_t c = 10;
+        for (auto t : expr_cast<Sum>(expr)->terms) c += 2 * estimate_complexity(t);
         return c;
     }
     case ExprKind::Product: {
-        std::size_t c = 1;
+        std::size_t c = 2;
         for (auto f : expr_cast<Product>(expr)->factors) c += estimate_complexity(f);
         return c;
     }
     case ExprKind::FuncCall: {
-        std::size_t c = 1;
+        std::size_t c = 5;
         for (auto a : expr_cast<FuncCall>(expr)->args) c += estimate_complexity(a);
         return c;
     }
     default:
-        return 5;
+        return 10;
     }
 }
 
@@ -211,7 +232,7 @@ PivotScore make_pivot_score(ExprPtr val, symbolic::CASContext& ctx) {
     const std::size_t cpx = estimate_complexity(val);
     const int deg_i = static_cast<int>(std::min<std::size_t>(deg, 1'000'000));
     const int cpx_i = static_cast<int>(std::min<std::size_t>(cpx, 1'000'000));
-    return PivotScore{certainty, -deg_i, -cpx_i};
+    return PivotScore{certainty, -cpx_i, -deg_i};
 }
 
 } // namespace cas::linalg
