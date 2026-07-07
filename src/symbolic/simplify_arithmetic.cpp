@@ -397,7 +397,7 @@ Result<std::optional<MonomialTerm>> Simplifier::extract_monomial(ExprPtr expr) {
                 continue;
             }
             if (const auto* power = expr_cast<Binary>(factor); power != nullptr && power->op == BinaryOp::Pow) {
-                if (auto exponent = try_get_integer_exponent(power->right); exponent.has_value() && !exponent->is_negative()) {
+                if (auto exponent = try_get_integer_exponent(power->right); exponent.has_value()) {
                     factors.push_back({power->left, *exponent});
                     continue;
                 }

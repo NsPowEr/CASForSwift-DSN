@@ -101,7 +101,7 @@ struct RatR { R2 num; R2 den; };
 
 class RadicalField {
 public:
-    RadicalField(AstArena& arena, ExprPtr p) : arena_(arena), p_(p) {}
+    RadicalField(CASContext& ctx, ExprPtr p) : ctx_(ctx), arena_(ctx.arena()), p_(p) {}
 
     ExprPtr zero() { return arena_.make<IntegerLit>(BigInt(0)); }
     ExprPtr one()  { return arena_.make<IntegerLit>(BigInt(1)); }
@@ -110,13 +110,22 @@ public:
     ExprPtr sub(ExprPtr x, ExprPtr y) { return arena_.make<Binary>(BinaryOp::Sub, x, y); }
     ExprPtr mul(ExprPtr x, ExprPtr y) { return arena_.make<Binary>(BinaryOp::Mul, x, y); }
 
+    ExprPtr norm(ExprPtr e) {
+        auto nf = polynomial_normal_form(e, ctx_);
+        return nf.is_ok() ? nf.value() : e;
+    }
+
     // (a1+b1 s)(a2+b2 s) = (a1 a2 + b1 b2 p) + (a1 b2 + a2 b1) s
     R2 r2_mul(const R2& x, const R2& y) {
-        return R2{ add(mul(x.a, y.a), mul(mul(x.b, y.b), p_)),
-                   add(mul(x.a, y.b), mul(x.b, y.a)) };
+        return R2{ norm(add(mul(x.a, y.a), mul(mul(x.b, y.b), p_))),
+                   norm(add(mul(x.a, y.b), mul(x.b, y.a))) };
     }
-    R2 r2_add(const R2& x, const R2& y) { return R2{ add(x.a, y.a), add(x.b, y.b) }; }
-    R2 r2_neg(const R2& x) { return R2{ sub(zero(), x.a), sub(zero(), x.b) }; }
+    R2 r2_add(const R2& x, const R2& y) {
+        return R2{ norm(add(x.a, y.a)), norm(add(x.b, y.b)) };
+    }
+    R2 r2_neg(const R2& x) {
+        return R2{ norm(sub(zero(), x.a)), norm(sub(zero(), x.b)) };
+    }
 
     RatR lit(ExprPtr scalar) { return RatR{ R2{scalar, zero()}, R2{one(), zero()} }; }
     RatR radical() { return RatR{ R2{zero(), one()}, R2{one(), zero()} }; }  // s itself
@@ -134,6 +143,7 @@ public:
     RatR rneg(const RatR& f) { return RatR{ r2_neg(f.num), f.den }; }
 
 private:
+    CASContext& ctx_;
     AstArena& arena_;
     ExprPtr p_;
 };
@@ -231,7 +241,7 @@ private:
     if (radicands.size() != 1U) return false;  // need exactly one radical extension
     ExprPtr p = radicands.front();
 
-    RadicalField F(ctx.arena(), p);
+    RadicalField F(ctx, p);
     auto r = to_ratr(diff_expr, p, F);
     if (!r) return false;
 

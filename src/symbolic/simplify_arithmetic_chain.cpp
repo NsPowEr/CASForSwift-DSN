@@ -316,8 +316,8 @@ Result<ExprPtr> Simplifier::simplify_product_factors(
         }
     }
 
-    // Step 5.5: Risch IBP exp-fold via SimplifyHints flag.
-    if (context_ != nullptr && context_->hints().fold_exp_products) {
+    // Step 5.5: Exp-fold.
+    {
         auto exp_res = fold_exponential_products(symbolic, coefficient);
         if (exp_res.is_error()) return fail<ExprPtr>(exp_res.error());
     }

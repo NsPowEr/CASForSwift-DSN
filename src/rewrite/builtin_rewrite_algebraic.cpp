@@ -9,6 +9,37 @@
 
 namespace cas::symbolic {
 
+[[nodiscard]] static std::optional<Rational> get_exact_rational(ExprPtr e) {
+    if (!e) return std::nullopt;
+    if (const auto* il = expr_cast<IntegerLit>(e)) return Rational(il->value);
+    if (const auto* rl = expr_cast<RationalLit>(e)) {
+        auto val = Rational::make(rl->numerator, rl->denominator);
+        if (val.is_ok()) return val.value();
+    }
+    if (const auto* un = expr_cast<Unary>(e)) {
+        if (un->op == UnaryOp::Neg) {
+            if (auto inner = get_exact_rational(un->operand)) return -*inner;
+        }
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] static BigInt get_poly_lcm(const algebra::PolyExpr& poly) {
+    BigInt common_lcm(1);
+    for (ExprPtr coefficient : poly.coefficients()) {
+        if (!coefficient) continue;
+        if (const auto* il = expr_cast<IntegerLit>(coefficient); il && il->value.is_zero()) continue;
+        if (const auto* rl = expr_cast<RationalLit>(coefficient); rl && rl->numerator.is_zero()) continue;
+        auto rat = get_exact_rational(coefficient);
+        if (!rat.has_value()) continue;
+        if (!rat->denominator().is_zero()) {
+            BigInt d = rat->denominator();
+            common_lcm = (common_lcm * d) / gcd(common_lcm, d);
+        }
+    }
+    return common_lcm;
+}
+
 Result<ExprPtr> try_rewrite_algebraic(
     ExprPtr expr,
     AstArena& arena,
@@ -76,6 +107,11 @@ Result<ExprPtr> try_rewrite_algebraic(
 
                             auto n_poly = exact_div(i1_res.value(), gcd_poly);
                             auto d_poly = exact_div(i2_res.value(), gcd_poly);
+
+                            BigInt lcm1 = get_poly_lcm(p1_res.value());
+                            BigInt lcm2 = get_poly_lcm(p2_res.value());
+                            algebra::multiply_integer_coefficients_by_scalar(n_poly, lcm2);
+                            algebra::multiply_integer_coefficients_by_scalar(d_poly, lcm1);
                             
                             auto n_expr = algebra::integer_coefficients_to_expr(n_poly, *var, *context);
                             auto d_expr = algebra::integer_coefficients_to_expr(d_poly, *var, *context);

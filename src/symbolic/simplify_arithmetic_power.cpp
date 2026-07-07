@@ -267,27 +267,23 @@ Result<ExprPtr> Simplifier::simplify_power(ExprPtr base, ExprPtr exponent, ExprP
         sqrt_call != nullptr && sqrt_call->func_id == BuiltinOp::Sqrt && sqrt_call->args.size() == 1U) {
         if (auto maybe_n = try_get_integer_exponent(exponent); maybe_n.has_value()) {
             const BigInt n = *maybe_n;
-            if (n.is_negative()) {  // HC-KV-04: reciprocal sqrt(A)^(-m)
-                ExprPtr pp = arena_.make<Binary>(BinaryOp::Pow, base, make_integer(arena_, -n));
-                auto ps = simplify_expr(pp);
-                if (ps.is_ok()) return simplify_expr(arena_.make<Binary>(BinaryOp::Div,
-                    make_integer(arena_, BigInt(1)), ps.value()));
-            }
-            if (!n.is_negative() && !n.is_zero()) {
+            if (!n.is_zero()) {
                 ExprPtr arg = sqrt_call->args.front();
                 BigInt k = n / BigInt(2);
                 BigInt rem = n % BigInt(2);
 
-                if (k.is_zero()) {
-                    // sqrt(A)^1 = sqrt(A), handled by default return
-                } else if (rem.is_zero()) {
-                    // (sqrt(A))^(2k) = A^k
+                if (rem.is_zero()) {
+                    // (sqrt(A))^(2k) = A^k  (works for both positive and negative k)
                     return simplify_power(arg, make_integer(arena_, k));
-                } else {
+                } else if (n != BigInt(-1) && !k.is_zero()) {
                     // (sqrt(A))^(2k+1) = A^k * sqrt(A)
+                    // Under Euclidean division for negative n:
+                    // e.g. -3 / 2 = -2, -3 % 2 = 1.
+                    // (sqrt(A))^-3 = A^-2 * sqrt(A). This is correct and contains no negative sqrt.
+                    // We skip n == -1 to avoid infinite loop.
                     auto ak = simplify_power(arg, make_integer(arena_, k));
                     if (ak.is_error()) return ak;
-                    return simplify_product_factors({ak.value(), base});
+                    return simplify_product_factors({ak.value(), base}, ExprPtr{}, false);
                 }
             }
         }

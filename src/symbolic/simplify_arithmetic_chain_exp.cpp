@@ -54,34 +54,50 @@ Result<void> Simplifier::fold_exponential_products(
         }
     }
     if (exp_args.size() > 1) {
-        for (auto it = indices_to_remove.rbegin(); it != indices_to_remove.rend(); ++it) {
-            symbolic.erase(symbolic.begin() + static_cast<std::ptrdiff_t>(*it));
-        }
-        ExprPtr sum_exp = arena_.make<Sum>(std::move(exp_args));
+        bool force_fold = (context_ != nullptr && context_->hints().fold_exp_products);
+        const std::size_t original_count = exp_args.size();
+
+        ExprPtr sum_exp = arena_.make<Sum>(exp_args); // make a copy Sum to simplify
         auto sum_exp_s = simplify_expr(sum_exp);
         ExprPtr simplified_sum = sum_exp_s.is_ok() ? sum_exp_s.value() : sum_exp;
-        ExprPtr new_exp = arena_.make<FuncCall>(BuiltinOp::Exp, std::vector<ExprPtr>{simplified_sum});
-        auto new_exp_s = simplify_expr(new_exp);
-        ExprPtr final_exp = new_exp_s.is_ok() ? new_exp_s.value() : new_exp;
 
-        auto insert_factor = [&](ExprPtr f) {
-            if (is_zero_expr(f)) return;
-            LiteralComplex comp;
-            auto exact = try_get_exact_complex(f, comp);
-            if (exact.is_ok() && exact.value()) {
-                coefficient = coefficient * comp.value;
-                return;
+        bool should_fold = force_fold;
+        if (!should_fold) {
+            const auto* simplified_sum_node = expr_cast<Sum>(simplified_sum);
+            if (!simplified_sum_node) {
+                should_fold = true;
+            } else if (simplified_sum_node->terms.size() < original_count) {
+                should_fold = true;
             }
-            if (const auto* prod = expr_cast<Product>(f)) {
-                for (ExprPtr factor : prod->factors) {
-                    symbolic.push_back({factor, BigInt(1)});
+        }
+
+        if (should_fold) {
+            for (auto it = indices_to_remove.rbegin(); it != indices_to_remove.rend(); ++it) {
+                symbolic.erase(symbolic.begin() + static_cast<std::ptrdiff_t>(*it));
+            }
+            ExprPtr new_exp = arena_.make<FuncCall>(BuiltinOp::Exp, std::vector<ExprPtr>{simplified_sum});
+            auto new_exp_s = simplify_expr(new_exp);
+            ExprPtr final_exp = new_exp_s.is_ok() ? new_exp_s.value() : new_exp;
+
+            auto insert_factor = [&](ExprPtr f) {
+                if (is_zero_expr(f)) return;
+                LiteralComplex comp;
+                auto exact = try_get_exact_complex(f, comp);
+                if (exact.is_ok() && exact.value()) {
+                    coefficient = coefficient * comp.value;
+                    return;
                 }
-            } else {
-                symbolic.push_back({f, BigInt(1)});
-            }
-        };
-        insert_factor(final_exp);
-        merge_symbolic_factors(symbolic);
+                if (const auto* prod = expr_cast<Product>(f)) {
+                    for (ExprPtr factor : prod->factors) {
+                        symbolic.push_back({factor, BigInt(1)});
+                    }
+                } else {
+                    symbolic.push_back({f, BigInt(1)});
+                }
+            };
+            insert_factor(final_exp);
+            merge_symbolic_factors(symbolic);
+        }
     }
     return ok();
 }

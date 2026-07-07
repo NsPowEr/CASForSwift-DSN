@@ -4,9 +4,11 @@
 #include "cas/normal_form.hpp"
 #include "cas/parser.hpp"
 #include "cas/symbolic.hpp"
+#include "cas/numeric.hpp"
+#include "cas/error.hpp"
+#include "cas/formatter.hpp"
 #include "../../helpers/property_test.hpp"
 
-// Dummy comment for rebuild
 #include <gtest/gtest.h>
 
 #include <chrono>
@@ -1622,6 +1624,34 @@ TEST(SymbolicSimplifyTest, ExpandsExponentialOfSum) {
     EXPECT_TRUE(structural_equal(simplified.value(), expected.value()));
 }
 
+TEST(SymbolicSimplifyTest, FoldsExponentialProductsWhenArgsSimplify) {
+    AstArena parse_arena;
+    AstArena simplify_arena;
+    AstArena expected_arena;
+
+    // exp(-1/x) * exp(2/x) -> exp(1/x) because sum of exponents (-1/x + 2/x = 1/x) simplifies to fewer terms
+    auto simplified = simplify_input("exp(-1/x) * exp(2/x)", parse_arena, simplify_arena);
+    auto expected = simplify_input("exp(1/x)", expected_arena, expected_arena);
+    ASSERT_TRUE(simplified.is_ok()) << simplified.error().message;
+    ASSERT_TRUE(expected.is_ok()) << expected.error().message;
+
+    EXPECT_TRUE(structural_equal(simplified.value(), expected.value()));
+}
+
+TEST(SymbolicSimplifyTest, PreventsFoldingExponentialProductsWithoutReduction) {
+    AstArena parse_arena;
+    AstArena simplify_arena;
+    AstArena expected_arena;
+
+    // exp(a) * exp(b) -> exp(a) * exp(b) because sum of exponents (a+b) does not simplify/reduce
+    auto simplified = simplify_input("exp(a) * exp(b)", parse_arena, simplify_arena);
+    auto expected = simplify_input("exp(a) * exp(b)", expected_arena, expected_arena);
+    ASSERT_TRUE(simplified.is_ok()) << simplified.error().message;
+    ASSERT_TRUE(expected.is_ok()) << expected.error().message;
+
+    EXPECT_TRUE(structural_equal(simplified.value(), expected.value()));
+}
+
 TEST(SymbolicSimplifyTest, NormalizesTanToSinOverCos) {
     AstArena parse_arena;
     AstArena simplify_arena;
@@ -2044,6 +2074,77 @@ TEST(SymbolicCycleDetectionTest, DeepNestedExprTerminates) {
     }
     auto result = ctx.simplify(acc);
     ASSERT_TRUE(result.is_ok()) << result.error().message;
+}
+
+TEST(TaskA20_CycleDetection, ContextMaxRecursionDepthConfigurable) {
+    CASContext ctx;
+    EXPECT_EQ(ctx.max_recursion_depth(), 256U);
+    ctx.set_max_recursion_depth(150U);
+    EXPECT_EQ(ctx.max_recursion_depth(), 150U);
+    ctx.set_max_recursion_depth(0U);
+    EXPECT_EQ(ctx.max_recursion_depth(), 1U);
+}
+
+TEST(TaskA20_CycleDetection, SimplifierRecursionDepthExceeded) {
+    // The simplifier budget is max_simplification_depth (L0-12 contract);
+    // max_recursion_depth governs the numeric evaluators.
+    CASContext ctx;
+    ctx.set_max_simplification_depth(10);
+    ExprPtr sym = ctx.arena().make<Symbol>(std::string("w"));
+    ExprPtr acc = sym;
+    for (int i = 0; i < 15; ++i) {
+        acc = ctx.arena().make<Unary>(UnaryOp::Neg, acc);
+    }
+    auto result = ctx.simplify(acc);
+    ASSERT_TRUE(result.is_error());
+    EXPECT_EQ(result.error().kind, CASErrorKind::Unimplemented);
+    ASSERT_TRUE(result.error().payload.has_value());
+    EXPECT_EQ(result.error().payload->reason, error::reason_codes::RECURSION_DEPTH_EXCEEDED);
+}
+
+TEST(TaskA20_CycleDetection, SimplifierCyclicExpressionDetected) {
+    CASContext ctx;
+    ExprPtr sym = ctx.arena().make<Symbol>(std::string("c"));
+    ExprPtr node = ctx.arena().make<Unary>(UnaryOp::Neg, sym);
+    // Mutate internal operand to introduce a pointer cycle: node -> node
+    const Unary* unary_ptr = expr_cast<Unary>(node);
+    const_cast<ExprPtr&>(unary_ptr->operand) = node;
+
+    auto result = ctx.simplify(node);
+    ASSERT_TRUE(result.is_error());
+    EXPECT_EQ(result.error().kind, CASErrorKind::Unimplemented);
+    ASSERT_TRUE(result.error().payload.has_value());
+    EXPECT_EQ(result.error().payload->reason, error::reason_codes::CYCLE_DETECTED);
+}
+
+TEST(TaskA20_CycleDetection, EvaluatorRecursionDepthExceeded) {
+    cas::numeric::NumericEvaluator evaluator({}, 5U);
+    AstArena arena;
+    ExprPtr val = arena.make<IntegerLit>(BigInt(1));
+    ExprPtr acc = val;
+    for (int i = 0; i < 10; ++i) {
+        acc = arena.make<Unary>(UnaryOp::Neg, acc);
+    }
+    auto result = evaluator.evaluate(acc);
+    ASSERT_TRUE(result.is_error());
+    EXPECT_EQ(result.error().kind, CASErrorKind::Unimplemented);
+    ASSERT_TRUE(result.error().payload.has_value());
+    EXPECT_EQ(result.error().payload->reason, error::reason_codes::RECURSION_DEPTH_EXCEEDED);
+}
+
+TEST(TaskA20_CycleDetection, EvaluatorCyclicExpressionDetected) {
+    cas::numeric::NumericEvaluator evaluator({});
+    AstArena arena;
+    ExprPtr val = arena.make<IntegerLit>(BigInt(1));
+    ExprPtr node = arena.make<Unary>(UnaryOp::Neg, val);
+    const Unary* unary_ptr = expr_cast<Unary>(node);
+    const_cast<ExprPtr&>(unary_ptr->operand) = node;
+
+    auto result = evaluator.evaluate(node);
+    ASSERT_TRUE(result.is_error());
+    EXPECT_EQ(result.error().kind, CASErrorKind::Unimplemented);
+    ASSERT_TRUE(result.error().payload.has_value());
+    EXPECT_EQ(result.error().payload->reason, error::reason_codes::CYCLE_DETECTED);
 }
 
 TEST(SymbolicTimeoutTest, TimeoutCheckIntervalConfigurable) {
