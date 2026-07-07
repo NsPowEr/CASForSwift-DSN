@@ -26,6 +26,10 @@ public:
     [[nodiscard]] const CASError& error() const& { return *error_; }
     [[nodiscard]] CASError& error() & { return *error_; }
 
+    [[nodiscard]] static Result<T> unimplemented(UnimplementedInfo info, std::string brief_message = {}) {
+        return Result<T>(make_unimplemented_error(std::move(info), std::move(brief_message)));
+    }
+
 private:
     std::optional<T> value_;
     std::optional<CASError> error_;
@@ -41,6 +45,10 @@ public:
     [[nodiscard]] bool is_ok() const noexcept { return ok_; }
     [[nodiscard]] bool is_error() const noexcept { return !ok_; }
     [[nodiscard]] const CASError& error() const& { return *error_; }
+
+    [[nodiscard]] static Result<void> unimplemented(UnimplementedInfo info, std::string brief_message = {}) {
+        return Result<void>(make_unimplemented_error(std::move(info), std::move(brief_message)));
+    }
 
 private:
     bool ok_{false};

@@ -33,6 +33,7 @@
 #include "ode_kovacic_internal.hpp"
 #include "ode_kovacic_case3_helpers.hpp"
 #include "ode_kovacic_pf_helpers.hpp"
+#include "cas/error_helpers.hpp"
 #include <algorithm>
 #include <chrono>
 #include <optional>
@@ -365,9 +366,14 @@ Result<OmegaPair> case3_omega(
         return ok(OmegaPair{root, root});
     }
 
-    return fail<OmegaPair>(kv_unimpl(
-        "Kovacic Case 3: no polynomial P found for any n ∈ {4, 6, 12}; "
-        "Case 3 cannot hold for this DE."));
+    return cas::make_unimplemented<OmegaPair>(UnimplementedInfo{
+        .module      = "calculus",
+        .function    = "case3_omega",
+        .input_shape = "Kovacic Case 3 candidate n ∈ {4, 6, 12}",
+        .reason      = cas::error::reason_codes::ODE_UNSUPPORTED_TYPE,
+        .suggestion  = "Verify Kovacic invariants or check higher order solver",
+        .ticket      = "HC-KV-06"
+    }, "Kovacic Case 3: no polynomial P found for any n ∈ {4, 6, 12}; Case 3 cannot hold for this DE.");
 }
 
 } // namespace kovacic_impl

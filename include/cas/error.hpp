@@ -4,6 +4,8 @@
 #include <optional>
 #include <string>
 
+#include "cas/unimplemented_info.hpp"
+
 namespace cas {
 
 enum class CASErrorKind : std::uint8_t {
@@ -68,19 +70,10 @@ namespace error::reason_codes {
     static constexpr const char* SYMBOLIC_NORMAL_FORM_DEPTH    = "SYMBOLIC_NORMAL_FORM_DEPTH";
     static constexpr const char* SYMBOLIC_UNITS_UNKNOWN        = "SYMBOLIC_UNITS_UNKNOWN";
     static constexpr const char* SYMBOLIC_ZETA_OVERFLOW        = "SYMBOLIC_ZETA_OVERFLOW";
+    static constexpr const char* RECURSION_DEPTH_EXCEEDED     = "RECURSION_DEPTH_EXCEEDED";
+    static constexpr const char* CYCLE_DETECTED                = "CYCLE_DETECTED";
     static constexpr const char* GENERIC                       = "GENERIC";
 }  // namespace error::reason_codes
-
-/// Structured payload carried by CASErrorKind::Unimplemented errors.
-/// All fields are non-empty strings when the payload is present.
-struct UnimplementedPayload {
-    std::string module;         ///< e.g. "calculus", "algebra"
-    std::string function;       ///< enclosing C++ function name
-    std::string input_shape;    ///< human-readable descriptor of the input form
-    std::string reason_code;    ///< one of cas::error::reason_codes constants
-    std::string suggestion;     ///< actionable next step for the user/developer
-    std::string ticket_id;      ///< e.g. "F0.8", "L3-04" — empty string if no ticket
-};
 
 // ---------------------------------------------------------------------------
 
@@ -95,7 +88,7 @@ struct CASError {
     /// created via make_unimplemented()).
     /// Default-initialised to nullopt so existing designated-init aggregate
     /// constructions {.kind=..., .message=..., .hint=...} remain valid.
-    std::optional<UnimplementedPayload> payload{std::nullopt};
+    std::optional<UnimplementedInfo> payload{std::nullopt};
 
     /// Produce a multi-line user-facing diagnostic string.
     /// Format:
@@ -113,31 +106,39 @@ struct CASError {
 // ---------------------------------------------------------------------------
 
 [[nodiscard]] inline CASError make_unimplemented_error(
-    std::string module,
-    std::string function,
-    std::string input_shape,
-    std::string reason_code,
-    std::string suggestion,
-    std::string ticket_id,
+    UnimplementedInfo info,
     std::string brief_message = {})
 {
-    UnimplementedPayload p{
-        std::move(module),
-        std::move(function),
-        std::move(input_shape),
-        std::move(reason_code),
-        std::move(suggestion),
-        std::move(ticket_id),
-    };
     std::string msg = brief_message.empty()
-        ? (p.reason_code + ": " + p.input_shape)
+        ? (info.reason + ": " + info.input_shape)
         : std::move(brief_message);
     return CASError{
         .kind    = CASErrorKind::Unimplemented,
         .message = std::move(msg),
         .hint    = std::nullopt,
-        .payload = std::move(p),
+        .payload = std::move(info),
     };
+}
+
+[[nodiscard]] inline CASError make_unimplemented_error(
+    std::string module,
+    std::string function,
+    std::string input_shape,
+    std::string reason,
+    std::string suggestion,
+    std::string ticket = {},
+    std::string brief_message = {})
+{
+    return make_unimplemented_error(
+        UnimplementedInfo{
+            .module      = std::move(module),
+            .function    = std::move(function),
+            .input_shape = std::move(input_shape),
+            .reason      = std::move(reason),
+            .suggestion  = std::move(suggestion),
+            .ticket      = std::move(ticket),
+        },
+        std::move(brief_message));
 }
 
 // ---------------------------------------------------------------------------

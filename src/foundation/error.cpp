@@ -13,15 +13,15 @@ std::string CASError::format_user_message() const {
         return message;
     }
 
-    const UnimplementedPayload& p = *payload;
+    const UnimplementedInfo& p = *payload;
     std::ostringstream oss;
     oss << "[Unimplemented] module=" << p.module
         << " function=" << p.function << "\n"
         << "  Input shape: " << p.input_shape << "\n"
-        << "  Reason: "      << p.reason_code << "\n"
+        << "  Reason: "      << p.reason << "\n"
         << "  Suggestion: "  << p.suggestion;
-    if (!p.ticket_id.empty()) {
-        oss << "\n  Ticket: " << p.ticket_id;
+    if (!p.ticket.empty()) {
+        oss << "\n  Ticket: " << p.ticket;
     }
     return oss.str();
 }
