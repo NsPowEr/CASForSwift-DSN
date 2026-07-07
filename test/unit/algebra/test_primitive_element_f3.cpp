@@ -560,5 +560,86 @@ TEST_F(PrimitiveElementTest, DegreeOneMinPolyReturnsError) {
     EXPECT_EQ(result.error().kind, CASErrorKind::InvalidArgument);
 }
 
+// ── Task 1.2 / A9 Unit Tests: 3-Level Extensions & Multi-β Nested Towers ────
+
+TEST_F(PrimitiveElementTest, ThreeLevelExtension_Sqrt2_Cbrt3_Sqrt5) {
+    // Q(√2, ∛3, √5) — 3-level simple algebraic extensions. Total degree 2·3·2 = 12.
+    ExprPtr a1 = make_sqrt_rootof(2, 0);
+    ExprPtr a3 = make_sqrt_rootof(5, 2);
+    ASSERT_NE(a1, nullptr);
+    ASSERT_NE(a3, nullptr);
+
+    ExprPtr a2 = parse_ok("RootOf(z1^3-3, z1, 0)");
+    ASSERT_NE(a2, nullptr);
+
+    ExprPtr sum_expr = ctx->arena().make<Sum>(std::vector<ExprPtr>{a1, a2, a3});
+
+    auto result = algebra::detect_n_level_tower(sum_expr, *ctx);
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+    ASSERT_TRUE(result.value().has_value());
+
+    const auto& res = result.value().value();
+    EXPECT_EQ(res.min_poly_theta.size(), 13U) << "Degree of Q(√2, ∛3, √5) must be 12";
+    EXPECT_EQ(res.alphas_in_theta.size(), 3U);
+}
+
+TEST_F(PrimitiveElementTest, DetectNLevelTower_MultiBetaNested) {
+    // Outer RootOf α = RootOf(z2² - β1·z2 - β2, z2, 0) depending on β1=√2 and β2=√3.
+    ExprPtr beta1 = parse_ok("RootOf(z0^2-2, z0, 0)");
+    ExprPtr beta2 = parse_ok("RootOf(z1^2-3, z1, 0)");
+    ASSERT_NE(beta1, nullptr);
+    ASSERT_NE(beta2, nullptr);
+
+    ExprPtr z2 = ctx->arena().make<Symbol>(Symbol{"z2"});
+    ExprPtr z2_sq = ctx->arena().make<Binary>(BinaryOp::Pow, z2, ctx->arena().make<IntegerLit>(BigInt(2)));
+    ExprPtr beta1_z2 = ctx->arena().make<Binary>(BinaryOp::Mul, beta1, z2);
+    ExprPtr term1 = ctx->arena().make<Unary>(UnaryOp::Neg, beta1_z2);
+    ExprPtr term2 = ctx->arena().make<Unary>(UnaryOp::Neg, beta2);
+    ExprPtr poly_alpha = ctx->arena().make<Sum>(std::vector<ExprPtr>{z2_sq, term1, term2});
+    ExprPtr alpha = ctx->arena().make<RootOf>(poly_alpha, Symbol{"z2"}, 0U);
+
+    ExprPtr sum_expr = ctx->arena().make<Sum>(std::vector<ExprPtr>{alpha, beta1, beta2});
+
+    auto result = algebra::detect_n_level_tower(sum_expr, *ctx);
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+    ASSERT_TRUE(result.value().has_value());
+}
+
+// DISABLED: truly-nested chain β1→β2→α requires recursive primitive-element
+// flattening (compute Q-min-poly of each level before combining).  The iterative
+// resolver lifts the individual level min-polys correctly, but compute_primitive_element
+// with all 3 generators still fails (returns empty optional after ~225 s) because the
+// 3 algebraic numbers live in a sequential dependency chain, not independent Q extensions.
+// Tracked as F3.4-DEBT-01 / A9 follow-up.  Re-enable when the hierarchical
+// prim-elem chain Q(β1) → Q(β1,β2) → Q(β1,β2,α) is implemented.
+TEST_F(PrimitiveElementTest, DISABLED_DetectNLevelTower_ThreeLevelNested) {
+    // 3-level nested radical: β1 = √3, β2 = √(2 + √3), α = √(1 + √(2 + √3)).
+    ExprPtr beta1 = parse_ok("RootOf(z0^2-3, z0, 0)");
+    ASSERT_NE(beta1, nullptr);
+
+    // β2: z1² - (2 + β1) = 0
+    ExprPtr z1 = ctx->arena().make<Symbol>(Symbol{"z1"});
+    ExprPtr z1_sq = ctx->arena().make<Binary>(BinaryOp::Pow, z1, ctx->arena().make<IntegerLit>(BigInt(2)));
+    ExprPtr two = ctx->arena().make<IntegerLit>(BigInt(2));
+    ExprPtr two_plus_b1 = ctx->arena().make<Binary>(BinaryOp::Add, two, beta1);
+    ExprPtr poly_b2 = ctx->arena().make<Binary>(BinaryOp::Sub, z1_sq, two_plus_b1);
+    ExprPtr beta2 = ctx->arena().make<RootOf>(poly_b2, Symbol{"z1"}, 0U);
+
+    // α: z2² - (1 + β2) = 0
+    ExprPtr z2 = ctx->arena().make<Symbol>(Symbol{"z2"});
+    ExprPtr z2_sq = ctx->arena().make<Binary>(BinaryOp::Pow, z2, ctx->arena().make<IntegerLit>(BigInt(2)));
+    ExprPtr one = ctx->arena().make<IntegerLit>(BigInt(1));
+    ExprPtr one_plus_b2 = ctx->arena().make<Binary>(BinaryOp::Add, one, beta2);
+    ExprPtr poly_a = ctx->arena().make<Binary>(BinaryOp::Sub, z2_sq, one_plus_b2);
+    ExprPtr alpha = ctx->arena().make<RootOf>(poly_a, Symbol{"z2"}, 0U);
+
+    ExprPtr sum_expr = ctx->arena().make<Sum>(std::vector<ExprPtr>{alpha, beta2, beta1});
+
+    auto result = algebra::detect_n_level_tower(sum_expr, *ctx);
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+    ASSERT_TRUE(result.value().has_value());
+}
+
 }  // namespace
 }  // namespace cas::test
+

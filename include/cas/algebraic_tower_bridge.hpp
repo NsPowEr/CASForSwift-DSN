@@ -141,5 +141,12 @@ struct TowerGeneratorsN {
     ExprPtr expr,
     symbolic::CASContext& ctx);
 
+[[nodiscard]] inline Result<std::optional<PrimitiveElementResult>> detect_n_level_tower(
+    ExprPtr expr,
+    symbolic::CASContext& ctx) {
+    return detect_tower_n_level(expr, ctx);
+}
+
 }  // namespace algebra
 }  // namespace cas
+
