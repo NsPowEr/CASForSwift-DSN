@@ -52,3 +52,9 @@
 # orthogonal_polynomials, residue_theorem, algebraic_tower_primitive_internal.hpp,
 # polynomial_gcd_fp_recursive, polynomial_gcd_brown_modular, polynomial_groebner_fglm,
 # cas_context_params.hpp, ode_solver_frobenius, summation_abramov.
+
+# Temporary whitelist pending split task A29 (TASKLIST_MASTER.md, SPLIT-RISCH-RDE):
+# risch_rde_bronstein.cpp 538 LOC, risch_parametric_rational.cpp 593 LOC.
+src/calculus/risch_rde_bronstein.cpp
+src/calculus/risch_parametric_rational.cpp
+

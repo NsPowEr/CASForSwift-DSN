@@ -63,9 +63,10 @@ Ordinati per severità/impatto decrescente. Ogni voce verificata aperta a codice
 - **Stato a codice**: già implementato in `src/linalg/matrix_smith_qx.cpp` (`smith_normal_form_qx`): algoritmo PID Bezout-based completo (row/col ops con `polynomial_bezout` + `polynomial_exact_divide`, catena divisibilità, normalizzazione monica). Dispatch automatico da `matrix_smith.cpp:163` quando entrate single-var poly. I citati `:166/:216` sono il bail multivar (correttamente NON-PID) e il guard Z-path — non gap. Q[x] è Euclideo ⇒ no Storjohann/LLL necessario. Coverage rafforzata 2026-06-26: +test non-diagonale `[[x,1],[−1,x]]` → `diag(1, x²+1)` con certificato `U·A·V==S`. 4/4 SmithQxTest.
 - **Refs**: F4.2, CAS-L2-04
 
-### A5 · ODE Frobenius: log-term + resonance (radici differing-by-integer) — PARZIALE 2026-06-26 — `[E3·C3·S3·R1]`
+### A5 · ODE Frobenius: log-term + resonance (radici differing-by-integer) — 🔨 QUASI-FATTO 2026-07-07 (x₀≠0 chiuso; residuo secondary-resonance) — `[E3·C3·S3·R1]`
 - **Stato a codice**: ✅ gap principale chiuso: **radice indiciale doppia** (gap N=0) ora produce la seconda soluzione logaritmica via costruzione parametro-derivata `y₂ = ln(x)·y₁ + x^{r1}·Σ aₙ'(r1) xⁿ` (`build_double_root_log_branch`, recurrence con root simbolico ρ + `d/dρ` + sub ρ=r1). Prima `series_solutions.size()==1` restituiva solo `C1·y₁` (soluzione generale incompleta). Verificato: Euler `x²y''−xy'+y=0` → `C1·x + C2·x·ln x`; Bessel₀ `x²y''+xy'+x²y=0` → `J₀·ln x + x²/4 − 3x⁴/128…`. +2 test, 6/6 FrobeniusTest. Gap intero positivo (`build_log_branch`) + resonance detection già presenti.
-- **Residuo**: risonanza secondaria multi-livello durante costruzione bₙ (log branch, `ode_solver_frobenius_series.cpp:201`) → `Unimplemented` esplicito diagnostico; punto singolare regolare a x≠0 (solo x=0). **Refs**: F5.3, CAS-L2-01
+- **✅ FATTO 2026-07-07**: **punto singolare regolare a x₀≠0** chiuso — nuovo entry-point `solve_ode_frobenius(a2,a1,a0,x,x_0,n,ctx)` (`ode.hpp` + `ode_solver_frobenius.cpp`): shift `x→u+x₀` (fresh symbol), solve a 0, back-substitute `u→x−x₀`. Test `OdeFrobeniusTest` 3/3 (Bessel ν=1 log-branch, Legendre a x₀=1 double-root, Euler shiftato x₀=2). ⚠ **Audit anti-silent-wrong**: una bozza intermedia aveva sostituito i guard di risonanza con "pick 0" silenzioso (`compute_recurrence` RHS≠0, `build_log_branch` secondary resonance) — **RIPRISTINATI** come `Unimplemented` strutturati (REGOLA ZERO): pick-0 resta solo per RHS=0 / S_total=0 (vero parametro libero).
+- **Residuo**: risonanza secondaria multi-livello con forcing ≠0 durante costruzione bₙ (log branch) → `Unimplemented` esplicito diagnostico (extended log-power construction). **Refs**: F5.3, CAS-L2-01
 
 ### A6 · Stauduhar Galois group deg ≥ 6 — `[E4·C4·S3·R1]`
 - **Stato a codice**: solo `src/algebra/galois_deg5.cpp` (deg ≤5: S5/A5/D5/F20/C5). Nessun descent Stauduhar.
@@ -84,9 +85,13 @@ Ordinati per severità/impatto decrescente. Ogni voce verificata aperta a codice
 - **Stato a codice**: `ode_kovacic_case3.cpp` ha tetraedrico/ottaedrico; n=12 = solo diagnostico (recurrence blow-up).
 - **Cosa**: ottimizzazione recurrence per A₅ n=12. **Ledger**: HC-KV-06 · **Refs**: T-028, T-009 (parziale), F5.C
 
-### A9 · Tower algebrico ≥3 livelli / multi-β nested non-squarefree — `[E3·C4·S2·R2]`
-- **Stato a codice**: `algebraic_tower_primitive_nested.cpp` esiste (F3.4-DEBT-01) ma → `Unimplemented` se la min-poll liftata non è squarefree. Bridge solo 2-level (`detect_two_level_tower`).
-- **Cosa**: nesting multi-β >1 + factor Q(β)[x] reducible. **Refs**: F3.5, F3.D, Task 7, CAS-L3-06
+### A9 · Tower algebrico ≥3 livelli / multi-β nested non-squarefree — 🔨 QUASI-FATTO 2026-07-07 (residuo: catena nested sequenziale) — `[E3·C4·S2·R2]`
+- **✅ FATTO 2026-07-07** (`algebraic_tower_primitive_nested.cpp` riscritto, Cohen §3.6.1-3.6.4/Trager):
+  - **Multi-β lift**: `try_nested_lift_min_poly_multi` — quando il RootOf esterno dipende da PIÙ β risolti, collassa i β via `compute_primitive_element`, riscrive f(x, β₁..βₖ) in θ, resultant assoluto `Res_y(minpoly_θ(y), f(x,y))`.
+  - **Risoluzione iterativa a punto fisso**: `detect_tower_n_level` ripassa le entry irrisolte finché fa progresso (multi-livello, ordine-indipendente).
+  - **Non-squarefree/reducible**: R fattorizzato su Q (`collect_irred_factors_over_q`); selezione del fattore **solo con certificato esatto** di vanishing (`cand_vanishes_at_theta_expr`, simplify→0 letterale). Nessun certificato o R non-squarefree senza fattorizzazione → `Unimplemented` strutturato (audit 2026-07-07: rimosso fallback `all_factors[0]` arbitrario = silent-wrong latente, REGOLA ZERO).
+  - Test: `ThreeLevelExtension_Sqrt2_Cbrt3_Sqrt5` (deg 12, 3 generatori indipendenti), `DetectNLevelTower_MultiBetaNested` (α su β₁=√2,β₂=√3). PrimitiveElementTest verdi.
+- **🔧 RESIDUO**: catena nested **sequenziale** β₁→β₂→α (es. √(1+√(2+√3))) — il lift dei singoli livelli funziona ma `compute_primitive_element` a 3 generatori dipendenti non termina in tempo utile (~225s): serve flattening gerarchico Q(β₁)→Q(β₁,β₂)→Q(β₁,β₂,α). Test `DISABLED_DetectNLevelTower_ThreeLevelNested` documenta il gap (riabilitare alla chiusura). **Refs**: F3.5, F3.D, Task 7, CAS-L3-06
 
 ### A10 · Eigenvalues n>3 / catene di Jordan sotto RootOf — ✅ FATTO (probe chiuso 2026-06-27) — `[E3·C3·S3·R2]`
 - **Stato a codice**: routing RootOf GIÀ presente (`matrix_jordan.cpp:150` → `null_space_over_extension` quando autovalore è `RootOf`). Algoritmo generale (Filippov `n_k=2d_k−d_{k−1}−d_{k+1}`, catene top-down) senza cap su `n`/molteplicità.
@@ -137,6 +142,7 @@ Ordinati per severità/impatto decrescente. Ogni voce verificata aperta a codice
   - Debito reale (più profondo, **non** quello del titolo originale): (a) output radici via `double_to_rational_approx` (riga 115) = boundary **approssimati**, e (b) `InequalityInterval.lower/upper` è `optional<Rational>` → **non può rappresentare radici irrazionali esatte** (√2 ecc.) neppure col fix puro-Rational.
   - **Fix completo (ledgered, deferito Fase 8 post-parità)**: `find_polynomial_roots_sturm_rational` (bisection puro Rational/BigFloat) per (a); per (b) servirebbe `InequalityInterval` boundary `ExprPtr`+`RootOf` via `find_polynomial_isolating_intervals` (esiste, F8.0-5.4). Re-stima realistica **E3·C3**, non E1.
   - **Decisione**: NON toccare ora — versione cosmetica `low/high/tol`→Rational = pigra/no-op (REGOLA ZERO), versione vera contraddice il deferral post-parità deciso (goal corrente = parità HP Prime ≥95%, §B). Blast radius contenuto (3 file, nessun chiamante esterno) quando si riprenderà in Fase 8.
+- **Nota 2026-07-07**: aggiunto guard esplicito multivariato in `solve_inequality_1var` (simboli ≠ var → `Unimplemented` strutturato, Cat-3 niente silenzio fuori scope) + passthrough diagnostico su fallimento Sturm. Il deferral del fix Rational/RootOf resta invariato.
 - **Ledger**: HC-F70-A21-NUMERIC-BOUNDARY (PARTIAL, deferral documentato) · **Refs**: T-018
 
 ### A17 · IBP doppia applicazione su `Product(Log,…)` — ✅ FATTO (verificato 2026-06-26, stale) — `[E1·C2·S3·R2]`
@@ -151,17 +157,20 @@ Ordinati per severità/impatto decrescente. Ogni voce verificata aperta a codice
 - **Cosa**: migrare radici quando l'arena è resettata con nodi ancora referenziati. ⚠ tocca Arena core.
 - **Ledger**: HC-F70-A31-MIGRATION-TODO · **Refs**: T-023
 
-### A20 · Cycle detection simplifier/evaluator — `[E2·C3·S2·R3]`
-- **Stato a codice**: parziale. **Cosa**: rilevare ricorsione infinita via depth max + fingerprint stack. **Refs**: CAS-L0-10
+### A20 · Cycle detection simplifier/evaluator — ✅ FATTO 2026-07-07 — `[E2·C3·S2·R3]`
+- **Stato a codice**: chiuso.
+  - **Simplifier**: `CycleGuard` riscritto **path-based** (catena ancestrale, `simplify_ancestor_path`) — un nodo è ciclo solo se ri-entrato su un frame antenato; lo structural sharing (stesso ExprPtr figlio di più padri) NON è falso positivo. Cycle → `Unimplemented` strutturato `CYCLE_DETECTED` (prima ritornava `ok(expr)` silenzioso). Depth exceeded → `RECURSION_DEPTH_EXCEEDED` strutturato. Budget = `max_simplification_depth` (contratto L0-12 preservato — audit 2026-07-07: una bozza lo aveva switchato a `max_recursion_depth` svuotando `set_max_simplification_depth`; ripristinato).
+  - **Numeric evaluators** (`NumericEvaluator`, `BigFloatEvaluator`): guardie depth+cycle con `active_nodes_` + ScopeGuard RAII; budget = nuovo param ctx `max_recursion_depth` (default 256, configurabile `set_max_recursion_depth`).
+  - Test `TaskA20_CycleDetection` 5/5 (config param, depth simplifier/evaluator, cicli puntatore mutati ad arte). **Refs**: CAS-L0-10
 
-### A21 · Pivot Bareiss euristica contestuale — `[E2·C2·S2·R2]`
-- **Cosa**: PivotScore contestuale (oggi: first non-zero). **Ledger**: HPP-025 · **Refs**: CAS-L1-17
+### A21 · Pivot Bareiss euristica contestuale — ✅ FATTO 2026-07-07 — `[E2·C2·S2·R2]`
+- **Stato a codice**: `PivotScore` ora ordina `(certainty, −complexity, −degree)` con `estimate_complexity` pesata per operazione (Sum/Add penalizzati — espansione fill-in; Mul/Pow leggeri; letterali ±1 minimi); rimossi gli early-exit `certainty==3` in bareiss/determinant/inverse/LU (scan colonna completo — il pivot "esatto ma complesso" non domina più un pivot semplice). Test `test_bareiss_vander.cpp` estesi (+205 righe, Vandermonde simbolici). **Ledger**: HPP-025 · **Refs**: CAS-L1-17
 
 ### A22 · Padé coeff generici Q(π,e,√) — `[E2·C3·S1·R1]`
 - **Cosa**: estendere Padé a campo algebrico generato dinamicamente (oggi vincolo Q), riusare LLL. **Refs**: F7.5.C2
 
-### A23 · Structured Unimplemented diagnostic — `[E2·C1·S1·R1]`
-- **Cosa**: payload strutturato `{module, fn, input_shape, reason, suggestion, ticket}` su ogni `Unimplemented`.
+### A23 · Structured Unimplemented diagnostic — ✅ FATTO 2026-07-07 — `[E2·C1·S1·R1]`
+- **Stato a codice**: nuovo `include/cas/unimplemented_info.hpp` (`UnimplementedInfo{module,function,input_shape,reason,suggestion,ticket}`, alias compat `UnimplementedPayload` + getter `reason_code()/ticket_id()`); overload `make_unimplemented_error(UnimplementedInfo)` + helper `make_unimplemented<T>(UnimplementedInfo)` + `Result<T>::unimplemented(...)`; reason codes `RECURSION_DEPTH_EXCEEDED`/`CYCLE_DETECTED` aggiunti. Call-site conversion: limit_mrv, kovacic case3, solve_inequality (+ guard multivar esplicito Cat-3), tower nested, frobenius, simplify_core, evaluators. Test: `test_unimplemented_info.cpp` nuovo + diagnostic/payload aggiornati. Copertura incrementale sui restanti `Unimplemented` legacy man mano che si toccano i moduli.
 - **Ledger**: F0.8-ERROR-STRUCT · **Refs**: T-026
 
 ### A24 · Runner matrix·scalar / matrix±matrix — ✅ FATTO (verificato 2026-06-26, stale) — `[E1·C2·S2·R1]`
@@ -200,6 +209,10 @@ Ordinati per severità/impatto decrescente. Ogni voce verificata aperta a codice
 - **Root cause**: `DifferentialField::to_field_generators` (`src/calculus/differential_field.cpp`) sostituiva i generatori della torre in ordine **forward** (`t_0=exp(x)` prima di `t_1=exp(exp(x))`). Sostituire il generatore interno per primo riscrive `exp(x)→t_0` **dentro** il pattern del generatore esterno `exp(exp(x))`, che diventa `exp(t_0)` e non matcha più il pattern di `t_1`. Il transcendente esterno resta simbolo libero non mappato → il ramo poly-part del solver esponenziale lo classifica come **coefficiente costante** e produce un'antiderivata elementare errata per un integrando non-elementare.
 - **Fix**: iterazione **reverse** (`rbegin()/rend()`, outermost-first), simmetrica a `from_field_generators` che già svolgeva in quest'ordine. Nessun hardcode: stessa logica generale, solo ordine di iterazione corretto sulla torre.
 - **Verifica**: nuovo test `test/unit/calculus/test_risch_nested_transcendental.cpp` (4 casi) — i 3 integrandi non-elementari ora ritornano `Unimplemented` (bail pulito, REGOLA 0.2 rispettata) invece di risposta sbagliata silenziosa; il caso elementare `exp(exp(x))·exp(x)` resta correttamente risolto (nessuna regressione). Gate: quick pieno 2551 PASS, 0 regressioni, 2 skip pre-esistenti.
+
+### A29 · Anti-monolito: split `risch_rde_bronstein.cpp` (538 LOC) + `risch_parametric_rational.cpp` (593 LOC) — 🆕 APERTO 2026-07-07 (alias SPLIT-RISCH-RDE) — `[E1·C1·S2·R2]`
+- **Stato**: entrambi oltre il limite 500 (il secondo oltre l'hard block 550), whitelisted temporaneamente in `scripts/file_size_whitelist.txt` con rif. a questo task.
+- **Cosa**: split per unità funzionale (es. denominator-bound/degree-bound vs solve loop; limited-integration vs ParamRischDE generale), zero cambi di logica, gate verde per ogni split. Rimuovere le due voci di whitelist alla chiusura (pre-commit Gate 3 blocca whitelist stale).
 
 ---
 

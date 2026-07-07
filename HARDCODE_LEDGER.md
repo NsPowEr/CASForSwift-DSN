@@ -1158,7 +1158,7 @@
   rilevati), `Phi105HasMinusTwoCoefficient` (fold multi-primo). Caller
   regression 180/180; cyclotomic suite 14/14.
 
-### HPP-013 — evaluator.cpp RootOf seed scheme deterministico (evaluator.cpp:142-149)
+### HPP-013 — evaluator.cpp RootOf seed scheme deterministico (evaluator.cpp:142-149) — ✅ CHIUSA (2026-07-01)
 - **File**: `src/numeric/evaluator.cpp:142-149`
 - **Categoria CLAUDE.md**: Cat 6 — seed/randomness deterministica non derivata dall'input.
 - **Descrizione**: Guess iniziale Newton-Raphson per `RootOf` usa schema deterministico `idx/2 + 1.0` / `-(idx+1)/2` basato solo su `root_index`. Per polinomi con radici reali ravvicinate (es. Wilkinson), questo schema può far convergere radici diverse allo stesso valore numerico (due `RootOf` con indici distinti convergono alla stessa radice → risultati duplicati/sbagliati).
@@ -1197,7 +1197,7 @@
 - **Stato**: RISOLTO 2026-05-25 — per tracciabilità storica.
 - **Blocking dependency**: N/A.
 
-### HPP-018 — gaussian_factor swap branch vuoto (gaussian_factor.cpp:83)
+### HPP-018 — gaussian_factor swap branch vuoto (gaussian_factor.cpp:83) — 🟡 PARZIALE (audit 2026-07-07: NON chiudibile — assert solo debug, release path ancora silente su invariant violato; chiusura vera = `Result` error al posto dell'assert)
 - **File**: `src/algebra/gaussian_factor.cpp:83` — `if (re * re + im * im != p) { /* empty */ }`
 - **Categoria CLAUDE.md**: Cat 4 — bail-out silenzioso su invariant matematico violato
 - **Descrizione**: La branch `if (norm != p)` aveva corpo vuoto — restituiva silenziosamente `GaussianInt(re, im)` con norma sbagliata. L'invariant di Hermite-Serret (Cohen GTM 138 §4.2.5) garantisce che l'algoritmo euclidico su Z[i] termini con norm(alpha) = p. La branch non può succedere correttamente; un'occorrenza indica un bug nell'algoritmo euclidico.
