@@ -144,13 +144,14 @@ Result<std::vector<IntPoly>> factorize_univariate_hensel_or_kronecker(
         }
 
         // 2. Determine target modulus p^k via Mignotte bound
+        // B = 2^(n/2 + 1) * ||f||_1 * |lc(f)|
         std::size_t n = f.degree();
         BigInt pk = p;
         std::size_t k = 1;
-        BigInt two_pow_n = BigInt(1).shift_left_bits(n);
-        BigInt norm2_sq(0);
-        for (const auto& c : f.coefficients()) norm2_sq += c * c;
-        while (pk < two_pow_n * norm2_sq * BigInt(2)) {
+        BigInt norm1(0);
+        for (const auto& c : f.coefficients()) norm1 += c.abs();
+        BigInt target_bound = BigInt(1).shift_left_bits(n / 2 + 1) * norm1 * f.leading_coeff().abs();
+        while (pk < target_bound) {
             pk *= p;
             k++;
         }
