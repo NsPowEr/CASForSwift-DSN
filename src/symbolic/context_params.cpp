@@ -12,6 +12,10 @@ void CASContext::set_max_simplification_depth(int depth) noexcept {
     max_simplification_depth_ = (depth < 10) ? 10 : depth;
 }
 
+void CASContext::set_max_recursion_depth(std::size_t depth) noexcept {
+    max_recursion_depth_ = (depth < 1U) ? 1U : depth;
+}
+
 void CASContext::set_max_integration_depth(std::size_t depth) noexcept {
     max_integration_depth_ = (depth < 1U) ? 1U : (depth > 128U) ? 128U : depth;
 }

@@ -11,7 +11,7 @@ int canonical_compare(ExprPtr lhs, ExprPtr rhs) noexcept;
 namespace detail {
 
 thread_local int simplification_depth = 0;
-thread_local std::unordered_set<ExprPtr, ExprHash> active_simplify_nodes;
+thread_local std::vector<ExprPtr> simplify_ancestor_path;
 
 DepthGuard::DepthGuard(int max_depth) : max_depth_(max_depth) { ++simplification_depth; }
 DepthGuard::~DepthGuard() { --simplification_depth; }

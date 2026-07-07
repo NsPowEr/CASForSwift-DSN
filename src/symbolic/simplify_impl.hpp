@@ -6,7 +6,7 @@
 #include <chrono>
 #include <functional>
 #include <string>
-#include <unordered_set>
+
 #include <vector>
 #include <optional>
 
@@ -18,11 +18,6 @@ namespace detail {
 thread_local extern int simplification_depth;
 constexpr int MAX_SIMPLIFICATION_DEPTH = 300;
 
-// Fingerprint set for cycle detection: tracks ExprPtr nodes currently
-// being simplified on this thread's call stack. If a node is re-entered
-// before its first simplification completes, a rewrite cycle is detected.
-thread_local extern std::unordered_set<ExprPtr, ExprHash> active_simplify_nodes;
-
 struct DepthGuard {
     explicit DepthGuard(int max_depth = MAX_SIMPLIFICATION_DEPTH);
     ~DepthGuard();
@@ -32,25 +27,8 @@ private:
 };
 
 // F7.0-A3.2: async-aware depth propagation primitives.
-//
-// CAS core is currently single-threaded by design (CASContext is NOT
-// thread-safe — see CLAUDE.md + F7.0 voice 7). However the `thread_local`
-// `simplification_depth` is a known footgun if any caller ever spawns a
-// std::async / std::jthread worker that calls into the simplifier: the worker
-// starts at depth 0 and bypasses the parent's recursion budget.
-//
-// To make the propagation pattern explicit when (and if) async simplification
-// is introduced, use the snapshot+scope helpers below:
-//
-//   // ON PARENT THREAD:
-//   const int parent_depth = current_simplify_depth();
-//   auto fut = std::async(std::launch::async, [parent_depth, ...] {
-//       AsyncDepthScope scope(parent_depth);   // worker inherits depth
-//       return ctx_clone.simplify(sub_expr);   // recursion budget preserved
-//   });
-//
-// AsyncDepthScope sets the current thread's simplification_depth to the given
-// value on construction and restores it on destruction.
+// AsyncDepthScope propagates the parent thread's recursion budget to a worker
+// thread if async simplification is ever introduced.
 [[nodiscard]] int current_simplify_depth() noexcept;
 
 class AsyncDepthScope {
@@ -63,23 +41,34 @@ private:
     int prev_;
 };
 
-// RAII guard that inserts expr into active_simplify_nodes on construction
-// and removes it on destruction. cycle_detected() returns true if the
-// node was already present (i.e., we are inside a cycle).
+// Path-based cycle guard (A20).  Tracks the current recursion *path* (the
+// direct ancestor chain) rather than the global set of all active nodes.
+// A node is a cycle only if it appears as a direct ancestor on the current
+// descent — i.e. the same pointer is already being simplified in an enclosing
+// stack frame on this thread.  Structurally-shared nodes (same ExprPtr
+// appearing as a valid child in multiple parents) are NOT false-positives
+// because they are inserted+erased independently per call frame.
+// Complexity: O(depth) linear scan, depth ≤ MAX_SIMPLIFICATION_DEPTH.
+extern thread_local std::vector<ExprPtr> simplify_ancestor_path;
+
 struct CycleGuard {
     ExprPtr expr_;
     bool cycle_{false};
 
     explicit CycleGuard(ExprPtr expr) : expr_(expr) {
-        cycle_ = !active_simplify_nodes.insert(expr).second;
+        for (ExprPtr anc : simplify_ancestor_path) {
+            if (anc == expr) { cycle_ = true; return; }
+        }
+        simplify_ancestor_path.push_back(expr);
     }
     ~CycleGuard() {
         if (!cycle_) {
-            active_simplify_nodes.erase(expr_);
+            simplify_ancestor_path.pop_back();
         }
     }
     [[nodiscard]] bool cycle_detected() const noexcept { return cycle_; }
 };
+
 
 struct LiteralRational {
     Rational value;

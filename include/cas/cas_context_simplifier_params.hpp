@@ -60,8 +60,14 @@ struct CASContextSimplifierParams {
         return branch_cut_aware_logexp_;
     }
 
+    // F0.0-A20: Configurable recursion depth bound for simplifier/evaluator
+    [[nodiscard]] std::size_t max_recursion_depth() const noexcept {
+        return max_recursion_depth_;
+    }
+
 protected:
     int           max_simplification_depth_{300};
+    std::size_t   max_recursion_depth_{256U};
     bool          strict_branch_cuts_{false};
     long long     max_trig_power_reduction_{32LL};
     long long     symbolic_qr_max_norm_complexity_{2LL};
@@ -71,3 +77,4 @@ protected:
 };
 
 }  // namespace cas::symbolic
+

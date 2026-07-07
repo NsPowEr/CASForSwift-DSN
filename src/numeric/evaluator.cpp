@@ -17,10 +17,43 @@ namespace {
 
 } // namespace
 
+NumericEvaluator::NumericEvaluator(symbolic::CASContext& ctx, const NumericEnv& env)
+    : env_(env), max_recursion_depth_(ctx.max_recursion_depth()) {}
+
 Result<double> NumericEvaluator::evaluate(ExprPtr expr) {
     if (!expr) {
         return fail<double>(make_error(CASErrorKind::InvalidArgument, "Cannot evaluate null expression"));
     }
+
+    if (current_depth_ >= max_recursion_depth_) {
+        return make_unimplemented<double>(
+            "numeric", "NumericEvaluator::evaluate",
+            "expression recursion depth",
+            error::reason_codes::RECURSION_DEPTH_EXCEEDED,
+            "Increase max_recursion_depth in CASContext",
+            "A20",
+            "Numeric evaluation recursion depth limit exceeded");
+    }
+
+    auto [it, inserted] = active_nodes_.insert(expr);
+    if (!inserted) {
+        return make_unimplemented<double>(
+            "numeric", "NumericEvaluator::evaluate",
+            "expression cycle",
+            error::reason_codes::CYCLE_DETECTED,
+            "Ensure expression AST has no cyclic references",
+            "A20",
+            "Cyclic evaluation detected during numeric evaluation");
+    }
+
+    struct ScopeGuard {
+        std::size_t& depth;
+        std::unordered_set<ExprPtr, ExprHash>& nodes;
+        ExprPtr expr;
+        ScopeGuard(std::size_t& d, std::unordered_set<ExprPtr, ExprHash>& n, ExprPtr e)
+            : depth(d), nodes(n), expr(e) { ++depth; }
+        ~ScopeGuard() { --depth; nodes.erase(expr); }
+    } scope_guard(current_depth_, active_nodes_, expr);
 
     return visit_expr(
         expr,
@@ -230,6 +263,10 @@ Result<double> NumericEvaluator::evaluate(ExprPtr expr) {
 
 Result<double> eval(ExprPtr expr, const NumericEnv& env) {
     return NumericEvaluator(env).evaluate(expr);
+}
+
+Result<double> eval(ExprPtr expr, symbolic::CASContext& ctx, const NumericEnv& env) {
+    return NumericEvaluator(ctx, env).evaluate(expr);
 }
 
 } // namespace cas::numeric
