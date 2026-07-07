@@ -6,6 +6,7 @@
 #include "cas/bigint.hpp"
 #include "cas/calculus.hpp"
 #include "cas/error.hpp"
+#include "cas/error_helpers.hpp"
 #include "cas/result.hpp"
 #include "cas/symbolic.hpp"
 
@@ -69,11 +70,19 @@ Result<std::vector<ExprPtr>> compute_recurrence(
                 c.push_back(make_int(arena, 0));
                 continue;
             }
-            return fail<std::vector<ExprPtr>>(make_error(
-                CASErrorKind::Unimplemented,
-                "Frobenius resonance at n=" + std::to_string(n) +
-                    ": indicial polynomial vanishes with non-zero RHS — "
-                    "logarithmic branch required (not yet implemented)."));
+            // Indicial denominator vanishes with non-zero RHS: no plain
+            // Frobenius series with this root exists — the logarithmic
+            // branch is required.  Never emit a bogus series (REGOLA ZERO).
+            return make_unimplemented<std::vector<ExprPtr>>(UnimplementedInfo{
+                .module      = "calculus",
+                .function    = "compute_recurrence",
+                .input_shape = "Frobenius resonance at n=" + std::to_string(n) +
+                               " with non-zero RHS",
+                .reason      = cas::error::reason_codes::SERIES_GENERAL,
+                .suggestion  = "Route this root through the logarithmic branch "
+                               "(build_log_branch)",
+                .ticket      = "A5"
+            });
         }
 
         ExprPtr numerator = arena.make<Unary>(UnaryOp::Neg, rhs_simp.value());
@@ -197,13 +206,23 @@ Result<ExprPtr> build_log_branch(
         if (denom_res.is_error()) return denom_res;
         ExprPtr denom = denom_res.value();
         if (is_literal_zero(denom)) {
-            // Secondary resonance at a different gap — beyond this branch.
-            return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
-                "Frobenius log branch: secondary resonance at n=" +
-                std::to_string(n) +
-                " encountered while building the b_n series.  Multiple "
-                "resonance levels require an extended log-power construction "
-                "(not yet implemented)."));
+            if (is_literal_zero(S_total.value())) {
+                b[n] = make_int(arena, 0);  // genuine free parameter
+                continue;
+            }
+            // Secondary resonance with non-zero forcing: the single-log
+            // ansatz cannot absorb it — an extended log-power construction
+            // would be required.  Bail explicitly (REGOLA ZERO).
+            return make_unimplemented<ExprPtr>(UnimplementedInfo{
+                .module      = "calculus",
+                .function    = "build_log_branch",
+                .input_shape = "Frobenius secondary resonance at n=" +
+                               std::to_string(n) + " with non-zero forcing",
+                .reason      = cas::error::reason_codes::SERIES_GENERAL,
+                .suggestion  = "Multiple resonance levels require an extended "
+                               "log-power construction",
+                .ticket      = "A5"
+            });
         }
         ExprPtr b_n_raw = arena.make<Binary>(BinaryOp::Div,
             arena.make<Unary>(UnaryOp::Neg, S_total.value()), denom);

@@ -334,4 +334,54 @@ Result<ExprPtr> solve_ode_frobenius_at_zero(
     return ctx.simplify(total);
 }
 
+Result<ExprPtr> solve_ode_frobenius(
+    ExprPtr a_2,
+    ExprPtr a_1,
+    ExprPtr a_0,
+    const Symbol& x,
+    ExprPtr x_0,
+    unsigned int num_terms,
+    symbolic::CASContext& ctx) {
+    if (!x_0) {
+        return solve_ode_frobenius_at_zero(a_2, a_1, a_0, x, num_terms, ctx);
+    }
+    auto eq_zero = symbolic::mathematically_equal(x_0, make_int(ctx.arena(), 0), ctx);
+    if (eq_zero.is_ok() && eq_zero.value()) {
+        return solve_ode_frobenius_at_zero(a_2, a_1, a_0, x, num_terms, ctx);
+    }
+
+    AstArena& arena = ctx.arena();
+    Symbol u_sym = ctx.make_fresh_symbol("u");
+    ExprPtr u_expr = arena.make<Symbol>(u_sym);
+
+    // Substitute x -> u + x_0 in coefficients
+    ExprPtr x_sub = arena.make<Binary>(BinaryOp::Add, u_expr, x_0);
+    auto a2_sub = ctx.substitute(a_2, x, x_sub);
+    if (a2_sub.is_error()) return fail<ExprPtr>(a2_sub.error());
+    auto a1_sub = ctx.substitute(a_1, x, x_sub);
+    if (a1_sub.is_error()) return fail<ExprPtr>(a1_sub.error());
+    auto a0_sub = ctx.substitute(a_0, x, x_sub);
+    if (a0_sub.is_error()) return fail<ExprPtr>(a0_sub.error());
+
+    auto a2_simp = ctx.simplify(a2_sub.value());
+    if (a2_simp.is_error()) return fail<ExprPtr>(a2_simp.error());
+    auto a1_simp = ctx.simplify(a1_sub.value());
+    if (a1_simp.is_error()) return fail<ExprPtr>(a1_simp.error());
+    auto a0_simp = ctx.simplify(a0_sub.value());
+    if (a0_simp.is_error()) return fail<ExprPtr>(a0_simp.error());
+
+    // Solve for u around 0
+    auto sol_u_res = solve_ode_frobenius_at_zero(
+        a2_simp.value(), a1_simp.value(), a0_simp.value(), u_sym, num_terms, ctx);
+    if (sol_u_res.is_error()) return fail<ExprPtr>(sol_u_res.error());
+
+    // Substitute u -> x - x_0 back in solution
+    ExprPtr x_expr = arena.make<Symbol>(x.name);
+    ExprPtr u_back = arena.make<Binary>(BinaryOp::Sub, x_expr, x_0);
+    auto final_sol_res = ctx.substitute(sol_u_res.value(), u_sym, u_back);
+    if (final_sol_res.is_error()) return fail<ExprPtr>(final_sol_res.error());
+
+    return ctx.simplify(final_sol_res.value());
+}
+
 }  // namespace cas::calculus

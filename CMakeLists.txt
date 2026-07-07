@@ -726,6 +726,7 @@ test/unit/numeric/test_sturm_bigfloat.cpp
         test/unit/algebra/test_galois_deg5_f3.cpp
         test/unit/algebra/test_solve_closure.cpp
         test/unit/calculus/test_ode_laplace.cpp
+        test/unit/calculus/test_ode_frobenius.cpp
         test/unit/symbolic/test_jacobi.cpp
         test/unit/linalg/test_qr_decomposition.cpp
 test/unit/linalg/test_cholesky_ldlt.cpp
