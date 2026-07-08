@@ -131,6 +131,17 @@ struct CASContextCalculusParams {
         return kovacic_case3_max_poly_degree_;
     }
 
+    // Outer wall-clock safety net for the Case 3 §5 machinery: bounds one
+    // try_case3_for_n family sweep AND one compute_P_sequence run.  The
+    // recurrence is deterministic in PolyExpr form (HC-KV-06 closure); this
+    // budget only guards pathological multi-pole inputs.  0 = disabled.
+    void set_kovacic_case3_budget_ms(std::size_t ms) noexcept {
+        kovacic_case3_budget_ms_ = ms;
+    }
+    [[nodiscard]] std::size_t kovacic_case3_budget_ms() const noexcept {
+        return kovacic_case3_budget_ms_;
+    }
+
     // ── together() polynomial GCD content reduction ──────────────────────────
     void set_together_gcd_enabled(bool enabled) noexcept {
         together_gcd_enabled_ = enabled;
@@ -166,6 +177,7 @@ protected:
     std::size_t   kovacic_case2_max_poly_degree_{64U};
     std::size_t   kovacic_case3_max_pole_combinations_{4096U};
     std::size_t   kovacic_case3_max_poly_degree_{32U};
+    std::size_t   kovacic_case3_budget_ms_{2000U};
     unsigned int  mrv_max_append_depth_{1024U};
     unsigned int  diff_field_max_visit_depth_{4096U};
     int           mrv_growth_rank_max_depth_{1024};

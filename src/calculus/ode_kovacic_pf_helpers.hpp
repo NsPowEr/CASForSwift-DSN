@@ -25,7 +25,7 @@ namespace cas::calculus::kovacic_impl {
 // Try to interpret a base node as (x - c)-style linear factor.  Returns the
 // pole location c (or 0 for raw x) when the node matches; std::nullopt otherwise.
 [[nodiscard]] std::optional<ExprPtr> extract_pole_loc(
-    ExprPtr base, const Symbol& x, AstArena& a);
+    ExprPtr base, const Symbol& x, AstArena& a, symbolic::CASContext& ctx);
 
 // Detect  Pow(base, n)  with n ≤ -1.  Returns (base, |n|) on success.
 [[nodiscard]] std::optional<std::pair<ExprPtr, unsigned>> as_neg_pow(ExprPtr e);

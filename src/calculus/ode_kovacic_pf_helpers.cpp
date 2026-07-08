@@ -2,6 +2,7 @@
 // See ode_kovacic_pf_helpers.hpp.
 
 #include "ode_kovacic_pf_helpers.hpp"
+#include "../algebra/polynomial_internal.hpp"
 
 namespace cas::calculus::kovacic_impl {
 
@@ -22,17 +23,24 @@ std::optional<long long> rational_to_int(const Rational& r) {
 }
 
 std::optional<ExprPtr> extract_pole_loc(
-    ExprPtr base, const Symbol& x, AstArena& a) {
-    if (auto* sym = expr_cast<Symbol>(base); sym && sym->name == x.name)
-        return kv_int(a, 0);
-    if (auto* bin = expr_cast<Binary>(base)) {
-        auto* lsym = expr_cast<Symbol>(bin->left);
-        if (lsym && lsym->name == x.name) {
-            if (bin->op == BinaryOp::Sub) return bin->right;
-            if (bin->op == BinaryOp::Add) return kv_neg(a, bin->right);
-        }
-    }
-    return std::nullopt;
+    ExprPtr base, const Symbol& x, AstArena& a, symbolic::CASContext& ctx) {
+    // General linear-factor root extraction: base = c0 + c1*x  (any AST shape,
+    // e.g. Binary(Sub,...) or the canonical n-ary Sum node produced by arena
+    // normalisation) has pole location  c = −c0 / c1.  Parsing through
+    // `parse_polynomial` avoids pattern-matching on a specific tree shape
+    // (REGOLA ZERO categoria 8): any representation of a degree-1 polynomial
+    // in x is recognised uniformly.
+    auto poly_res = algebra::parse_polynomial(base, x, ctx);
+    if (poly_res.is_error()) return std::nullopt;
+    const auto& poly = poly_res.value();
+    if (poly.size() == 1U) return std::nullopt;   // constant: no root in x.
+    if (poly.size() != 2U) return std::nullopt;    // not a linear factor.
+    ExprPtr c0 = poly[0];
+    ExprPtr c1 = poly[1];
+    ExprPtr loc = a.make<Binary>(BinaryOp::Div,
+        a.make<Unary>(UnaryOp::Neg, c0), c1);
+    auto s = ctx.simplify(loc);
+    return s.is_ok() ? s.value() : loc;
 }
 
 std::optional<std::pair<ExprPtr, unsigned>> as_neg_pow(ExprPtr e) {
@@ -79,14 +87,14 @@ std::vector<PFPole> collect_pf_poles(
                     }
                 }
             }
-            auto loc = extract_pole_loc(base, x, a);
+            auto loc = extract_pole_loc(base, x, a, ctx);
             if (loc) record(*loc, pw, dv->left);
             continue;
         }
 
         // (b) Pow(base, −k) on its own → coeff = 1.
         if (auto np = as_neg_pow(term)) {
-            auto loc = extract_pole_loc(np->first, x, a);
+            auto loc = extract_pole_loc(np->first, x, a, ctx);
             if (loc) record(*loc, np->second, kv_int(a, 1));
             continue;
         }
@@ -101,7 +109,7 @@ std::vector<PFPole> collect_pf_poles(
             for (ExprPtr f : prod->factors) {
                 auto np = as_neg_pow(f);
                 if (!np) { coeffs.push_back(f); continue; }
-                auto loc = extract_pole_loc(np->first, x, a);
+                auto loc = extract_pole_loc(np->first, x, a, ctx);
                 if (!loc) { ambiguous = true; break; }
                 if (pole_loc.has_value()) { ambiguous = true; break; }
                 pole_loc = *loc;

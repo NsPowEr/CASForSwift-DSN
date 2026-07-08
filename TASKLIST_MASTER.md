@@ -81,9 +81,11 @@ Ordinati per severità/impatto decrescente. Ogni voce verificata aperta a codice
   - **File chiave**: `include/cas/builtin_functions.hpp`, `src/calculus/integrate_core.cpp`, `src/calculus/integrate.cpp:421`.
 - **Spec**: ❌ DA CREARE (`Meijer_G_Slater.md`) — la vecchia ref era errata · **Refs**: T-013, Task 22-23, F7.A-B
 
-### A8 · Kovacic Case 3 completo (icosaedrico n=12) — `[E3·C4·S1·R1]`
-- **Stato a codice**: `ode_kovacic_case3.cpp` ha tetraedrico/ottaedrico; n=12 = solo diagnostico (recurrence blow-up).
-- **Cosa**: ottimizzazione recurrence per A₅ n=12. **Ledger**: HC-KV-06 · **Refs**: T-028, T-009 (parziale), F5.C
+### A8 · Kovacic Case 3 completo (icosaedrico n=12) — ✅ FATTO 2026-07-08 — `[E3·C4·S1·R1]`
+- **✅ CHIUSO 2026-07-08** (due fix distinti, vedi ledger HC-KV-06):
+  1. **Perf**: `compute_P_sequence` riscritto in `algebra::PolyExpr` (coefficient-array): S, S′, S·θ, S²·r ridotti a polinomio UNA volta; derivata dei P_i (coeff a_i costanti in x) = power-rule shift, non `diff()` generico. Ricorrenza a 13 livelli ora deterministica.
+  2. **Root cause correttezza** (il vero blocco, Cat 8): `extract_pole_loc` riconosceva `x−c` solo come `Binary(Sub/Add)`; la forma canonica n-aria `Sum([x,−1])` veniva scartata in silenzio → polo x=1 perso → S sbagliato → S²·r non polinomiale. Fix: estrazione radice algoritmica via `parse_polynomial` (deg 1 → c = −c0/c1), indipendente dalla forma AST.
+- **Verifica**: paper Ex.1 (p.23, n=12 icosaedrico A₅) ora produce RootOf(M(ω) deg 12); test rafforzati (`Paper_Example1_p23_N12_Icosahedral` ASSERT ok, niente più SKIP); 11/11 Kovacic PASS. **Ledger**: HC-KV-06 ✅ · **Refs**: T-028, T-009 (parziale), F5.C
 
 ### A9 · Tower algebrico ≥3 livelli / multi-β nested non-squarefree — 🔨 QUASI-FATTO 2026-07-07 (residuo: catena nested sequenziale) — `[E3·C4·S2·R2]`
 - **✅ FATTO 2026-07-07** (`algebraic_tower_primitive_nested.cpp` riscritto, Cohen §3.6.1-3.6.4/Trager):
@@ -153,9 +155,10 @@ Ordinati per severità/impatto decrescente. Ogni voce verificata aperta a codice
 - **Stato a codice**: ✅ galois `*8U+16U` rimosso → bound derivato `prime_budget + Σ bit_length(lc,disc_num,disc_den)` (galois_deg5.cpp:187, HPP-003B). 🟡 Residuo: pad `+16U` additivo in `divides_sparse_z` (brown_helpers/lc_scaling/fp_helpers) — diagnosi: il bound moltiplicativo sottostante è euristico (non provato), il budget→`return false` è un falso-negativo Cat-4 latente pre-esistente. Fix corretto specificato in HPP-003C (rely on well-ordering termination, cap provato `∏(deg_i+1)`, ritorna `Unimplemented` non `false`). R2/R3 hot-path, deferito con ledger.
 - **Ledger**: HPP-003B (chiuso), HPP-003C (documentato) · **Refs**: T-020
 
-### A19 · AstArena reset con root migration — `[E2·C3·S2·R3]`
-- **Cosa**: migrare radici quando l'arena è resettata con nodi ancora referenziati. ⚠ tocca Arena core.
-- **Ledger**: HC-F70-A31-MIGRATION-TODO · **Refs**: T-023
+### A19 · AstArena reset con root migration — ✅ CHIUSO (verificato a codice 2026-07-08, era stale) — `[E2·C3·S2·R3]`
+- **Stato a codice**: già implementato e testato, a un layer diverso da quello che il ledger descriveva. `CASContext::collect_garbage(external_roots)` (`src/symbolic/context_core.cpp`) crea una `AstArena new_arena`, clona ogni radice viva (variabili, assumptions, trace, root esterni passati dal chiamante, le 3 cache simplify/diff/integrate) via `clone_into_arena` (`src/ast/ast_clone.cpp`, deep-copy visitor completo su **tutti** gli ExprKind incl. RootOf/Matrix/SeriesExp/Quantity/Integral/Derivative/Limit) e poi fa lo swap `arena_ = std::move(new_arena)`. Testato in `test_gc.cpp`: `CollectsGarbageAndPreservesRoots` (radici interne+esterne preservate, interning nella nuova arena funzionante) e `MemoryPressureStressTest` (10k simplify + GC ogni 100 iter, arena resta <100 nodi).
+- **Distinzione chiave**: il raw `AstArena::reset()` (senza migrazione) resta un primitivo *intenzionalmente* distruttivo — `test_arena_reset.cpp` ne documenta esplicitamente il contratto ("post-reset, the prior pointers are dangling — they MUST NOT be dereferenced"). Non è un bug: è il building block a basso livello; `collect_garbage` è l'API sicura sopra di esso. Grep-verificato: **zero** call-site in `src/` chiamano `arena_.reset()`/`.arena().reset()` su un'arena viva bypassando `collect_garbage` — il pattern pericoloso descritto dal ledger non esiste in produzione.
+- **Ledger**: HC-F70-A31-MIGRATION-TODO → chiuso (era APERTO per assenza letterale di `AstArena::migrate_into`, funzione equivalente e più completa esiste come `CASContext::collect_garbage`+`clone_into_arena`) · **Refs**: T-023
 
 ### A20 · Cycle detection simplifier/evaluator — ✅ FATTO 2026-07-07 — `[E2·C3·S2·R3]`
 - **Stato a codice**: chiuso.

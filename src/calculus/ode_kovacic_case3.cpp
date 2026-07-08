@@ -242,14 +242,15 @@ struct C3Pole {
     }
 
     // Steps 3-4 per family.
-    // Wall-clock budget per try_case3_for_n call: families enumerated for
-    // n = 12 + multi-pole inputs can collectively saturate the recurrence
-    // cost.  This guard ensures `case3_omega` terminates in bounded time
-    // even when no family yields a P; tracked as HC-KV-06 mitigation.
+    // Outer wall-clock safety net per try_case3_for_n call (configurable via
+    // ctx.kovacic_case3_budget_ms(), 0 = disabled): the PolyExpr recurrence
+    // is deterministic (HC-KV-06 closed), so this only guards pathological
+    // multi-pole inputs where the family count itself is large.
     const auto start = std::chrono::steady_clock::now();
-    const auto budget = std::chrono::seconds(2);
+    const auto budget = std::chrono::milliseconds(ctx.kovacic_case3_budget_ms());
+    const bool budget_enabled = ctx.kovacic_case3_budget_ms() > 0U;
     for (const auto& idx : fams_res.value()) {
-        if (std::chrono::steady_clock::now() - start > budget) {
+        if (budget_enabled && std::chrono::steady_clock::now() - start > budget) {
             return ok(std::optional<std::pair<ExprPtr, Symbol>>{});
         }
         std::vector<long long> e_c_chosen;
@@ -346,12 +347,11 @@ Result<OmegaPair> case3_omega(
     }
 
     // Try n = 4, 6, 12 in order (paper §5.1).
-    // For n = 12 (icosahedral A₅) the §5 recurrence runs 13 levels; the
-    // soft-fail timeout in `compute_P_sequence` (helpers TU) silently skips
-    // families whose intermediate `diff()` exceeds the symbolic-op budget,
-    // letting tractable families succeed.  HC-KV-06 (HARDCODE_LEDGER.md)
-    // tracks the polynomial-mode representation work that would let every
-    // family complete deterministically.
+    // For n = 12 (icosahedral A₅) the §5 recurrence runs 13 levels;
+    // `compute_P_sequence` (helpers TU) represents it in `algebra::PolyExpr`
+    // form so every family completes deterministically (HC-KV-06, CHIUSO
+    // 2026-07-08).  The wall-clock budgets below remain as an outer safety
+    // net for pathological multi-pole inputs, not as the primary mechanism.
     for (unsigned n : {4U, 6U, 12U}) {
         auto try_res = try_case3_for_n(poles, *inf_opt, r, n, x, ctx);
         if (try_res.is_error()) return fail<OmegaPair>(try_res.error());
@@ -372,7 +372,7 @@ Result<OmegaPair> case3_omega(
         .input_shape = "Kovacic Case 3 candidate n ∈ {4, 6, 12}",
         .reason      = cas::error::reason_codes::ODE_UNSUPPORTED_TYPE,
         .suggestion  = "Verify Kovacic invariants or check higher order solver",
-        .ticket      = "HC-KV-06"
+        .ticket      = ""  // no open debt: negative outcome is the correct §5 result (HC-KV-06 closed 2026-07-08)
     }, "Kovacic Case 3: no polynomial P found for any n ∈ {4, 6, 12}; Case 3 cannot hold for this DE.");
 }
 

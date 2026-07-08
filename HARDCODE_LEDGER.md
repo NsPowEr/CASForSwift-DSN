@@ -151,20 +151,21 @@
   fail_unimpl(...)` del ramo (finestra ~µs, nessun hang, re-poll a
   integrate_once) — fedeltà parziale, non bloccante.
 
-### HC-F70-A31-MIGRATION-TODO — AstArena reset without root migration
+### HC-F70-A31-MIGRATION-TODO — AstArena reset without root migration — ✅ CHIUSO 2026-07-08 (A19)
 - **File**: `include/cas/ast.hpp` (AstArena::reset declaration), `src/ast/ast.cpp` (impl)
 - **Categoria CLAUDE.md**: Cat 4 (boundary documentato)
-- **Descrizione**: `AstArena::reset()` distrugge ogni nodo e libera ogni blocco. Non è
+- **Descrizione originale**: `AstArena::reset()` distrugge ogni nodo e libera ogni blocco. Non era
   presente una funzione `migrate_into(span<ExprPtr*>)` che esegue deep-copy dei root
-  forniti in un nuovo stato arena prima del reset, permettendo al chiamante di
-  conservare alcuni nodi attraverso il ciclo di REPL/server.
-- **Motivazione**: la migrazione richiede un visitor di deep-copy completo
-  attraverso tutti gli `ExprKind`. F7.0 Phase A privilegia chiusura sicurezza
-  resource — la migration è add-on non bloccante (REPL pattern: re-parse expressions
-  dopo reset).
-- **Fix corretto**: implementare `AstArena::migrate_into(std::span<ExprPtr*>)` o
-  helper free-function `deep_copy_into(ExprPtr, AstArena&)`. Ticket-in-place per Fase 8.
-- **STATO**: APERTO (post-parità ammesso).
+  forniti in un nuovo stato arena prima del reset.
+- **Chiusura (verificata a codice, non dedotta)**: la funzione equivalente esiste già ed è più completa —
+  `CASContext::collect_garbage(external_roots)` (`src/symbolic/context_core.cpp`) + `clone_into_arena`
+  (`src/ast/ast_clone.cpp`, deep-copy su tutti gli ExprKind). Migra variabili, assumptions, trace,
+  root esterni e le 3 cache; poi swap `arena_ = std::move(new_arena)`. Testato: `test_gc.cpp`
+  (`CollectsGarbageAndPreservesRoots`, `MemoryPressureStressTest`). Grep-verificato zero call-site
+  in produzione chiamano il raw `reset()` su un'arena viva bypassando `collect_garbage` — il raw
+  `reset()` resta correttamente un primitivo distruttivo a basso livello (contratto documentato in
+  `test_arena_reset.cpp`), non l'API da usare quando servono root vive.
+- **STATO**: CHIUSO — nessun fix necessario, solo correzione stato ledger/tasklist (A19).
 
 ### HC-F70-A21-NUMERIC-BOUNDARY — solve_inequality double boundary
 - **File**: `src/algebra/solve_inequality.cpp:96-115`
@@ -316,29 +317,46 @@
   2401/2401 suite quick verde. Zero regressioni.
 - **STATO**: ✅ CHIUSO 2026-06-15.
 
-### HC-KV-06 — Kovacic Case 3 n=12 (icosahedral A₅) recurrence blow-up (2026-06-14, MITIGATO 2026-06-15)
+### HC-KV-06 — Kovacic Case 3 n=12 (icosahedral A₅) recurrence blow-up (2026-06-14, MITIGATO 2026-06-15, CHIUSO 2026-07-08)
 - **File**: `src/calculus/ode_kovacic_case3.cpp` (try_case3_for_n
   wall-clock budget + family-loop guard);
   `src/calculus/ode_kovacic_case3_helpers.cpp` (`compute_P_sequence`
-  per-iteration budget).
+  per-iteration budget); `src/calculus/ode_kovacic_pf_helpers.cpp`
+  (`extract_pole_loc`).
 - **Categoria CLAUDE.md**: Cat 3 (set sfruttabile parzialmente n=12 due
-  to perf).
-- **Mitigazione applicata 2026-06-15**:
-  - Dispatcher loop ora itera `{4, 6, 12}` completo.
-  - Wall-clock budget `2s` per `try_case3_for_n`; supererato → ritorna
-    `nullopt` (family ok, advance n).
-  - `compute_P_sequence` per-iter budget `500ms`; supererato → ritorna
-    `std::vector<ExprPtr>{}` (soft-fail), dispatcher avanza famiglia.
-  - `build_omega_minpoly_case3` soft-fail su sequence empty.
-  - Garantisce terminazione bounded; n=12 success per input semplici;
-    n=12 input complessi (es. paper Ex.1) ritornano Unimplemented.
-- **Closure completo**: rappresentazione `PolyLin` (vector di coeff
-  Rational + linear-in-a_i parts) sostituisce ExprPtr in `compute_P_sequence`;
-  recurrence diventa O(n · d²) deterministico per n=12.
-- **Blocking dependency**: design polymorphic-coefficient ring per
-  ExprPtr-with-linear-symbolic-coefficients; ~3-5 gg lavoro focused.
-- **STATO**: ⚠️ MITIGATO (terminazione garantita, soft-fail per cases
-  intractabili; closure completa pending PolyLin work).
+  to perf) — **rivelatasi in realtà Cat 8** (pattern matching a forma).
+- **Mitigazione 2026-06-15**: dispatcher loop `{4,6,12}` completo +
+  wall-clock budget `2s` per `try_case3_for_n` + budget per-iter su
+  `compute_P_sequence`; garantiva solo terminazione bounded, non
+  correttezza (paper Ex.1 ancora Unimplemented).
+- **Closure 2026-07-08 (parte 1 — perf)**: `compute_P_sequence`
+  riscritto in rappresentazione `algebra::PolyExpr` (coefficient-array)
+  invece di albero `ExprPtr` generico: S, S′, S·θ, S²·r sono polinomi
+  FISSI (indipendenti dall'ansatz) calcolati una sola volta via
+  `parse_polynomial`; la derivata dei P_i (coefficienti costanti in x,
+  essendo simboli freschi a_i) è power-rule triviale
+  (`poly_derivative_const_coeffs`), non `diff()` generico. Elimina
+  `diff()+together()+simplify()` ripetuto a ogni livello della
+  ricorrenza a 13 livelli.
+- **Root cause reale scoperta 2026-07-08 (parte 2 — correttezza)**:
+  il fix di parte 1 NON bastava — `MinPoly_Structural_Soundness_WhenSuccess`
+  restava SKIPPED. Causa reale: `extract_pole_loc` (ode_kovacic_pf_helpers.cpp)
+  riconosceva la forma lineare `x−c` SOLO come nodo `Binary(Sub/Add)`
+  esplicito; quando l'arena canonicalizza `x−1` nel nodo n-ario `Sum`
+  interno (`Sum([x, −1])`), il pattern-matching falliva silenziosamente
+  e il polo veniva scartato — per il paper Ex.1 (poli in x=0 e x=1)
+  questo faceva sparire il polo x=1 da `poles`, rendendo `S = x` invece
+  di `S = x(x−1)`: S² non cancellava il fattore (x−1)² e `S²·r` non
+  riduceva a polinomio (errore fuorviante "precondizione ordine poli
+  violata", mentre la vera precondizione era rispettata).
+- **Fix**: `extract_pole_loc` riscritto per estrarre la radice via
+  `algebra::parse_polynomial(base, x, ctx)` (poly grado 1 → c = −c0/c1),
+  algoritmico e indipendente dalla forma AST — riconosce qualunque
+  rappresentazione di un fattore lineare in x, non solo `Binary(Sub)`.
+- **Verifica**: `OdeKovacicCase3Test.*` 11/11 PASS (era 10 PASS + 1
+  SKIPPED); `MinPoly_Structural_Soundness_WhenSuccess` ora produce
+  RootOf reale per il paper Ex.1 (n=12, icosahedrale). Zero regressioni.
+- **STATO**: ✅ CHIUSO 2026-07-08.
 
 ### HC-F8-F2GATE-BENCHMARK-FAIL — F2 exit-gate benchmark perf regression
 - **File**: `test/unit/algebra/test_f2_gate_benchmark.cpp:107`
