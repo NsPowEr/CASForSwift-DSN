@@ -2147,6 +2147,57 @@ TEST(TaskA20_CycleDetection, EvaluatorCyclicExpressionDetected) {
     EXPECT_EQ(result.error().payload->reason, error::reason_codes::CYCLE_DETECTED);
 }
 
+TEST(TaskA30_OpsBudget, DefaultBudgetEnabledAndConfigurable) {
+    CASContext ctx;
+    EXPECT_EQ(ctx.max_operation_ops(), 2'000'000ULL);
+    ctx.set_max_operation_ops(500U);
+    EXPECT_EQ(ctx.max_operation_ops(), 500U);
+    ctx.set_max_operation_ops(0U);  // 0 = disabled
+    EXPECT_EQ(ctx.max_operation_ops(), 0U);
+}
+
+TEST(TaskA30_OpsBudget, BudgetExceededIsStructuredUnimplemented) {
+    CASContext ctx;
+    ctx.set_max_operation_ops(50U);
+    // Wide flat sum: enough node visits to exceed the 50-op budget, but far
+    // below any depth limit — isolates the ops gate from the depth gate.
+    ExprPtr sym = ctx.arena().make<Symbol>(std::string("x"));
+    std::vector<ExprPtr> terms(512U, sym);
+    ExprPtr wide_sum = ctx.arena().make<Sum>(std::move(terms));
+    auto result = ctx.simplify(wide_sum);
+    ASSERT_TRUE(result.is_error());
+    EXPECT_EQ(result.error().kind, CASErrorKind::Unimplemented);
+    ASSERT_TRUE(result.error().payload.has_value());
+    EXPECT_EQ(result.error().payload->reason, error::reason_codes::OPS_BUDGET_EXCEEDED);
+    EXPECT_EQ(result.error().payload->ticket, "A30");
+}
+
+TEST(TaskA30_OpsBudget, ExplicitTimeoutDisablesDefaultBudget) {
+    // A30 contract: an explicit set_timeout() without an explicit
+    // set_max_operation_ops() hands the operation budget to the caller's
+    // wall-clock deadline (long factorisation/Galois workloads rely on this).
+    CASContext ctx;
+    ctx.set_timeout(std::chrono::minutes(10));
+    EXPECT_EQ(ctx.max_operation_ops(), 0U);
+}
+
+TEST(TaskA30_OpsBudget, ExplicitBudgetSurvivesSetTimeout) {
+    CASContext ctx;
+    ctx.set_max_operation_ops(123456U);
+    ctx.set_timeout(std::chrono::minutes(10));
+    EXPECT_EQ(ctx.max_operation_ops(), 123456U);
+}
+
+TEST(TaskA30_OpsBudget, HeavyOperationFitsDefaultBudget) {
+    // Regression guard for the calibration: a moderately heavy real operation
+    // must complete well within the default budget (heaviest measured op in
+    // the full suite is ~117k node visits; default is 2M).
+    CASContext ctx;
+    AstArena parse_arena;
+    auto result = simplify_input_with_context("(x+1)^8 - ((x+1)^4)^2", parse_arena, ctx);
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+}
+
 TEST(SymbolicTimeoutTest, TimeoutCheckIntervalConfigurable) {
     // L0-13: set_timeout_check_interval changes check granularity
     CASContext ctx;

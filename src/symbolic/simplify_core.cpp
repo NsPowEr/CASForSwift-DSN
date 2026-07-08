@@ -98,6 +98,22 @@ Result<void> Simplifier::check_timeout() {
         return ok();
     }
     ++(*ops_count_);
+    // A30: deterministic per-operation node-visit budget is the PRIMARY gate.
+    // Checked on every op (cheap integer compare) so the outcome for a given
+    // input+params never depends on machine load; the wall-clock timeout below
+    // remains only as an outer anti-hang safety net.
+    const std::uint64_t max_ops = (context_ != nullptr) ? context_->max_operation_ops() : 0U;
+    if (max_ops > 0U && *ops_count_ > max_ops) {
+        return Result<void>(make_unimplemented_error(
+            UnimplementedInfo{
+                .module = "symbolic",
+                .function = "Simplifier::simplify_expr",
+                .input_shape = "operation exceeding " + std::to_string(max_ops) + " node visits",
+                .reason = error::reason_codes::OPS_BUDGET_EXCEEDED,
+                .suggestion = "Increase max_operation_ops in CASContext (0 disables the budget)",
+                .ticket = "A30"},
+            "Symbolic operation ops budget exceeded"));
+    }
     const std::uint64_t interval = (context_ != nullptr) ? context_->timeout_check_interval() : 1024U;
     if ((*ops_count_ % interval) != 0U) {
         return ok();

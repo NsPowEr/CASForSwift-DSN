@@ -68,6 +68,13 @@ const ComputationTrace& CASContext::get_trace() const noexcept {
 
 void CASContext::set_timeout(std::chrono::milliseconds timeout) noexcept {
     timeout_ = timeout;
+    // A30 contract: an explicit wall-clock budget means the caller owns the
+    // operation budget, so the default deterministic ops gate steps aside
+    // (long-running factorisation/Galois workloads legitimately exceed it).
+    // An explicit set_max_operation_ops call always wins over this default.
+    if (!max_operation_ops_explicit_) {
+        max_operation_ops_ = 0U;
+    }
 }
 
 Symbol CASContext::make_fresh_symbol(const std::string& prefix) {

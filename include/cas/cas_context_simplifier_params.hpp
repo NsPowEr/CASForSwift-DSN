@@ -65,9 +65,27 @@ struct CASContextSimplifierParams {
         return max_recursion_depth_;
     }
 
+    // A30: deterministic per-operation node-visit budget (primary resource
+    // gate).  Counted per top-level CASContext operation (ops_count_), so the
+    // outcome for a given input+params is machine- and load-independent; the
+    // wall-clock timeout stays as an outer anti-hang safety net only.
+    // 0 = disabled.  Default 2'000'000 ≈ 17x the heaviest legitimate operation
+    // measured across the full quick suite + heavy calculus suites
+    // (117k node visits, calibration 2026-07-08); raise it consciously if a
+    // legitimate operation ever reports OPS_BUDGET_EXCEEDED.
+    // Contract: an explicit set_timeout() call without an explicit
+    // set_max_operation_ops() disables this default gate — the caller then
+    // owns the operation budget via its wall-clock deadline.
+    // (setter declared in CASContext / context_params.cpp)
+    [[nodiscard]] std::uint64_t max_operation_ops() const noexcept {
+        return max_operation_ops_;
+    }
+
 protected:
     int           max_simplification_depth_{300};
     std::size_t   max_recursion_depth_{256U};
+    std::uint64_t max_operation_ops_{2'000'000ULL};
+    bool          max_operation_ops_explicit_{false};
     bool          strict_branch_cuts_{false};
     long long     max_trig_power_reduction_{32LL};
     long long     symbolic_qr_max_norm_complexity_{2LL};

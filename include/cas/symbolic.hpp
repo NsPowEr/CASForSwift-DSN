@@ -213,6 +213,7 @@ public:
     void set_timeout_check_interval(std::uint64_t interval) noexcept;
     void set_max_simplification_depth(int depth) noexcept;
     void set_max_recursion_depth(std::size_t depth) noexcept;
+    void set_max_operation_ops(std::uint64_t ops) noexcept;
     void set_max_integration_depth(std::size_t depth) noexcept;
     void set_gcd_error_probability(double prob) noexcept;
     void set_zippel_error_probability(double prob) noexcept;
@@ -321,7 +322,12 @@ public:
     bool operation_active_{false};
     bool caching_enabled_{true};
     ComputationTrace trace_;
-    std::chrono::milliseconds timeout_{1000};
+    // A30: wall-clock timeout is an outer anti-hang safety net only; the
+    // primary, deterministic per-operation gate is max_operation_ops (see
+    // CASContextSimplifierParams).  10s covers ~10x load-induced slowdown of
+    // any operation that fits the default ops budget, so pass/fail outcomes
+    // do not depend on machine load.
+    std::chrono::milliseconds timeout_{10000};
     std::chrono::steady_clock::time_point operation_started_at_{};
     std::chrono::steady_clock::time_point hard_deadline_{std::chrono::steady_clock::time_point::max()};
     std::uint64_t ops_count_{0};

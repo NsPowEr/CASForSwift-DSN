@@ -16,6 +16,12 @@ void CASContext::set_max_recursion_depth(std::size_t depth) noexcept {
     max_recursion_depth_ = (depth < 1U) ? 1U : depth;
 }
 
+void CASContext::set_max_operation_ops(std::uint64_t ops) noexcept {
+    // 0 = disabled (wall-clock safety net only); any positive value accepted.
+    max_operation_ops_ = ops;
+    max_operation_ops_explicit_ = true;
+}
+
 void CASContext::set_max_integration_depth(std::size_t depth) noexcept {
     max_integration_depth_ = (depth < 1U) ? 1U : (depth > 128U) ? 128U : depth;
 }
