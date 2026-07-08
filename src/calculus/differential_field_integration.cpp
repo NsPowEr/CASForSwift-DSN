@@ -38,7 +38,7 @@ static bool ho_reduce_step(
     // V' as poly
     auto V_expr_res = algebra::polynomial_to_expr(V_poly, x, ctx);
     if (V_expr_res.is_error()) return false;
-    auto Vd_res = field.derive(V_expr_res.value(), ctx);
+    auto Vd_res = field.derive_in_generators(V_expr_res.value(), ctx);
     if (Vd_res.is_error()) return false;
     auto Vd_poly_res = algebra::parse_polynomial(Vd_res.value(), x, ctx);
     if (Vd_poly_res.is_error()) return false;
@@ -89,7 +89,7 @@ static bool ho_reduce_step(
     rational_part = arena.make<Binary>(BinaryOp::Add, rational_part, contrib);
 
     // Compute A' (polynomial derivative of A_poly via field derivation)
-    auto A_prime_res = field.derive(A_expr, ctx);
+    auto A_prime_res = field.derive_in_generators(A_expr, ctx);
     if (A_prime_res.is_error()) return false;
     auto A_prime_poly_res = algebra::parse_polynomial(A_prime_res.value(), x, ctx);
     if (A_prime_poly_res.is_error()) return false;
@@ -215,7 +215,12 @@ Result<ExprPtr> integrate_rothstein_trager(
 
     AstArena& arena = ctx.arena();
 
-    auto dQ_res = field.derive(Q, ctx);
+    // A27: the derivative must stay in the generator representation.  A plain
+    // derive() of a generator symbol returns D(t_i) in ORIGINAL form (e.g.
+    // 1/(x·ln x)), and resultants/GCDs over the resulting mixed expression
+    // silently lose factors — this produced the wrong antiderivative 0 for
+    // ∫ 1/(x·ln x·ln ln x) dx (root accepted with gcd v = 1, term ln|1| = 0).
+    auto dQ_res = field.derive_in_generators(Q, ctx);
     if (dQ_res.is_error()) return fail<ExprPtr>(dQ_res.error());
     ExprPtr dQ = dQ_res.value();
 
@@ -256,7 +261,20 @@ Result<ExprPtr> integrate_rothstein_trager(
     }
 
     std::vector<ExprPtr> integral_terms;
-    for (ExprPtr root : unique_roots) {
+    for (ExprPtr root_raw : unique_roots) {
+        // A27: Rothstein-Trager is only valid for CONSTANT roots (the c_i in
+        // Σ c_i·ln v_i live in Const(K)).  A root depending on the integration
+        // variable or on a tower generator is not a valid residue; emitting a
+        // term for it produces a silently wrong antiderivative.
+        ExprPtr root = root_raw;
+        if (auto s = ctx.simplify(root); s.is_ok()) root = s.value();
+        if (depends_on(root, field.base_var())) continue;
+        bool depends_on_generator = false;
+        for (const auto& ext : field.extensions()) {
+            if (depends_on(root, ext.t_var)) { depends_on_generator = true; break; }
+        }
+        if (depends_on_generator) continue;
+
         ExprPtr root_dQ = arena.make<Product>(std::vector<ExprPtr>{root, dQ});
         ExprPtr A_root = arena.make<Binary>(BinaryOp::Sub, P, root_dQ);
         { auto s = ctx.simplify(A_root); if (s.is_ok()) A_root = s.value(); }
@@ -264,6 +282,11 @@ Result<ExprPtr> integrate_rothstein_trager(
         auto v_res = algebra::polynomial_gcd(A_root, Q, t_var, ctx);
         if (v_res.is_error()) continue;
         ExprPtr v = v_res.value();
+
+        // A27: a gcd that is trivial in t (degree 0) contributes ln(const),
+        // i.e. nothing — such a root is spurious for the log part.  Emitting
+        // ln|1| terms here masked the "no valid terms" diagnostic below.
+        if (!depends_on(v, t_var)) continue;
 
         // Use ln(|v|) for real-domain correctness
         ExprPtr abs_v = arena.make<FuncCall>(BuiltinOp::Abs, std::vector<ExprPtr>{v});

@@ -386,9 +386,30 @@ Result<ExprPtr> integrate_risch_poly_and_rational_part(
         if (poly_back_res.is_error()) return poly_back_res;
         bool poly_zero = expr_is<IntegerLit>(poly_back_res.value())
             && expr_ref<IntegerLit>(poly_back_res.value()).value.is_zero();
-        if (poly_zero) return back_res;
         bool back_zero = expr_is<IntegerLit>(back_res.value())
             && expr_ref<IntegerLit>(back_res.value()).value.is_zero();
+        // A27 zero-result guard (REGOLA 0.2): 0 is an antiderivative only of
+        // the zero function.  If every component collapsed to 0 while the
+        // integrand is not literally 0, some sub-step silently lost the
+        // integral (this exact path returned 0 for ∫ 1/(x·ln x·ln ln x) dx) —
+        // report Unimplemented instead of a wrong answer.
+        if (poly_zero && back_zero) {
+            bool integrand_zero = false;
+            if (auto is = context.simplify(gen_expr); is.is_ok()) {
+                integrand_zero = (expr_is<IntegerLit>(is.value())
+                    && expr_ref<IntegerLit>(is.value()).value.is_zero());
+            }
+            if (!integrand_zero) {
+                return make_unimplemented<ExprPtr>(
+                    "calculus", "integrate_risch",
+                    "rational/log/poly parts all reduced to 0 for a non-zero integrand",
+                    cas::error::reason_codes::RISCH_LOG_EXTENSION_GENERAL,
+                    "A sub-step (Hermite/Rothstein-Trager) lost the integral; "
+                    "the result would be silently wrong",
+                    "A27");
+            }
+        }
+        if (poly_zero) return back_res;
         if (back_zero) return context.simplify(poly_back_res.value());
         return context.simplify(arena.make<Sum>(std::vector<ExprPtr>{
             poly_back_res.value(), back_res.value()}));

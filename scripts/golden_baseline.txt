@@ -18,8 +18,8 @@
 #   3) bash scripts/check_golden_ratchet.sh --report report.json --update-baseline
 #
 STATUS: SET
-PASS_FLOOR: 914
-FAIL_CEILING: 26
+PASS_FLOOR: 928
+FAIL_CEILING: 16
 TOLERANCE: 0
 #
 # Riferimento storico (STATE.md, 2026-06-10): aggregato ~83.9% = 753 pass / 145 fail
