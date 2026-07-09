@@ -372,6 +372,8 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/gaussian_factor.cpp
     src/algebra/galois.cpp
     src/algebra/galois_deg5.cpp
+    src/algebra/perm_group.cpp
+    src/algebra/galois_transitive_lattice.cpp
 )
 
 set(CAS_LINALG_SOURCES
@@ -728,6 +730,8 @@ test/unit/numeric/test_sturm_bigfloat.cpp
         test/unit/calculus/test_laplace.cpp
         test/unit/algebra/test_galois.cpp
         test/unit/algebra/test_galois_deg5_f3.cpp
+        test/unit/algebra/test_perm_group.cpp
+        test/unit/algebra/test_galois_lattice.cpp
         test/unit/algebra/test_solve_closure.cpp
         test/unit/calculus/test_ode_laplace.cpp
         test/unit/calculus/test_ode_frobenius.cpp
