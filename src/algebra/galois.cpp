@@ -251,10 +251,10 @@ Result<std::string> galois_group(ExprPtr poly, const Symbol& var,
         }
         return ok(joined);
     }
-    if (total_deg == 6U) {
-        // A6 — irreducible sextic goes through the exact deg-6 pipeline
-        // (galois_deg6.cpp); reducible sextics recurse into factors exactly
-        // like the deg-5 path above.
+    if (total_deg == 6U || total_deg == 7U) {
+        // A6 — an irreducible degree-6/7 input goes through the exact resolvent
+        // pipeline (galois_deg6.cpp); reducible ones recurse into factors
+        // exactly like the deg-5 path above.
         std::size_t non_constant_factors = 0U;
         std::size_t max_factor_deg = 0U;
         for (const auto& f : factors) {
@@ -266,10 +266,10 @@ Result<std::string> galois_group(ExprPtr poly, const Symbol& var,
                 if (d > max_factor_deg) max_factor_deg = d;
             }
         }
-        if (non_constant_factors == 1U && max_factor_deg == 6U) {
-            return galois_group_sextic_irreducible(poly, var, ctx);
+        if (non_constant_factors == 1U && max_factor_deg == total_deg) {
+            return galois_group_irreducible_resolvent(poly, var, ctx);
         }
-        if (linear_count >= 6U) return ok(std::string("trivial"));
+        if (linear_count >= total_deg) return ok(std::string("trivial"));
         std::vector<std::string> sub_labels;
         for (const auto& f : factors) {
             auto pp = parse_polynomial(f.factor, var, ctx);

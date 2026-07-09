@@ -736,6 +736,7 @@ test/unit/numeric/test_sturm_bigfloat.cpp
         test/unit/algebra/test_galois_lattice.cpp
         test/unit/algebra/test_galois_setpoly.cpp
         test/unit/algebra/test_galois_deg6.cpp
+        test/unit/algebra/test_galois_deg7.cpp
         test/unit/algebra/test_solve_closure.cpp
         test/unit/calculus/test_ode_laplace.cpp
         test/unit/calculus/test_ode_frobenius.cpp

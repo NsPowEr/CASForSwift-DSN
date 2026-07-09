@@ -1,20 +1,22 @@
-// A6 / CAS-L3-18 — Galois group of an irreducible sextic over Q.
+// A6 / CAS-L3-18 — Galois group of an irreducible f ∈ Q[x] of degree 6 or 7.
 //
-// Fully exact pipeline (no floats, no transcribed group tables):
+// Fully exact pipeline (no floats, no transcribed group tables), n-generic
+// throughout — only the candidate lattice and the naming depend on n:
 //
 //   1. Normalize to a monic integer model (root scaling x → lc·x preserves
 //      the splitting field, hence the group and its natural action).
-//   2. Discriminant parity: disc square ⇔ G ⊆ A₆ (eliminates half the
+//   2. Discriminant parity: disc square ⇔ G ⊆ Aₙ (eliminates half the
 //      transitive classes deterministically).
 //   3. Dedekind/Frobenius sieve: for budgeted primes p ∤ lc·disc, the
 //      factor-degree multiset of f mod p is the cycle type of Frob_p in G —
 //      a candidate class lacking that cycle type is eliminated (positive
 //      witnesses only: sound eliminations, never probabilistic guesses).
-//   4. 2-set resolvent: the factor-degree multiset of the squarefree
-//      R₂(y)=∏_{i<j}(y−α_i−α_j) over Q equals the orbit-length multiset of
-//      G on 2-subsets (Soicher-McKay); collisions handled by quadratic
-//      Tschirnhaus transforms (bounded retry, bound derived below).
-//   5. Candidate set = exhaustively generated transitive lattice of S₆
+//   4. k-set resolvents (k = 2, then 3 while still ambiguous): the factor-
+//      degree multiset of the squarefree R_k(y) = ∏_{|T|=k}(y − Σ_{i∈T} α_i)
+//      over Q equals the orbit-length multiset of G on k-subsets (Soicher-
+//      McKay). Root-sum collisions are resolved by a Tschirnhaus power-basis
+//      transform (bounded sweep, bound derived below).
+//   5. Candidate set = exhaustively generated transitive lattice of Sₙ
 //      (galois_transitive_lattice.cpp — completeness by construction).
 //      Unique survivor → structural name. Several survivors → structured
 //      Unimplemented listing them (REGOLA ZERO: never guess); the
@@ -38,6 +40,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -55,22 +58,33 @@ using permgrp::PermGroup;
     return r.numerator().is_zero();
 }
 
-// Memoized transitive lattice of S₆. Pure mathematics (independent of any
-// CASContext), so a process-wide memo is sound; the ops budget of the
-// *first* caller is used to build it (anti-runaway belt only — termination
-// is proven).
-[[nodiscard]] Result<std::vector<PermGroup>> sextic_lattice(
-    std::uint64_t max_ops) {
+// Memoized transitive lattice of S_n, keyed by degree. Pure mathematics
+// (independent of any CASContext), so a process-wide memo is sound; the ops
+// budget of the *first* caller for a given n is used to build it (anti-runaway
+// belt only — termination is proven, the subgroup lattice is finite).
+[[nodiscard]] Result<std::vector<PermGroup>> transitive_lattice(
+    unsigned int n, std::uint64_t max_ops) {
     static std::mutex mu;
-    static std::optional<std::vector<PermGroup>> memo;
+    static std::map<unsigned int, std::vector<PermGroup>> memo;
     std::lock_guard<std::mutex> lock(mu);
-    if (!memo.has_value()) {
+    auto it = memo.find(n);
+    if (it == memo.end()) {
         auto r = permgrp::transitive_subgroup_classes(
-            6U, LatticeBudget{.max_degree = 6U, .max_ops = max_ops});
+            n, LatticeBudget{.max_degree = n, .max_ops = max_ops});
         if (r.is_error()) return r;  // not cached: caller may raise budget
-        memo = std::move(r.value());
+        it = memo.emplace(n, std::move(r.value())).first;
     }
-    return ok(*memo);
+    return ok(it->second);
+}
+
+// Exact binomial C(n, k).
+[[nodiscard]] std::size_t binomial(std::size_t n, std::size_t k) {
+    if (k > n) return 0U;
+    std::size_t r = 1U;
+    for (std::size_t i = 0U; i < k; ++i) {
+        r = r * (n - i) / (i + 1U);
+    }
+    return r;
 }
 
 // Monic integer model with the same splitting field: for f = Σ aᵢxⁱ of
@@ -121,7 +135,7 @@ struct MonicModel {
     if (F.degree() != n) {
         return fail<MonicModel>(CASError{
             .kind = CASErrorKind::InternalError,
-            .message = "galois_deg6: monic integer model degree mismatch"});
+            .message = "galois_resolvent: monic integer model degree mismatch"});
     }
     return ok(MonicModel{std::move(F), lc});
 }
@@ -145,43 +159,62 @@ struct MonicModel {
     return false;
 }
 
-// Structural, deterministic label for a deg-6 transitive class. Famous
-// groups are named via order + parity + 6-cycle content (all derived from
-// the generated group itself); the rest get an explicit descriptive label.
-[[nodiscard]] std::string structural_name_deg6(const PermGroup& g) {
+// Structural, deterministic label for a transitive class of degree n. Famous
+// groups are named via order + parity + n-cycle content — all derived from
+// the generated group itself (their orders are mathematical facts, e.g.
+// |PSL(3,2)| = 168, not transcribed classifications); everything else gets an
+// explicit descriptive label carrying the invariants used to reach it.
+[[nodiscard]] std::string structural_name(const PermGroup& g, std::size_t n) {
     const std::uint64_t o = g.order();
     const bool odd = g.has_odd_element();
-    const bool has6 = contains_cycle_type(g, {6U});
-    if (o == 720U) return "S6";
-    if (o == 360U) return "A6";
-    if (o == 120U) return "PGL(2,5)";
-    if (o == 60U) return "PSL(2,5)";
-    if (o == 6U) return has6 ? "C6" : "S3(6)";
-    if (o == 12U) return has6 ? "D6" : "A4(6)";
-    if (o == 18U) return "F18";
-    std::string label = "6T(o=" + std::to_string(o);
+    const bool has_ncyc = contains_cycle_type(g, {n});
+    if (n == 6U) {
+        if (o == 720U) return "S6";
+        if (o == 360U) return "A6";
+        if (o == 120U) return "PGL(2,5)";
+        if (o == 60U) return "PSL(2,5)";
+        if (o == 6U) return has_ncyc ? "C6" : "S3(6)";
+        if (o == 12U) return has_ncyc ? "D6" : "A4(6)";
+        if (o == 18U) return "F18";
+    } else if (n == 7U) {
+        // The seven transitive groups of degree 7 all have distinct orders,
+        // so the order alone determines the class.
+        if (o == 5040U) return "S7";
+        if (o == 2520U) return "A7";
+        if (o == 168U) return "PSL(3,2)";
+        if (o == 42U) return "F42";
+        if (o == 21U) return "F21";
+        if (o == 14U) return "D7";
+        if (o == 7U) return "C7";
+    }
+    std::string label = std::to_string(n) + "T(o=" + std::to_string(o);
     label += odd ? ",odd" : ",even";
-    if (has6) label += ",6cyc";
+    if (has_ncyc) label += "," + std::to_string(n) + "cyc";
     label += ")";
     return label;
 }
 
 }  // namespace
 
-Result<std::string> galois_group_sextic_irreducible(
+Result<std::string> galois_group_irreducible_resolvent(
     ExprPtr poly, const Symbol& var, symbolic::CASContext& ctx) {
     // ── Parse to RatPoly ────────────────────────────────────────────────────
     auto pe = parse_polynomial(poly, var, ctx);
     if (pe.is_error()) return fail<std::string>(pe.error());
     auto rc = poly_to_rational_coefficients(pe.value());
     if (rc.is_error()) return fail<std::string>(rc.error());
-    if (rc.value().size() != 7U) {
-        return fail<std::string>(CASError{
-            .kind = CASErrorKind::Unimplemented,
-            .message = "galois_deg6: input does not have degree 6"});
-    }
     RatPoly f_in(rc.value());
     f_in.normalize(rat_is_zero);
+    const std::size_t n = f_in.degree();
+    // The exact resolvent pipeline is wired for n = 6 and n = 7 (the
+    // transitive lattices S₆, S₇ are generable in time; n ≥ 8 is the Stauduhar
+    // maximal-descent increment). Everything below is n-generic.
+    if (n != 6U && n != 7U) {
+        return fail<std::string>(CASError{
+            .kind = CASErrorKind::Unimplemented,
+            .message = "galois_resolvent: exact pipeline wired for degree 6 "
+                       "and 7 only (n >= 8 is the Stauduhar increment)"});
+    }
 
     // ── Discriminant parity ─────────────────────────────────────────────────
     auto disc_res = polynomial_discriminant(poly, var, ctx);
@@ -192,13 +225,13 @@ Result<std::string> galois_group_sextic_irreducible(
     if (!disc_rat) {
         return fail<std::string>(CASError{
             .kind = CASErrorKind::Unimplemented,
-            .message = "galois_deg6: discriminant did not reduce to a "
+            .message = "galois_resolvent: discriminant did not reduce to a "
                        "rational"});
     }
     if (disc_rat->numerator().is_zero()) {
         return fail<std::string>(CASError{
             .kind = CASErrorKind::InvalidArgument,
-            .message = "galois_deg6: zero discriminant (not separable)"});
+            .message = "galois_resolvent: zero discriminant (not separable)"});
     }
     const bool disc_square = is_rational_square_q(*disc_rat);
 
@@ -209,7 +242,8 @@ Result<std::string> galois_group_sextic_irreducible(
     const BigInt& root_scale = F_res.value().root_scale;
 
     // ── Candidate classes: exhaustive lattice + parity filter ───────────────
-    auto lat = sextic_lattice(ctx.galois_lattice_max_ops());
+    auto lat = transitive_lattice(static_cast<unsigned int>(n),
+                                  ctx.galois_lattice_max_ops());
     if (lat.is_error()) return fail<std::string>(lat.error());
     std::vector<const PermGroup*> cands;
     for (const auto& g : lat.value()) {
@@ -247,7 +281,7 @@ Result<std::string> galois_group_sextic_irreducible(
             type.push_back(d);
             total += d;
         }
-        if (total != 6U) continue;  // repeated factors mod p — skip prime
+        if (total != n) continue;  // repeated factors mod p — skip prime
         std::sort(type.begin(), type.end(), std::greater<std::size_t>());
         ++primes_used;
         std::vector<const PermGroup*> next;
@@ -266,7 +300,7 @@ Result<std::string> galois_group_sextic_irreducible(
     auto resolvent_pattern =
         [&](std::size_t k) -> std::optional<std::vector<std::size_t>> {
         const std::size_t n_deg = F_rat.degree();
-        const std::size_t rdeg = (k == 2U) ? 15U : 20U;  // C(6,k)
+        const std::size_t rdeg = binomial(n_deg, k);  // C(n,k)
         // Tschirnhaus sweep on the moment curve (derived bound, not magic):
         // P_t(x) = x + t·x² + t²·x³ + t³·x⁴ + t⁴·x⁵. For each pair of
         // distinct k-subsets (T,T′) the separating condition
@@ -353,17 +387,18 @@ Result<std::string> galois_group_sextic_irreducible(
         cands = std::move(next);
     }
 
-    if (cands.size() == 1U) return ok(structural_name_deg6(*cands[0]));
+    if (cands.size() == 1U) return ok(structural_name(*cands[0], n));
     if (cands.empty()) {
         return fail<std::string>(CASError{
             .kind = CASErrorKind::InternalError,
-            .message = "galois_deg6: all transitive candidates eliminated — "
-                       "invariant violated (Dedekind/resolvent inconsistency)"});
+            .message = "galois_resolvent: all transitive candidates eliminated "
+                       "— invariant violated (Dedekind/resolvent "
+                       "inconsistency)"});
     }
     std::string diag =
-        "galois_deg6: ambiguous after discriminant, Dedekind sieve and "
+        "galois_resolvent: ambiguous after discriminant, Dedekind sieve and "
         "2-/3-set resolvents; remaining candidates:";
-    for (const auto* g : cands) diag += " " + structural_name_deg6(*g);
+    for (const auto* g : cands) diag += " " + structural_name(*g, n);
     diag += " — Stauduhar relative-resolvent descent is the follow-up "
             "increment (A6)";
     return fail<std::string>(

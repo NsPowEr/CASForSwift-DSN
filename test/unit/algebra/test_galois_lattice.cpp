@@ -64,6 +64,21 @@ TEST(GaloisLatticeTest, Degree6_SixteenTransitiveClasses) {
     EXPECT_EQ(std::count(ords.begin(), ords.end(), 360U), 1);  // A_6
 }
 
+TEST(GaloisLatticeTest, Degree7_SevenTransitiveClasses) {
+    // Classical (Butler-McKay): exactly 7 transitive classes in S_7, with
+    // pairwise-distinct orders 7, 14, 21, 42, 168, 2520, 5040 — i.e.
+    // C7, D7, F21, F42, PSL(3,2), A7, S7. Used here as an independent oracle;
+    // the engine derives the lattice from first principles.
+    auto r = transitive_subgroup_classes(
+        7U, LatticeBudget{.max_degree = 7U, .max_ops = 40'000'000'000ULL});
+    ASSERT_TRUE(r.is_ok()) << r.error().message;
+    EXPECT_EQ(r.value().size(), 7U);
+    EXPECT_EQ(orders_of(r.value()),
+              (std::vector<std::uint64_t>{7U, 14U, 21U, 42U, 168U, 2520U,
+                                          5040U}));
+    for (const auto& g : r.value()) EXPECT_TRUE(g.is_transitive());
+}
+
 TEST(GaloisLatticeTest, DegreeBeyondCapIsStructuredUnimplemented) {
     auto r = transitive_subgroup_classes(
         9U, LatticeBudget{.max_degree = 7U, .max_ops = 1'000'000ULL});
