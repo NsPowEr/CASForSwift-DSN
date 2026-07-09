@@ -12,6 +12,7 @@
 namespace cas::symbolic {
 
 CASContext::CASContext() : rewrite_provider_(&default_rewrite_provider()) {
+    intern_shards_ = arena_.num_shards();
     ::cas::algebra::register_algebraic_simplify_hook(*this);
 }
 

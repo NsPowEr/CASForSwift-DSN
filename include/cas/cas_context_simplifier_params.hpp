@@ -81,10 +81,19 @@ struct CASContextSimplifierParams {
         return max_operation_ops_;
     }
 
+    // HPP-016: number of interning shards (0 = derive from hardware concurrency)
+    [[nodiscard]] std::size_t intern_shards() const noexcept {
+        return intern_shards_;
+    }
+    void set_intern_shards(std::size_t n) noexcept {
+        intern_shards_ = n;
+    }
+
 protected:
     int           max_simplification_depth_{300};
     std::size_t   max_recursion_depth_{256U};
     std::uint64_t max_operation_ops_{2'000'000ULL};
+    std::size_t   intern_shards_{0U};
     bool          max_operation_ops_explicit_{false};
     bool          strict_branch_cuts_{false};
     long long     max_trig_power_reduction_{32LL};

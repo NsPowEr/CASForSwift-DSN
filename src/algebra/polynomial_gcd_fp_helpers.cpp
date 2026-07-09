@@ -2,6 +2,7 @@
 #include "cas/numtheory.hpp"
 
 #include <algorithm>
+#include <limits>
 #include <set>
 
 namespace cas::algebra::fp_helpers {
@@ -46,6 +47,17 @@ std::size_t deg_in_var(const BSparsePoly& sp, std::size_t vi) {
     for (const auto& [m, _] : sp)
         if (vi < m.size()) d = std::max<std::size_t>(d, m[vi]);
     return d;
+}
+
+std::size_t proven_division_step_bound(const BSparsePoly& dividend, std::size_t n_vars) {
+    constexpr std::size_t kMax = std::numeric_limits<std::size_t>::max();
+    std::size_t bound = 1U;
+    for (std::size_t i = 0; i < n_vars; ++i) {
+        const std::size_t factor = deg_in_var(dividend, i) + 1U;
+        if (factor != 0U && bound > kMax / factor) return kMax;
+        bound *= factor;
+    }
+    return bound;
 }
 
 BSparsePoly eval_var_mod_p(const BSparsePoly& sp, std::size_t var_idx,
@@ -227,7 +239,7 @@ std::optional<BSparsePoly> exact_div_fp(
     auto inv = numtheory::modular_inverse(pos_mod(dlc, p), p);
     if (inv.is_error()) return std::nullopt;
     const BigInt ilc = inv.value();
-    const std::size_t budget = (rem.size() + 1U) * (B.size() + 1U) + 16U;
+    const std::size_t budget = proven_division_step_bound(A, n);
     std::size_t steps = 0;
     while (!rem.empty()) {
         if (++steps > budget) return std::nullopt;

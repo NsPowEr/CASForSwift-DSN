@@ -79,7 +79,7 @@ namespace cas::algebra::fp_helpers {
     if (dividend.empty()) return true;
     BSparsePoly rem = dividend;
     auto [dlm, dlc] = *std::prev(divisor.end());
-    const std::size_t budget = (rem.size() + 1U) * (divisor.size() + 1U) + 16U;
+    const std::size_t budget = proven_division_step_bound(dividend, n_vars);
     std::size_t steps = 0;
     while (!rem.empty()) {
         if (++steps > budget) return false;

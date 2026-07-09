@@ -26,6 +26,20 @@ using BSparsePoly = std::map<BMonomial, BigInt>;
 [[nodiscard]] BSparsePoly reduce_sparse_mod_p(const BSparsePoly& sp, const BigInt& p);
 [[nodiscard]] BigInt      sparse_inf_norm(const BSparsePoly& sp);
 [[nodiscard]] std::size_t deg_in_var(const BSparsePoly& sp, std::size_t var_idx);
+
+// HPP-003C — proven upper bound on the number of leading-monomial reduction
+// steps a sparse polynomial division can take when `dividend` is genuinely
+// divisible: every step yields one quotient monomial q with q[i] <= deg_i
+// (dividend) for each variable i (degree arithmetic of exact polynomial
+// division), so the quotient has at most prod_i (deg_i(dividend)+1) distinct
+// monomials. Termination itself is guaranteed unconditionally by the
+// leading-monomial well-ordering (each step strictly decreases the reducible
+// leading monomial); this bound only distinguishes a legitimate large
+// division from a corrupted invariant, replacing the previous unproven
+// heuristic `(|rem|+1)*(|divisor|+1)+16` that could false-negative on a
+// genuine divisor with many quotient terms.
+[[nodiscard]] std::size_t proven_division_step_bound(
+    const BSparsePoly& dividend, std::size_t n_vars);
 [[nodiscard]] BSparsePoly eval_var_mod_p(const BSparsePoly& sp, std::size_t var_idx,
                                           const BigInt& val, const BigInt& p);
 

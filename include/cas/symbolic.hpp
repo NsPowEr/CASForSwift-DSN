@@ -213,6 +213,7 @@ public:
     void set_timeout_check_interval(std::uint64_t interval) noexcept;
     void set_max_simplification_depth(int depth) noexcept;
     void set_max_recursion_depth(std::size_t depth) noexcept;
+    void set_intern_shards(std::size_t n) noexcept;
     void set_max_operation_ops(std::uint64_t ops) noexcept;
     void set_max_integration_depth(std::size_t depth) noexcept;
     void set_gcd_error_probability(double prob) noexcept;

@@ -111,6 +111,17 @@ struct CASContextAlgebraParams {
         kronecker_max_degree_ = degree;
     }
 
+    // ── Algebraic tower ring-arithmetic bit-cap (safety belt, HC-F8-PENDING-26) ──
+    // Guards Q[y]/(cand_q) Euclidean inverse/divmod against unbounded coefficient
+    // growth when cand_q turns out reducible (not a field): returns nullopt past
+    // this cap instead of looping on ever-larger BigInt coefficients.
+    [[nodiscard]] std::size_t algebraic_tower_eval_max_bits() const noexcept {
+        return algebraic_tower_eval_max_bits_;
+    }
+    void set_algebraic_tower_eval_max_bits(std::size_t bits) noexcept {
+        algebraic_tower_eval_max_bits_ = bits;
+    }
+
     // ── F4 Macaulay matrix caps ──────────────────────────────────────────────
     void set_f4_max_macaulay_rows(std::size_t n) noexcept {
         f4_max_macaulay_rows_ = n;
@@ -346,6 +357,7 @@ protected:
     std::size_t   max_hensel_lift_attempts_{8U};
     std::size_t   kronecker_max_degree_{8U};
     double        zippel_error_probability_{1e-6};
+    std::size_t   algebraic_tower_eval_max_bits_{8192U};
     double        zippel_density_threshold_{5.0};
     std::size_t   f4_max_macaulay_rows_{512U};
     std::size_t   f4_max_macaulay_monomials_{512U};

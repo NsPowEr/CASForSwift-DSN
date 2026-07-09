@@ -1007,23 +1007,35 @@
   `prime_budget + bit_length(lc) + bit_length(disc_num) + bit_length(disc_den)` candidati.
   Il break a `p > 2^30` resta backstop assoluto. 19/19 test Galois verdi.
 
-### HPP-003C — divides_sparse_z step-budget `+16U` additivo (residuo A18, NON chiuso)
-- **File**: `polynomial_gcd_brown_helpers.cpp:82`, `polynomial_gcd_brown_lc_scaling.cpp:188`,
-  `polynomial_gcd_fp_helpers.cpp:230` — `budget = (rem.size()+1)*(divisor.size()+1) + 16U`.
+### HPP-003C — divides_sparse_z step-budget `+16U` additivo (residuo A18) — 🟡 PARZIALE (2026-07-08)
+- **File**: `polynomial_gcd_brown_helpers.cpp` (`divides_sparse_z`), `polynomial_gcd_brown_lc_scaling.cpp`
+  (`exact_divide_sparse_z`), `polynomial_gcd_fp_helpers.cpp` (`exact_div_fp`) — tutti e tre condividevano
+  lo stesso `budget = (rem.size()+1)*(divisor.size()+1) + 16U` euristico.
 - **Categoria CLAUDE.md**: Cat 4 — bail-out potenzialmente silent-wrong + Cat 2 (pad magico).
-- **Descrizione/diagnosi 2026-06-26**: il pad `+16U` è minore, ma l'analisi rivela un
-  problema più profondo *pre-esistente* (eredità HPP-003): il bound moltiplicativo
-  `(|rem|+1)*(|divisor|+1)` è **euristico**, NON un upper bound provato sul numero di
-  termini del quoziente. Per un divisore vero il numero di passi = |quoziente|, che in
-  presenza di molti termini può eccedere il bound → `return false` su un divisore reale
-  (falso negativo silenzioso). Il `+16U` non risolve questo.
-- **Fix corretto (deferito, R2/R3 hot-path)**: la terminazione è garantita dal
-  well-ordering monomiale (ogni passo riduce strettamente il leading monomial); rimuovere
-  il budget come gate-di-correttezza, cap di sola sicurezza al bound *provato*
-  `∏_i (deg_i(dividend)+1)` (numero di monomi ≼ lt(dividend)), e su sforamento ritornare
-  `Unimplemented` diagnostico — **mai** `false`. Richiede test mirati anti-regressione GCD.
-- **STATO**: 🟡 DOCUMENTATO — galois (HPP-003B) chiuso; questo residuo aperto con fix
-  specificato. Non destabilizzato ora per evitare regressione hot-path non testata.
+- **Fix applicato 2026-07-08**: nuovo helper condiviso `fp_helpers::proven_division_step_bound(dividend, n_vars)`
+  (`polynomial_gcd_fp_internal.hpp`/`.cpp`) sostituisce l'euristica con il bound **provato**
+  `∏_i (deg_i(dividend)+1)`: per una divisione esatta `dividend = divisor·quotient`, ogni variabile
+  del quoziente soddisfa `deg_i(quotient) ≤ deg_i(dividend)` (aritmetica dei gradi della divisione
+  polinomiale esatta), quindi il numero di monomi distinti del quoziente — e con esso il numero di
+  iterazioni, essendo ciascuna iterazione responsabile di esattamente un monomio del quoziente — è
+  limitato da tale prodotto. Saturazione a `SIZE_MAX` su overflow (nessun troncamento silenzioso).
+  Rimosso il pad `+16U` e l'accoppiamento spurio a `rem.size()*divisor.size()` in tutti e 3 i siti.
+- **Nota di rigore**: la terminazione del loop è comunque garantita **indipendentemente** da questo
+  bound — ogni iterazione riduce strettamente il leading monomial sotto il well-ordering di `BMonomial`
+  (proprietà di compatibilità con l'addizione degli ordini monomiali), quindi non è mai stato un
+  problema di non-terminazione ma di **falso negativo** su divisori legittimi con molti termini nel
+  quoziente. Il bound provato elimina questo falso negativo.
+- **Residuo non chiuso (onestà REGOLA ZERO)**: il ramo "budget superato" nei 3 siti ritorna ancora
+  `false`/`nullopt` anziché `Unimplemented` strutturato — non implementato perché tutti i 5 call-site
+  (`brown_modular.cpp`, `fp_recursive.cpp`) usano questi helper come gate di retry in loop CRT/modulari
+  dove `false` è l'esito atteso per un candidato sbagliato (non un errore); threading `Result<T>`
+  attraverso quella catena è un refactor a parte, R2/R3, non incluso in questo fix. Con il bound
+  provato, però, superarlo è ormai evidenza di un **invariante rotto** (non di un "non-divisore"), quindi
+  il rischio pratico di falso-negativo silenzioso è stato rimosso; l'upgrade a `Unimplemented` resta
+  un miglioramento di osservabilità, non di correttezza.
+- **Verifica**: 129/129 test GCD/Zippel/Wang/Brown mirati verdi (0 regressioni), suite quick in corso.
+- **STATO**: 🟡 PARZIALE — bound-fix (la parte Cat-4 reale) chiuso; propagazione `Unimplemented`
+  rimane task separato se si vuole la chiusura completa.
 
 ### HPP-004 — GCD multivariate max_samples formula (polynomial_gcd_multivariate.cpp:774)
 - **File**: `src/algebra/polynomial_gcd_multivariate.cpp:774`
@@ -1201,11 +1213,11 @@
 - **Eccezione legittima preservata**: i default sono safety-cap hardware (Digamma(2^25) materializzerebbe ~33M nodi AST; Bernoulli(2^31) → ~30 GB rationals). Bound `unsigned int` (bit_length API) intenzionale per evitare wraparound silenzioso.
 - **STATO**: ✅ RISOLTA 2026-06-02.
 
-### HPP-016 — N_INTERN_SHARDS = 16 (include/cas/ast.hpp)
-- **File**: `include/cas/ast.hpp` — `static constexpr std::size_t N_INTERN_SHARDS = 16U`
-- **Categoria CLAUDE.md**: Cat 1 eccezione legittima (budget architetturale con giustificazione formale)
-- **Descrizione**: Il numero 16 è una costante architetturale deliberata: (a) potenza di 2 → shard selection via bitwise AND in O(1); (b) 16 shard riducono la contention a ~1/16 rispetto a lock globale; (c) il numero di shard non è runtime-configurabile perché la struttura dati `std::array<..., N>` richiede N compile-time; un rebuild con N diverso è l'unica via per cambiarlo. Documentato con `static_assert((N_INTERN_SHARDS & (N_INTERN_SHARDS-1)) == 0)`.
-- **Fix corretto**: Eccezione legittima — non richiede fix. Il valore 16 è derivato da considerazioni di cache-line alignment e trade-off contention/overhead. Per workload estremi (>64 thread), valutare N=64.
+### HPP-016 — N_INTERN_SHARDS = 16 (include/cas/ast.hpp) — ✅ CHIUSA (2026-07-08)
+- **File**: `include/cas/ast_arena.hpp` (ex `include/cas/ast.hpp`) — `static constexpr std::size_t N_INTERN_SHARDS = 16U`
+- **Categoria CLAUDE.md**: Cat 1 eccezione legittima (budget architetturale con giustificazione formale) -> Rimosso compile-time hardcoding.
+- **Descrizione**: Il numero statico di shard è stato rimosso. AstArena ora alloca i shard dinamicamente tramite unique_ptr. Il numero di shard di interning è configurabile via `CASContext::set_intern_shards(n)` e, se non impostato (default 0), viene derivato dinamicamente a runtime dalla hardware concurrency (`std::thread::hardware_concurrency()`) arrotondata alla successiva potenza di due.
+- **Risoluzione**: Dynamic sharding implementato in `AstArena` e `CASContextParams`. Unit test `DynamicShardingConfigurable` e `ReconfigureShardsEmpty` verificano il comportamento a runtime.
 - **Blocking dependency**: Nessuno.
 
 ### HPP-017 — intern_shard_tables_ shard contention nota (include/cas/ast.hpp)
@@ -1215,11 +1227,11 @@
 - **Stato**: RISOLTO 2026-05-25 — per tracciabilità storica.
 - **Blocking dependency**: N/A.
 
-### HPP-018 — gaussian_factor swap branch vuoto (gaussian_factor.cpp:83) — 🟡 PARZIALE (audit 2026-07-07: NON chiudibile — assert solo debug, release path ancora silente su invariant violato; chiusura vera = `Result` error al posto dell'assert)
-- **File**: `src/algebra/gaussian_factor.cpp:83` — `if (re * re + im * im != p) { /* empty */ }`
+### HPP-018 — gaussian_factor swap branch vuoto (gaussian_factor.cpp:83) — ✅ RISOLTA (2026-07-08)
+- **File**: `src/algebra/gaussian_factor.cpp`
 - **Categoria CLAUDE.md**: Cat 4 — bail-out silenzioso su invariant matematico violato
-- **Descrizione**: La branch `if (norm != p)` aveva corpo vuoto — restituiva silenziosamente `GaussianInt(re, im)` con norma sbagliata. L'invariant di Hermite-Serret (Cohen GTM 138 §4.2.5) garantisce che l'algoritmo euclidico su Z[i] termini con norm(alpha) = p. La branch non può succedere correttamente; un'occorrenza indica un bug nell'algoritmo euclidico.
-- **Fix corretto (applicato 2026-05-25)**: Aggiunta `assert(re*re+im*im == p && "HPP-018 Hermite-Serret invariant")` per debug; tentativo di swap come recovery superficiale (non cambia norma); test esplicito `HermiteSerretNormInvariant` in `test_gaussian_factor.cpp` verifica a²+b²=p per 11 split primes.
+- **Descrizione**: Rimosso il vecchio swap branch non funzionante/vuoto e l'assert di solo debug. Ora la violazione dell'invariant di Hermite-Serret viene intercettata a runtime in ogni build e ritorna immediatamente un `Result` di errore strutturato (`InternalError`). Il canonical swap `re < im` è applicato correttamente per garantire la forma canonica `re >= im`.
+- **Risoluzione**: Hermite-Serret invariant verification corretta a livello di produzione via Result error propagation, swap canonicalizzazione corretto. Testato via `HermiteSerretNormInvariant`.
 - **Blocking dependency**: Nessuno.
 
 ### HPP-014c — Gauss period closed-form per q∈{17,257,65537} — APERTA PERMANENTE
@@ -1307,7 +1319,7 @@
 
 ---
 
-### HC-F8-MONOLITH-WAIVER — Anti-monolith 28 file >500 LOC — APERTA Fase 8
+### HC-F8-MONOLITH-WAIVER — Anti-monolith 28 file >500 LOC — CHIUSA (2026-07-08)
 
 - **File**: 28 file in `src/` + `include/` documentati in
   `ANTI_MONOLITHIC_REPORT.md` (vedi tabella tier-1 + tier-2).
@@ -1337,9 +1349,7 @@
 - **Enforcement**: `scripts/check_file_size.sh` whitelist tier-1+tier-2
   documentata; tutti gli altri file devono passare ≤500 LOC. Nuove
   violazioni post 2026-06-11 vietate senza ledger entry esplicita.
-- **STATO**: APERTA Fase 8 (waiver formale F7.5 sign-off).
-  Condition C1 audit AUDIT_CAS_F7.5_2026-06-11.md risolta come
-  waiver path B (riga 261-263 audit).
+- **STATO**: ✅ CHIUSA (2026-07-08). Tutti i 28 file sono stati suddivisi in moduli coesi al di sotto di 500 righe. Whitelist in `scripts/file_size_whitelist.txt` completamente svuotata.
 
 ---
 
@@ -2127,10 +2137,10 @@ Vedi `PLAN_TASKS_REMAINING.md` per breakdown completo.
 - **Task ID**: 22
 - **Fix corretto**: vedi plan §Task 22 (SL-1..SL-5).
 
-### HC-F8-PENDING-25 — Monolith split 28 file >500 LOC — APERTA
+### HC-F8-PENDING-25 — Monolith split 28 file >500 LOC — RISOLTA (2026-07-08)
 - **Task ID**: 25
 - **Audit**: 28 file whitelisted in CMakeLists.txt anti-monolith scan.
-- **Fix corretto**: vedi plan §Task 25 (MS-1..MS-final).
+- **Fix applicato**: Tutti i 28 file sono stati completamente suddivisi in moduli coesi sotto le 500 righe e la whitelist è stata svuotata.
 
 ### HC-F8-FLAKY-COS-7PI-16 — `SpecialFunctionsTest.CosSevenPiOverSixteen_NonInert` order-dependent — RISOLTA (2026-06-19)
 - **ROOT CAUSE (confermata 2026-06-19 via `CAS_DEBUG_CHEBYSHEV=1`)**: NON un counter/cache globale (le ipotesi sotto erano errate). `cos(7π/16)` prendeva il ramo **Chebyshev T₇** in `cos_ref_value` (`simplify_trig.cpp`): `cos_q = cos(π/16)` (radicale annidato di profondità 3), poi 7 iterazioni di `2·cos_q·T_curr − T_prev` costruivano un'espressione **enorme**. La sua semplificazione costava ~605 ms e stava **al limite del budget depth/timeout** del Simplifier: dopo migliaia di test nella suite completa, lo stato di risorse al margine faceva fallire (bail → ritorno della `FuncCall(cos,…)` inerte). In isolamento il budget pieno riusciva → flaky order-dependent, deterministico solo sotto carico.
@@ -2157,10 +2167,33 @@ Vedi `PLAN_TASKS_REMAINING.md` per breakdown completo.
 - **Blocking dependency**: nessuna — è bug di test/infrastruttura, non gating per feature.
 - **Test di regressione**: `SpecialFunctionsTest.CosSevenPiOverSixteen_NonInert` (full suite) + 73 sibling che passano in isolation.
 
-### HC-F8-PENDING-26 — Cross-cutting CASContext params — PARTIAL
+### HC-F8-PENDING-26 — Cross-cutting CASContext params — PARTIAL (audit 2026-07-08)
 - **Task ID**: 26 — tracker distribuito.
 - **Params già esposti** (sessione 2026-06-12): `max_bessel_half_integer_order`, `integration_abs_tol`, `integration_rel_tol`, `integration_max_intervals`.
-- **Params pendenti**: vedi plan §Task 26 tabella (12 params associati a task pending).
+- **Audit 2026-07-08 sulla tabella "12 params pendenti" di `PLAN_TASKS_REMAINING.md` §Task 26**: la
+  tabella era stale — verificato a codice, non dedotto:
+  - `hensel_max_lift_attempts`, `kronecker_max_degree`, `zippel_error_probability` → **già esposti**
+    (`cas_context_algebra_params.hpp`, wired in `factorization_wang_eez.cpp`/`context_params.cpp`).
+  - `risch_de_max_degree` → già coperto da `max_risch_rational_ansatz_degree` (A26, default 32,
+    `cas_context_calculus_params.hpp`) — nome diverso dalla tabella, stessa cosa.
+  - `zippel_confidence_samples` → non è un parametro fisso: `polynomial_gcd_zippel_prony.cpp` conta
+    `samples_used` adattivamente (Schwartz-Zippel incrementale), niente da esporre.
+  - `bigint_ssa_threshold`, `galois_resolvent_precision_bits` → algoritmi **non ancora implementati**
+    (Schönhage-Strassen §B won't-do-now; Stauduhar deg≥6 = A6 non fatto) — esporre un param per un
+    algoritmo inesistente è prematuro/privo di significato, non un gap reale finché A6/SS non esistono.
+  - `puiseux_truncation_order`/`puiseux_max_branches`/`cad_max_cells`/`cad_isolation_bits` → task 14/19
+    deferred by-design (§B), coerente col non essere esposti.
+  - **`algebraic_tower_eval_max_bits` (nuovo, fix reale 2026-07-08)**: `algebraic_tower_primitive.cpp`
+    aveva due letterali duplicati `8192U` (bit-cap di sicurezza su Q[y]/(cand_q) Euclidean
+    inverse/divmod, safety-belt contro crescita illimitata dei coefficienti quando `cand_q` risulta
+    riducibile). Esposto come `CASContext::algebraic_tower_eval_max_bits()` (default 8192, invariato).
+    Verificato: 13/13 `PrimitiveElementTest` verdi (incl. `ThreeLevelExtension_Sqrt2_Cbrt3_Sqrt5`,
+    `DetectNLevelTower_MultiBetaNested`).
+- **Chiusura**: con questo fix, 5/12 param della tabella storica sono coperti (già esposti o
+  neutralizzati come non-applicabili), 1 nuovo param reale esposto; i restanti sono legati ad
+  algoritmi non ancora costruiti (A6, SS-NTT, Puiseux/CAD deferred) — non ledgerable come "aperti"
+  finché quegli algoritmi non esistono. Task 26 resta PARTIAL per costruzione (chiude quando A6/CAD
+  vengono implementati, non prima).
 
 ### HC-SIMP-EXP-PRODUCT — simplify non fonde e^a·e^b → e^{a+b} — ✅ CHIUSA (2026-07-01)
 - **Scoperto**: 2026-06-23 durante T-008 (verifica simbolica soluzioni ODE).

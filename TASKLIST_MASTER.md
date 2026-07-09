@@ -151,9 +151,11 @@ Ordinati per severità/impatto decrescente. Ogni voce verificata aperta a codice
 - **Stato a codice**: ledger HC-F75-B1-IBP-DOUBLE-APPLY CHIUSO (fix 2026-06-10 simplify(vdu) pre-ricorsione + T-016 ILATE-class-da-base per `Pow`). Round-trip `IntegrateByPartsTest.{XLogX,XLogXSquared,LogXCubed}` 3/3 verdi 2026-06-26. Voce era stale nel tasklist.
 - **Ledger**: HC-F75-B1-IBP-DOUBLE-APPLY (chiuso) · **Refs**: T-016
 
-### A18 · GCD multivariato budget magico `*16U` → bound Mignotte — PARZIALE 2026-06-26 — `[E1·C2·S2·R2]`
-- **Stato a codice**: ✅ galois `*8U+16U` rimosso → bound derivato `prime_budget + Σ bit_length(lc,disc_num,disc_den)` (galois_deg5.cpp:187, HPP-003B). 🟡 Residuo: pad `+16U` additivo in `divides_sparse_z` (brown_helpers/lc_scaling/fp_helpers) — diagnosi: il bound moltiplicativo sottostante è euristico (non provato), il budget→`return false` è un falso-negativo Cat-4 latente pre-esistente. Fix corretto specificato in HPP-003C (rely on well-ordering termination, cap provato `∏(deg_i+1)`, ritorna `Unimplemented` non `false`). R2/R3 hot-path, deferito con ledger.
-- **Ledger**: HPP-003B (chiuso), HPP-003C (documentato) · **Refs**: T-020
+### A18 · GCD multivariato budget magico `*16U` → bound Mignotte — 🔨 QUASI-FATTO 2026-07-08 (bound provato chiuso; propagazione Unimplemented residua) — `[E1·C2·S2·R2]`
+- **Stato a codice**: ✅ galois `*8U+16U` rimosso → bound derivato `prime_budget + Σ bit_length(lc,disc_num,disc_den)` (galois_deg5.cpp:187, HPP-003B).
+- **✅ FATTO 2026-07-08**: pad `+16U` euristico rimosso dai 3 siti `divides_sparse_z`/`exact_divide_sparse_z`/`exact_div_fp` (brown_helpers/lc_scaling/fp_helpers) → nuovo `fp_helpers::proven_division_step_bound(dividend, n_vars)` = bound **provato** `∏_i(deg_i(dividend)+1)` (grado del quoziente in ogni variabile ≤ grado del dividendo, per divisione esatta). Elimina il falso-negativo Cat-4 su divisori legittimi a molti termini. Verificato: 129/129 test GCD/Zippel/Wang/Brown mirati verdi.
+- **🔧 RESIDUO**: i 3 siti ritornano ancora `false`/`nullopt` (non `Unimplemented`) su sforamento bound — non chiuso perché tutti i call-site li usano come gate di retry in loop CRT/modulari dove `false` è esito atteso per candidato sbagliato; threading `Result<T>` attraverso quella catena è refactor R2/R3 a parte. Col bound provato, sforarlo è ormai evidenza di invariante rotto (non falso "non-divisore"), quindi il rischio pratico è rimosso; l'upgrade resta solo osservabilità.
+- **Ledger**: HPP-003B (chiuso), HPP-003C (🟡 parziale, bound-fix chiuso) · **Refs**: T-020
 
 ### A19 · AstArena reset con root migration — ✅ CHIUSO (verificato a codice 2026-07-08, era stale) — `[E2·C3·S2·R3]`
 - **Stato a codice**: già implementato e testato, a un layer diverso da quello che il ledger descriveva. `CASContext::collect_garbage(external_roots)` (`src/symbolic/context_core.cpp`) crea una `AstArena new_arena`, clona ogni radice viva (variabili, assumptions, trace, root esterni passati dal chiamante, le 3 cache simplify/diff/integrate) via `clone_into_arena` (`src/ast/ast_clone.cpp`, deep-copy visitor completo su **tutti** gli ExprKind incl. RootOf/Matrix/SeriesExp/Quantity/Integral/Derivative/Limit) e poi fa lo swap `arena_ = std::move(new_arena)`. Testato in `test_gc.cpp`: `CollectsGarbageAndPreservesRoots` (radici interne+esterne preservate, interning nella nuova arena funzionante) e `MemoryPressureStressTest` (10k simplify + GC ogni 100 iter, arena resta <100 nodi).
@@ -276,7 +278,8 @@ Confermato a codice 2026-06-26. Elencato per evitare ri-lavoro (i vecchi tracker
 
 **Numerica**: fsolve tolerance ctx-param (`fsolve_tolerance_bits`, T-019), solve_inequality via Sturm, RootOf isolation bounds, Bessel identities *(ade20ff)*, statistics package (`src/statistics/`).
 
-**Infra**: **Phase-7 anti-monolith DONE** — tutti i 23 file ex >500 LOC ora <500 *(commit 7aa5f2e + T-046..050, T-029..051)*; flaky cos(7π/16) fixed via co-function *(d03ff6d, T-004)*; rapidcheck property tests; golden aggregate **94.5%** (F7.5); **A2 hard-timeout RDE solver interrompibile** *(commit 388f6f5)*; **untracked top-level `_deps/` cruft + gitlink rotto rimossi, `_deps/` gitignored** — il dep tree reale è `build/_deps` da FetchContent *(2026-06-28)*; `ledger_index.py` 3-tier classifier + `doctor` *(03928f7)*.
+**Infra**: **Phase-7 & Phase-8/Task-25 anti-monolith DONE (HC-F8-PENDING-25)** — tutti i 28 file ex >500 LOC ora <500 *(commit 7aa5f2e + T-046..050, T-029..051, A29 split)*; flaky cos(7π/16) fixed via co-function *(d03ff6d, T-004)*; rapidcheck property tests; golden aggregate **94.5%** (F7.5); **A2 hard-timeout RDE solver interrompibile** *(commit 388f6f5)*; **untracked top-level `_deps/` cruft + gitlink rotto rimossi, `_deps/` gitignored** — il dep tree reale è `build/_deps` da FetchContent *(2026-06-28)*; `ledger_index.py` 3-tier classifier + `doctor` *(03928f7)*.
+
 
 ---
 
