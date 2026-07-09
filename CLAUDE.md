@@ -78,8 +78,8 @@ Maxima 5.49.0 (`/opt/homebrew/Cellar/maxima/5.49.0/`) è l'oracolo della golden 
 ## REGOLA TIMEOUT TEST (CRITICA — anti-hang)
 
 **VIETATO** lanciare i test senza timeout esplicito: un loop introdotto può bloccare `cas_foundation_tests` per ore senza output.
-- **Modo preferito**: `bash scripts/test_quick.sh` (cap 600s, esclude slow noti) per sviluppo; `--slow` (cap 1800s) come gate pre-commit. Non modificare la lista esclusioni senza indagare la regressione.
-- Invocazione diretta sempre con `--gtest_filter=` mirato + timeout shell (≤120s mirato, ≤600s quick, ≤1800s slow).
+- **Modo preferito**: `bash scripts/test_quick.sh` (cap 1200s — misura reale ~803s @2565 test ASan/M1 Pro 2026-07-09 — esclude slow noti) per sviluppo; `--slow` (cap 1800s) come gate pre-commit. Non modificare la lista esclusioni senza indagare la regressione.
+- Invocazione diretta sempre con `--gtest_filter=` mirato + timeout shell (≤120s mirato, ≤1200s quick, ≤1800s slow).
 - **Mai** `run_in_background` per la suite intera in sviluppo (hang silenzioso). Foreground + timeout.
 - Test bloccato → STOP immediato (kill), restringi filtro, instrumenta con `std::cerr`, isola la causa. **NON** ripetere la stessa invocazione alla cieca.
 - CMakeLists: `set_tests_properties(... PROPERTIES TIMEOUT 60)` per ogni gtest registrato.

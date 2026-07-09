@@ -18,7 +18,7 @@
 # regressioni. Ora il verde del quick è onesto e --slow è di nuovo eseguibile.
 #
 # Uso:
-#   bash scripts/test_quick.sh                 # quick, cap 600s
+#   bash scripts/test_quick.sh                 # quick, cap 1200s
 #   bash scripts/test_quick.sh --slow          # + SLOW_OK, cap 1800s (gate pre-push)
 #   bash scripts/test_quick.sh --filter X      # filtro positivo aggiuntivo
 #   bash scripts/test_quick.sh --quarantine    # esegue SOLO i quarantenati, uno per
@@ -46,6 +46,8 @@ SLOW_OK=(
     FactorizationTowerNTest.SplitsX2Minus5_Over_Q_Sqrt2_Sqrt3_Sqrt5       # >240s
     PrimitiveElementTest.RedundantMixedTower_Sqrt2_Sqrt3_Sqrt5_Sqrt6      # >60s (oggi DISABLED_)
     PrimitiveElementTest.DetectTowerNLevel_SqrtTwoSqrtThreeSqrtFive       # 31s
+    PrimitiveElementTest.DetectNLevelTower_MultiBetaNested                # ~30s (macOS ASan)
+    GaloisDeg5Test.C5_RealCyclotomic11                                    # ~360s (macOS ASan)
 )
 
 # Quarantena (noti-rossi) — caricata dal file governato.
@@ -67,7 +69,11 @@ join_colon() { local IFS=':'; echo "$*"; }
 # Due dimensioni ORTOGONALI (tenerle separate evita che --slow e --print-filter
 # si sovrascrivano): SUITE = cosa escludere; ACTION = cosa fare.
 POSITIVE_FILTER=''
-CAP=600
+# Misura reale suite quick: ~803s (2565 test, macOS arm64 M1 Pro, ASan,
+# 2026-07-09). Cap = misura + ~50% margine anti-flake da carico; se la suite
+# sfora QUESTO cap, è una regressione di complessità da indagare, non un
+# numero da alzare alla cieca.
+CAP=1200
 SUITE='quick'          # quick | slow
 ACTION='run'           # run | print | quarantine
 QCAP=60                # per-test cap in --quarantine
