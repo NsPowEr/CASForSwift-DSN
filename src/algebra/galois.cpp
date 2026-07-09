@@ -251,6 +251,48 @@ Result<std::string> galois_group(ExprPtr poly, const Symbol& var,
         }
         return ok(joined);
     }
+    if (total_deg == 6U) {
+        // A6 — irreducible sextic goes through the exact deg-6 pipeline
+        // (galois_deg6.cpp); reducible sextics recurse into factors exactly
+        // like the deg-5 path above.
+        std::size_t non_constant_factors = 0U;
+        std::size_t max_factor_deg = 0U;
+        for (const auto& f : factors) {
+            auto pp = parse_polynomial(f.factor, var, ctx);
+            if (pp.is_error()) continue;
+            std::size_t d = poly_degree(pp.value());
+            if (d >= 1U) {
+                non_constant_factors += 1U;
+                if (d > max_factor_deg) max_factor_deg = d;
+            }
+        }
+        if (non_constant_factors == 1U && max_factor_deg == 6U) {
+            return galois_group_sextic_irreducible(poly, var, ctx);
+        }
+        if (linear_count >= 6U) return ok(std::string("trivial"));
+        std::vector<std::string> sub_labels;
+        for (const auto& f : factors) {
+            auto pp = parse_polynomial(f.factor, var, ctx);
+            if (pp.is_error()) continue;
+            std::size_t d = poly_degree(pp.value());
+            if (d <= 1U) continue;
+            for (unsigned int mi = 0U; mi < f.multiplicity; ++mi) {
+                auto sub = galois_group(f.factor, var, ctx);
+                if (sub.is_error()) return ok(std::string("reducible"));
+                if (sub.value() != std::string("trivial")) {
+                    sub_labels.push_back(sub.value());
+                }
+            }
+        }
+        if (sub_labels.empty()) return ok(std::string("trivial"));
+        if (sub_labels.size() == 1U) return ok(sub_labels[0]);
+        std::string joined;
+        for (std::size_t i = 0U; i < sub_labels.size(); ++i) {
+            if (i > 0U) joined += " x ";
+            joined += sub_labels[i];
+        }
+        return ok(joined);
+    }
     return ok(std::string("unknown"));
 }
 

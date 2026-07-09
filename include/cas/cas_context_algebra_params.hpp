@@ -111,6 +111,20 @@ struct CASContextAlgebraParams {
         kronecker_max_degree_ = degree;
     }
 
+    // ── Galois transitive-lattice enumeration budget (A6) ───────────────────
+    // Anti-runaway belt for the exhaustive transitive-subgroup enumeration
+    // (termination is proven — the subgroup lattice is finite — so this only
+    // guards against implementation bugs). Default derived from the worst
+    // case at the dense-lattice degree cap n=7: #subgroup-classes(S_7)≈96,
+    // double-coset marking ≤ n!·|H|²_max ≈ 5040·2520² ⇒ ~3.1e12 rank-ops
+    // total; 2^42 ≈ 4.4e12 covers it with margin.
+    [[nodiscard]] std::uint64_t galois_lattice_max_ops() const noexcept {
+        return galois_lattice_max_ops_;
+    }
+    void set_galois_lattice_max_ops(std::uint64_t n) noexcept {
+        galois_lattice_max_ops_ = n;
+    }
+
     // ── Algebraic tower ring-arithmetic bit-cap (safety belt, HC-F8-PENDING-26) ──
     // Guards Q[y]/(cand_q) Euclidean inverse/divmod against unbounded coefficient
     // growth when cand_q turns out reducible (not a field): returns nullopt past
@@ -358,6 +372,7 @@ protected:
     std::size_t   kronecker_max_degree_{8U};
     double        zippel_error_probability_{1e-6};
     std::size_t   algebraic_tower_eval_max_bits_{8192U};
+    std::uint64_t galois_lattice_max_ops_{1ULL << 42U};
     double        zippel_density_threshold_{5.0};
     std::size_t   f4_max_macaulay_rows_{512U};
     std::size_t   f4_max_macaulay_monomials_{512U};

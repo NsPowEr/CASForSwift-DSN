@@ -43,6 +43,15 @@ namespace cas::algebra {
 [[nodiscard]] Result<std::string> galois_group_quintic_irreducible(
     ExprPtr poly, const Symbol& var, symbolic::CASContext& ctx);
 
+// A6 — identify Galois group of an irreducible sextic f ∈ Q[x] via the
+// fully exact pipeline (discriminant parity + Dedekind sieve + 2-set
+// resolvent) matched against the exhaustively *generated* transitive
+// lattice of S₆ (no transcribed group tables). Ambiguity → structured
+// Unimplemented listing the surviving candidates (never a guess).
+// Implemented in galois_deg6.cpp.
+[[nodiscard]] Result<std::string> galois_group_sextic_irreducible(
+    ExprPtr poly, const Symbol& var, symbolic::CASContext& ctx);
+
 // Returns true if rational is a perfect square in Q (i.e. p/q with
 // p, q both perfect squares as BigInt and same sign). Shared with deg-4 path.
 [[nodiscard]] bool is_rational_square_q(const Rational& r);

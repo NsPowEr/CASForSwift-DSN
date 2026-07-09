@@ -4,7 +4,6 @@
 #include <vector>
 #include <string>
 #include <algorithm>
-#include <iostream>
 
 namespace cas::algebra {
 
@@ -116,13 +115,28 @@ Result<std::vector<IntPoly>> factorize_univariate_hensel_or_kronecker(
     const std::size_t max_attempts = ctx.max_hensel_lift_attempts();
     std::vector<BigInt> primes = get_prime_candidates(f, max_attempts);
 
+    // ── Prime selection (Zassenhaus best-prime heuristic) ───────────────────
+    // The cost of the lift+recombine step grows sharply with the number r of
+    // modular factors: an UNLUCKY prime that splits f into many small factors
+    // (e.g. deg-20 → 18 factors mod 73) makes the recombination search
+    // explode, while a good prime (deg-20 → 8 factors mod 79) finishes in
+    // milliseconds. So instead of committing to the first prime, we factor
+    // mod several LUCKY primes (f squarefree mod p ⇒ the mod-p factorisation
+    // lifts faithfully) — a cheap operation — and keep the one that splits f
+    // the LEAST. The heavy Hensel lift + recombination then runs only once,
+    // on that best prime. Unlucky primes (p | disc(f)) are skipped: their
+    // repeated-factor image cannot be lifted soundly.
+    BigInt best_prime(0);
+    std::vector<IntPoly> best_mod_factors;
+    std::size_t best_count = 0U;
     std::size_t attempts = 0;
     std::size_t bad_primes = 0;
-
     for (const auto& p : primes) {
         attempts++;
-        
-        // 1. Factor mod p
+        if (!integer_poly_squarefree_mod_p(f, static_cast<long long>(p.to_u64()))) {
+            bad_primes++;
+            continue;  // unlucky: p | disc(f), image does not lift faithfully.
+        }
         const std::size_t deg_p_product = f.degree() * static_cast<std::size_t>(p.to_u64());
         auto mod_factors_res = (deg_p_product <= ctx.max_berlekamp_matrix_size())
             ? berlekamp_factor_mod_p(f, p, ctx.max_berlekamp_matrix_size())
@@ -130,18 +144,31 @@ Result<std::vector<IntPoly>> factorize_univariate_hensel_or_kronecker(
         if (mod_factors_res.is_error()) {
             mod_factors_res = factor_polynomial_mod_p(f, p, &ctx);
         }
-
         if (mod_factors_res.is_error()) {
             bad_primes++;
             continue;
         }
-
-        const auto& mod_factors = mod_factors_res.value();
-        
-        // If irreducible modulo p, it's irreducible over Z
-        if (mod_factors.size() == 1U) {
+        const std::size_t count = mod_factors_res.value().size();
+        // Irreducible mod a lucky prime ⇒ irreducible over Z (best possible).
+        if (count == 1U) {
             return ok(std::vector<IntPoly>{f});
         }
+        if (best_prime.is_zero() || count < best_count) {
+            best_prime = p;
+            best_count = count;
+            best_mod_factors = std::move(mod_factors_res.value());
+            // r = 2 is the provable optimum: a reducible f has at least two
+            // modular factors (r = 1 returned "irreducible" above), and a
+            // 2-factor pool means the recombination is a single trivial split.
+            // No prime can do better, so stop scanning.
+            if (best_count == 2U) break;
+        }
+    }
+
+    // If a good lucky prime was found, run the single heavy lift+recombine.
+    if (!best_prime.is_zero()) {
+        const BigInt& p = best_prime;
+        const std::vector<IntPoly>& mod_factors = best_mod_factors;
 
         // 2. Determine target modulus p^k via Mignotte bound
         // B = 2^(n/2 + 1) * ||f||_1 * |lc(f)|
@@ -158,66 +185,59 @@ Result<std::vector<IntPoly>> factorize_univariate_hensel_or_kronecker(
 
         // 3. Hensel lift
         auto lifted_res = hensel_lift_multi(f, mod_factors, p, k);
-        if (lifted_res.is_error()) {
-            bad_primes++;
-            continue;
-        }
+        if (!lifted_res.is_error()) {
+            const auto& lifted = lifted_res.value();
 
-        const auto& lifted = lifted_res.value();
-
-        // 4. Try recombination.  van Hoeij (fast, but in this implementation not
-        // provably complete — it can miss a real factor) is always backed by the
-        // EXHAUSTIVE Hensel subset search, which IS complete up to degree n/2.
-        // So after this block, an empty found_factor means the exhaustive search
-        // found nothing.
-        std::optional<IntPoly> found_factor;
-        if (lifted.size() >= ctx.van_hoeij_threshold()) {
-            found_factor = van_hoeij_knapsack_factor(
-                f, lifted, pk, ctx.lll_delta(), ctx.van_hoeij_lll_threshold(), &ctx);
-            if (!found_factor.has_value()) {
+            // 4. Recombination.  van Hoeij (fast, but not provably complete in
+            // this implementation — it can miss a real factor) is always backed
+            // by the EXHAUSTIVE Hensel subset search, which IS complete up to
+            // degree n/2.  After this block an empty found_factor means the
+            // exhaustive search genuinely found nothing.
+            std::optional<IntPoly> found_factor;
+            if (lifted.size() >= ctx.van_hoeij_threshold()) {
+                found_factor = van_hoeij_knapsack_factor(
+                    f, lifted, pk, ctx.lll_delta(), ctx.van_hoeij_lll_threshold(), &ctx);
+                if (!found_factor.has_value()) {
+                    found_factor = find_factor_by_hensel_recombination(
+                        f, lifted, pk, f.degree() / 2U);
+                }
+            } else {
                 found_factor = find_factor_by_hensel_recombination(
-                    f, mod_factors, p, k, f.degree() / 2U);
+                    f, lifted, pk, f.degree() / 2U);
             }
-        } else {
-            found_factor = find_factor_by_hensel_recombination(
-                f, mod_factors, p, k, f.degree() / 2U);
-        }
 
-        if (found_factor.has_value()) {
-            // Validate and divide
-            auto q_res = exact_divide_integer_poly(f, found_factor.value(), ctx);
-            if (q_res.is_ok()) {
-                // Recursively factor both found_factor and the quotient
-                auto f1_res = factorize_univariate_hensel_or_kronecker(found_factor.value(), ctx);
-                auto f2_res = factorize_univariate_hensel_or_kronecker(q_res.value(), ctx);
-                if (f1_res.is_ok() && f2_res.is_ok()) {
-                    std::vector<IntPoly> result = f1_res.value();
-                    result.insert(result.end(), f2_res.value().begin(), f2_res.value().end());
-                    return ok(result);
+            if (found_factor.has_value()) {
+                auto q_res = exact_divide_integer_poly(f, found_factor.value(), ctx);
+                if (q_res.is_ok()) {
+                    // Recursively factor both the found factor and the quotient.
+                    auto f1_res = factorize_univariate_hensel_or_kronecker(found_factor.value(), ctx);
+                    auto f2_res = factorize_univariate_hensel_or_kronecker(q_res.value(), ctx);
+                    if (f1_res.is_ok() && f2_res.is_ok()) {
+                        std::vector<IntPoly> result = f1_res.value();
+                        result.insert(result.end(), f2_res.value().begin(), f2_res.value().end());
+                        return ok(result);
+                    }
                 }
             }
-        }
 
-        // No factor found.  On a LUCKY prime (f squarefree mod p) the exhaustive
-        // Hensel search above is a complete factor search, so "no factor" is a
-        // PROOF that f is irreducible over Z — return it directly instead of
-        // treating the good prime as bad and falling through to the exponential
-        // Kronecker fallback (the SD3 Swinnerton-Dyer hang, HC-F8-SD3-VANHOEIJ-SLOW).
-        // We trust ONLY the exhaustive Hensel verdict on a lucky prime, never van
-        // Hoeij's (which can miss factors), and require squarefree-mod-p so the
-        // mod-p factorisation lifts faithfully.
-        if (integer_poly_squarefree_mod_p(f, static_cast<long long>(p.to_u64()))) {
+            // No factor found.  best_prime is LUCKY (f squarefree mod p) by
+            // construction, so the exhaustive Hensel search is a COMPLETE factor
+            // search and "no factor" is a proof that f is irreducible over Z —
+            // return it directly rather than falling through to the exponential
+            // Kronecker path (the SD3 Swinnerton-Dyer hang, HC-F8-SD3-VANHOEIJ-
+            // SLOW).  We trust only the exhaustive Hensel verdict, never van
+            // Hoeij's (which can miss factors).
             return ok(std::vector<IntPoly>{f});
         }
-
-        // Unlucky prime (p | disc): the verdict is unreliable, try another prime.
-        bad_primes++;
+        // Hensel lift itself failed on the best prime — fall through to the
+        // Kronecker fallback below.
     }
 
-    // If we failed after all attempts, compute bad prime rate
+    // No lucky prime found (every candidate divided disc(f) — implausible for a
+    // squarefree f) or the lift on the best prime failed.  Fall back to the
+    // exhaustive Kronecker factoriser within its degree budget.
     double bad_prime_rate = (attempts > 0) ? (static_cast<double>(bad_primes) / attempts) : 0.0;
-
-    if (bad_prime_rate > 0.5 || attempts == 0) {
+    if (bad_prime_rate > 0.5 || attempts == 0 || best_prime.is_zero()) {
         if (f.degree() <= ctx.kronecker_max_degree()) {
             return factorize_kronecker(f, ctx);
         } else {
