@@ -106,7 +106,7 @@ if [[ "$ACTION" == "quarantine" ]]; then
     [[ ! -x "$BIN" ]] && { echo "[test_quick] binario non buildato: $BIN" >&2; exit 2; }
     echo "[test_quick] --quarantine: ${#QUARANTINE[@]} test, per-test cap ${QCAP}s"
     pass=0; fail=0; tmo=0
-    for name in "${QUARANTINE[@]}"; do
+    for name in ${QUARANTINE[@]+"${QUARANTINE[@]}"}; do
         if timeout "$QCAP" "$BIN" --gtest_filter="$name" >/dev/null 2>&1; then
             echo "  PASS    $name   (potenziale candidato a de-quarantena!)"
             pass=$((pass+1))
@@ -123,9 +123,10 @@ fi
 
 # ── Costruzione filtro quick / slow ──────────────────────────────────────────
 if [[ "$SUITE" == "slow" ]]; then
-    NEG=( "${STRUCTURAL[@]}" "${QUARANTINE[@]}" )           # SLOW_OK INCLUSI
+    # ${arr[@]+...}: bash 3.2 + set -u tratta l'array vuoto come unbound
+    NEG=( "${STRUCTURAL[@]}" ${QUARANTINE[@]+"${QUARANTINE[@]}"} )   # SLOW_OK INCLUSI
 else
-    NEG=( "${STRUCTURAL[@]}" "${SLOW_OK[@]}" "${QUARANTINE[@]}" )
+    NEG=( "${STRUCTURAL[@]}" "${SLOW_OK[@]}" ${QUARANTINE[@]+"${QUARANTINE[@]}"} )
 fi
 EXCLUDE="-$(join_colon "${NEG[@]}")"
 

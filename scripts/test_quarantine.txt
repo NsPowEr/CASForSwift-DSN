@@ -21,7 +21,7 @@
 # Stato reale dei quarantenati (hang → fail veloce, per-test timeout):
 #   bash scripts/test_quick.sh --quarantine
 #
-CEILING: 1
+CEILING: 0
 #
 # Risolti 2026-06-29 (A3: integer fraction-free LLL + opt-in Kronecker hard-deadline
 # nel tower) — rimossi dalla quarantena, terminano in <6s:
@@ -35,4 +35,8 @@ CEILING: 1
 #     minimizza i fattori modulari elimina il collo di bottiglia Hensel-lift sulla
 #     norma deg-16. SplitsProductOfQuadratics 9.9s, SplitsX4Minus10X2Plus1 12.5s (erano >200s).
 #   - PrimitiveElementTest.SqrtTwoSqrtThreeSqrtFive 1.25s, sbloccato da A9 (chain flattening).
-F2GateBenchmark.FactorOneHundredRandomZxUnderBudget	HC-F8-F2GATE-BENCHMARK-FAIL	fail permanente ~155s (budget factorizzazione Z[x])
+#   - F2GateBenchmark.FactorOneHundredRandomZxUnderBudget (145s -> 4.4s): il collo era
+#     try_kronecker_quadratic_factor, che faceva la divisione di prova su PolyExpr
+#     (IntegerLit d'arena per ogni coefficiente, ~8ms per candidato). Ora pseudo-resto BigInt.
+#
+# Quarantena VUOTA: nessun test noto-rosso.

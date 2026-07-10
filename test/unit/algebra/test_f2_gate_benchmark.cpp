@@ -111,3 +111,4 @@ TEST(F2GateBenchmark, FactorOneHundredRandomZxUnderBudget) {
 }  // namespace
 }  // namespace algebra
 }  // namespace cas
+

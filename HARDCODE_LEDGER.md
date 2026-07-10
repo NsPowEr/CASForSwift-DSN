@@ -366,14 +366,21 @@
   (osservato ~155s su clean baseline).  Pre-existing FAIL documentato in
   `PLAN_TASKS_REMAINING.md:347` come "verified baseline... ignorare in
   regression checks fino a fix dedicato".
-- **Fix corretto**: profilare collo di bottiglia (probabile van_hoeij su
-  random inputs di grado medio, oppure squarefree pre-pass) e portare il
-  totale sotto soglia.  Potenziale candidato: applicare Mignotte bound +
-  Hensel quadratic lifting precoce per ridurre LLL invocations.
-- **Workaround applicato 2026-06-14**: aggiunto a `scripts/test_quick.sh`
-  EXCLUDE list. Test resta abilitato via gtest_filter esplicito o tramite
-  invocazione dedicata di benchmark.
-- **STATO**: APERTO (perf debt, baseline pre-esistente, non bloccante).
+- **✅ RISOLTO 2026-07-10** — misurato, non ipotizzato. Le ipotesi in questa voce
+  (van Hoeij / squarefree pre-pass / LLL) erano tutte sbagliate: i polinomi del
+  benchmark hanno grado ≤ 6 e **non raggiungono mai** Hensel/van Hoeij (la soglia in
+  `append_integer_factor_component` è `size() > 7`). Timing per fase:
+  `parse=0.38s sqfree=0.70s append=142.31s (roots=0.79s kron=141.51s)`.
+  Il collo era `try_kronecker_quadratic_factor`: **17590** candidati (poche centinaia
+  per chiamata, quindi non un problema di conteggio) a **~8 ms ciascuno**, perché il
+  test di divisibilità convertiva `f` e `g` in `PolyExpr` internando un `IntegerLit`
+  d'arena per **ogni coefficiente a ogni iterazione**, poi chiamava
+  `divide_poly_with_remainder` (divisione simbolica su `ExprPtr`).
+  **Fix**: `pseudo_remainder_integer_poly(f, g) == 0` — stesso predicato (resto nullo
+  ⟺ `g | f` in `Q[x]`), aritmetica BigInt pura, zero allocazioni. Il parametro `ctx`,
+  ora inutilizzato, è stato rimosso dalla firma.
+  **Esito**: 145s → **4.4s** (budget 30s). Test fuori quarantena; CEILING 1 → 0.
+- **STATO**: ✅ RISOLTO.
 
 ### HC-F8-FACTORIZATIONTOWER-PERF — 2-level Q(√2,√3) factorization regression
 - **File**: `test/unit/algebra/test_factorization_tower.cpp` (members:
