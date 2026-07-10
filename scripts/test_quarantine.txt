@@ -21,7 +21,7 @@
 # Stato reale dei quarantenati (hang → fail veloce, per-test timeout):
 #   bash scripts/test_quick.sh --quarantine
 #
-CEILING: 4
+CEILING: 1
 #
 # Risolti 2026-06-29 (A3: integer fraction-free LLL + opt-in Kronecker hard-deadline
 # nel tower) — rimossi dalla quarantena, terminano in <6s:
@@ -29,7 +29,10 @@ CEILING: 4
 #   - FactorizationTowerTest.PreservesLeadingCoefficientAsContent (5.8s)
 #   - FactorizationTowerNTest.IrreducibleX2Minus7_Over_Q_Sqrt2_Sqrt3 (3.5s, contratto allineato ad AntiHardcode)
 #
+#
+# Risolti 2026-07-10:
+#   - A25 chiuso dal best-prime Zassenhaus (commit 88d0b0e): la scelta del primo che
+#     minimizza i fattori modulari elimina il collo di bottiglia Hensel-lift sulla
+#     norma deg-16. SplitsProductOfQuadratics 9.9s, SplitsX4Minus10X2Plus1 12.5s (erano >200s).
+#   - PrimitiveElementTest.SqrtTwoSqrtThreeSqrtFive 1.25s, sbloccato da A9 (chain flattening).
 F2GateBenchmark.FactorOneHundredRandomZxUnderBudget	HC-F8-F2GATE-BENCHMARK-FAIL	fail permanente ~155s (budget factorizzazione Z[x])
-FactorizationTowerTest.SplitsProductOfQuadraticsOverQSqrt2Sqrt3	HC-F8-FACTORIZATIONTOWER-PERF	deg-16 norm: collo di bottiglia ora Hensel-lift (LLL risolto)
-FactorizationTowerTest.SplitsX4Minus10X2Plus1OverQSqrt2Sqrt3	HC-F8-FACTORIZATIONTOWER-PERF	deg-16 norm: collo di bottiglia ora Hensel-lift (LLL risolto)
-PrimitiveElementTest.SqrtTwoSqrtThreeSqrtFive	HC-F8-FACTORIZATIONTOWER-PERF	regressione perf primitive element 3-level

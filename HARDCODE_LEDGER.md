@@ -426,13 +426,17 @@
   **Esito**: AntiHardcode 3.2s, PreservesLeadingCoeff 5.8s, IrreducibleX2Minus7 3.5s,
   SplitsX2Minus3 4.5s — rimossi dalla quarantena. 239 test factor/poly/LLL/Galois +
   327 consumer (integrate/simplify/solve) verdi.
-- **RESIDUO APERTO**: i due splitter deg-4 → norma **deg-16** (`SplitsProductOfQuadratics`,
-  `SplitsX4Minus10X2Plus1`) restano lenti (>200s): col LLL risolto il collo di
-  bottiglia si è spostato sull'**Hensel-lift** mod-p^k della norma deg-16 a coefficienti
-  enormi (profilo: `hensel_lift`/`quadratic_step`/`poly_*_mod`). Facet distinto, restano
-  in quarantena. `PrimitiveElementTest.SqrtTwoSqrtThreeSqrtFive` non toccato.
-  **Tracciato come task separato A25** (TASKLIST_MASTER, perf-only `[E3·C3·S2·R3]`, ⏸️ in pausa).
-- **STATO**: PARZIALMENTE RISOLTO (tower hang + LLL chiusi; Hensel-lift deg-16 = A25, in pausa).
+- **RESIDUO CHIUSO 2026-07-10** (A25): il collo di bottiglia non era l'aritmetica dell'Hensel-lift
+  ma la **scelta del primo**. `factorize_univariate_hensel_or_kronecker` usava il primo candidato
+  della lista; un primo sfortunato spezza la norma deg-16 in molti fattori modulari e fa esplodere
+  la ricombinazione (misurato altrove: deg-20 mod 73 → 18 fattori/217s, mod 79 → 8 fattori/4ms).
+  Fix (`factorization_wang_eez.cpp`, commit `88d0b0e`): si scandiscono i primi **lucky**
+  (`f` squarefree mod p) e si esegue l'unico lift+recombine pesante su quello con **meno fattori
+  modulari** — esattamente il fix "scelta primo mirata" già indicato, non un'euristica di forma.
+  **Esito**: `SplitsProductOfQuadraticsOverQSqrt2Sqrt3` >200s → **9.9s**,
+  `SplitsX4Minus10X2Plus1OverQSqrt2Sqrt3` >200s → **12.5s**; entrambi fuori quarantena.
+  `PrimitiveElementTest.SqrtTwoSqrtThreeSqrtFive` → 1.25s, sbloccato da A9 (chain flattening).
+- **STATO**: ✅ RISOLTO (tower hang, LLL, e Hensel-lift deg-16 tutti chiusi).
 
 ### HC-F8-FACTORIZATIONTOWER-AntiHardcode-X2Minus2-Sqrt3Sqrt5 — Hang >500s
 - **File**: `test/unit/algebra/test_factorization_tower.cpp`
