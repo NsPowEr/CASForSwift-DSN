@@ -382,6 +382,121 @@ TEST_F(PrimitiveElementTest, DetectTowerNLevel_NestedRootOf_F34Debt01) {
     EXPECT_EQ(res.alphas_in_theta.size(), 2U);
 }
 
+// ── PE-3 (HC-F8-PENDING-07): RootOf with a free-symbol coefficient ───────────
+//
+// RootOf(x^2 - a, x, 0) with `a` a plain Symbol (not another algebraic
+// generator) is an algebraic FUNCTION of the parameter a, not an algebraic
+// number over Q — AlgebraicNumber::CoeffVec is Rational-only, so it cannot be
+// folded into a Q-primitive-element θ. It must be excluded from the collapse
+// and preserved as-is, while algebraically independent RootOfs elsewhere in
+// the same expression still collapse normally (this is the "rappresentazione
+// parametrica su Q(a)" fix recorded in HARDCODE_LEDGER.md).
+
+// sqrt(2) + sqrt(3) + RootOf(y^2-a,y,0): 2 clean generators + 1 parametric.
+// Must collapse the clean pair (degree 4) and silently skip the parametric one.
+TEST_F(PrimitiveElementTest, DetectTowerNLevel_SymbolicCoeffRootOf_ExcludedFromCollapse) {
+    ExprPtr alpha1 = make_sqrt_rootof(2, 0);
+    ExprPtr alpha2 = make_sqrt_rootof(3, 1);
+    ASSERT_NE(alpha1, nullptr);
+    ASSERT_NE(alpha2, nullptr);
+
+    ExprPtr y2 = ctx->arena().make<Symbol>(Symbol{"y2"});
+    ExprPtr a = ctx->arena().make<Symbol>(Symbol{"a"});
+    ExprPtr y2_sq = ctx->arena().make<Binary>(BinaryOp::Pow, y2,
+        ctx->arena().make<IntegerLit>(BigInt(2)));
+    ExprPtr poly_parametric = ctx->arena().make<Binary>(BinaryOp::Sub, y2_sq, a);
+    ExprPtr parametric = ctx->arena().make<RootOf>(poly_parametric, Symbol{"y2"}, 0U);
+
+    ExprPtr sum_expr = ctx->arena().make<Sum>(
+        std::vector<ExprPtr>{alpha1, alpha2, parametric});
+
+    auto result = algebra::detect_tower_n_level(sum_expr, *ctx);
+    ASSERT_TRUE(result.is_ok()) << "PE-3: " << result.error().message;
+    ASSERT_TRUE(result.value().has_value())
+        << "PE-3: nullopt — the two clean generators should still collapse";
+
+    const auto& res = result.value().value();
+    EXPECT_EQ(res.min_poly_theta.size(), 5U)
+        << "PE-3: expected degree 4 (2·2) from the two non-parametric roots only";
+    EXPECT_EQ(res.alphas_in_theta.size(), 2U)
+        << "PE-3: the parametric RootOf must not be counted as a collapsed generator";
+}
+
+// sqrt(a) + sqrt(b): both generators are parametric → nothing to collapse.
+// Correct outcome is nullopt (both roots filtered, ≤1 remaining), never a
+// wrong theta and never a spurious Unimplemented — this is a clean decline.
+TEST_F(PrimitiveElementTest, DetectTowerNLevel_AllSymbolicRootOf_ReturnsNullopt) {
+    ExprPtr y0 = ctx->arena().make<Symbol>(Symbol{"y0"});
+    ExprPtr y1 = ctx->arena().make<Symbol>(Symbol{"y1"});
+    ExprPtr a = ctx->arena().make<Symbol>(Symbol{"a"});
+    ExprPtr b = ctx->arena().make<Symbol>(Symbol{"b"});
+    ExprPtr two = ctx->arena().make<IntegerLit>(BigInt(2));
+
+    ExprPtr poly_a = ctx->arena().make<Binary>(BinaryOp::Sub,
+        ctx->arena().make<Binary>(BinaryOp::Pow, y0, two), a);
+    ExprPtr poly_b = ctx->arena().make<Binary>(BinaryOp::Sub,
+        ctx->arena().make<Binary>(BinaryOp::Pow, y1, two), b);
+    ExprPtr root_a = ctx->arena().make<RootOf>(poly_a, Symbol{"y0"}, 0U);
+    ExprPtr root_b = ctx->arena().make<RootOf>(poly_b, Symbol{"y1"}, 0U);
+
+    ExprPtr sum_expr = ctx->arena().make<Binary>(BinaryOp::Add, root_a, root_b);
+
+    auto result = algebra::detect_tower_n_level(sum_expr, *ctx);
+    ASSERT_TRUE(result.is_ok()) << "PE-3: " << result.error().message;
+    EXPECT_FALSE(result.value().has_value())
+        << "PE-3: both generators are parametric — nothing should collapse";
+}
+
+// sqrt(2) + RootOf(y^2-a,y,0): only 1 clean generator survives filtering →
+// nullopt (nothing to collapse a single root against), same contract as the
+// pre-existing roots.size()<=1 early-out.
+TEST_F(PrimitiveElementTest, DetectTowerNLevel_OneCleanOneSymbolic_ReturnsNullopt) {
+    ExprPtr alpha1 = make_sqrt_rootof(2, 0);
+    ASSERT_NE(alpha1, nullptr);
+
+    ExprPtr y1 = ctx->arena().make<Symbol>(Symbol{"y1"});
+    ExprPtr a = ctx->arena().make<Symbol>(Symbol{"a"});
+    ExprPtr poly_parametric = ctx->arena().make<Binary>(BinaryOp::Sub,
+        ctx->arena().make<Binary>(BinaryOp::Pow, y1, ctx->arena().make<IntegerLit>(BigInt(2))), a);
+    ExprPtr parametric = ctx->arena().make<RootOf>(poly_parametric, Symbol{"y1"}, 0U);
+
+    ExprPtr sum_expr = ctx->arena().make<Binary>(BinaryOp::Add, alpha1, parametric);
+
+    auto result = algebra::detect_tower_n_level(sum_expr, *ctx);
+    ASSERT_TRUE(result.is_ok()) << "PE-3: " << result.error().message;
+    EXPECT_FALSE(result.value().has_value())
+        << "PE-3: only one clean generator survives — nothing to collapse";
+}
+
+// Regression: a RootOf nested inside another RootOf's polynomial (chain,
+// pre-existing F3.4-DEBT-01 machinery) must NOT be misclassified as
+// "symbolic" — the nested reference is a RootOf node, not a free Symbol leaf.
+TEST_F(PrimitiveElementTest, DetectTowerNLevel_NestedRootOf_NotMisdetectedAsSymbolic) {
+    ExprPtr beta = parse_ok("RootOf(z0^2-2, z0, 0)");
+    ASSERT_NE(beta, nullptr);
+    ctx->set_max_rootof_explicit_degree(1U);
+    auto beta_canon = ctx->simplify(beta);
+    ASSERT_TRUE(beta_canon.is_ok()) << beta_canon.error().message;
+
+    ExprPtr z1 = ctx->arena().make<Symbol>(Symbol{"z1"});
+    ExprPtr one = ctx->arena().make<IntegerLit>(BigInt(1));
+    ExprPtr two = ctx->arena().make<IntegerLit>(BigInt(2));
+    ExprPtr z1_sq = ctx->arena().make<Binary>(BinaryOp::Pow, z1, two);
+    ExprPtr beta_z1 = ctx->arena().make<Binary>(BinaryOp::Mul, beta_canon.value(), z1);
+    ExprPtr neg_beta_z1 = ctx->arena().make<Unary>(UnaryOp::Neg, beta_z1);
+    ExprPtr poly_alpha = ctx->arena().make<Sum>(
+        std::vector<ExprPtr>{z1_sq, neg_beta_z1, one});
+    ExprPtr alpha = ctx->arena().make<RootOf>(poly_alpha, Symbol{"z1"}, 0U);
+
+    ExprPtr sum_expr = ctx->arena().make<Binary>(BinaryOp::Add, alpha, beta_canon.value());
+
+    auto result = algebra::detect_tower_n_level(sum_expr, *ctx);
+    ASSERT_TRUE(result.is_ok()) << "PE-3 regression: " << result.error().message;
+    ASSERT_TRUE(result.value().has_value())
+        << "PE-3 regression: nested-RootOf chain must still collapse (F3.4-DEBT-01 unaffected)";
+    EXPECT_EQ(result.value().value().alphas_in_theta.size(), 2U);
+}
+
 // ── F3.5-DEBT-01 RESOLVED: redundant generators with degree compression ──────
 //
 // When a generator α_k is algebraically dependent on the existing field

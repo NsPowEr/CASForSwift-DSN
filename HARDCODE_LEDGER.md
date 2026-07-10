@@ -2081,22 +2081,34 @@ Vedi `PLAN_TASKS_REMAINING.md` per breakdown completo.
 - **Fix corretto**: vedi plan §Task 4 (SS-1..SS-5).
 - **Effort**: 2-3 settimane T3.
 
-### HC-F8-PENDING-07 — Primitive Element nested multi-β — PARZIALE (rescoped 2026-07-10)
+### HC-F8-PENDING-07 — Primitive Element nested multi-β — ✅ RISOLTA 2026-07-10 (PE-3 chiuso)
 - **Task ID**: 7 — *F3.D Primitive Element nested multi-β residuo*
-- **Stato**: residuo F3.4-DEBT-01, rescoped dopo A9 (verificato a codice 2026-07-10):
-  - **PE-1 (selezione fattore su R reducible)**: ✅ chiuso da A9 (2026-07-07) — meglio del piano:
-    certificato ESATTO di vanishing (`cand_vanishes_at_theta_expr`, simplify→0 letterale) invece
-    della selezione numerica BigFloat proposta dal plan; nessun fattore scelto senza certificato.
+- **Origine**: F3.4-DEBT-01, chiuso in 3 fasi via A9 (2026-07-07) + PE-3 (2026-07-10):
+  - **PE-1 (selezione fattore su R reducible)**: ✅ chiuso da A9 — certificato ESATTO di
+    vanishing (`cand_vanishes_at_theta_expr`, simplify→0 letterale) invece della selezione
+    numerica BigFloat proposta dal plan; nessun fattore scelto senza certificato.
   - **PE-2 (multi-β iterato Cohen §3.6.4)**: ✅ chiuso da A9 — `try_nested_lift_min_poly_multi`
     + risoluzione iterativa a punto fisso in `detect_tower_n_level`; catene sequenziali senza
-    risultante via `algebraic_tower_primitive_chain.cpp` (2026-07-10).
-  - **PE-3 (RootOf con simboli letterali)**: ⏳ UNICO residuo — min-poly con coefficiente
-    simbolico libero (es. `RootOf(x²−a)`) non risolvibile dal punto fisso →
-    `Unimplemented` strutturato (`algebraic_tower_primitive_nested.cpp:383`,
-    ticket F3.4-DEBT-01). Diagnostico esplicito, nessun silent-wrong.
-  - **PE-4**: chiude con PE-3.
-- **Fix corretto**: PE-3 = rappresentazione parametrica su Q(a) (RootOf preservato quando il
-  target è simbolico), plan §Task 7.
+    risultante via `algebraic_tower_primitive_chain.cpp`.
+  - **PE-3 (RootOf con simboli letterali) ✅ RISOLTO 2026-07-10**: un `RootOf(poly,var,i)` il
+    cui `poly` referenzia un Symbol libero diverso da `var` (es. `RootOf(x²−a,x,0)`, `a` non
+    collezionato) è una funzione algebrica del parametro `a`, non un numero algebrico su Q
+    (`AlgebraicNumber::CoeffVec` è `vector<Rational>` per costruzione) — non può essere fuso
+    in un θ primitivo su Q. Fix in `algebraic_tower_primitive_nested.cpp` (Collector +
+    `references_free_symbol`): tale RootOf è escluso dalla collapse e preservato com'è
+    ovunque appaia in `expr`, esattamente come qualunque altro simbolo; i RootOf algebricamente
+    indipendenti nella stessa espressione continuano a collassare normalmente. La ricorsione
+    del rilevatore NON entra nel polinomio di un RootOf annidato (quello è un generatore
+    algebrico opaco gestito da PE-2, non un parametro libero) — non confonde catene multi-β con
+    coefficienti simbolici. **Residuo onesto**: il caso indiretto/transitivo (un RootOf che
+    referenzia — non direttamente, ma tramite un altro RootOf annidato — un generatore già
+    escluso) non viene pre-filtrato esplicitamente; ricade nel path di fallback preesistente e
+    produce comunque `Unimplemented` strutturato (mai silent-wrong), non l'esclusione pulita.
+    Non osservato in pratica: il caso diretto (spec/ledger) è quello con impatto reale.
+  - **PE-4**: chiuso con PE-3.
+- **Test**: 4 nuovi in `test_primitive_element_f3.cpp` (mix simbolico+algebrico → collassa solo
+  i puliti; tutto simbolico → nullopt pulito; 1 pulito+1 simbolico → nullopt; regressione catena
+  annidata non-simbolica invariata). 89/89 suite Tower/Primitive/RootOf verdi, 0 regressioni.
 
 ### HC-F8-PENDING-09 — Stauduhar Galois deg ≥ 6 — APERTA
 - **Task ID**: 9

@@ -283,6 +283,44 @@ Result<std::optional<AlgebraicNumber::CoeffVec>> try_nested_lift_min_poly(
 
 }  // namespace primitive_internal
 
+namespace {
+
+// PE-3 (HC-F8-PENDING-07): does `e` reference any Symbol other than `bound`?
+// Does NOT recurse into a nested RootOf's own polynomial — a nested RootOf is
+// an opaque algebraic generator (handled by try_nested_lift_min_poly_multi),
+// not a free parameter, and its own free-symbol-ness is checked independently
+// when it is collected as its own entry.
+[[nodiscard]] bool references_free_symbol(ExprPtr e, const Symbol& bound) {
+    if (!e) return false;
+    if (const auto* sym = expr_cast<Symbol>(e)) return sym->name != bound.name;
+    if (expr_is<RootOf>(e)) return false;
+    bool found = false;
+    visit_expr(e, [&](const auto& node) {
+        using Node = std::decay_t<decltype(node)>;
+        if constexpr (std::is_same_v<Node, Unary>) {
+            found = references_free_symbol(node.operand, bound);
+        } else if constexpr (std::is_same_v<Node, Binary>) {
+            found = references_free_symbol(node.left, bound) ||
+                    references_free_symbol(node.right, bound);
+        } else if constexpr (std::is_same_v<Node, FuncCall>) {
+            for (ExprPtr arg : node.args) {
+                if (references_free_symbol(arg, bound)) { found = true; break; }
+            }
+        } else if constexpr (std::is_same_v<Node, Sum>) {
+            for (ExprPtr term : node.terms) {
+                if (references_free_symbol(term, bound)) { found = true; break; }
+            }
+        } else if constexpr (std::is_same_v<Node, Product>) {
+            for (ExprPtr factor : node.factors) {
+                if (references_free_symbol(factor, bound)) { found = true; break; }
+            }
+        }
+    });
+    return found;
+}
+
+}  // namespace
+
 Result<std::optional<PrimitiveElementResult>> detect_tower_n_level(
     ExprPtr expr,
     symbolic::CASContext& ctx) {
@@ -295,12 +333,24 @@ Result<std::optional<PrimitiveElementResult>> detect_tower_n_level(
         void collect(ExprPtr e) {
             if (!e) return;
             if (expr_is<RootOf>(e)) {
-                bool seen = false;
-                for (ExprPtr ex : out) {
-                    if (structural_equal(ex, e)) { seen = true; break; }
+                const auto& r = expr_ref<RootOf>(e);
+                // PE-3: a RootOf whose defining polynomial carries a free
+                // parameter (e.g. RootOf(x^2 - a, x, 0)) is an algebraic
+                // FUNCTION of that parameter, not an algebraic number over Q
+                // — it cannot be folded into a Q-primitive-element theta
+                // (CoeffVec is Rational-only by construction). It is excluded
+                // from the collapse and preserved as-is wherever it appears
+                // in `expr`, exactly like any other symbol; algebraically
+                // independent RootOfs elsewhere in the same expression are
+                // still collapsed normally.
+                if (!references_free_symbol(r.polynomial, r.variable)) {
+                    bool seen = false;
+                    for (ExprPtr ex : out) {
+                        if (structural_equal(ex, e)) { seen = true; break; }
+                    }
+                    if (!seen && out.size() < 16U) out.push_back(e);
                 }
-                if (!seen && out.size() < 16U) out.push_back(e);
-                collect(expr_ref<RootOf>(e).polynomial);
+                collect(r.polynomial);
                 return;
             }
             visit_expr(e, [&](const auto& node) {
