@@ -227,12 +227,7 @@ Result<ExprPtr> Simplifier::simplify_funcall_exp_log_sqrt(
                 ExprPtr correction = symbolic::branch_cut::make_log_quotient_correction(div->left, div->right, arena_);
                 return simplify_expr(arena_.make<Binary>(BinaryOp::Add, diff, correction));
             }
-            // Legacy / non-strict default: ln(z1) - ln(z2)
-            auto ln_a = simplify_expr(arena_.make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{div->left}));
-            if (ln_a.is_error()) return ln_a;
-            auto ln_b = simplify_expr(arena_.make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{div->right}));
-            if (ln_b.is_error()) return ln_b;
-            return simplify_expr(arena_.make<Binary>(BinaryOp::Sub, ln_a.value(), ln_b.value()));
+            // If not positive and not strict, do not expand ln(z1/z2) as it violates branch cuts on complex numbers.
         }
 
         // ln(sqrt(x)) = (1/2)*ln(x) — identità esatta

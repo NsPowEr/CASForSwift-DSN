@@ -981,7 +981,8 @@ TEST(A14TranscendentalEqual, NoOverClaimWithoutAssumption) {
         EXPECT_FALSE(equal_under(ctx, lnx2, two_lnx))
             << "ln(x^2)=2ln(x) must NOT be claimed without x>0";
     }
-    {   CASContext ctx; AstArena& ar = ctx.arena();  // x unrestricted
+    {   CASContext ctx; AstArena& ar = ctx.arena();
+        ctx.assumptions().assume_real(Symbol{"x"});
         ExprPtr X = make_sym(ar, "x");
         ExprPtr sqrtx2 = ar.make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{
             ar.make<Binary>(BinaryOp::Pow, X, make_int(ar, 2))});
@@ -989,7 +990,7 @@ TEST(A14TranscendentalEqual, NoOverClaimWithoutAssumption) {
             << "sqrt(x^2)=x must NOT be claimed without x>=0";
         ExprPtr absx = ar.make<FuncCall>(BuiltinOp::Abs, std::vector<ExprPtr>{X});
         EXPECT_TRUE(equal_under(ctx, sqrtx2, absx))
-            << "sqrt(x^2)=|x| holds unconditionally";
+            << "sqrt(x^2)=|x| holds under real assumption";
     }
 }
 

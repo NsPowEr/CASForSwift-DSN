@@ -167,30 +167,40 @@ Result<ExprPtr> transcendental_normal_form(ExprPtr expr, CASContext& ctx, int de
                 return recurse(inner->args[0]);
             // ln(a * b) [Binary] → ln(a) + ln(b)
             if (auto* bin = expr_cast<Binary>(arg); bin && bin->op == BinaryOp::Mul) {
-                auto la = recurse(ctx.arena().make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{bin->left}));
-                if (la.is_error()) return la;
-                auto lb = recurse(ctx.arena().make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{bin->right}));
-                if (lb.is_error()) return lb;
-                return ok(ctx.arena().make<Binary>(BinaryOp::Add, la.value(), lb.value()));
+                if (ctx.assumptions().is_positive(bin->left) && ctx.assumptions().is_positive(bin->right)) {
+                    auto la = recurse(ctx.arena().make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{bin->left}));
+                    if (la.is_error()) return la;
+                    auto lb = recurse(ctx.arena().make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{bin->right}));
+                    if (lb.is_error()) return lb;
+                    return ok(ctx.arena().make<Binary>(BinaryOp::Add, la.value(), lb.value()));
+                }
             }
             // ln(a * b * ...) [Product] → ln(a) + ln(b) + ...
             if (auto* prod = expr_cast<Product>(arg); prod && prod->factors.size() >= 2U) {
-                std::vector<ExprPtr> ln_terms;
-                ln_terms.reserve(prod->factors.size());
+                bool all_pos = true;
                 for (auto fac : prod->factors) {
-                    auto r = recurse(ctx.arena().make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{fac}));
-                    if (r.is_error()) return r;
-                    ln_terms.push_back(r.value());
+                    if (!ctx.assumptions().is_positive(fac)) { all_pos = false; break; }
                 }
-                return ok(ctx.arena().make<Sum>(std::move(ln_terms)));
+                if (all_pos) {
+                    std::vector<ExprPtr> ln_terms;
+                    ln_terms.reserve(prod->factors.size());
+                    for (auto fac : prod->factors) {
+                        auto r = recurse(ctx.arena().make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{fac}));
+                        if (r.is_error()) return r;
+                        ln_terms.push_back(r.value());
+                    }
+                    return ok(ctx.arena().make<Sum>(std::move(ln_terms)));
+                }
             }
             // ln(a / b) → ln(a) - ln(b)
             if (auto* bin = expr_cast<Binary>(arg); bin && bin->op == BinaryOp::Div) {
-                auto la = recurse(ctx.arena().make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{bin->left}));
-                if (la.is_error()) return la;
-                auto lb = recurse(ctx.arena().make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{bin->right}));
-                if (lb.is_error()) return lb;
-                return ok(ctx.arena().make<Binary>(BinaryOp::Sub, la.value(), lb.value()));
+                if (ctx.assumptions().is_positive(bin->left) && ctx.assumptions().is_positive(bin->right)) {
+                    auto la = recurse(ctx.arena().make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{bin->left}));
+                    if (la.is_error()) return la;
+                    auto lb = recurse(ctx.arena().make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{bin->right}));
+                    if (lb.is_error()) return lb;
+                    return ok(ctx.arena().make<Binary>(BinaryOp::Sub, la.value(), lb.value()));
+                }
             }
             // ln(a^n) → n * ln(a), n integer
             if (auto* bin = expr_cast<Binary>(arg); bin && bin->op == BinaryOp::Pow && expr_is<IntegerLit>(bin->right)) {

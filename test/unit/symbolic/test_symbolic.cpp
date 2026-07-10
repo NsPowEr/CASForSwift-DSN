@@ -1584,12 +1584,26 @@ TEST(SymbolicSimplifyTest, RewritesNegativePowerAsDivision) {
     EXPECT_TRUE(structural_equal(simplified.value(), expected.value()));
 }
 
-TEST(SymbolicSimplifyTest, RewritesSqrtSquareToAbsWithoutAssumptions) {
+TEST(SymbolicSimplifyTest, DoesNotRewriteSqrtSquareToAbsWithoutRealAssumption) {
     AstArena parse_arena;
-    AstArena simplify_arena;
     AstArena expected_arena;
+    CASContext context;
 
-    auto simplified = simplify_input("sqrt(x^2)", parse_arena, simplify_arena);
+    auto simplified = simplify_input_with_context("sqrt(x^2)", parse_arena, context);
+    auto expected = parse_expr("sqrt(x^2)", expected_arena);
+    ASSERT_TRUE(simplified.is_ok()) << simplified.error().message;
+    ASSERT_TRUE(expected.is_ok()) << expected.error().message;
+
+    EXPECT_TRUE(structural_equal(simplified.value(), expected.value()));
+}
+
+TEST(SymbolicSimplifyTest, RewritesSqrtSquareToAbsWithRealAssumption) {
+    AstArena parse_arena;
+    AstArena expected_arena;
+    CASContext context;
+    context.assumptions().assume_real(Symbol{"x"});
+
+    auto simplified = simplify_input_with_context("sqrt(x^2)", parse_arena, context);
     auto expected = simplify_input("abs(x)", expected_arena, expected_arena);
     ASSERT_TRUE(simplified.is_ok()) << simplified.error().message;
     ASSERT_TRUE(expected.is_ok()) << expected.error().message;
@@ -2658,6 +2672,8 @@ TEST(SymbolicRewriteTest, LnDecompositionOverDivisionIsOriented) {
 // and cancel inverse pairs without hardcoded special cases
 TEST(SymbolicNormalFormTest, L1_07_LnProductExpands) {
     CASContext ctx;
+    ctx.assumptions().assume_positive(Symbol{"x"});
+    ctx.assumptions().assume_positive(Symbol{"y"});
     auto e = parse_expr("ln(x * y)", ctx.arena());
     ASSERT_TRUE(e.is_ok());
     auto res = transcendental_normal_form(e.value(), ctx);
@@ -2675,8 +2691,10 @@ TEST(SymbolicNormalFormTest, L1_07_LnProductExpands) {
     EXPECT_EQ(ln_count, 2) << "ln(x*y) must expand to ln(x)+ln(y)";
 }
 
-TEST(SymbolicNormalFormTest, L1_07_LnDivisionExpands) {
+TEST(SymbolicNormalFormTest, L1_07_LnQuotientExpands) {
     CASContext ctx;
+    ctx.assumptions().assume_positive(Symbol{"x"});
+    ctx.assumptions().assume_positive(Symbol{"y"});
     auto e = parse_expr("ln(x / y)", ctx.arena());
     ASSERT_TRUE(e.is_ok());
     auto res = transcendental_normal_form(e.value(), ctx);

@@ -159,10 +159,6 @@ Result<ExprPtr> Simplifier::simplify_funcall_sqrt(
                     power->left, correction);
                 return traced_result(RuleId::SimplifySqrtSquare, target_before, corrected);
             }
-            // Legacy default for complex generic x: emit abs(x).
-            return traced_result(RuleId::SimplifySqrtSquare, target_before,
-                arena_.make<FuncCall>(BuiltinOp::Abs,
-                    std::vector<ExprPtr>{power->left}));
         }
     }
     // sqrt(sqrt(x)) -> x^(1/4)
