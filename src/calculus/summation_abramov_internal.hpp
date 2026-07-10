@@ -9,6 +9,7 @@
 
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace cas::calculus::abramov_detail {
@@ -99,5 +100,15 @@ namespace cas::calculus::abramov_detail {
 // atoms. Defined in summation_abramov_quadratic.cpp.
 [[nodiscard]] std::optional<ExprPtr> try_quadratic_atom_antidiff(
     ExprPtr term, const Symbol& k, symbolic::CASContext& ctx);
+
+// Partial-fraction coefficients of (A1·k + A0)/((k−α)^m (k−β)^m) over Q(α,β):
+//   (A1·k + A0)/((k−α)^m(k−β)^m) = Σ_{j=1..m} [ C_j/(k−α)^j + D_j/(k−β)^j ].
+// Returned in j order (index 0 ↔ j=1). Pure AST construction, no simplify:
+// α and β may be RootOf nodes or plain rationals — the identity is the same,
+// which is what makes the formula directly testable with rational roots.
+// Defined in summation_abramov_quadratic.cpp (F5.7-B6BIS).
+[[nodiscard]] std::vector<std::pair<ExprPtr, ExprPtr>> quadratic_pf_coeffs(
+    ExprPtr A0, ExprPtr A1, ExprPtr alpha, ExprPtr beta, unsigned int m,
+    AstArena& arena);
 
 }  // namespace cas::calculus::abramov_detail

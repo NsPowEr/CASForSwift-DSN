@@ -677,7 +677,20 @@
 - **Fix corretto**: Estendere `try_quadratic_atom_antidiff` per m>1: decomposizione di `(B₁k+B₀)/((k-α)^m(k-β)^m)` in somma di `C_j/(k-α)^j + D_j/(k-β)^j` (j=1..m) via derivata dell'equazione di Hermite su Q(α), poi applicare `polygamma_antidiff(..., m, ctx)` per ogni grado.
 - **Blocking dependency**: Simplifier deve supportare `ψ^(n)(RootOf(...))` come forma canonica opaca (attualmente funziona per digamma; polygamma order m-1 con algebraic arg è già ExprPtr-compatibile ma non testato).
 - **Self-check Regola Zero**: "Hardcode silenzioso?" → no, ritorna nullopt esplicito → caller produce Unimplemented con messaggio diagnostico. "Input più grande?" → m>1 è il caso rifiutato, documentato qui. "Costanti?" → nessuna costante hardcoded; il valore m=1 è la condizione di guarda.
-- **STATO**: APERTO — m>1 richiede implementazione futura (frequenza rara in pratica: partial_fractions su denominatori irriducibili tipicamente produce m=1).
+- **✅ RISOLTA 2026-07-10 — voce era STALE, codice già implementato ma NON testato**: verifica a codice
+  (lezione ledger-lag): `try_quadratic_atom_antidiff` gestisce già m>1 con decomposizione
+  Hermite-style `Σ_j [C_j/(k−α)^j + D_j/(k−β)^j]` + `polygamma_antidiff(·, ·, j)` — il bail
+  `nullopt` per m>1 descritto sopra non esiste più nel codice. Mancava però QUALSIASI test del
+  ramo m>1 (OPEN-flag su codice vivo = gemello dell'anti-pattern "CLOSED-flag su codice morto").
+  **Verifica load-bearing aggiunta**: la costruzione dei coefficienti è estratta in
+  `quadratic_pf_coeffs(A0, A1, α, β, m, arena)` (pura, testabile) e l'identità dei fratti
+  semplici — che è un'identità in Q(α,β,k) — è verificata ESATTAMENTE con radici razionali
+  (α,β ∈ Q, simplify chiude la differenza a zero letterale): m=1/2/3 × numeratore costante/lineare,
+  6/6 verdi (`test_abramov_quadratic_multiplicity.cpp`), + end-to-end m=2 su `1/(k²+k+1)²`
+  (Polygamma(1, k−RootOf) presente). Fattori verificati anche a mano vs binom(2m−j−1, m−j)
+  standard per m=2,3.
+- **STATO**: ✅ RISOLTA (2026-07-10). Nota (non-gating, già nel blocking-dependency sopra):
+  valutazione numerica/semplificazione di ψ^(n) a shift algebrico resta opaca per design attuale.
 
 ### F5.7-ABRAMOV-FULL — Multi-atom rational summation via partial-fraction + polygamma — RISOLTA 2026-06-03
 - **File**: `src/calculus/summation.cpp` (helper `try_abramov_definite`); `src/symbolic/summation_gosper.cpp` (rescale tail ungated + `together`-based ratio); `test/unit/calculus/test_definite_summation.cpp` (+1 numerical test); `test/unit/symbolic/test_summation_gosper.cpp` (+1 antidifference witness).

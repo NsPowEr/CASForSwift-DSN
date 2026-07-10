@@ -87,7 +87,7 @@ std::optional<ExprPtr> try_polygamma_antidiff(
 
 [[nodiscard]] static Rational compute_hermite_factor(unsigned int m, unsigned int r) {
     if (r == 0U) return Rational(1);
-    
+
     auto fact = [](unsigned int n) -> BigInt {
         BigInt res(1);
         for (unsigned int i = 2U; i <= n; ++i) {
@@ -95,10 +95,74 @@ std::optional<ExprPtr> try_polygamma_antidiff(
         }
         return res;
     };
-    
+
     BigInt num = fact(m + r - 2U);
     BigInt den = fact(r) * fact(m - 1U);
     return Rational(num, den);
+}
+
+std::vector<std::pair<ExprPtr, ExprPtr>> quadratic_pf_coeffs(
+    ExprPtr A0, ExprPtr A1, ExprPtr alpha, ExprPtr beta, unsigned int m,
+    AstArena& arena) {
+    std::vector<std::pair<ExprPtr, ExprPtr>> out;
+    out.reserve(m);
+
+    ExprPtr alpha_minus_beta = arena.make<Binary>(BinaryOp::Sub, alpha, beta);
+    ExprPtr beta_minus_alpha = arena.make<Unary>(UnaryOp::Neg, alpha_minus_beta);
+
+    for (unsigned int j = 1U; j <= m; ++j) {
+        unsigned int r = m - j;
+        ExprPtr C_coeff, D_coeff;
+        if (r == 0U) {
+            ExprPtr denom_C = (m == 1U)
+                ? alpha_minus_beta
+                : arena.make<Binary>(BinaryOp::Pow, alpha_minus_beta,
+                    arena.make<IntegerLit>(BigInt(static_cast<long long>(m))));
+            ExprPtr denom_D = (m == 1U)
+                ? beta_minus_alpha
+                : arena.make<Binary>(BinaryOp::Pow, beta_minus_alpha,
+                    arena.make<IntegerLit>(BigInt(static_cast<long long>(m))));
+
+            ExprPtr A1_alpha = arena.make<Binary>(BinaryOp::Mul, A1, alpha);
+            ExprPtr num_C = arena.make<Binary>(BinaryOp::Add, A1_alpha, A0);
+            C_coeff = arena.make<Binary>(BinaryOp::Div, num_C, denom_C);
+
+            ExprPtr A1_beta = arena.make<Binary>(BinaryOp::Mul, A1, beta);
+            ExprPtr num_D = arena.make<Binary>(BinaryOp::Add, A1_beta, A0);
+            D_coeff = arena.make<Binary>(BinaryOp::Div, num_D, denom_D);
+        } else {
+            Rational factor_rat = compute_hermite_factor(m, r);
+            if (r % 2U == 1U) {
+                factor_rat = -factor_rat;
+            }
+            ExprPtr scale = rational_expr(arena, factor_rat);
+
+            ExprPtr denom_C = arena.make<Binary>(BinaryOp::Pow, alpha_minus_beta,
+                arena.make<IntegerLit>(BigInt(static_cast<long long>(m + r))));
+            ExprPtr denom_D = arena.make<Binary>(BinaryOp::Pow, beta_minus_alpha,
+                arena.make<IntegerLit>(BigInt(static_cast<long long>(m + r))));
+
+            ExprPtr A1_alpha = arena.make<Binary>(BinaryOp::Mul, A1, alpha);
+            ExprPtr A1_alpha_plus_A0 = arena.make<Binary>(BinaryOp::Add, A1_alpha, A0);
+            ExprPtr m_plus_r_minus_1_expr = arena.make<IntegerLit>(BigInt(static_cast<long long>(m + r - 1U)));
+            ExprPtr term_C_1 = arena.make<Binary>(BinaryOp::Mul, m_plus_r_minus_1_expr, A1_alpha_plus_A0);
+            ExprPtr r_A1 = arena.make<Binary>(BinaryOp::Mul, arena.make<IntegerLit>(BigInt(static_cast<long long>(r))), A1);
+            ExprPtr term_C_2 = arena.make<Binary>(BinaryOp::Mul, r_A1, alpha_minus_beta);
+            ExprPtr expr_C = arena.make<Binary>(BinaryOp::Sub, term_C_1, term_C_2);
+            ExprPtr scale_expr_C = arena.make<Binary>(BinaryOp::Mul, scale, expr_C);
+            C_coeff = arena.make<Binary>(BinaryOp::Div, scale_expr_C, denom_C);
+
+            ExprPtr A1_beta = arena.make<Binary>(BinaryOp::Mul, A1, beta);
+            ExprPtr A1_beta_plus_A0 = arena.make<Binary>(BinaryOp::Add, A1_beta, A0);
+            ExprPtr term_D_1 = arena.make<Binary>(BinaryOp::Mul, m_plus_r_minus_1_expr, A1_beta_plus_A0);
+            ExprPtr term_D_2 = arena.make<Binary>(BinaryOp::Mul, r_A1, beta_minus_alpha);
+            ExprPtr expr_D = arena.make<Binary>(BinaryOp::Sub, term_D_1, term_D_2);
+            ExprPtr scale_expr_D = arena.make<Binary>(BinaryOp::Mul, scale, expr_D);
+            D_coeff = arena.make<Binary>(BinaryOp::Div, scale_expr_D, denom_D);
+        }
+        out.emplace_back(C_coeff, D_coeff);
+    }
+    return out;
 }
 
 std::optional<ExprPtr> try_quadratic_atom_antidiff(
@@ -195,59 +259,9 @@ std::optional<ExprPtr> try_quadratic_atom_antidiff(
     std::vector<ExprPtr> S_terms;
     S_terms.reserve(2U * m);
 
-    ExprPtr alpha_minus_beta = arena.make<Binary>(BinaryOp::Sub, alpha, beta);
-    ExprPtr beta_minus_alpha = arena.make<Unary>(UnaryOp::Neg, alpha_minus_beta);
-
+    const auto coeffs = quadratic_pf_coeffs(A0, A1, alpha, beta, m, arena);
     for (unsigned int j = 1U; j <= m; ++j) {
-        unsigned int r = m - j;
-        ExprPtr C_coeff, D_coeff;
-        if (r == 0U) {
-            ExprPtr denom_C = (m == 1U)
-                ? alpha_minus_beta
-                : arena.make<Binary>(BinaryOp::Pow, alpha_minus_beta,
-                    arena.make<IntegerLit>(BigInt(static_cast<long long>(m))));
-            ExprPtr denom_D = (m == 1U)
-                ? beta_minus_alpha
-                : arena.make<Binary>(BinaryOp::Pow, beta_minus_alpha,
-                    arena.make<IntegerLit>(BigInt(static_cast<long long>(m))));
-
-            ExprPtr A1_alpha = arena.make<Binary>(BinaryOp::Mul, A1, alpha);
-            ExprPtr num_C = arena.make<Binary>(BinaryOp::Add, A1_alpha, A0);
-            C_coeff = arena.make<Binary>(BinaryOp::Div, num_C, denom_C);
-
-            ExprPtr A1_beta = arena.make<Binary>(BinaryOp::Mul, A1, beta);
-            ExprPtr num_D = arena.make<Binary>(BinaryOp::Add, A1_beta, A0);
-            D_coeff = arena.make<Binary>(BinaryOp::Div, num_D, denom_D);
-        } else {
-            Rational factor_rat = compute_hermite_factor(m, r);
-            if (r % 2U == 1U) {
-                factor_rat = -factor_rat;
-            }
-            ExprPtr scale = rational_expr(arena, factor_rat);
-
-            ExprPtr denom_C = arena.make<Binary>(BinaryOp::Pow, alpha_minus_beta,
-                arena.make<IntegerLit>(BigInt(static_cast<long long>(m + r))));
-            ExprPtr denom_D = arena.make<Binary>(BinaryOp::Pow, beta_minus_alpha,
-                arena.make<IntegerLit>(BigInt(static_cast<long long>(m + r))));
-
-            ExprPtr A1_alpha = arena.make<Binary>(BinaryOp::Mul, A1, alpha);
-            ExprPtr A1_alpha_plus_A0 = arena.make<Binary>(BinaryOp::Add, A1_alpha, A0);
-            ExprPtr m_plus_r_minus_1_expr = arena.make<IntegerLit>(BigInt(static_cast<long long>(m + r - 1U)));
-            ExprPtr term_C_1 = arena.make<Binary>(BinaryOp::Mul, m_plus_r_minus_1_expr, A1_alpha_plus_A0);
-            ExprPtr r_A1 = arena.make<Binary>(BinaryOp::Mul, arena.make<IntegerLit>(BigInt(static_cast<long long>(r))), A1);
-            ExprPtr term_C_2 = arena.make<Binary>(BinaryOp::Mul, r_A1, alpha_minus_beta);
-            ExprPtr expr_C = arena.make<Binary>(BinaryOp::Sub, term_C_1, term_C_2);
-            ExprPtr scale_expr_C = arena.make<Binary>(BinaryOp::Mul, scale, expr_C);
-            C_coeff = arena.make<Binary>(BinaryOp::Div, scale_expr_C, denom_C);
-
-            ExprPtr A1_beta = arena.make<Binary>(BinaryOp::Mul, A1, beta);
-            ExprPtr A1_beta_plus_A0 = arena.make<Binary>(BinaryOp::Add, A1_beta, A0);
-            ExprPtr term_D_1 = arena.make<Binary>(BinaryOp::Mul, m_plus_r_minus_1_expr, A1_beta_plus_A0);
-            ExprPtr term_D_2 = arena.make<Binary>(BinaryOp::Mul, r_A1, beta_minus_alpha);
-            ExprPtr expr_D = arena.make<Binary>(BinaryOp::Sub, term_D_1, term_D_2);
-            ExprPtr scale_expr_D = arena.make<Binary>(BinaryOp::Mul, scale, expr_D);
-            D_coeff = arena.make<Binary>(BinaryOp::Div, scale_expr_D, denom_D);
-        }
+        const auto& [C_coeff, D_coeff] = coeffs[j - 1U];
 
         ExprPtr k_sym_e = arena.make<Symbol>(k);
         ExprPtr k_minus_alpha = arena.make<Binary>(BinaryOp::Sub, k_sym_e, alpha);

@@ -794,6 +794,7 @@ test/unit/algebra/test_half_gcd.cpp
         test/unit/algebra/test_groebner_f5_pruning_f3.cpp
         test/unit/algebra/test_interrupt_a33_probes.cpp
         test/unit/calculus/test_limit_branch_cut.cpp
+        test/unit/calculus/test_abramov_quadratic_multiplicity.cpp
         test/unit/algebra/test_polynomial_gcd_subresultant.cpp
         test/unit/algebra/test_polynomial_gcd_multivariate_robust.cpp
         test/unit/algebra/test_gcd_brown_f3.cpp
