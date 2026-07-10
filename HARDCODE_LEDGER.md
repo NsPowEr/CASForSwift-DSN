@@ -701,7 +701,7 @@
   - `BaselSumDefinite_ViaPolygamma`: Σ_{k=1}^n 1/k² → contiene FuncCall(Polygamma). PASS.
   - Regression: 1953/1953 non-stress PASS in 54s Release (1951 baseline + 2 nuovi).
   - Build pulito `-Wall -Wextra -Wpedantic -Werror`.
-- **STATO**: ✅ RISOLTA 2026-06-03 — Abramov sub-block "single rational atom A/(linear)^m" chiuso. Estensione futuro: partial-fraction decomposition multi-fattore + Q-irreducible quadratic via RootOf (tracciato come B6-bis Abramov-Full).
+- **STATO**: ✅ RISOLTA 2026-06-03 — Abramov sub-block "single rational atom A/(linear)^m" chiuso. Estensione futura: decomposizione in fratti semplici multi-fattore + Q-irreducible quadratic via RootOf (tracciata come B6-bis Abramov-Full, voce F5.7-B6BIS-QUADRATIC-M-GT-1).
 
 ### F5.7-GOSPER-WIRING — Gosper-summable closed forms via summation driver — RISOLTA 2026-06-03
 - **File**: `src/calculus/summation.cpp` (wire-up `try_gosper_definite` + integrazione in `symbolic_sum`); `test/unit/calculus/test_definite_summation.cpp` (NEW, 3 test); `CMakeLists.txt` (test registrato).
@@ -1416,6 +1416,7 @@
 - **Blocking dependency**: Aperta permanente — Fase 8 post-parità. F4 chiusa su MGS.
 - **Test di regressione**: `QRTest.SymbolicQR_DefaultSignConvention_2x2`, `F4StressTest.Householder_QR_8x8_RandomQ_CorrectAndTimed`.
 - **Riferimento storico**: HC-F4-QR-SYMBOLIC-TIMEOUT (chiuso, ledger §HC-F4-QR-SYMBOLIC-TIMEOUT) contiene la riscrittura.
+- **STATO**: ✅ storico (2026-06-12) — F4 chiusa su MGS; lo stato corrente Householder è tracciato dalla voce principale sopra (HC-F8-PENDING-12 / HC-F8-QR-HOUSEHOLDER-BAILOUT).
 
 ---
 
@@ -2039,10 +2040,22 @@ Vedi `PLAN_TASKS_REMAINING.md` per breakdown completo.
 - **Fix corretto**: vedi plan §Task 4 (SS-1..SS-5).
 - **Effort**: 2-3 settimane T3.
 
-### HC-F8-PENDING-07 — Primitive Element nested multi-β — APERTA
+### HC-F8-PENDING-07 — Primitive Element nested multi-β — PARZIALE (rescoped 2026-07-10)
 - **Task ID**: 7 — *F3.D Primitive Element nested multi-β residuo*
-- **Stato**: residuo F3.4-DEBT-01.
-- **Fix corretto**: vedi plan §Task 7 (PE-1..PE-4).
+- **Stato**: residuo F3.4-DEBT-01, rescoped dopo A9 (verificato a codice 2026-07-10):
+  - **PE-1 (selezione fattore su R reducible)**: ✅ chiuso da A9 (2026-07-07) — meglio del piano:
+    certificato ESATTO di vanishing (`cand_vanishes_at_theta_expr`, simplify→0 letterale) invece
+    della selezione numerica BigFloat proposta dal plan; nessun fattore scelto senza certificato.
+  - **PE-2 (multi-β iterato Cohen §3.6.4)**: ✅ chiuso da A9 — `try_nested_lift_min_poly_multi`
+    + risoluzione iterativa a punto fisso in `detect_tower_n_level`; catene sequenziali senza
+    risultante via `algebraic_tower_primitive_chain.cpp` (2026-07-10).
+  - **PE-3 (RootOf con simboli letterali)**: ⏳ UNICO residuo — min-poly con coefficiente
+    simbolico libero (es. `RootOf(x²−a)`) non risolvibile dal punto fisso →
+    `Unimplemented` strutturato (`algebraic_tower_primitive_nested.cpp:383`,
+    ticket F3.4-DEBT-01). Diagnostico esplicito, nessun silent-wrong.
+  - **PE-4**: chiude con PE-3.
+- **Fix corretto**: PE-3 = rappresentazione parametrica su Q(a) (RootOf preservato quando il
+  target è simbolico), plan §Task 7.
 
 ### HC-F8-PENDING-09 — Stauduhar Galois deg ≥ 6 — APERTA
 - **Task ID**: 9
@@ -2094,7 +2107,7 @@ Vedi `PLAN_TASKS_REMAINING.md` per breakdown completo.
   point for RP-2 Hermite parametric reduction).
 - **Categoria CLAUDE.md**: Cat 8 (algoritmo non implementato; diagnostic
   esplicito invece di silent dispatch).
-- **Stato**: scaffold-only (commit 2026-06-14).
+- **Stato**: ✅ superseded — sezione storica, chiusura reale 2026-07-01 nella voce sopra. Al 2026-06-14 era scaffold-only:
   `risch_rde_hermite_parametric_stub(ctx)` ritorna sempre
   `Unimplemented("Risch RDE parametric Hermite reduction (RP-2) not yet
   implemented...")` con riferimento esplicito a HC-F8-PENDING-17 +
