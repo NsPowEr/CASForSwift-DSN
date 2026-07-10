@@ -19,6 +19,8 @@
 #include "algebraic_tower_primitive_internal.hpp"
 #include "algebraic_tower_primitive_nested.hpp"
 
+#include "algebraic_tower_primitive_chain.hpp"
+
 #include <chrono>
 #include <cstddef>
 #include <string>
@@ -389,12 +391,29 @@ Result<std::optional<PrimitiveElementResult>> detect_tower_n_level(
     }
 
     std::vector<ExprPtr> alphas;
+    std::vector<const RootOf*> nodes;
     std::vector<AlgebraicNumber::CoeffVec> min_polys_vec;
     alphas.reserve(entries.size());
+    nodes.reserve(entries.size());
     min_polys_vec.reserve(entries.size());
     for (auto& e : entries) {
         alphas.push_back(e.canon);
+        nodes.push_back(e.node);
         min_polys_vec.push_back(std::move(e.mp.value()));
+    }
+
+    // A9: a sequentially nested tower (each level linear in the previous one)
+    // is flattened without a single shift resultant. Returns nullopt — never a
+    // wrong answer — when the structure is not a chain, and we fall through to
+    // the generic Trager merge below.
+    auto chain = primitive_internal::try_primitive_element_from_chain(
+        alphas, nodes, min_polys_vec, ctx);
+    if (chain.is_error()) {
+        return fail<std::optional<PrimitiveElementResult>>(chain.error());
+    }
+    if (chain.value().has_value()) {
+        return ok(std::optional<PrimitiveElementResult>(
+            std::move(chain.value().value())));
     }
 
     auto result = compute_primitive_element(alphas, min_polys_vec, ctx);

@@ -45,7 +45,6 @@ SLOW_OK=(
     VanHoeijDirect.Deg16_EightQuadratics_FindsRealFactor                  # 181s
     FactorizationTowerNTest.SplitsX2Minus5_Over_Q_Sqrt2_Sqrt3_Sqrt5       # >240s
     PrimitiveElementTest.RedundantMixedTower_Sqrt2_Sqrt3_Sqrt5_Sqrt6      # >60s (oggi DISABLED_)
-    PrimitiveElementTest.DetectTowerNLevel_SqrtTwoSqrtThreeSqrtFive       # 31s
     PrimitiveElementTest.DetectNLevelTower_MultiBetaNested                # ~30s (macOS ASan)
     GaloisDeg5Test.C5_RealCyclotomic11                                    # ~360s (macOS ASan)
 )

@@ -605,14 +605,12 @@ TEST_F(PrimitiveElementTest, DetectNLevelTower_MultiBetaNested) {
     ASSERT_TRUE(result.value().has_value());
 }
 
-// DISABLED: truly-nested chain β1→β2→α requires recursive primitive-element
-// flattening (compute Q-min-poly of each level before combining).  The iterative
-// resolver lifts the individual level min-polys correctly, but compute_primitive_element
-// with all 3 generators still fails (returns empty optional after ~225 s) because the
-// 3 algebraic numbers live in a sequential dependency chain, not independent Q extensions.
-// Tracked as F3.4-DEBT-01 / A9 follow-up.  Re-enable when the hierarchical
-// prim-elem chain Q(β1) → Q(β1,β2) → Q(β1,β2,α) is implemented.
-TEST_F(PrimitiveElementTest, DISABLED_DetectNLevelTower_ThreeLevelNested) {
+// A9: truly-nested chain β1→β2→α.  Q(β1,β2,α) = Q(α) has degree 8, and each
+// level is defined by a polynomial linear in the previous one, so
+// try_primitive_element_from_chain flattens the tower with no shift resultant.
+// Before that fast path the generic Trager merge built a degree-32 resultant and
+// did not finish (~185 s); it now runs in ~0.16 s.
+TEST_F(PrimitiveElementTest, DetectNLevelTower_ThreeLevelNested) {
     // 3-level nested radical: β1 = √3, β2 = √(2 + √3), α = √(1 + √(2 + √3)).
     ExprPtr beta1 = parse_ok("RootOf(z0^2-3, z0, 0)");
     ASSERT_NE(beta1, nullptr);
@@ -638,6 +636,29 @@ TEST_F(PrimitiveElementTest, DISABLED_DetectNLevelTower_ThreeLevelNested) {
     auto result = algebra::detect_n_level_tower(sum_expr, *ctx);
     ASSERT_TRUE(result.is_ok()) << result.error().message;
     ASSERT_TRUE(result.value().has_value());
+
+    const auto& prim = result.value().value();
+    // [Q(α):Q] = 8 and α is itself the primitive element: no shift was needed.
+    EXPECT_EQ(prim.min_poly_theta.size(), 9U);
+    EXPECT_TRUE(prim.shifts.empty());
+    ASSERT_EQ(prim.alphas_in_theta.size(), 3U);
+    for (const auto& rep : prim.alphas_in_theta) {
+        EXPECT_EQ(rep.size(), 8U);
+    }
+    // θ = α, so α is the monomial y: coefficient vector [0,1,0,...].
+    const auto& theta_rep = prim.alphas_in_theta[0];
+    EXPECT_TRUE(theta_rep[0].numerator().is_zero());
+    EXPECT_EQ(theta_rep[1], Rational(BigInt(1)));
+    // β2 = α² − 1.
+    const auto& b2 = prim.alphas_in_theta[1];
+    EXPECT_EQ(b2[0], Rational(BigInt(-1)));
+    EXPECT_TRUE(b2[1].numerator().is_zero());
+    EXPECT_EQ(b2[2], Rational(BigInt(1)));
+    // β1 = β2² − 2 = α⁴ − 2α² − 1.
+    const auto& b1 = prim.alphas_in_theta[2];
+    EXPECT_EQ(b1[0], Rational(BigInt(-1)));
+    EXPECT_EQ(b1[2], Rational(BigInt(-2)));
+    EXPECT_EQ(b1[4], Rational(BigInt(1)));
 }
 
 }  // namespace

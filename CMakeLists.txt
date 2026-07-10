@@ -296,6 +296,7 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/algebraic_tower_bridge_parse.cpp
     src/algebra/algebraic_tower_primitive.cpp
     src/algebra/algebraic_tower_primitive_nested.cpp
+    src/algebra/algebraic_tower_primitive_chain.cpp
     src/algebra/polynomial_arithmetic.cpp
     src/algebra/polynomial_multivariate.cpp
     src/algebra/factor_multivariate_mpoly.cpp
