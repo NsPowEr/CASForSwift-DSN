@@ -151,6 +151,34 @@
   fail_unimpl(...)` del ramo (finestra ~µs, nessun hang, re-poll a
   integrate_once) — fedeltà parziale, non bloccante.
 
+  AGGIORNAMENTO 2026-07-10 — chiusi i loop combinatori residui:
+  - `polynomial_groebner_f5.cpp` (S-pair main while): `f5c_groebner` ora
+    `Result<F5Result>` + `CASContext*` opzionale, poll per iterazione;
+    call-site `f4_groebner` propaga. (`buchberger_with_zero_count` resta
+    senza poll: baseline test-only, mai su path di produzione.)
+  - `factorization_recombination.cpp` (enumerazione subset Zassenhaus,
+    esponenziale in |lifted|): **fix di soundness della cancellazione**,
+    non solo di reattività — il caller wang_eez legge `nullopt` come
+    PROVA di irriducibilità (ricerca esaustiva), quindi l'interrupt DEVE
+    emergere come errore: firma → `Result<std::optional<IntPoly>>` +
+    `CASContext*`, poll a ogni nodo di ricorsione, errore propagato dai
+    2 call-site wang_eez.
+  - `polynomial_gcd_zippel_crt.cpp` (while CRT sui primi),
+    `polynomial_gcd_brown_modular.cpp` (while primi Brown),
+    `polynomial_gcd_multivariate_sparse.cpp` (`exact_quotient` while di
+    eliminazione): poll diretto (tutti hanno `ctx&` e ritornano `Result`).
+  - Escluso con motivazione: `sparse_gcd_fp` (fp_recursive) ritorna
+    `optional` con semantica "candidato fallito → retry" nei loop CRT dei
+    caller; un poll che ritorna nullopt verrebbe assorbito come retry.
+    I caller (Brown/Zippel CRT) sono ora polled, quindi la cancellazione
+    arriva entro un'iterazione di primo.
+  - Test: `test_interrupt_a33_probes.cpp` (5 probe) — pre-interrupt su
+    recombination → **errore, mai nullopt** (anti-silent-wrong), idem F5;
+    null-ctx invariato. 94/94 suite algebra mirata verde.
+- **STATO**: CHIUSURA SOSTANZIALE 2026-07-10 — tutti i loop combinatori
+  citati dalla voce sono polled o esclusi con motivazione esplicita.
+  Restano solo i residui micro (< 1s) documentati sopra.
+
 ### HC-F70-A31-MIGRATION-TODO — AstArena reset without root migration — ✅ CHIUSO 2026-07-08 (A19)
 - **File**: `include/cas/ast.hpp` (AstArena::reset declaration), `src/ast/ast.cpp` (impl)
 - **Categoria CLAUDE.md**: Cat 4 (boundary documentato)
@@ -2153,9 +2181,30 @@ Vedi `PLAN_TASKS_REMAINING.md` per breakdown completo.
   - rule 4 ln(z1·z2): make_log_product_correction, wired simplify_exp_log.cpp:203.
   - rule 5 ln(z1/z2): make_log_quotient_correction, wired simplify_exp_log.cpp:227 (T-002).
   - Gate: BranchCutsGlobalTest 12/12 PASS (LnOfQuotient_*, LnOfProduct_*, PowOfPow_*, Sqrt*).
-- **Residuo**: SOLO direction-limit table (spec §3.2) — continuità dei limiti
-  direzionali ai bordi del taglio, es. √(x ± iε) per ε→0± con x<0.
-- **Fix corretto**: vedi plan §Task 20 (BC-1..BC-5).
+- **✅ Direction-limit table (spec §3.2) RISOLTA 2026-07-10** (`src/calculus/limit_branch_cut.cpp`,
+  hook in `LimitEngine::compute_recursive`):
+  - **Silent-wrong direzionale trovato e chiuso**: la sostituzione diretta era edge-blind —
+    `limit(sqrt(-4+i·t), t→0, Left)` restituiva il bordo superiore `+2i` (ramo principale)
+    invece di `−2i`. Il lato è ora deciso dal segno della prima derivata non nulla di
+    `Im(arg)` al punto (valuation scan, stesso idioma dei poli con segno di `limit_rules.cpp`);
+    `Left` inverte il segno per k dispari.
+  - **Tabella**: sqrt → ±i·√(−w₀); ln → ln(−w₀) ± iπ; **arg → ±π** (necessario perché il
+    simplifier decompone `ln(z) = ln|z| + i·arg(z)` prima che il LimitEngine giri, spostando
+    il taglio dentro `arg`).
+  - **Composito**: decomposizione SOUND per algebra dei limiti (`lim Σ = Σ lim`, `lim Π = Π lim`
+    solo con membri tutti finiti); forme non decomponibili (es. 0/0 attraverso il taglio)
+    → `Unimplemented` strutturato (mai il valore top-edge cieco). Bilaterale con bordi
+    discordi → `Undefined` esplicito. Ogni passo indecidibile (Re non-letterale, segno non
+    esatto, Im non in forma a+b·I) → nullopt = path legacy invariato.
+  - **Test**: `test_limit_branch_cut.cpp` 11/11 (spec-driven: √(x±iε) ε→0±, ln bordi, arg via
+    Sum-decomposition, composito indeterminato → diagnostico, regressioni cut-free). 90/90
+    suite Limit/Gruntz/MRV.
+  - **Gap osservato (non-gating)**: `mathematically_equal` non prova `ln(4) − ln(16)/2 = 0`
+    (estrazione log-potenza mancante); i test ln usano la forma canonica `ln(16)/2`.
+- **Residuo**: nessuno per §3.2. Estensioni future: funzioni con taglio non ancora in tabella
+  (asin/acos/atanh fuori [−1,1], potenze non intere) → oggi path legacy (principale), candidate
+  alla stessa tabella.
+- **Fix corretto (storico)**: vedi plan §Task 20 (BC-1..BC-5).
 
 ### HC-F8-PENDING-22 — Slater pFq → Meijer G + Bailey — APERTA
 - **Task ID**: 22

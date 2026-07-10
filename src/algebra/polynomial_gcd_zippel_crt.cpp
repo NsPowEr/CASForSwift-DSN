@@ -113,6 +113,10 @@ Result<MultivariatePolynomial> gcd_zippel_prony_crt(
     std::size_t total_samples = 0, good = 0, tried = 0;
 
     while (good < max_primes && tried < prime_cap) {
+        // HC-F70-A33: poll interrupt per prime (pure modular arithmetic loop).
+        if (auto chk = ctx.check_interrupt(); chk.is_error()) {
+            return fail<MultivariatePolynomial>(chk.error());
+        }
         auto np = numtheory::next_prime(p);
         if (np.is_error()) break;
         p = np.value();

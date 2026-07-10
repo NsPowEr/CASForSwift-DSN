@@ -139,6 +139,16 @@ Result<ExprPtr> LimitEngine::compute_recursive(
 
     auto direct = substitute_and_simplify(expr, var, point);
 
+    // HC-F8-PENDING-20 §3.2: direction-limit table at branch-cut edges.
+    // Plain substitution is edge-blind (always the principal/top edge); when
+    // the argument of sqrt/ln lands on the negative real axis with a
+    // var-dependent imaginary part, the side of the approach decides the
+    // value. nullopt → no cut involvement, fall through unchanged.
+    if (auto cut = try_branch_cut_directional(expr, var, point, dir, depth);
+        cut.has_value()) {
+        return cut.value();
+    }
+
     auto quotient = extract_quotient_view(expr, arena_);
     const bool has_quotient = quotient.has_value();
 

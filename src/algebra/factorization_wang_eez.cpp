@@ -197,13 +197,16 @@ Result<std::vector<IntPoly>> factorize_univariate_hensel_or_kronecker(
             if (lifted.size() >= ctx.van_hoeij_threshold()) {
                 found_factor = van_hoeij_knapsack_factor(
                     f, lifted, pk, ctx.lll_delta(), ctx.van_hoeij_lll_threshold(), &ctx);
-                if (!found_factor.has_value()) {
-                    found_factor = find_factor_by_hensel_recombination(
-                        f, lifted, pk, f.degree() / 2U);
+            }
+            if (!found_factor.has_value()) {
+                auto recomb = find_factor_by_hensel_recombination(
+                    f, lifted, pk, f.degree() / 2U, &ctx);
+                // An interrupt/timeout here must NOT decay to "no factor":
+                // downstream reads empty found_factor as irreducibility.
+                if (recomb.is_error()) {
+                    return fail<std::vector<IntPoly>>(recomb.error());
                 }
-            } else {
-                found_factor = find_factor_by_hensel_recombination(
-                    f, lifted, pk, f.degree() / 2U);
+                found_factor = std::move(recomb.value());
             }
 
             if (found_factor.has_value()) {

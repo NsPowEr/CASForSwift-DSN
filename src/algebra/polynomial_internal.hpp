@@ -249,12 +249,14 @@ void lll_reduction(LatticeMatrix& b, double delta = 0.75);
 // if the subset search finds one, else nullopt. On a lucky prime (f
 // squarefree mod p, modulus = p^a above the Mignotte bound) the search is
 // exhaustive, so nullopt is a proof of irreducibility for degrees ≤
-// max_degree.
-[[nodiscard]] std::optional<IntPoly> find_factor_by_hensel_recombination(
+// max_degree. An interrupt (ctx poll, HC-F70-A33) surfaces as an error —
+// never as nullopt, which would forge that proof.
+[[nodiscard]] Result<std::optional<IntPoly>> find_factor_by_hensel_recombination(
     const IntPoly& f,
     const std::vector<IntPoly>& lifted_factors,
     const BigInt& modulus,
-    std::size_t max_degree);
+    std::size_t max_degree,
+    symbolic::CASContext* ctx = nullptr);
 
 // Van Hoeij knapsack-lattice recombination (van Hoeij 2002 §2-4, Belabas 2004 §4).
 // Finds one factor of f ∈ Z[x] from r lifted modular factors mod p^a = pk.

@@ -1,5 +1,7 @@
 #include "polynomial_internal.hpp"
 
+#include "cas/symbolic.hpp"
+
 #include <optional>
 #include <vector>
 
@@ -138,7 +140,7 @@ namespace {
 //
 // Termination: bounded structurally by 2^r enumeration depth + the
 // fact that selected_degree > max_degree prunes whole sub-trees.
-[[nodiscard]] std::optional<IntPoly> recombine_from(
+[[nodiscard]] Result<std::optional<IntPoly>> recombine_from(
     const IntPoly& f,
     const std::vector<IntPoly>& lifted,
     const BigInt& modulus,
@@ -146,7 +148,16 @@ namespace {
     std::size_t start,
     std::vector<bool>& selected,
     std::size_t selected_degree,
-    const BigInt& mignotte_bound) {
+    const BigInt& mignotte_bound,
+    symbolic::CASContext* ctx) {
+    // HC-F70-A33: the subset enumeration is exponential in |lifted|; an
+    // interrupt MUST surface as an error, never as nullopt — the caller
+    // reads nullopt as a proof of irreducibility (see wang_eez).
+    if (ctx) {
+        if (auto chk = ctx->check_interrupt(); chk.is_error()) {
+            return fail<std::optional<IntPoly>>(chk.error());
+        }
+    }
     for (std::size_t index = start; index < lifted.size(); ++index) {
         const std::size_t next_degree = selected_degree + lifted[index].degree();
         if (next_degree > max_degree) {
@@ -157,29 +168,30 @@ namespace {
         auto candidate = check_subset(
             f, lifted, selected, modulus, max_degree, mignotte_bound);
         if (candidate.has_value()) {
-            return candidate;
+            return ok(std::optional<IntPoly>(std::move(candidate)));
         }
 
         auto nested = recombine_from(
             f, lifted, modulus, max_degree,
-            index + 1U, selected, next_degree, mignotte_bound);
-        if (nested.has_value()) {
+            index + 1U, selected, next_degree, mignotte_bound, ctx);
+        if (nested.is_error() || nested.value().has_value()) {
             return nested;
         }
         selected[index] = false;
     }
-    return std::nullopt;
+    return ok(std::optional<IntPoly>{});
 }
 
 } // namespace
 
-std::optional<IntPoly> find_factor_by_hensel_recombination(
+Result<std::optional<IntPoly>> find_factor_by_hensel_recombination(
     const IntPoly& f,
     const std::vector<IntPoly>& lifted_factors,
     const BigInt& modulus,
-    std::size_t max_degree) {
+    std::size_t max_degree,
+    symbolic::CASContext* ctx) {
     if (f.is_zero() || modulus <= BigInt(1) || lifted_factors.empty()) {
-        return std::nullopt;
+        return ok(std::optional<IntPoly>{});
     }
 
     // Every nonconstant lifted factor stays in the pool: a factor of degree
@@ -197,7 +209,7 @@ std::optional<IntPoly> find_factor_by_hensel_recombination(
         }
     }
     if (!any_selectable) {
-        return std::nullopt;
+        return ok(std::optional<IntPoly>{});
     }
 
     std::vector<bool> selected(usable_factors.size(), false);
@@ -210,7 +222,8 @@ std::optional<IntPoly> find_factor_by_hensel_recombination(
         0U,
         selected,
         0U,
-        mignotte_bound);
+        mignotte_bound,
+        ctx);
 }
 
 } // namespace cas::algebra

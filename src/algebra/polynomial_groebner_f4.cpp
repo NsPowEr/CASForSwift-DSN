@@ -218,8 +218,9 @@ Result<std::vector<PolyF4>> f4_groebner(std::vector<PolyF4> G, MonomialOrder ord
     // divisibility against accumulated syzygy signatures (Faugère 2002 §3).
     // Default flag false → original F4/Buchberger path retained.
     if (ctx && ctx->enable_f5_signature_pruning() && !G.empty()) {
-        F5Result fr = f5c_groebner(std::move(G), order);
-        return ok(std::move(fr.basis));
+        auto fr = f5c_groebner(std::move(G), order, ctx);
+        if (fr.is_error()) return fail<std::vector<PolyF4>>(fr.error());
+        return ok(std::move(fr.value().basis));
     }
     // Termination follows from the Hilbert basis theorem (every ideal in
     // K[x_1, ..., x_n] is finitely generated) and Buchberger termination

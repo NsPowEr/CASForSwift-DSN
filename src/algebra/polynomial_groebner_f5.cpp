@@ -40,6 +40,7 @@
 #include "cas/rational.hpp"
 #include "cas/result.hpp"
 #include "cas/error.hpp"
+#include "cas/symbolic.hpp"
 
 #include <algorithm>
 #include <vector>
@@ -263,16 +264,17 @@ struct SLabeledResult {
 //      Update pairs.
 //  Inter-reduce basis; return {polys, stats}.
 
-F5Result f5c_groebner(
+Result<F5Result> f5c_groebner(
     std::vector<PolyF4> F,
-    MonomialOrder order)
+    MonomialOrder order,
+    symbolic::CASContext* ctx)
 {
     F5Result result;
     result.zero_reductions_baseline = 0;
     result.zero_reductions_f5 = 0;
 
     if (F.empty()) {
-        return result;
+        return ok(std::move(result));
     }
 
     const std::size_t r = F.size();
@@ -323,6 +325,13 @@ F5Result f5c_groebner(
     }
 
     while (!pairs.empty()) {
+        // HC-F70-A33: poll interrupt per S-pair iteration (pure combinatorial
+        // loop, no simplify/substitute inside → otherwise uninterruptible).
+        if (ctx) {
+            if (auto chk = ctx->check_interrupt(); chk.is_error()) {
+                return fail<F5Result>(chk.error());
+            }
+        }
         // Select pair with minimum sugar (then min lcm degree for tie-break)
         auto min_it = std::min_element(pairs.begin(), pairs.end(),
             [](const Pair& a, const Pair& b) {
@@ -396,7 +405,7 @@ F5Result f5c_groebner(
     inter_reduce(result.basis, order);
     for (auto& g : result.basis) g.make_monic(order);
 
-    return result;
+    return ok(std::move(result));
 }
 
 } // namespace cas::algebra

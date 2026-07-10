@@ -39,9 +39,12 @@ struct BuchbergerCountResult {
 // Applies F5 signature criterion + Rewritten criterion to eliminate
 // provably-redundant S-pairs (syzygies) during Buchberger computation.
 // Returns the reduced GRevLex Groebner basis + zero-reduction counts.
-[[nodiscard]] F5Result f5c_groebner(
+// ctx (optional) enables the HC-F70-A33 interrupt poll in the S-pair loop;
+// an interrupt surfaces as an error, never as a truncated basis.
+[[nodiscard]] Result<F5Result> f5c_groebner(
     std::vector<PolyF4> F,
-    MonomialOrder order = MonomialOrder::GRevLex);
+    MonomialOrder order = MonomialOrder::GRevLex,
+    symbolic::CASContext* ctx = nullptr);
 
 // Plain Buchberger with zero-reduction counting, for baseline comparison.
 [[nodiscard]] BuchbergerCountResult buchberger_with_zero_count(

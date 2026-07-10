@@ -158,6 +158,11 @@ void sparse_subtract(SparsePoly& lhs, const SparsePoly& rhs) {
     std::size_t steps = 0U;
 
     while (!remainder.empty()) {
+        // HC-F70-A33: poll interrupt per elimination step (pure sparse
+        // arithmetic loop, potentially long on large supports).
+        if (auto chk = ctx.check_interrupt(); chk.is_error()) {
+            return fail<std::optional<MultivariatePolynomial>>(chk.error());
+        }
         if (++steps > max_steps) {
             return fail<std::optional<MultivariatePolynomial>>(make_error(
                 CASErrorKind::Unimplemented,

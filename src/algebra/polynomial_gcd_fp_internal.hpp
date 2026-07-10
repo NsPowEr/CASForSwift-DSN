@@ -132,4 +132,18 @@ void scale_by_lc(fp_helpers::BSparsePoly& gp, const BigInt& u, const BigInt& p);
     const fp_helpers::BSparsePoly& divisor,
     std::size_t n_vars, fp_helpers::BSparsePoly& quo);
 
+// Polynomial-content pre-extraction w.r.t. main_var (Geddes §7.4 setup).
+// Decomposes ppP = cont_main(ppP) · pp_main(ppP) (same for ppQ) and divides
+// both by gcd(cont_main_P, cont_main_Q); ppP/ppQ are updated in place when
+// the extraction succeeds. Returns the extracted content gcd (1 when none)
+// and whether the inputs were actually divided by it.
+struct MainVarContentGcd {
+    MultivariatePolynomial content_gcd;
+    bool stripped{false};
+};
+[[nodiscard]] MainVarContentGcd extract_main_var_content_gcd(
+    fp_helpers::BSparsePoly& ppP, fp_helpers::BSparsePoly& ppQ,
+    const std::vector<Symbol>& vars, std::size_t n_vars, std::size_t main_var,
+    symbolic::CASContext& ctx);
+
 }  // namespace cas::algebra

@@ -233,6 +233,7 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/differential_field_generators.cpp
     src/calculus/differential_field_integration.cpp
     src/calculus/limit.cpp
+    src/calculus/limit_branch_cut.cpp
     src/calculus/limit_rules.cpp
     src/calculus/limit_helpers.cpp
     src/calculus/limit_infinite.cpp
@@ -345,6 +346,7 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/polynomial_gcd_modular.cpp
     src/algebra/polynomial_gcd_brown.cpp
     src/algebra/polynomial_gcd_brown_modular.cpp
+    src/algebra/polynomial_gcd_brown_content.cpp
     src/algebra/polynomial_gcd_brown_helpers.cpp
     src/algebra/polynomial_gcd_brown_lc_scaling.cpp
     src/algebra/polynomial_gcd_fp_recursive.cpp
@@ -790,6 +792,8 @@ test/unit/algebra/test_half_gcd.cpp
         test/unit/algebra/test_root_of.cpp
         test/unit/algebra/test_groebner.cpp
         test/unit/algebra/test_groebner_f5_pruning_f3.cpp
+        test/unit/algebra/test_interrupt_a33_probes.cpp
+        test/unit/calculus/test_limit_branch_cut.cpp
         test/unit/algebra/test_polynomial_gcd_subresultant.cpp
         test/unit/algebra/test_polynomial_gcd_multivariate_robust.cpp
         test/unit/algebra/test_gcd_brown_f3.cpp
