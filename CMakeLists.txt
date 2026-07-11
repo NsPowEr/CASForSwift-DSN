@@ -376,6 +376,7 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/galois.cpp
     src/algebra/galois_deg5.cpp
     src/algebra/perm_group.cpp
+    src/algebra/perm_bsgs.cpp
     src/algebra/galois_transitive_lattice.cpp
     src/algebra/galois_setpoly.cpp
     src/algebra/galois_deg6.cpp
@@ -736,6 +737,7 @@ test/unit/numeric/test_sturm_bigfloat.cpp
         test/unit/algebra/test_galois.cpp
         test/unit/algebra/test_galois_deg5_f3.cpp
         test/unit/algebra/test_perm_group.cpp
+        test/unit/algebra/test_perm_bsgs.cpp
         test/unit/algebra/test_galois_lattice.cpp
         test/unit/algebra/test_galois_setpoly.cpp
         test/unit/algebra/test_galois_deg6.cpp

@@ -2110,9 +2110,37 @@ Vedi `PLAN_TASKS_REMAINING.md` per breakdown completo.
   i puliti; tutto simbolico → nullopt pulito; 1 pulito+1 simbolico → nullopt; regressione catena
   annidata non-simbolica invariata). 89/89 suite Tower/Primitive/RootOf verdi, 0 regressioni.
 
-### HC-F8-PENDING-09 — Stauduhar Galois deg ≥ 6 — APERTA
-- **Task ID**: 9
-- **Fix corretto**: vedi plan §Task 9 (GA-1..GA-5).
+### HC-F8-PENDING-09 — Stauduhar Galois deg ≥ 6 — 🔨 APERTA (Brick 1/4 fatto 2026-07-11)
+- **Task ID**: 9 — closure deg ≥ 8 (deg 6/7 già coperti dal driver esatto A6).
+- **Correzione di rotta vs plan storico**: il PLAN Task 9 (GA-1 tabelle Hulpke
+  trascritte + GA-2 risolventi BigFloat) è **stale** — contraddice le scelte del
+  codice A6 esistente (REGOLA 0.1 zero-hardcode + REGOLA 1 no-double). Direzione
+  approvata 2026-07-11: estensione **float-free** in stile Fieker-Klüners (2014),
+  discesa esatta razionale/p-adica sui sottogruppi. Build multi-sessione, 4 brick,
+  ognuno completo+testato. Piano: `~/.claude/plans/drifting-sprouting-walrus.md`.
+- **Collo di bottiglia diagnosticato**: `permgrp::transitive_subgroup_classes`
+  (`galois_transitive_lattice.cpp`) enumera l'INTERO reticolo dei sottogruppi di
+  S_n con bitset densi Θ(n!)/sottogruppo — infeasible per n ≥ 8. Anche `PermGroup`
+  è Θ(|G|) (element-set denso).
+- **✅ Brick 1/4 FATTO 2026-07-11 — engine BSGS scalabile**: nuovo
+  `BsgsGroup` (`src/algebra/perm_bsgs.cpp` + `perm_bsgs_internal.hpp`), Schreier-Sims
+  **deterministico verificato** (Holt-Eick-O'Brien §4.4, NO Monte-Carlo → ordine e
+  membership esatti, mai congettura probabilistica). Rappresentazione base + strong
+  generating set + transversali, spazio/tempo polinomiale — rimuove il muro Θ(n!).
+  API: `build/order/contains/sift/is_transitive/has_odd_element`. Riusa i primitivi
+  Perm di `perm_group_internal.hpp` (zero duplicazione). Cap n ≤ 20 (bound u64
+  sull'ordine, |G| ≤ n! ≤ 20! < 2^62 — derivato, non magico). **Nessun** file del
+  path deg 6/7 toccato (resta verde). Test `test_perm_bsgs.cpp` (9): ordini S_n/A_n/
+  C_n/D_n/V_4, membership, **cross-check completo vs `PermGroup` denso su tutto S_n
+  per n ≤ 7** (order/transitività/parità/membership rank-per-rank), scala n=8
+  (S_8/A_8/C_4≀C_2 ordini esatti in ms). Bug trovato+fixato in dev: heap-use-after-
+  free (riferimenti in `ods`/`lgens` invalidati da `rebuild()` durante la verifica →
+  copie locali per iterazione).
+- **Residuo (Brick 2-4, sessioni successive)**: discesa top-down sui massimali
+  transitivi on-demand; risolventi relative G/H esatte + separazione coppie
+  Galois-equivalenti a n=8; naming strutturale n=8..10; wiring in `galois.cpp` +
+  corpus oracoli ≥30. La voce resta **APERTA** finché la discesa non identifica
+  realmente i gruppi deg ≥ 8.
 
 ### HC-F8-PENDING-10 — Wang EEZ Kronecker fallback — CHIUSA 2026-06-13
 - **Task ID**: 10
