@@ -47,6 +47,7 @@ SLOW_OK=(
     PrimitiveElementTest.RedundantMixedTower_Sqrt2_Sqrt3_Sqrt5_Sqrt6      # >60s (oggi DISABLED_)
     PrimitiveElementTest.DetectNLevelTower_MultiBetaNested                # ~30s (macOS ASan)
     GaloisDeg5Test.C5_RealCyclotomic11                                    # ~360s (macOS ASan)
+    PermMaximalTest.CrossCheckDegree7BothAmbients                         # ~45s (2× lattice n=7, macOS ASan)
 )
 
 # Quarantena (noti-rossi) — caricata dal file governato.

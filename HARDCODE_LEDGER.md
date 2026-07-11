@@ -2136,11 +2136,45 @@ Vedi `PLAN_TASKS_REMAINING.md` per breakdown completo.
   (S_8/A_8/C_4≀C_2 ordini esatti in ms). Bug trovato+fixato in dev: heap-use-after-
   free (riferimenti in `ods`/`lgens` invalidati da `rebuild()` durante la verifica →
   copie locali per iterazione).
-- **Residuo (Brick 2-4, sessioni successive)**: discesa top-down sui massimali
-  transitivi on-demand; risolventi relative G/H esatte + separazione coppie
-  Galois-equivalenti a n=8; naming strutturale n=8..10; wiring in `galois.cpp` +
-  corpus oracoli ≥30. La voce resta **APERTA** finché la discesa non identifica
-  realmente i gruppi deg ≥ 8.
+- **✅ Brick 2/4 FATTO 2026-07-11 — massimali transitivi on-demand (primo strato
+  di discesa)**: 4 nuovi moduli, tutti generativi (zero permutazioni/tabelle
+  trascritte, REGOLA 0.1):
+  `perm_blocks.cpp` (block system minimali via union-find di Atkinson 1975,
+  `is_primitive`, azione indotta sui blocchi);
+  `perm_construct.cpp` (S_n/A_n/S_a≀S_b da cicli, parte pari G∩A_n via lemma di
+  Schreier, azione sui k-subset canonica k ≤ m/2);
+  `perm_construct_linear.cpp` + `perm_construct_gf.cpp` (AGL(d,p) e PGL(d,p)
+  proiettivo da generatori matriciali ⟨trasvezione, ciclo coordinate, toro⟩;
+  GF(p^e) costruito a runtime con irriducibile certificato dal test di Rabin;
+  famiglie Möbius/semilineari PSL/PGL/PΓL(2,q) su P¹(F_q));
+  `perm_maximal.cpp` (`maximal_transitive_candidates(ambient, n)`, 5 ≤ n ≤ 10):
+  assemblaggio dall'aritmetica di n (divisori → wreath; p^d → affine; q+1 →
+  Möbius; (p^d−1)/(p−1) → proiettivo; C(m,k) → subset), smistamento per parità
+  (dispari → lato S_n, pari → lato A_n), parti pari dei candidati dispari,
+  **twin (0 1)-coniugato** per le classi pari senza certificato strutturale di
+  non-split in A_n (cattura le 2 classi di AGL(3,2) in A_8 e di PΓL(2,8) in A_9),
+  pruning per contenimento diretto, `Unimplemented` strutturato fuori [5,10].
+- **Certificazione (test)**: `test_perm_maximal.cpp` — **cross-check esaustivo
+  n = 5, 6, 7 contro il lattice generato** (soundness: ogni candidato è una classe
+  transitiva propria; **copertura**: ogni classe transitiva sta in un candidato a
+  meno di coniugio, con σ ristretto ad A_n e su ENTRAMBI i rappresentanti di
+  A_n-classe sul lato alternante; tripwire di quasi-massimalità: una classe
+  intermedia deve essere essa stessa listata — la ridondanza è ammessa dal
+  contratto, es. F_21 ⊂ PSL(3,2) in A_7). Struttura n = 8, 9, 10 verificata
+  (ordini vs formule classiche, parità, primitività, twin distinti; il pruning ha
+  correttamente eliminato (S_2≀S_4)∩A_8 = 192 ⊂ AGL(3,2), coerente con ATLAS).
+  Copertura per 8 ≤ n ≤ 10: teorema di enumerazione (Sims 1970; Butler-McKay
+  1983) citato nel header, da cross-validare col corpus oracoli del Brick 4.
+  `test_perm_blocks.cpp` + `test_perm_construct.cpp` (assiomi di campo GF(q)
+  esaustivi, ordini |AGL|/|PΓL| da formula, blocchi D_4/V_4/wreath).
+  `PermMaximalTest.CrossCheckDegree7BothAmbients` in SLOW_OK (~45s ASan, 2×
+  lattice n=7).
+- **Residuo (Brick 3-4, sessioni successive)**: risolventi relative G/H esatte +
+  decisione d'inclusione via fattorizzazione su Q (con gestione coset per le
+  classi twin); massimali dei nodi PIÙ IN BASSO della discesa (sotto il primo
+  strato: ricorsione sui blocchi / reticolo dei gruppi piccoli); naming
+  strutturale n=8..10; wiring in `galois.cpp` + corpus oracoli ≥30. La voce resta
+  **APERTA** finché la discesa non identifica realmente i gruppi deg ≥ 8.
 
 ### HC-F8-PENDING-10 — Wang EEZ Kronecker fallback — CHIUSA 2026-06-13
 - **Task ID**: 10
