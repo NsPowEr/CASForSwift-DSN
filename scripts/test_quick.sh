@@ -48,6 +48,8 @@ SLOW_OK=(
     PrimitiveElementTest.DetectNLevelTower_MultiBetaNested                # ~30s (macOS ASan)
     GaloisDeg5Test.C5_RealCyclotomic11                                    # ~360s (macOS ASan)
     PermMaximalTest.CrossCheckDegree7BothAmbients                         # ~45s (2× lattice n=7, macOS ASan)
+    GaloisStauduharTest.CrossCheckDegree6                                 # ~45s (oracolo = pipeline deg6, macOS ASan)
+    GaloisStauduharTest.CrossCheckDegree7                                 # ~57s (oracolo = pipeline deg7, macOS ASan)
 )
 
 # Quarantena (noti-rossi) — caricata dal file governato.

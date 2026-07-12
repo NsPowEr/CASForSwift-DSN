@@ -2169,12 +2169,71 @@ Vedi `PLAN_TASKS_REMAINING.md` per breakdown completo.
   esaustivi, ordini |AGL|/|PΓL| da formula, blocchi D_4/V_4/wreath).
   `PermMaximalTest.CrossCheckDegree7BothAmbients` in SLOW_OK (~45s ASan, 2×
   lattice n=7).
-- **Residuo (Brick 3-4, sessioni successive)**: risolventi relative G/H esatte +
-  decisione d'inclusione via fattorizzazione su Q (con gestione coset per le
-  classi twin); massimali dei nodi PIÙ IN BASSO della discesa (sotto il primo
-  strato: ricorsione sui blocchi / reticolo dei gruppi piccoli); naming
-  strutturale n=8..10; wiring in `galois.cpp` + corpus oracoli ≥30. La voce resta
-  **APERTA** finché la discesa non identifica realmente i gruppi deg ≥ 8.
+- **✅ Brick 3/4 FATTO 2026-07-12 — passo Stauduhar certificato (motore
+  p-adico + invarianti relative + primo strato di discesa)**. Tre layer nuovi,
+  tutti esatti/float-free (spec `Galois_Groups.md` letta, REGOLA 0.1; rotta
+  p-adica esatta al posto dello sketch MPFR della spec, come approvato):
+  1. `galois_padic_{ring,roots,split}.cpp` (+ `_internal.hpp`, `_detail.hpp`) —
+     anello di Galois GR(p^k, L) = (Z/p^k)[t]/(Φ) con Φ intero monico
+     irriducibile mod p (fattore deg-L di f quando esiste, altrimenti sweep
+     esaustivo certificato Rabin); radici di f liftate via Newton/Hensel
+     (quadratico, f'(r) unità perché p ∤ disc); scelta del primo unramified
+     con test esplicito gcd(f,f') su F_p (la SOLA forma dell'output del
+     fattorizzatore mod p NON è un segnale affidabile di ramificazione — bug
+     trovato dai tripwire in dev) e L = lcm dei gradi minimizzato sul budget
+     `ctx.max_galois_frobenius_primes()`. CZ equal-degree (Las Vegas, seed
+     derivato dall'input / ctx.rng(), REGOLA cat. 6; l'output è sempre
+     verificato). **Certificati** ad ogni build/raise: f(r_i) ≡ 0, radici
+     distinte mod p, identità di Newton e_1/e_n, ciclo-tipo del Frobenius
+     (automorfismo canonico liftato) = multiset dei gradi mod p (Dedekind).
+  2. `galois_invariant.cpp` — invariante relativo F con Stab_G(F) = H
+     **certificato per conteggio** (orbita G di F enumerata = [G:H] esatto,
+     mai assunto; H non assunto massimale). Due tier generativi: orbit-sum di
+     k-subset (uno per H-orbita, e_k simmetrico scartato) e fallback garantito
+     = monomio risolvente di Galois x_1x_2²⋯x_{n−1}^{n−1} (Stab_{S_n}
+     triviale ⇒ esattezza incondizionata). Transversal sinistro = rappresentanti
+     dell'orbita (reps[0] = id). Budget ops = anti-runaway del chiamante
+     (`ctx.galois_lattice_max_ops()`), Unimplemented strutturato.
+  3. `galois_stauduhar_{step,descent}.cpp` — test di Stauduhar esatto: valori
+     coset v_i = (σ_i·F)(r) in GR(p^k,L); R(y)=∏(y−v_i) MAI espansa — solo
+     R(c), R′(c) su residui puri via prodotti prefix/suffix O(m); bound
+     archimedeo B = #termini·(1+max|f_j|)^{deg F} (Cauchy) e precisione
+     derivata p^k > 2·max(|R(c)|,|R′(c)|) via bit-length (mai float);
+     **two-phase**: screening a p^k > 2B (impurità del residuo a QUALSIASI
+     precisione certifica ∉ Z → NotContained senza mai pagare la precisione
+     piena; misurato 36s → 2.9s su x⁸−x−1) e precisione piena solo con
+     candidati puri. Radice intera c: verificata esatta (R(c)=0 su Z) e
+     SEMPLICE (R′(c)≠0); radice multipla → Tschirnhaus sul modello (β=P_t(α)
+     valutato sulle STESSE radici liftate: ordine e Frobenius preservati,
+     identità g(P(α))=0 tripwire) con sweep bound derivato; collisione di
+     residui a radice semplice → raise di precisione con cap dimostrato
+     (norm bound (2B)^{m²}). Discesa certificata ⇒ tripwire ordine +
+     Frobenius ∈ σHσ⁻¹. Primo strato: parità disc → ambiente S_n/A_n
+     (cross-tripwire parità del Frobenius), candidati Brick 2 (twin incluse,
+     σ scandito nel gruppo CORRENTE), nessun candidato contiene G_f ⇒
+     **G_f = ambiente ESATTO** (contratto di copertura Brick 2).
+  Test: `test_galois_padic.cpp` (8: assiomi GF(9), radici razionali esatte,
+  orbita Frobenius, CZ in GF(121), trace-split 2-adico + sweep Rabin Φ deg 6,
+  raise in-place, budget strutturati), `test_galois_invariant.cpp` (5:
+  wreath deg-2 in S_8, fallback monomio di Galois forzato da A_6
+  k-omogeneo, Stab esatto per C_6 non-massimale idx 120, twin AGL(3,2) in
+  A_8, failure strutturati), `test_galois_stauduhar.cpp` (5: cross-check
+  vs pipeline deg 6/7 INDIPENDENTE — ambiente ⟺ nome S/A, proprio ⟺
+  discesa; Φ₁₆ scende sotto A_8 e x⁸−x−1 = S_8 certificato — primi
+  statement Galois deg-8 del motore; failure strutturati).
+  `GaloisStauduharTest.CrossCheckDegree{6,7}` in SLOW_OK (~45/57s ASan,
+  dominati dal pipeline-oracolo richiamato). Bug di design trovato e corretto
+  in dev (non nascosto): coset distinti NON implicano valori distinti — la
+  pretesa di distinzione globale era sia matematicamente sbagliata
+  (InternalError spurio su Φ₉/x⁶−2/Φ₁₆) sia O(m²) inutile; sostituita dal
+  criterio corretto radice-semplice.
+- **Residuo (Brick 3.5-4, sessioni successive)**: discesa SOTTO il primo
+  strato (massimali dei nodi interni: ricorsione sui blocchi per gli
+  imprimitivi, reticolo dei sottogruppi per i primitivi piccoli) — oggi la
+  prosecuzione oltre il primo strato ritorna il containment certificato, non
+  l'identificazione completa; naming strutturale n=8..10; wiring in
+  `galois.cpp` + corpus oracoli ≥30. La voce resta **APERTA** finché la
+  discesa non identifica realmente i gruppi deg ≥ 8.
 
 ### HC-F8-PENDING-10 — Wang EEZ Kronecker fallback — CHIUSA 2026-06-13
 - **Task ID**: 10
