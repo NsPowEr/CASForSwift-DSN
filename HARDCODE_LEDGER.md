@@ -2227,13 +2227,54 @@ Vedi `PLAN_TASKS_REMAINING.md` per breakdown completo.
   pretesa di distinzione globale era sia matematicamente sbagliata
   (InternalError spurio su Φ₉/x⁶−2/Φ₁₆) sia O(m²) inutile; sostituita dal
   criterio corretto radice-semplice.
-- **Residuo (Brick 3.5-4, sessioni successive)**: discesa SOTTO il primo
-  strato (massimali dei nodi interni: ricorsione sui blocchi per gli
-  imprimitivi, reticolo dei sottogruppi per i primitivi piccoli) — oggi la
-  prosecuzione oltre il primo strato ritorna il containment certificato, non
-  l'identificazione completa; naming strutturale n=8..10; wiring in
-  `galois.cpp` + corpus oracoli ≥30. La voce resta **APERTA** finché la
-  discesa non identifica realmente i gruppi deg ≥ 8.
+- **✅ Brick 3.5 FATTO 2026-07-13 — walk sotto il primo strato
+  (identificazione completa)**. Tre pezzi nuovi + un fix matematico:
+  1. `galois_sublattice.cpp` (+ `_internal.hpp`) —
+     `transitive_subgroup_classes_in(H, max_ops, max_bytes, ctx)`: classi di
+     sottogruppi transitivi MASSIMALI dentro un nodo interno H, a meno di
+     H-coniugio, enumerazione esaustiva in index-space u16 (tabella di Cayley
+     densa 2|H|² byte, chiusure single-generator — completezza per
+     costruzione, zero tabelle). Filtro di massimalità ESATTO (dominazione
+     via coniugati, test sui soli generatori): tiene basso l'indice [H:K] =
+     grado della risolvente, da cui dipende la precisione p-adica. Doppio
+     budget: ops (tempo, `galois_lattice_max_ops`) + bytes (memoria, NUOVO
+     param `CASContext::galois_sublattice_max_bytes`, default 256 MiB,
+     speso PRIMA di allocare — mai una tabella multi-GiB a sorpresa).
+  2. `galois_stauduhar_below.cpp` — `stauduhar_identify(f, ctx, dl)`: primo
+     strato, poi loop {classi massimali transitive del nodo corrente → test
+     certificato → hit = discesa (tripwire Frobenius ∈ nodo), nessun hit =
+     G_f = nodo ESATTO (ogni transitivo proprio sta in un massimale
+     transitivo — teorema, non euristica)}. Terminazione = ordini
+     strettamente decrescenti. Lo splitting (e l'indicizzazione delle
+     radici) è UNICO per tutta la catena.
+  3. `galois_stauduhar_candidate.cpp` — protocollo retry per-candidato
+     estratto da descent.cpp e condiviso col walk. **Bug matematico trovato
+     e corretto**: la famiglia Tschirnhaus a un parametro P_t = Σt^{m−1}x^m
+     è DEGENERE (c_a·c_b dipende solo da a+b): su x⁵−2 col invariante
+     quadratico sotto F₂₀ la differenza di coset è ∝ (c₁c₄−c₂c₃)√5 ≡ 0 su
+     tutta la curva ⇒ sweep esausto (Unimplemented spurio, preso dal test
+     IdentifyDegree5). Fix generale: sweep sulla GRIGLIA di coefficienti
+     c = (c₀..c_{n−1}) ∈ {0..Δ}ⁿ a gusci di norma-max, c₀ via Taylor-shift
+     esatto di g; ogni polinomio separatore è ≢ 0 in coefficienti liberi
+     (interpolazione di Lagrange + densità Zariski dei punti a coordinate
+     distinte) e il Combinatorial Nullstellensatz (Alon) garantisce un punto
+     buono con Δ = deg(F)·C(m,2)+C(n,2) ⇒ terminazione DIMOSTRATA
+     (esaurimento griglia = InternalError, non retry-budget).
+  Test: `test_galois_sublattice.cpp` (5: S₄→{A₄,D₄}, D₄→{C₄,V₄} distinte
+  per parità, S₅→{A₅,F₂₀} + copertura cross-check vs lattice denso
+  INDIPENDENTE, C₅→∅ = certificato terminale, failure strutturati ops/bytes/
+  u16-cap) e `test_galois_stauduhar.cpp` esteso (+5): deg 5 TUTTE e 5 le
+  classi (S₅ 120 / A₅ 60 / F₂₀ 20 / D₅ 10 / C₅ 5, con conteggio passi
+  esatto), C₇ deg 7 (ordine 7 via F₂₁), Φ₉→C₆ e x⁶−2→ordine 12, e i primi
+  due gruppi deg-8 COMPLETAMENTE identificati: Φ₁₆ → ordine 8 (~5s) e
+  x⁸−2 → ordine 16 = Q(2^{1/8}, i) (~25s, in SLOW_OK).
+- **Residuo (Brick 3.75-4, sessioni successive)**: i nodi wreath 5|2 di
+  grado 10 (S₅≀S₂ = 28800, ∩A₁₀ = 14400 — sottocampo quadratico di un campo
+  deg 10) superano il byte-budget della sublattice densa (tabella 1.66/0.41
+  GiB) e falliscono STRUTTURATI: serve la via dei massimali strutturali di
+  wreath (Brick 3.75). Naming strutturale n=8..10; wiring in `galois.cpp` +
+  corpus oracoli ≥30 (Brick 4). La voce resta **APERTA** finché il driver
+  pubblico non copre deg ≥ 8 end-to-end.
 
 ### HC-F8-PENDING-10 — Wang EEZ Kronecker fallback — CHIUSA 2026-06-13
 - **Task ID**: 10

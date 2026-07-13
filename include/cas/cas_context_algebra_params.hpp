@@ -125,6 +125,23 @@ struct CASContextAlgebraParams {
         galois_lattice_max_ops_ = n;
     }
 
+    // ── Galois sublattice memory budget (A6 Brick 3.5) ──────────────────────
+    // The below-first-layer descent enumerates the subgroup classes INSIDE a
+    // small interior node H with a dense u16 Cayley table (2·|H|² bytes) plus
+    // the conjugate dedup sets (2·|K| bytes per distinct conjugate). This is
+    // a MEMORY budget, distinct from the ops budget above (time): the default
+    // 2^28 B = 256 MiB admits every certified first-layer node of degree ≤ 10
+    // except the 5|2-block wreath family of S_10/A_10 (|H| = 28800/14400 →
+    // table alone 1.66/0.41 GiB), which awaits the structural wreath-maximal
+    // route (HC-F8-PENDING-09). Exhaustion → structured Unimplemented, never
+    // a silent truncation.
+    [[nodiscard]] std::uint64_t galois_sublattice_max_bytes() const noexcept {
+        return galois_sublattice_max_bytes_;
+    }
+    void set_galois_sublattice_max_bytes(std::uint64_t b) noexcept {
+        galois_sublattice_max_bytes_ = b;
+    }
+
     // ── Algebraic tower ring-arithmetic bit-cap (safety belt, HC-F8-PENDING-26) ──
     // Guards Q[y]/(cand_q) Euclidean inverse/divmod against unbounded coefficient
     // growth when cand_q turns out reducible (not a field): returns nullopt past
@@ -373,6 +390,7 @@ protected:
     double        zippel_error_probability_{1e-6};
     std::size_t   algebraic_tower_eval_max_bits_{8192U};
     std::uint64_t galois_lattice_max_ops_{1ULL << 42U};
+    std::uint64_t galois_sublattice_max_bytes_{1ULL << 28U};
     double        zippel_density_threshold_{5.0};
     std::size_t   f4_max_macaulay_rows_{512U};
     std::size_t   f4_max_macaulay_monomials_{512U};

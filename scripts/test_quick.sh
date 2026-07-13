@@ -50,6 +50,7 @@ SLOW_OK=(
     PermMaximalTest.CrossCheckDegree7BothAmbients                         # ~45s (2× lattice n=7, macOS ASan)
     GaloisStauduharTest.CrossCheckDegree6                                 # ~45s (oracolo = pipeline deg6, macOS ASan)
     GaloisStauduharTest.CrossCheckDegree7                                 # ~57s (oracolo = pipeline deg7, macOS ASan)
+    GaloisStauduharTest.IdentifyDegree8X8Minus2Order16                    # ~25s isolato (catena deg-8 completa, macOS ASan) — borderline sotto carico
 )
 
 # Quarantena (noti-rossi) — caricata dal file governato.

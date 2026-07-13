@@ -391,6 +391,9 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/galois_invariant.cpp
     src/algebra/galois_stauduhar_step.cpp
     src/algebra/galois_stauduhar_descent.cpp
+    src/algebra/galois_stauduhar_candidate.cpp
+    src/algebra/galois_sublattice.cpp
+    src/algebra/galois_stauduhar_below.cpp
 )
 
 set(CAS_LINALG_SOURCES
@@ -759,6 +762,7 @@ test/unit/numeric/test_sturm_bigfloat.cpp
         test/unit/algebra/test_galois_padic.cpp
         test/unit/algebra/test_galois_invariant.cpp
         test/unit/algebra/test_galois_stauduhar.cpp
+        test/unit/algebra/test_galois_sublattice.cpp
         test/unit/algebra/test_solve_closure.cpp
         test/unit/calculus/test_ode_laplace.cpp
         test/unit/calculus/test_ode_frobenius.cpp

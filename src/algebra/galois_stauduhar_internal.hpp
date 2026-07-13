@@ -33,11 +33,13 @@
 // First layer (degrees 5..10): ambient = S_n, or A_n when disc(f) is a
 // rational square; candidates from perm_maximal.cpp (Brick 2, coverage
 // contract). If NO transitive maximal candidate contains G_f, then
-// G_f = ambient EXACTLY (coverage + maximality). One certified descent
-// step below the ambient is returned as a containment; continuing the
-// walk below the first layer needs the maximals of the inner nodes —
-// that is the next brick, surfaced as a structured Unimplemented by the
-// full identification driver (HC-F8-PENDING-09 stays open).
+// G_f = ambient EXACTLY (coverage + maximality). Below the first layer
+// (Brick 3.5) the walk of stauduhar_identify repeats the certified step
+// on the exhaustively generated maximal transitive classes of each
+// interior node (galois_sublattice) until no class contains G_f — which
+// certifies G_f = current node, exactly. The 5|2-block wreath nodes of
+// degree 10 exceed the sublattice memory budget and fail structured
+// (HC-F8-PENDING-09 stays open for them and for the Brick-4 naming).
 
 #pragma once
 
@@ -85,6 +87,26 @@ struct StepOutcome {
     const galois_padic::PadicSplitting& split, symbolic::CASContext* ctx,
     const primitive_internal::Deadline& deadline = std::nullopt);
 
+// A certified containment G_f ≤ subgroup (= σ·H·σ⁻¹ for the tested H).
+struct DescentHit {
+    permgrp::Perm conjugator;
+    permgrp::BsgsGroup subgroup;
+};
+
+// Runs the full retry protocol for ONE candidate H below the current
+// group: identity model first, then precision raises on demand
+// (NeedPrecision — applied to `base`, the ORIGINAL splitting, the only
+// one Newton can safely refine) and the derived Tschirnhaus sweep on
+// certified multiple integer roots (Collision). Returns the hit, or
+// nullopt for a certified NotContained. `base` may come back at a
+// higher precision (kept for the following candidates). Structured
+// Unimplemented when the derived sweep bound is exhausted.
+[[nodiscard]] Result<std::optional<DescentHit>> test_candidate_with_retries(
+    const permgrp::BsgsGroup& current, const permgrp::BsgsGroup& H,
+    const galois_invariant::RelativeInvariant& inv, const IntPoly& f_monic,
+    galois_padic::PadicSplitting& base, symbolic::CASContext& ctx,
+    const primitive_internal::Deadline& deadline = std::nullopt);
+
 struct FirstLayerDescent {
     bool disc_square{false};
     // True: G_f equals the ambient group EXACTLY (certified by the
@@ -104,6 +126,35 @@ struct FirstLayerDescent {
 // (monicity, squarefreeness via disc ≠ 0); irreducibility is the
 // caller's certified responsibility (as in galois.cpp).
 [[nodiscard]] Result<FirstLayerDescent> stauduhar_first_layer(
+    const IntPoly& f_monic, symbolic::CASContext& ctx,
+    const primitive_internal::Deadline& deadline = std::nullopt);
+
+// S_n (alternating = false) or A_n (true) as a verified BsgsGroup, with
+// the exact order cross-checked. Shared by the first layer and the
+// below-first-layer walk.
+[[nodiscard]] Result<permgrp::BsgsGroup> ambient_bsgs(std::size_t n,
+                                                      bool alternating);
+
+// The exact Galois group, certified end to end (A6 Brick 3.5).
+struct GaloisIdentification {
+    bool disc_square{false};
+    std::string ambient_name;  // structural: "S<n>" / "A<n>"
+    // G_f on the root indexing fixed by the p-adic splitting. EXACT: each
+    // descent step is a certified Stauduhar containment, and the terminal
+    // node is certified by exhausting its maximal transitive classes (any
+    // proper transitive subgroup lies inside one of them).
+    permgrp::BsgsGroup group;
+    std::size_t descent_steps{0U};  // 0 ⟺ G_f = ambient
+    std::string first_layer_provenance;  // empty ⟺ G_f = ambient
+};
+
+// Full Stauduhar identification for a monic irreducible squarefree
+// f ∈ Z[x] of degree 5..10: first layer (Brick-2 maximal candidates),
+// then the below-first-layer walk on exhaustively generated maximal
+// transitive classes of each interior node (galois_sublattice). The
+// 5|2-block wreath nodes of degree 10 exceed the sublattice memory
+// budget and surface as structured Unimplemented (HC-F8-PENDING-09).
+[[nodiscard]] Result<GaloisIdentification> stauduhar_identify(
     const IntPoly& f_monic, symbolic::CASContext& ctx,
     const primitive_internal::Deadline& deadline = std::nullopt);
 

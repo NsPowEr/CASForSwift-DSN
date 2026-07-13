@@ -14,6 +14,7 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <initializer_list>
 #include <string>
 #include <vector>
@@ -121,6 +122,93 @@ TEST_F(GaloisStauduharTest, Degree8OsadaTrinomialIsS8) {
     EXPECT_FALSE(fl.value().disc_square);
     EXPECT_TRUE(fl.value().is_ambient);
     EXPECT_EQ(fl.value().ambient_name, "S8");
+}
+
+TEST_F(GaloisStauduharTest, IdentifyDegree5AllTransitiveClasses) {
+    // The five transitive classes of S₅, one certified witness each —
+    // the full walk must land on the EXACT group order every time:
+    //   x⁵−x−1 → S₅ (Osada), x⁵+20x+16 → A₅ (square disc, no proper
+    //   candidate), x⁵−2 → F₂₀ = AGL(1,5), x⁵−5x+12 → D₅, and the
+    //   Gaussian-period minimal polynomial of 2cos(2π/11) → C₅.
+    struct Case {
+        IntPoly f;
+        std::uint64_t order;
+        std::size_t steps;
+    };
+    const Case cases[] = {
+        {make_poly({-1, -1, 0, 0, 0, 1}), 120U, 0U},
+        {make_poly({16, 20, 0, 0, 0, 1}), 60U, 0U},
+        {make_poly({-2, 0, 0, 0, 0, 1}), 20U, 1U},
+        {make_poly({12, -5, 0, 0, 0, 1}), 10U, 1U},
+        {make_poly({1, 3, -3, -4, 1, 1}), 5U, 2U},
+    };
+    for (const auto& c : cases) {
+        auto id = stauduhar_identify(c.f, ctx);
+        ASSERT_TRUE(id.is_ok()) << "order " << c.order << ": "
+                                << id.error().message;
+        EXPECT_EQ(id.value().group.order(), c.order);
+        EXPECT_EQ(id.value().descent_steps, c.steps);
+        EXPECT_TRUE(id.value().group.is_transitive());
+        EXPECT_EQ(id.value().descent_steps == 0U,
+                  id.value().first_layer_provenance.empty());
+    }
+}
+
+TEST_F(GaloisStauduharTest, IdentifyDegree6ProperChains) {
+    // Φ₉ = x⁶ + x³ + 1 → C₆ (order 6) and x⁶ − 2 → the dihedral group of
+    // order 12: both need at least one certified step BELOW the first
+    // layer, exercising the sublattice-driven walk.
+    auto phi9 = stauduhar_identify(make_poly({1, 0, 0, 1, 0, 0, 1}), ctx);
+    ASSERT_TRUE(phi9.is_ok()) << phi9.error().message;
+    EXPECT_EQ(phi9.value().group.order(), 6U);
+    EXPECT_TRUE(phi9.value().group.is_transitive());
+    EXPECT_GE(phi9.value().descent_steps, 2U);
+    auto x6m2 = stauduhar_identify(make_poly({-2, 0, 0, 0, 0, 0, 1}), ctx);
+    ASSERT_TRUE(x6m2.is_ok()) << x6m2.error().message;
+    EXPECT_EQ(x6m2.value().group.order(), 12U);
+    EXPECT_TRUE(x6m2.value().group.is_transitive());
+    EXPECT_GE(x6m2.value().descent_steps, 2U);
+}
+
+TEST_F(GaloisStauduharTest, IdentifyDegree7GaussianPeriodC7) {
+    // The Gaussian-period minimal polynomial for Q(ζ₂₉)⁺-related C₇:
+    // the walk must pass through the Frobenius node F₂₁ down to C₇.
+    auto id = stauduhar_identify(
+        make_poly({1, -9, 14, 28, -7, -12, 1, 1}), ctx);
+    ASSERT_TRUE(id.is_ok()) << id.error().message;
+    EXPECT_EQ(id.value().group.order(), 7U);
+    EXPECT_TRUE(id.value().group.is_transitive());
+    EXPECT_GE(id.value().descent_steps, 2U);
+}
+
+TEST_F(GaloisStauduharTest, IdentifyDegree8X8Minus2Order16) {
+    // x⁸ − 2: √2 = (2^{1/8})⁴ already lies in Q(2^{1/8}), so the
+    // splitting field is Q(2^{1/8}, i) of degree 16 — a second degree-8
+    // chain, through the imprimitive candidates of S₈ this time (the
+    // discriminant is not a square).
+    auto id = stauduhar_identify(
+        make_poly({-2, 0, 0, 0, 0, 0, 0, 0, 1}), ctx);
+    ASSERT_TRUE(id.is_ok()) << id.error().message;
+    EXPECT_FALSE(id.value().disc_square);
+    EXPECT_EQ(id.value().ambient_name, "S8");
+    EXPECT_EQ(id.value().group.order(), 16U);
+    EXPECT_TRUE(id.value().group.is_transitive());
+    EXPECT_GE(id.value().descent_steps, 2U);
+}
+
+TEST_F(GaloisStauduharTest, IdentifyDegree8Phi16OrderEight) {
+    // Φ₁₆ = x⁸ + 1: G ≅ (Z/16)^* has order 8 — the first FULL certified
+    // identification at degree 8 (the first layer only certified a
+    // containment). The chain starts at A₈ and must walk the interior
+    // sublattices down to the exact regular abelian group.
+    auto id = stauduhar_identify(
+        make_poly({1, 0, 0, 0, 0, 0, 0, 0, 1}), ctx);
+    ASSERT_TRUE(id.is_ok()) << id.error().message;
+    EXPECT_TRUE(id.value().disc_square);
+    EXPECT_EQ(id.value().ambient_name, "A8");
+    EXPECT_EQ(id.value().group.order(), 8U);
+    EXPECT_TRUE(id.value().group.is_transitive());
+    EXPECT_GE(id.value().descent_steps, 2U);
 }
 
 TEST_F(GaloisStauduharTest, StructuredFailures) {
