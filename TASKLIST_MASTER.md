@@ -316,7 +316,9 @@ A16..A24 (debiti minori) — indipendenti, inframmezzabili
 
 ## E — Ordine raccomandato
 
-> **Avanzamento 2026-06-28**: A2 ✅ (388f6f5) · A10 ✅ chiuso con probe (156b18a) · A16 chiarito = deferral ledgered post-parità (non E1) · A4/A12/A14/A15/A17/A24 = già FATTO/stale. **Quick-win esauriti** (done-stale o ledger-deferred). **Prossima direzione = research C4**: entry-point **A7** (unblocked, vedi RESTART GUIDE in A7); A1 resta BLOCCATO (richiede prima la torre-test deg_t(f)>0).
+> **Avanzamento 2026-07-13**: linea attiva = **A6** (Brick 1-3.5 fatti; prossimi = **Brick 3.75** massimali strutturali wreath 5|2 deg-10, poi **Brick 4** naming n=8..10 + wiring `galois.cpp` + corpus ≥30 → chiude HC-F8-PENDING-09). Dopo A6: **A31** (propagazione condizioni di dominio — serve SPEC + decisione architetturale (a)Piecewise/(b)side-conditions/(c)generic-point; sblocca anche i residui `abs` real-domain di B.1/B.2) e **A7** (Meijer-G — resta SPEC-BLOCKED: prima redigere+approvare `Meijer_G_Slater.md`). Minori intercalabili: A22 (Padé Q(π,e,√)), A18-residuo (osservabilità `false`→`Unimplemented`, R2/R3). A5/A13/A11/A26 residui = by-design, riaprire solo con driver reale.
+>
+> ⬇️ avanzamento 2026-06-28 (storico): A2 ✅ (388f6f5) · A10 ✅ chiuso con probe (156b18a) · A16 chiarito = deferral ledgered post-parità (non E1) · A4/A12/A14/A15/A17/A24 = già FATTO/stale. Quick-win esauriti.
 >
 > ⬇️ ordine storico (pre-sessione 2026-06-28), conservato per contesto:
 
