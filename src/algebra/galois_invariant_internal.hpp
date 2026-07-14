@@ -15,11 +15,17 @@
 //   • tier 1 — H-orbit sums of squarefree monomials (k-subset indicator
 //     monomials, k = 1..n−1, one candidate per H-orbit; the full orbit
 //     e_k is skipped: its stabiliser is all of G);
-//   • tier 2 — the classical Galois resolvent monomial
-//     m* = x_1 x_2² ⋯ x_{n−1}^{n−1} whose S_n-stabiliser is trivial, so
-//     Stab_G(Σ_{h∈H} h·m*) = H unconditionally (guaranteed terminator —
-//     the search never fails, it only prefers lower-degree invariants
-//     because the later p-adic precision bound grows with the degree).
+//   • tier 2 — H-orbit sums of j-tuple monomials x_{t₀}¹x_{t₁}²⋯x_{t_j}^j
+//     over ordered tuples of distinct indices, ascending j = 2..n−1: the
+//     smallest j whose point stabilisers differ already separates
+//     subgroups invisible to set-orbits (e.g. sign-character kernels in
+//     wreath nodes) with an orbit-sum FAR smaller than the full Galois
+//     monomial. The last level j = n−1 IS the classical Galois resolvent
+//     monomial m* = x_1 x_2² ⋯ x_{n−1}^{n−1}, whose S_n-stabiliser is
+//     trivial, so Stab_G(Σ_{h∈H} h·m*) = H unconditionally (guaranteed
+//     terminator — the search never fails, it only prefers small
+//     invariants because the later p-adic precision bound grows with the
+//     degree and the term count).
 // Exactness of every candidate is CERTIFIED by counting: the G-orbit of F
 // is enumerated and accepted iff its size equals [G:H] (Stab_G(F) ⊇ H
 // always holds by construction, so equality of counts pins Stab = H).

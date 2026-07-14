@@ -35,11 +35,12 @@
 // contract). If NO transitive maximal candidate contains G_f, then
 // G_f = ambient EXACTLY (coverage + maximality). Below the first layer
 // (Brick 3.5) the walk of stauduhar_identify repeats the certified step
-// on the exhaustively generated maximal transitive classes of each
-// interior node (galois_sublattice) until no class contains G_f — which
-// certifies G_f = current node, exactly. The 5|2-block wreath nodes of
-// degree 10 exceed the sublattice memory budget and fail structured
-// (HC-F8-PENDING-09 stays open for them and for the Brick-4 naming).
+// on the maximal transitive classes of each interior node — dense
+// exhaustive (galois_sublattice) when the node fits the byte budget,
+// structural wreath-preimage (galois_wreath_maximal, Brick 3.75, covers
+// the 5|2-block degree-10 nodes of order 28800/14400) otherwise — until
+// no class contains G_f, which certifies G_f = current node, exactly
+// (HC-F8-PENDING-09 stays open for the Brick-4 naming and wiring).
 
 #pragma once
 
@@ -92,6 +93,25 @@ struct DescentHit {
     permgrp::Perm conjugator;
     permgrp::BsgsGroup subgroup;
 };
+
+// Certified quadratic-character descent for an INDEX-2 candidate H of G
+// (index 2 ⇒ H ◁ G ⇒ no conjugator): when the character of G/H is
+// realised by a ±δ alternating form (per-block/top/global Vandermonde
+// products over a minimal block system of G — see
+// galois_stauduhar_quadratic.cpp), the resolvent is y² − v² with
+// v = δ(r) evaluated as a PRODUCT: the |H|-monomial orbit-sum invariant
+// (unavoidably ≥ |H|/2 terms for sign-character kernels) is bypassed.
+//   ok(true)    — certified G_f ≤ H;
+//   ok(false)   — certified G_f ⊄ H;
+//   ok(nullopt) — no δ-form realises the character, or the matched form
+//                 degenerates on these roots: the caller MUST fall back
+//                 to the general invariant route (always sound).
+// `base` may come back at a higher (certified) precision.
+[[nodiscard]] Result<std::optional<bool>> quadratic_character_descent(
+    const permgrp::BsgsGroup& G, const permgrp::BsgsGroup& H,
+    const IntPoly& f_monic, galois_padic::PadicSplitting& base,
+    symbolic::CASContext& ctx,
+    const primitive_internal::Deadline& deadline = std::nullopt);
 
 // Runs the full retry protocol for ONE candidate H below the current
 // group: identity model first, then precision raises on demand
@@ -150,10 +170,10 @@ struct GaloisIdentification {
 
 // Full Stauduhar identification for a monic irreducible squarefree
 // f ∈ Z[x] of degree 5..10: first layer (Brick-2 maximal candidates),
-// then the below-first-layer walk on exhaustively generated maximal
-// transitive classes of each interior node (galois_sublattice). The
-// 5|2-block wreath nodes of degree 10 exceed the sublattice memory
-// budget and surface as structured Unimplemented (HC-F8-PENDING-09).
+// then the below-first-layer walk on the maximal transitive classes of
+// each interior node (galois_sublattice dense route, or the structural
+// wreath-preimage route of galois_wreath_maximal for the 5|2-block
+// degree-10 nodes beyond the dense byte budget — A6 Brick 3.75).
 [[nodiscard]] Result<GaloisIdentification> stauduhar_identify(
     const IntPoly& f_monic, symbolic::CASContext& ctx,
     const primitive_internal::Deadline& deadline = std::nullopt);

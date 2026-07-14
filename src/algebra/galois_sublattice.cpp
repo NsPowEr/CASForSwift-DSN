@@ -1,12 +1,13 @@
-// A6 Brick 3.5 — implementation of the maximal transitive-subgroup classes
-// inside a small group H. See galois_sublattice_internal.hpp for the
-// contract. The three optimisations of galois_transitive_lattice.cpp are
-// reused in index space: a dense Cayley table over element indices,
-// index-only closures (a BsgsGroup is materialised only for the surviving
-// maximal classes), and an exact `seen` set holding the element-index set
-// of every subgroup H-conjugate to an accepted class. Both budgets (ops =
-// time, bytes = memory) are spent BEFORE the corresponding allocation or
-// scan — the table is never allocated past the byte budget.
+// A6 Brick 3.5 / 3.75 — implementation of the dense subgroup-class
+// enumeration inside a small group H. See galois_sublattice_internal.hpp
+// for the contracts. The three optimisations of
+// galois_transitive_lattice.cpp are reused in index space: a dense Cayley
+// table over element indices, index-only closures (a BsgsGroup is
+// materialised only for the surviving classes), and an exact `seen` set
+// holding the element-index set of every subgroup H-conjugate to an
+// accepted class. Both budgets (ops = time, bytes = memory) are spent
+// BEFORE the corresponding allocation or scan — the table is never
+// allocated past the byte budget.
 
 #include "galois_sublattice_internal.hpp"
 
@@ -94,24 +95,29 @@ struct NodeClass {
     std::vector<std::uint16_t> elem_idxs;
 };
 
-}  // namespace
+// Which classes the caller keeps after the exhaustive BFS.
+enum class ClassSelection : std::uint8_t {
+    TransitiveMaximal,  // proper + transitive + not dominated
+    Maximal,            // proper + not dominated
+    All,                // every class, no filter
+};
 
-Result<std::vector<BsgsGroup>> transitive_subgroup_classes_in(
+Result<std::vector<BsgsGroup>> subgroup_classes_impl(
     const BsgsGroup& H, std::uint64_t max_ops, std::uint64_t max_bytes,
-    symbolic::CASContext* ctx) {
+    symbolic::CASContext* ctx, ClassSelection sel) {
     if (max_ops == 0U || max_bytes == 0U) {
         return fail<std::vector<BsgsGroup>>(CASError{
             .kind = CASErrorKind::InvalidArgument,
-            .message = "transitive_subgroup_classes_in: caller must supply "
-                       "positive ops and byte budgets"});
+            .message = "subgroup_classes_in: caller must supply positive "
+                       "ops and byte budgets"});
     }
     const std::uint64_t order64 = H.order();
     if (order64 > 65536ULL) {
         return fail<std::vector<BsgsGroup>>(CASError{
             .kind = CASErrorKind::Unimplemented,
-            .message = "transitive_subgroup_classes_in: |H| exceeds the "
-                       "u16-index universe (2^16); such a node needs the "
-                       "structural wreath-maximal route"});
+            .message = "subgroup_classes_in: |H| exceeds the u16-index "
+                       "universe (2^16); such a node needs the structural "
+                       "wreath-preimage route (galois_wreath_maximal)"});
     }
     const std::size_t m = static_cast<std::size_t>(order64);
     const std::size_t n = H.degree();
@@ -125,16 +131,15 @@ Result<std::vector<BsgsGroup>> transitive_subgroup_classes_in(
     auto ops_fail = []() {
         return fail<std::vector<BsgsGroup>>(CASError{
             .kind = CASErrorKind::Unimplemented,
-            .message = "transitive_subgroup_classes_in: operations budget "
-                       "exhausted — raise "
-                       "CASContext::galois_lattice_max_ops"});
+            .message = "subgroup_classes_in: operations budget exhausted — "
+                       "raise CASContext::galois_lattice_max_ops"});
     };
     auto bytes_fail = []() {
         return fail<std::vector<BsgsGroup>>(CASError{
             .kind = CASErrorKind::Unimplemented,
-            .message = "transitive_subgroup_classes_in: memory budget "
-                       "exhausted — this node needs the structural "
-                       "wreath-maximal route, or raise "
+            .message = "subgroup_classes_in: memory budget exhausted — "
+                       "this node needs the structural wreath-preimage "
+                       "route (galois_wreath_maximal), or raise "
                        "CASContext::galois_sublattice_max_bytes"});
     };
     auto poll = [&]() -> bool {
@@ -161,8 +166,8 @@ Result<std::vector<BsgsGroup>> transitive_subgroup_classes_in(
         if (elems.size() != m) {
             return fail<std::vector<BsgsGroup>>(CASError{
                 .kind = CASErrorKind::InternalError,
-                .message = "transitive_subgroup_classes_in: element "
-                           "enumeration disagrees with the BSGS order"});
+                .message = "subgroup_classes_in: element enumeration "
+                           "disagrees with the BSGS order"});
         }
         // Canonical (lexicographic) element order — indices are stable.
         std::sort(elems.begin(), elems.end());
@@ -267,91 +272,132 @@ Result<std::vector<BsgsGroup>> transitive_subgroup_classes_in(
         }
     }
 
-    // ── keep the PROPER transitive classes, largest first ──────────────────
-    std::vector<NodeClass> trans;
+    // ── select the classes the caller asked for, largest first ─────────────
+    std::vector<NodeClass> kept;
     for (auto& c : classes) {
-        if (c.elem_idxs.size() == m) continue;  // proper only
-        // Transitivity: orbit of 0 under the class's generators.
-        std::vector<bool> orb(n, false);
-        orb[0] = true;
-        std::vector<std::size_t> queue{0U};
-        std::size_t reached = 1U;
-        while (!queue.empty()) {
-            const std::size_t pt = queue.back();
-            queue.pop_back();
-            for (const std::uint16_t g : c.gen_idxs) {
-                const std::size_t img = elems[g][pt];
-                if (!orb[img]) {
-                    orb[img] = true;
-                    ++reached;
-                    queue.push_back(img);
+        if (sel != ClassSelection::All && c.elem_idxs.size() == m) {
+            continue;  // proper only
+        }
+        if (sel == ClassSelection::TransitiveMaximal) {
+            // Transitivity: orbit of 0 under the class's generators.
+            std::vector<bool> orb(n, false);
+            orb[0] = true;
+            std::vector<std::size_t> queue{0U};
+            std::size_t reached = 1U;
+            while (!queue.empty()) {
+                const std::size_t pt = queue.back();
+                queue.pop_back();
+                for (const std::uint16_t g : c.gen_idxs) {
+                    const std::size_t img = elems[g][pt];
+                    if (!orb[img]) {
+                        orb[img] = true;
+                        ++reached;
+                        queue.push_back(img);
+                    }
                 }
             }
+            if (reached != n) continue;
         }
-        if (reached == n) trans.push_back(std::move(c));
+        kept.push_back(std::move(c));
     }
-    std::sort(trans.begin(), trans.end(), [](const auto& a, const auto& b) {
+    std::sort(kept.begin(), kept.end(), [](const auto& a, const auto& b) {
         return a.elem_idxs.size() > b.elem_idxs.size();
     });
 
     // ── maximality filter: drop K contained in a conjugate of a bigger
-    //    proper transitive class (any maximal subgroup above a transitive
-    //    K is itself transitive, so bigger TRANSITIVE classes suffice) ────
-    std::vector<bool> dominated(trans.size(), false);
-    for (std::size_t big = 0U; big < trans.size(); ++big) {
-        if (dominated[big]) continue;  // domination is transitive
-        IdxSet in_big(m);
-        for (const std::uint16_t r : trans[big].elem_idxs) in_big.set(r);
-        for (std::size_t small = big + 1U; small < trans.size(); ++small) {
-            if (dominated[small]) continue;
-            const std::size_t osm = trans[small].elem_idxs.size();
-            const std::size_t obg = trans[big].elem_idxs.size();
-            if (osm == obg || obg % osm != 0U) continue;  // Lagrange
-            if (!poll()) return ops_fail();
-            if (!spend(ops_left,
-                       order64 * trans[small].gen_idxs.size())) {
-                return ops_fail();
-            }
-            // K ⊆ s·BIG·s⁻¹ ⟺ every generator g of K has s⁻¹gs ∈ BIG.
-            for (std::size_t s = 0U; s < m; ++s) {
-                bool all_in = true;
-                for (const std::uint16_t g : trans[small].gen_idxs) {
-                    const std::uint16_t gs =
-                        mul[static_cast<std::size_t>(g) * m + s];
-                    const std::uint16_t sgs = mul[
-                        static_cast<std::size_t>(inv_idx[s]) * m + gs];
-                    if (!in_big.test(sgs)) {
-                        all_in = false;
+    //    kept class. For the transitive variant restricting dominators to
+    //    the kept (transitive) classes is exact: any maximal subgroup
+    //    above a transitive K is itself transitive. For the plain maximal
+    //    variant the kept list is ALL proper classes, so domination is
+    //    checked against the full lattice — also exact. ─────────────────────
+    std::vector<bool> dominated(kept.size(), false);
+    if (sel != ClassSelection::All) {
+        for (std::size_t big = 0U; big < kept.size(); ++big) {
+            if (dominated[big]) continue;  // domination is transitive
+            IdxSet in_big(m);
+            for (const std::uint16_t r : kept[big].elem_idxs) in_big.set(r);
+            for (std::size_t small = big + 1U; small < kept.size();
+                 ++small) {
+                if (dominated[small]) continue;
+                const std::size_t osm = kept[small].elem_idxs.size();
+                const std::size_t obg = kept[big].elem_idxs.size();
+                if (osm == obg || obg % osm != 0U) continue;  // Lagrange
+                if (!poll()) return ops_fail();
+                if (!spend(ops_left,
+                           order64 * kept[small].gen_idxs.size())) {
+                    return ops_fail();
+                }
+                // K ⊆ s·BIG·s⁻¹ ⟺ every generator g of K has s⁻¹gs ∈ BIG.
+                for (std::size_t s = 0U; s < m; ++s) {
+                    bool all_in = true;
+                    for (const std::uint16_t g : kept[small].gen_idxs) {
+                        const std::uint16_t gs =
+                            mul[static_cast<std::size_t>(g) * m + s];
+                        const std::uint16_t sgs = mul[
+                            static_cast<std::size_t>(inv_idx[s]) * m + gs];
+                        if (!in_big.test(sgs)) {
+                            all_in = false;
+                            break;
+                        }
+                    }
+                    if (all_in) {
+                        dominated[small] = true;
                         break;
                     }
-                }
-                if (all_in) {
-                    dominated[small] = true;
-                    break;
                 }
             }
         }
     }
 
     std::vector<BsgsGroup> out;
-    for (std::size_t i = 0U; i < trans.size(); ++i) {
+    for (std::size_t i = 0U; i < kept.size(); ++i) {
         if (dominated[i]) continue;
         std::vector<Perm> gens;
-        gens.reserve(trans[i].gen_idxs.size());
-        for (const std::uint16_t g : trans[i].gen_idxs) {
+        gens.reserve(kept[i].gen_idxs.size());
+        for (const std::uint16_t g : kept[i].gen_idxs) {
             gens.push_back(elems[g]);
         }
         auto b = BsgsGroup::build(n, std::move(gens));
         if (b.is_error()) return fail<std::vector<BsgsGroup>>(b.error());
-        if (b.value().order() != trans[i].elem_idxs.size()) {
+        if (b.value().order() != kept[i].elem_idxs.size()) {
             return fail<std::vector<BsgsGroup>>(CASError{
                 .kind = CASErrorKind::InternalError,
-                .message = "transitive_subgroup_classes_in: BSGS order "
-                           "disagrees with the index closure"});
+                .message = "subgroup_classes_in: BSGS order disagrees "
+                           "with the index closure"});
         }
         out.push_back(std::move(b.value()));
     }
     return ok(std::move(out));
+}
+
+}  // namespace
+
+std::uint64_t dense_sublattice_min_bytes(std::uint64_t order,
+                                         std::size_t degree) {
+    // Element store + Cayley table + inverse index — the exact structural
+    // spends of subgroup_classes_impl before any per-class allocation.
+    return 2ULL * order * degree + 2ULL * order * order + 2ULL * order;
+}
+
+Result<std::vector<BsgsGroup>> transitive_subgroup_classes_in(
+    const BsgsGroup& H, std::uint64_t max_ops, std::uint64_t max_bytes,
+    symbolic::CASContext* ctx) {
+    return subgroup_classes_impl(H, max_ops, max_bytes, ctx,
+                                 ClassSelection::TransitiveMaximal);
+}
+
+Result<std::vector<BsgsGroup>> maximal_subgroup_classes_in(
+    const BsgsGroup& H, std::uint64_t max_ops, std::uint64_t max_bytes,
+    symbolic::CASContext* ctx) {
+    return subgroup_classes_impl(H, max_ops, max_bytes, ctx,
+                                 ClassSelection::Maximal);
+}
+
+Result<std::vector<BsgsGroup>> all_subgroup_classes_in(
+    const BsgsGroup& H, std::uint64_t max_ops, std::uint64_t max_bytes,
+    symbolic::CASContext* ctx) {
+    return subgroup_classes_impl(H, max_ops, max_bytes, ctx,
+                                 ClassSelection::All);
 }
 
 }  // namespace cas::algebra::permgrp

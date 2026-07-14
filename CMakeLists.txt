@@ -392,7 +392,9 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/galois_stauduhar_step.cpp
     src/algebra/galois_stauduhar_descent.cpp
     src/algebra/galois_stauduhar_candidate.cpp
+    src/algebra/galois_stauduhar_quadratic.cpp
     src/algebra/galois_sublattice.cpp
+    src/algebra/galois_wreath_maximal.cpp
     src/algebra/galois_stauduhar_below.cpp
 )
 
@@ -763,6 +765,7 @@ test/unit/numeric/test_sturm_bigfloat.cpp
         test/unit/algebra/test_galois_invariant.cpp
         test/unit/algebra/test_galois_stauduhar.cpp
         test/unit/algebra/test_galois_sublattice.cpp
+        test/unit/algebra/test_galois_wreath_maximal.cpp
         test/unit/algebra/test_solve_closure.cpp
         test/unit/calculus/test_ode_laplace.cpp
         test/unit/calculus/test_ode_frobenius.cpp

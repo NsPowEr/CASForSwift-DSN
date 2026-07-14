@@ -2110,7 +2110,7 @@ Vedi `PLAN_TASKS_REMAINING.md` per breakdown completo.
   i puliti; tutto simbolico → nullopt pulito; 1 pulito+1 simbolico → nullopt; regressione catena
   annidata non-simbolica invariata). 89/89 suite Tower/Primitive/RootOf verdi, 0 regressioni.
 
-### HC-F8-PENDING-09 — Stauduhar Galois deg ≥ 6 — 🔨 APERTA (Brick 1/4 fatto 2026-07-11)
+### HC-F8-PENDING-09 — Stauduhar Galois deg ≥ 6 — 🔨 APERTA (Brick 1–3.75 fatti 2026-07-14; resta Brick 4: naming + wiring + corpus)
 - **Task ID**: 9 — closure deg ≥ 8 (deg 6/7 già coperti dal driver esatto A6).
 - **Correzione di rotta vs plan storico**: il PLAN Task 9 (GA-1 tabelle Hulpke
   trascritte + GA-2 risolventi BigFloat) è **stale** — contraddice le scelte del
@@ -2268,13 +2268,83 @@ Vedi `PLAN_TASKS_REMAINING.md` per breakdown completo.
   esatto), C₇ deg 7 (ordine 7 via F₂₁), Φ₉→C₆ e x⁶−2→ordine 12, e i primi
   due gruppi deg-8 COMPLETAMENTE identificati: Φ₁₆ → ordine 8 (~5s) e
   x⁸−2 → ordine 16 = Q(2^{1/8}, i) (~25s, in SLOW_OK).
-- **Residuo (Brick 3.75-4, sessioni successive)**: i nodi wreath 5|2 di
-  grado 10 (S₅≀S₂ = 28800, ∩A₁₀ = 14400 — sottocampo quadratico di un campo
-  deg 10) superano il byte-budget della sublattice densa (tabella 1.66/0.41
-  GiB) e falliscono STRUTTURATI: serve la via dei massimali strutturali di
-  wreath (Brick 3.75). Naming strutturale n=8..10; wiring in `galois.cpp` +
-  corpus oracoli ≥30 (Brick 4). La voce resta **APERTA** finché il driver
-  pubblico non copre deg ≥ 8 end-to-end.
+- **✅ Brick 3.75 FATTO 2026-07-14 — massimali strutturali dei nodi
+  wreath-preimage 5|2 di grado 10** (i nodi oltre il byte-budget denso:
+  S₅≀S₂ = 28800, ker χ₁ = 14400, ∩A₁₀ = ker(χ₁χ₂) = 14400):
+  1. `galois_wreath_maximal.cpp` (+ `_internal.hpp`) — nodo certificato
+     come φ-preimage (φ: S_d≀S_k → C₂≀S_k quoziente dei segni,
+     `detect_wreath_preimage`: block system minimale + certificato esatto
+     |H| = |Q_H|·(d!/2)^k, nessuna enumerazione di elementi) e **teorema di
+     copertura** (header, con dimostrazione): per d ≥ 5, d ≠ 6, k primo,
+     ∃ primo dispari p|d con p>k, ogni massimale transitivo di H è
+     H-coniugato a un membro di FA (lift dei massimali di Q_H, enumerati
+     ESAUSTIVAMENTE nel quoziente piccolo) ∪ FB ((K≀S_k)^t∩H, K shell
+     Brick-2 di S_d, t su trasversale destra di H in W — twins DIMOSTRATI
+     sufficienti via W = H·T) ∪ FD (N_W(Δ^t)∩H, diagonali piene — lemma di
+     Scott 1980, A_d semplice non-abeliano; Aschbacher-Scott 1985 per lo
+     split supplemento). Intersezioni ESATTE via φ (parte kernel = parti
+     pari per blocco + lift dei membri dell'immagine dei segni), mai
+     enumerazione di H. Ipotesi fuori teorema → Unimplemented STRUTTURATO
+     che nomina l'ipotesi (d<5 coperto dal denso; d=6 = Out(A₆); k
+     composto = diagonali partizionate).
+  2. `galois_sublattice.cpp` rifattorizzato: core denso condiviso da
+     `transitive_subgroup_classes_in` (contratto invariato) +
+     `maximal_subgroup_classes_in` (tutte le classi massimali — usato da FA
+     sul quoziente) + `all_subgroup_classes_in` (ground truth per i
+     micro-check) + `dense_sublattice_min_bytes` (unica fonte del costo
+     memoria per il pre-dispatch).
+  3. Dispatch deterministico nel walk (`node_maximal_transitive_classes`):
+     nodo dentro budget/u16 → via densa (comportamento identico al 3.5);
+     oltre → via strutturale; oltre e non-wreath → Unimplemented che nomina
+     entrambe le vie. + First layer ora scandisce i candidati per ordine
+     DECRESCENTE (= indice/risolvente crescente): il bound di precisione
+     p-adica cresce col grado della risolvente — su deg 10 il miss da 945
+     coset (S₂≀S₅) costava >30 min ASan e ora si paga solo quando
+     matematicamente necessario; l'ordine di discesa non cambia mai il
+     gruppo identificato (ogni passo certifica G_f ≤ nodo, il terminale è
+     order-independent).
+  4. **Colli di bottiglia del passo MISURATI (non congetturati) e chiusi
+     con soluzioni generali** — il primo run E2E deg-10 superava 30 min:
+     (a) `galois_invariant.cpp`: il tier k-subset non separa i kernel di
+     caratteri-segno (stesse orbite di SET) e il fallback monomio di
+     Galois costruiva 14400 monomi deg 45 → 351 s per singolo step.
+     Nuovo tier j-tuple (orbit-sum di x_{t₀}¹⋯x_{t_{j−1}}^j, j = 2..n−1
+     ascendente; l'ultimo livello È il monomio di Galois = terminatore
+     garantito invariato): il primo j che spezza gli stabilizzatori di
+     punto dà invarianti piccoli (es. 40 monomi deg 6 per F₂₀≀S₂ in W).
+     (b) Per i candidati INDEX-2 (⇒ normali, χ quadratico) anche l'orbit-
+     sum è intrinsecamente Ω(|H|/2) (lo stab del seed non può contenere
+     trasposizioni same-block): nuovo `galois_stauduhar_quadratic.cpp` —
+     **criterio del sottodiscriminante**: χ riconosciuto (verifica esatta
+     sui generatori) come forma δ alternante (∏ Vandermonde di blocco,
+     δ_top su somme di blocco, δ_Ω globale, δ₀±δ₁ per k=2) valutata come
+     PRODOTTO; D = lift esatto di δ(r)² (intero G-invariante ≤ bound di
+     Cauchy, p^k > 2B²) e contenimento ⟺ D quadrato perfetto — nessuna
+     collisione possibile, degenerazione (solo forme top/±) → fallback
+     dichiarato alla via monomiale generale (fast-path Cat-8 con via
+     generale sempre presente). E2E deg-10 completo: >30 min → 17.5 s.
+  Test (`test_galois_wreath_maximal.cpp`, 10): detection
+  (standard/even/rilabel ρ=3i+1), liste candidate pinnate sulla teoria
+  (W → {14400 kerχ₁, 14400 kerχ₁χ₂, 800 F₂₀≀S₂}; ker χ₁ → {7200×2,
+  400, 240×2 = le DUE classi diagonali S₅×C₂, twin essenziale};
+  ∩A₁₀ → solo 400-tipo, NESSUN index-2 transitivo), guardie strutturate,
+  dispatch denso/strutturale, e **micro-check dei due passi del teorema su
+  ground truth densa**: lemma di Scott su A₅×A₅ (ogni massimale con
+  entrambe le proiezioni piene = diagonale d'ordine 60) e copertura shell
+  dei N_{S₅}(D) su tutte le classi di A₅. E2E
+  (`IdentifyDegree10FullWreathViaStructuralRoute`): f = x¹⁰+2x⁷+x⁴−2
+  (= h·h̄, h = x⁵+x²−√2), G_f = S₅≀S₂ = 28800 DERIVATO INDIPENDENTEMENTE
+  (disc(f) e N = disc(h)·disc(h̄) non quadrati + testimoni di Frobenius
+  mod 47/103 che uccidono la fusione diagonale e i sotto-blocchi propri
+  via Goursat) — il walk manca A₁₀, scende in S₅≀S₂ via la rotta
+  strutturale ed esaurisce i 3 candidati.
+- **Residuo (Brick 4, sessione successiva)**: naming strutturale delle
+  classi n=8..10 (da invarianti del gruppo generato: ordine, parità,
+  primitività, blocchi, ciclicità — mai etichette trascritte), wiring in
+  `galois.cpp` (dispatch deg 8..10 → `stauduhar_identify`, deg 6/7 resta
+  il driver esatto con cross-check reciproco) + corpus oracoli ≥30. La
+  voce resta **APERTA** finché il driver pubblico non copre deg ≥ 8
+  end-to-end.
 
 ### HC-F8-PENDING-10 — Wang EEZ Kronecker fallback — CHIUSA 2026-06-13
 - **Task ID**: 10

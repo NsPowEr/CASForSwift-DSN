@@ -211,6 +211,39 @@ TEST_F(GaloisStauduharTest, IdentifyDegree8Phi16OrderEight) {
     EXPECT_GE(id.value().descent_steps, 2U);
 }
 
+TEST_F(GaloisStauduharTest, IdentifyDegree10FullWreathViaStructuralRoute) {
+    // f = h·h̄ for h = x⁵ + x² − √2: x¹⁰ + 2x⁷ + x⁴ − 2, irreducible/Q.
+    // Independent derivation of G_f = S₅ ≀ S₂ (order 28800), so the test
+    // does not lean on the code under test:
+    //   • Q(√2) is a quadratic subfield and h is irreducible over it ⇒
+    //     G_f ≤ S₅ ≀ S₂ on the 2×5 block system;
+    //   • disc(f) = 5119235588096 is not a square ⇒ G_f ⊄ ker(χ₁χ₂)
+    //     (= W ∩ A₁₀); N = disc(h)·disc(h̄) = 156226672 is not a square
+    //     ⇒ G_f ⊄ ker χ₁; the block swap is realised (√2 ↦ −√2) ⇒
+    //     G_f ⊄ base;
+    //   • Frobenius witnesses (Dedekind): mod 47 the factor degrees are
+    //     (1,4,5) — a 5-cycle in one block, an odd 4-cycle in the other:
+    //     the two in-block cycle types DIFFER, which is impossible in a
+    //     diagonal (Goursat) fusion, and mod 103 the degrees (1,2,3,4)
+    //     put an odd order-6 element (2,3) in a block, which no proper
+    //     transitive subgroup of S₅ contains ⇒ block group = S₅.
+    //   Subdirect fusions of S₅ × S₅ only exist over the C₂ quotient
+    //   (all excluded above) or the full diagonal (excluded) ⇒ G_f = W.
+    // The walk must: miss A₁₀ and S₂ ≀ S₅ at the first layer, descend
+    // into S₅ ≀ S₂ (28800 — beyond the dense byte budget, so the
+    // STRUCTURAL route of Brick 3.75 supplies the classes), then certify
+    // NotContained on all three structural candidates (14400, 14400,
+    // 800): G_f = S₅ ≀ S₂ exactly.
+    auto id = stauduhar_identify(
+        make_poly({-2, 0, 0, 0, 1, 0, 0, 2, 0, 0, 1}), ctx);
+    ASSERT_TRUE(id.is_ok()) << id.error().message;
+    EXPECT_FALSE(id.value().disc_square);
+    EXPECT_EQ(id.value().ambient_name, "S10");
+    EXPECT_EQ(id.value().group.order(), 28800U);
+    EXPECT_TRUE(id.value().group.is_transitive());
+    EXPECT_EQ(id.value().descent_steps, 1U);
+}
+
 TEST_F(GaloisStauduharTest, StructuredFailures) {
     // Non-monic.
     auto bad = stauduhar_first_layer(make_poly({1, 0, 2}), ctx);

@@ -1,7 +1,8 @@
 // A6 Brick 3b — implementation of the certified relative invariants.
 // See galois_invariant_internal.hpp for the contract and the two-tier
-// candidate strategy (k-subset orbit sums, then the guaranteed Galois
-// resolvent monomial).
+// candidate strategy (k-subset orbit sums, then j-tuple orbit sums of
+// growing length, whose last level is the guaranteed Galois resolvent
+// monomial).
 
 #include "galois_invariant_internal.hpp"
 
@@ -159,26 +160,6 @@ Result<RelativeInvariant> relative_invariant(const BsgsGroup& G,
     }
     std::uint64_t ops = 0U;
 
-    const auto try_candidate =
-        [&](const Monomial& seed) -> Result<std::optional<RelativeInvariant>> {
-        auto orb = monomial_orbit(H.generators(), seed, ops, max_ops, ctx);
-        if (orb.is_error()) {
-            return fail<std::optional<RelativeInvariant>>(orb.error());
-        }
-        std::vector<Monomial> F0(orb.value().begin(), orb.value().end());
-        auto tr = g_orbit_transversal(G, F0, index, ops, max_ops, ctx);
-        if (tr.is_error()) {
-            return fail<std::optional<RelativeInvariant>>(tr.error());
-        }
-        if (!tr.value().has_value()) {
-            return ok(std::optional<RelativeInvariant>{});  // Stab too big
-        }
-        std::size_t deg = 0U;
-        for (const auto e : seed) deg += e;
-        return ok(std::optional<RelativeInvariant>{RelativeInvariant{
-            std::move(F0), deg, std::move(*tr.value())}});
-    };
-
     // ── tier 1: k-subset orbit sums, one candidate per H-orbit ─────────────
     for (std::size_t k = 1U; k < n; ++k) {
         std::set<Monomial> covered;
@@ -235,15 +216,76 @@ Result<RelativeInvariant> relative_invariant(const BsgsGroup& G,
         }
     }
 
-    // ── tier 2: the Galois resolvent monomial (guaranteed) ─────────────────
-    Monomial mstar(n, 0U);
-    for (std::size_t i = 0U; i < n; ++i) {
-        mstar[i] = static_cast<std::uint8_t>(i);
+    // ── tier 2: j-tuple orbit sums, j = 2 .. n−1 ───────────────────────────
+    // Seeds x_{t₀}¹·x_{t₁}²⋯x_{t_{j−1}}^j over the ordered j-tuples of
+    // distinct indices, ascending j: k-subsets (tier 1) cannot separate a
+    // subgroup whose set-orbits coincide with G's (e.g. the sign-character
+    // kernels inside a wreath node), while a partial tuple already breaks
+    // the symmetry at the smallest j where the point stabilisers differ —
+    // with an orbit-sum FAR smaller than the full Galois monomial (the
+    // p-adic precision bound of the later resolvent grows with both the
+    // degree and the coefficient size of F, so invariant size is resolvent
+    // cost). j = n−1 IS the classical Galois resolvent monomial: its
+    // S_n-stabiliser is trivial, so Stab_G(Σ_{h∈H} h·m*) = H
+    // unconditionally — the tier is a guaranteed terminator.
+    for (std::size_t j = 2U; j < n; ++j) {
+        std::uint64_t tuple_count = 1U;
+        for (std::size_t i = 0U; i < j; ++i) tuple_count *= (n - i);
+        std::set<Monomial> covered;
+        std::vector<std::size_t> t(j);
+        for (std::size_t i = 0U; i < j; ++i) t[i] = i;
+        while (true) {
+            Monomial seed(n, 0U);
+            for (std::size_t i = 0U; i < j; ++i) {
+                seed[t[i]] = static_cast<std::uint8_t>(i + 1U);
+            }
+            if (covered.find(seed) == covered.end()) {
+                auto orb =
+                    monomial_orbit(H.generators(), seed, ops, max_ops, ctx);
+                if (orb.is_error()) return fail<RelativeInvariant>(orb.error());
+                covered.insert(orb.value().begin(), orb.value().end());
+                // Full tuple orbit ⇒ the sum is symmetric (Stab ⊇ S_n on
+                // the tuple pattern): it cannot separate H from G.
+                if (static_cast<std::uint64_t>(orb.value().size()) <
+                    tuple_count) {
+                    std::vector<Monomial> F0(orb.value().begin(),
+                                             orb.value().end());
+                    auto tr = g_orbit_transversal(G, F0, index, ops,
+                                                  max_ops, ctx);
+                    if (tr.is_error()) return fail<RelativeInvariant>(tr.error());
+                    if (tr.value().has_value()) {
+                        return ok(RelativeInvariant{std::move(F0),
+                                                    j * (j + 1U) / 2U,
+                                                    std::move(*tr.value())});
+                    }
+                }
+            }
+            // Next ordered tuple of distinct indices in lex order.
+            bool advanced = false;
+            std::size_t i = j;
+            while (i-- > 0U) {
+                std::vector<bool> used(n, false);
+                for (std::size_t a = 0U; a < i; ++a) used[t[a]] = true;
+                std::size_t v = t[i] + 1U;
+                while (v < n && used[v]) ++v;
+                if (v < n) {
+                    t[i] = v;
+                    used[v] = true;
+                    std::size_t w = 0U;
+                    for (std::size_t a = i + 1U; a < j; ++a) {
+                        while (used[w]) ++w;
+                        t[a] = w;
+                        used[w] = true;
+                    }
+                    advanced = true;
+                    break;
+                }
+            }
+            if (!advanced) break;
+        }
     }
-    auto res = try_candidate(mstar);
-    if (res.is_error()) return fail<RelativeInvariant>(res.error());
-    if (res.value().has_value()) return ok(std::move(*res.value()));
-    // m* has trivial S_n-stabiliser: Stab_G(orbit sum) = H is a theorem.
+    // Unreachable: the j = n−1 pass contains the Galois resolvent
+    // monomial, whose exactness certificate is a theorem.
     return fail<RelativeInvariant>(CASError{
         .kind = CASErrorKind::InternalError,
         .message = "relative_invariant: Galois resolvent monomial failed "

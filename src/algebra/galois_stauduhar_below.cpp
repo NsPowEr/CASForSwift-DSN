@@ -8,8 +8,12 @@
 // for a proper first-layer node. Then, repeatedly:
 //
 //   • enumerate the maximal transitive subgroup classes of `current` up
-//     to current-conjugacy (galois_sublattice — exhaustive
-//     single-generator-extension lattice, completeness by construction);
+//     to current-conjugacy: the dense exhaustive route of
+//     galois_sublattice when the node fits the byte budget
+//     (completeness by construction), else the structural
+//     wreath-preimage route of galois_wreath_maximal (A6 Brick 3.75 —
+//     coverage theorem in its header; the 5|2-block degree-10 nodes of
+//     order 28800/14400 travel this way);
 //   • run the certified Stauduhar test on each class (Brick 3b invariant
 //     + Brick 3c step with precision raises and the Tschirnhaus sweep);
 //   • a hit descends: G_f ≤ σKσ⁻¹ strictly smaller — the p-adic
@@ -30,7 +34,7 @@
 #include "cas/error.hpp"
 #include "cas/result.hpp"
 #include "cas/symbolic.hpp"
-#include "galois_sublattice_internal.hpp"
+#include "galois_wreath_maximal_internal.hpp"
 #include "polynomial_internal.hpp"
 
 #include <cstddef>
@@ -71,7 +75,7 @@ Result<GaloisIdentification> stauduhar_identify(const IntPoly& f_monic,
         if (auto chk = ctx.check_interrupt(); chk.is_error()) {
             return fail<GaloisIdentification>(chk.error());
         }
-        auto classes = permgrp::transitive_subgroup_classes_in(
+        auto classes = permgrp::node_maximal_transitive_classes(
             current, ctx.galois_lattice_max_ops(),
             ctx.galois_sublattice_max_bytes(), &ctx);
         if (classes.is_error()) {
@@ -79,13 +83,35 @@ Result<GaloisIdentification> stauduhar_identify(const IntPoly& f_monic,
         }
         bool descended = false;
         for (const BsgsGroup& cand : classes.value()) {
-            auto inv = galois_invariant::relative_invariant(
-                current, cand, ctx.galois_lattice_max_ops(), &ctx);
-            if (inv.is_error()) {
-                return fail<GaloisIdentification>(inv.error());
+            // δ-form fast path for index-2 candidates (normal ⇒ no
+            // conjugator); nullopt falls through to the general route.
+            std::optional<DescentHit> quick;
+            bool quick_decided = false;
+            if (current.order() == 2ULL * cand.order()) {
+                auto q = quadratic_character_descent(current, cand, f_monic,
+                                                     base, ctx, deadline);
+                if (q.is_error()) {
+                    return fail<GaloisIdentification>(q.error());
+                }
+                if (q.value().has_value()) {
+                    quick_decided = true;
+                    if (*q.value()) {
+                        quick = DescentHit{
+                            permgrp::identity(current.degree()), cand};
+                    }
+                }
             }
-            auto hit = test_candidate_with_retries(
-                current, cand, inv.value(), f_monic, base, ctx, deadline);
+            Result<std::optional<DescentHit>> hit = ok(std::move(quick));
+            if (!quick_decided) {
+                auto inv = galois_invariant::relative_invariant(
+                    current, cand, ctx.galois_lattice_max_ops(), &ctx);
+                if (inv.is_error()) {
+                    return fail<GaloisIdentification>(inv.error());
+                }
+                hit = test_candidate_with_retries(current, cand, inv.value(),
+                                                  f_monic, base, ctx,
+                                                  deadline);
+            }
             if (hit.is_error()) {
                 return fail<GaloisIdentification>(hit.error());
             }

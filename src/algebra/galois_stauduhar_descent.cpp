@@ -19,6 +19,7 @@
 #include "polynomial_internal.hpp"
 #include "polynomial_resultant_generic.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -137,6 +138,19 @@ Result<FirstLayerDescent> stauduhar_first_layer(const IntPoly& f_monic,
         disc_square ? AmbientGroup::Alternating : AmbientGroup::Symmetric;
     auto cands = permgrp::maximal_transitive_candidates(amb, n);
     if (cands.is_error()) return fail<FirstLayerDescent>(cands.error());
+    // Scan by DECREASING candidate order (= increasing index [ambient:H]):
+    // the resolvent degree is the index and the certified p-adic precision
+    // bound grows with it, so cheap resolvents go first and a hit on a big
+    // candidate spares every deeper (more expensive) miss. Descent order
+    // never changes the identified group — every step certifies
+    // G_f ≤ node and the terminal test is order-independent — this is
+    // resolvent economy only. Stable: preserves the Brick-2 relative
+    // order (A_n stays first: its order dominates every proper candidate).
+    std::stable_sort(cands.value().begin(), cands.value().end(),
+                     [](const permgrp::MaximalCandidate& a,
+                        const permgrp::MaximalCandidate& b) {
+                         return a.group.order() > b.group.order();
+                     });
     auto ambient_res = ambient_bsgs(n, disc_square);
     if (ambient_res.is_error()) {
         return fail<FirstLayerDescent>(ambient_res.error());
