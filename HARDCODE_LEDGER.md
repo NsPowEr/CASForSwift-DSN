@@ -2110,7 +2110,7 @@ Vedi `PLAN_TASKS_REMAINING.md` per breakdown completo.
   i puliti; tutto simbolico → nullopt pulito; 1 pulito+1 simbolico → nullopt; regressione catena
   annidata non-simbolica invariata). 89/89 suite Tower/Primitive/RootOf verdi, 0 regressioni.
 
-### HC-F8-PENDING-09 — Stauduhar Galois deg ≥ 6 — 🔨 APERTA (Brick 1–3.75 fatti 2026-07-14; resta Brick 4: naming + wiring + corpus)
+### HC-F8-PENDING-09 — Stauduhar Galois deg ≥ 6 — ✅ CHIUSA 2026-07-15 (Brick 1–4 fatti; driver pubblico deg 8..10 end-to-end)
 - **Task ID**: 9 — closure deg ≥ 8 (deg 6/7 già coperti dal driver esatto A6).
 - **Correzione di rotta vs plan storico**: il PLAN Task 9 (GA-1 tabelle Hulpke
   trascritte + GA-2 risolventi BigFloat) è **stale** — contraddice le scelte del
@@ -2338,13 +2338,39 @@ Vedi `PLAN_TASKS_REMAINING.md` per breakdown completo.
   mod 47/103 che uccidono la fusione diagonale e i sotto-blocchi propri
   via Goursat) — il walk manca A₁₀, scende in S₅≀S₂ via la rotta
   strutturale ed esaurisce i 3 candidati.
-- **Residuo (Brick 4, sessione successiva)**: naming strutturale delle
-  classi n=8..10 (da invarianti del gruppo generato: ordine, parità,
-  primitività, blocchi, ciclicità — mai etichette trascritte), wiring in
-  `galois.cpp` (dispatch deg 8..10 → `stauduhar_identify`, deg 6/7 resta
-  il driver esatto con cross-check reciproco) + corpus oracoli ≥30. La
-  voce resta **APERTA** finché il driver pubblico non copre deg ≥ 8
-  end-to-end.
+- **✅ Brick 4/4 FATTO 2026-07-15 — naming strutturale + wiring pubblico +
+  corpus ≥30** (`src/algebra/galois_deg8.cpp`, `test_galois_deg8.cpp`):
+  1. `structural_transitive_group_name(BsgsGroup)`: etichetta canonica del
+     gruppo identificato derivata SOLO dai suoi invarianti certificati —
+     mai una tabella (CLAUDE.md §8). S_n / A_n riconosciuti per **certificato
+     esatto d'ordine + parità** (|G|=n!, n!/2); regolari (|G|=n) → C_n se
+     ∃ elemento d'ordine n, altrimenti `Ab<n>_exp<e>` ((|G|, esponente) è
+     invariante completo degli abeliani d'ordine ≤ 15 ⇒ non ambiguo per
+     n ≤ 10); imprimitivi → **wreath pieno per certificato d'ordine**
+     (G ≤ Stab(sistema di blocchi) = S_s≀S_b d'ordine (s!)^b·b!; uguaglianza
+     ⇒ G = quello stabilizzatore → `S<s>wrS<b>`), altrimenti descrittore
+     invariante `Im<n>[s^b]_<ord>`; primitivi non-pieni → `P<n>_<ord>`.
+     Esponente abeliano = lcm degli ordini dei generatori (esatto per il
+     gruppo intero se abeliano) — nessuna enumerazione densa.
+  2. `galois_group_irreducible_deg8_to_10` + branch `total_deg∈[8,10]` in
+     `galois.cpp`: expr → modello monico intero (stesso campo di spezzamento
+     / gruppo di Galois) → `stauduhar_identify` → naming. I riducibili
+     ricorrono nei fattori come i path deg 5/6/7.
+  3. Corpus (`test_galois_deg8.cpp`): **6 unit di naming** su gruppi COSTRUITI
+     da `perm_construct` (etichetta nota dalla costruzione, non dal codice:
+     S/A 8-10, C_n, Ab per esponente, wreath pieni, imprimitivo non-wreath
+     even-part, primitivi PSL(2,7)/PGL(2,7)/AGL(3,2)) + **30 E2E** su
+     `galois_group` con oracoli indipendenti: 9 irriducibili (Osada S8/S9;
+     ciclotomiche Φ15/16/20/24/30 = (Z/m)^*; x⁸−2 = Im8[2^4]_16; x¹⁰ full-
+     wreath S5≀S2) + 21 riducibili (ricorsione, ogni fattore certificato dai
+     driver deg ≤7 validati / dal driver deg-8 stesso). I 5 test E2E in
+     SLOW_OK (deep deg-9/10 esclusi dal corpus: >90 s ciascuno — soffitto
+     perf noto e documentato del passo Stauduhar a grande grado/gruppo
+     profondo, non un errore di correttezza).
+- **Scope**: chiude deg 6/7 (driver esatto) + deg 8..10 (Stauduhar
+  end-to-end). deg ≥ 11 fuori dallo scope originale A6 (bound immagine `Perm`
+  n ≤ 20, ma il costo del passo cresce ripidamente col grado) → non aperto qui;
+  `galois_group` per deg ≥ 11 resta `"unknown"` (nessun silenzio-sbagliato).
 
 ### HC-F8-PENDING-10 — Wang EEZ Kronecker fallback — CHIUSA 2026-06-13
 - **Task ID**: 10

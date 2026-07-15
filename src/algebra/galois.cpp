@@ -293,6 +293,48 @@ Result<std::string> galois_group(ExprPtr poly, const Symbol& var,
         }
         return ok(joined);
     }
+    if (total_deg >= 8U && total_deg <= 10U) {
+        // A6 Brick 4 — an irreducible degree 8/9/10 input goes through the
+        // exact Stauduhar descent (galois_deg8.cpp); reducible ones recurse
+        // into factors exactly like the deg-5/6/7 paths above.
+        std::size_t non_constant_factors = 0U;
+        std::size_t max_factor_deg = 0U;
+        for (const auto& f : factors) {
+            auto pp = parse_polynomial(f.factor, var, ctx);
+            if (pp.is_error()) continue;
+            std::size_t d = poly_degree(pp.value());
+            if (d >= 1U) {
+                non_constant_factors += 1U;
+                if (d > max_factor_deg) max_factor_deg = d;
+            }
+        }
+        if (non_constant_factors == 1U && max_factor_deg == total_deg) {
+            return galois_group_irreducible_deg8_to_10(poly, var, ctx);
+        }
+        if (linear_count >= total_deg) return ok(std::string("trivial"));
+        std::vector<std::string> sub_labels;
+        for (const auto& f : factors) {
+            auto pp = parse_polynomial(f.factor, var, ctx);
+            if (pp.is_error()) continue;
+            std::size_t d = poly_degree(pp.value());
+            if (d <= 1U) continue;
+            for (unsigned int mi = 0U; mi < f.multiplicity; ++mi) {
+                auto sub = galois_group(f.factor, var, ctx);
+                if (sub.is_error()) return ok(std::string("reducible"));
+                if (sub.value() != std::string("trivial")) {
+                    sub_labels.push_back(sub.value());
+                }
+            }
+        }
+        if (sub_labels.empty()) return ok(std::string("trivial"));
+        if (sub_labels.size() == 1U) return ok(sub_labels[0]);
+        std::string joined;
+        for (std::size_t i = 0U; i < sub_labels.size(); ++i) {
+            if (i > 0U) joined += " x ";
+            joined += sub_labels[i];
+        }
+        return ok(joined);
+    }
     return ok(std::string("unknown"));
 }
 

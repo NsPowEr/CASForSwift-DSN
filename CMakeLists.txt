@@ -385,6 +385,7 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/galois_transitive_lattice.cpp
     src/algebra/galois_setpoly.cpp
     src/algebra/galois_deg6.cpp
+    src/algebra/galois_deg8.cpp
     src/algebra/galois_padic_ring.cpp
     src/algebra/galois_padic_roots.cpp
     src/algebra/galois_padic_split.cpp
@@ -760,6 +761,7 @@ test/unit/numeric/test_sturm_bigfloat.cpp
         test/unit/algebra/test_galois_lattice.cpp
         test/unit/algebra/test_galois_setpoly.cpp
         test/unit/algebra/test_galois_deg6.cpp
+        test/unit/algebra/test_galois_deg8.cpp
         test/unit/algebra/test_galois_deg7.cpp
         test/unit/algebra/test_galois_padic.cpp
         test/unit/algebra/test_galois_invariant.cpp

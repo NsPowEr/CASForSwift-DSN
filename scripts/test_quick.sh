@@ -53,6 +53,11 @@ SLOW_OK=(
     GaloisStauduharTest.IdentifyDegree8X8Minus2Order16                    # ~25s isolato (catena deg-8 completa, macOS ASan) — borderline sotto carico
     GaloisStauduharTest.IdentifyDegree10FullWreathViaStructuralRoute      # ~17s isolato (x¹⁰−2 → ordine 40, route strutturale Brick 3.75, macOS ASan)
     GaloisWreathMaximalTest.ScottLemmaGroundTruthOnA5xA5                  # ~20s isolato (ground truth Scott su A₅×A₅ ordine 3600, macOS ASan)
+    GaloisDeg8E2E.Deg8Irreducible                                        # ~42s (corpus Brick 4: S8 + 5 ciclotomiche + x⁸−2, macOS ASan)
+    GaloisDeg8E2E.Deg9And10Irreducible                                   # ~26s (S9 + x¹⁰ full-wreath via galois_group pubblico, macOS ASan)
+    GaloisDeg8E2E.ReducibleRecursionDeg8                                 # ~8s (ricorsione fattori deg-8, macOS ASan)
+    GaloisDeg8E2E.ReducibleRecursionDeg9                                 # ~21s (ricorsione fattori deg-9, macOS ASan)
+    GaloisDeg8E2E.ReducibleRecursionDeg10                                # ~22s (ricorsione fattori deg-10, macOS ASan)
 )
 
 # Quarantena (noti-rossi) — caricata dal file governato.
