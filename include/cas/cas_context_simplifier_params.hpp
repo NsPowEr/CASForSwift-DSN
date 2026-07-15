@@ -104,6 +104,38 @@ struct CASContextSimplifierParams {
         max_side_conditions_ = n;
     }
 
+    // A7 (Meijer_G_Slater.md §7.3, §8.3): p+q above this -> Unimplemented
+    // diagnostic at make_meijerg (never a silent truncation of the parameter
+    // list). Default 20: generous over every table §5 entry (p+q <= 5) and
+    // every pFq bridge case in §3.1/§10.5 used by this spec.
+    [[nodiscard]] std::size_t meijerg_max_param_count() const noexcept {
+        return meijerg_max_param_count_;
+    }
+    void set_meijerg_max_param_count(std::size_t n) noexcept {
+        meijerg_max_param_count_ = n;
+    }
+
+    // Recursion cap for to_meijerg()'s Product/pFq decomposition (§7.1 of
+    // to_meijerg's own future pipeline, Brick 3). Default 8: no elementary
+    // conversion in table §5 nests more than 2 levels; generous margin.
+    [[nodiscard]] std::size_t meijerg_max_conversion_depth() const noexcept {
+        return meijerg_max_conversion_depth_;
+    }
+    void set_meijerg_max_conversion_depth(std::size_t n) noexcept {
+        meijerg_max_conversion_depth_ = n;
+    }
+
+    // When true, numeric evaluation of a G-node outside its proven
+    // convergence region (§2.1) is refused rather than attempted (Brick 4+).
+    // Default true: REGOLA ZERO, never silently evaluate an undefined
+    // integral.
+    [[nodiscard]] bool meijerg_strict_convergence() const noexcept {
+        return meijerg_strict_convergence_;
+    }
+    void set_meijerg_strict_convergence(bool strict) noexcept {
+        meijerg_strict_convergence_ = strict;
+    }
+
 protected:
     int           max_simplification_depth_{300};
     std::size_t   max_recursion_depth_{256U};
@@ -117,6 +149,9 @@ protected:
     std::size_t   simplify_sqrt_trial_division_bound_{10000U};
     bool          branch_cut_aware_logexp_{false};
     std::size_t   max_side_conditions_{256U};
+    std::size_t   meijerg_max_param_count_{20U};
+    std::size_t   meijerg_max_conversion_depth_{8U};
+    bool          meijerg_strict_convergence_{true};
 };
 
 }  // namespace cas::symbolic
