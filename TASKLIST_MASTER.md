@@ -237,7 +237,40 @@ Ordinati per severità/impatto decrescente. Ogni voce verificata aperta a codice
 ### A29 · Anti-monolito: split `risch_rde_bronstein.cpp` (538 LOC) + `risch_parametric_rational.cpp` (593 LOC) — ✅ FATTO 2026-07-07 (alias SPLIT-RISCH-RDE) — `[E1·C1·S2·R2]`
 - **Chiusura**: split per unità funzionale, zero cambi di logica. `risch_rde_bronstein.cpp` (252) + nuovo `risch_rde_parametric_field.cpp` (306, tower descent parametrico); `risch_parametric_rational.cpp` (352, f≠0 P/D-ansatz) + nuovo `risch_parametric_limited.cpp` (248, f=0 limited integration). Helper condivisi (`poly_coeffs_q`, `rational_to_expr`) promossi inline in `risch_parametric_internal.hpp`. Whitelist svuotata. Gate: 97/97 test Risch mirati verdi, build -Werror pulita.
 
-### A31 · Propagazione condizioni di dominio (`x≠0`) attraverso simplify — 📋 SPEC PRONTA 2026-07-15 (decisione utente presa, opzione b) — `[E4·C4·S3·R2]`
+### A31 · Propagazione condizioni di dominio (`x≠0`) attraverso simplify — ✅ FASE 1 FATTA 2026-07-15 (opzione b implementata; fase 2 residua) — `[E4·C4·S3·R2]`
+- **✅ FASE 1 IMPLEMENTATA 2026-07-15**: `include/cas/side_conditions.hpp` +
+  `src/symbolic/side_conditions.cpp` — `SideConditionSet` (dedup + subsumption
+  Positive⊃NonZero,NonNegative) + `CASContext::emit_side_condition` (skip se
+  già provato da `assumptions()`, altrimenti registra o `Unimplemented`
+  strutturato `SIDE_CONDITION_BUDGET_EXCEEDED` oltre `max_side_conditions()`,
+  default 256). Instrumentati i **2 siti verificati** §4.3: (1)
+  `simplify_product_factors` (`simplify_arithmetic_chain.cpp:433`, drop di
+  `base^0`) — cancellazione `x·x⁻¹→1` per sintassi Product (bypassa il
+  rewrite_provider); (2) `try_rewrite_algebraic` GCD path
+  (`builtin_rewrite_algebraic.cpp`) — cancellazione `x/x→1` per sintassi Div
+  (intercettata dal rewrite_provider PRIMA del core `BinaryOp::Div`, verificato
+  essere un meccanismo DIVERSO dal (1) — Meccanismo 1 vs 2 di spec §1.1,
+  confermato dai test che i due producono la stessa condizione via codice
+  diverso). Cache `simplify_cache_` estesa a `SimplifyCacheEntry{result,
+  conditions}` — hit ri-emette le condizioni (altrimenti una seconda chiamata
+  le perderebbe silenziosamente); `collect_garbage()` re-interna i subject
+  ExprPtr sia della cache che dell'accumulatore live. Zero cambio nell'output
+  di `simplify()` (vincolo duro rispettato).
+- **Test**: `test/unit/symbolic/test_side_conditions.cpp` 13/13 verdi — i 2
+  meccanismi end-to-end, dedup/subsumption, cache-hit re-emission,
+  invalidazione su cambio assumptions (revision bump), no cross-pollution tra
+  chiamate top-level consecutive, GC round-trip (ASan pulito).
+- **Gate**: quick suite **2715/2715 verde** (2703 pre-A31 + 12 nuovi), build
+  `-Werror` pulita, benchmark eseguito (numeri assoluti non anomali —
+  `parse_implicit_mul_ms 0.007`, `simplify_basic_ms 0.067`,
+  `poly_gcd_subresultant_ms 1.750`; nessun `baseline_release.txt` per
+  confronto relativo, come già in A6/A7 questa sessione).
+- **Residuo (fase 2, spec §9)**: censimento completo di ALTRI siti fase-1 oltre
+  i 2 verificati (stesso metodo: leggere il codice, mai la memoria/ledger);
+  `enable_conditional_rules()` per le regole B.1 real-domain oggi rifiutate
+  (`log(xⁿ)`, `abs(x²)`, `0^x`, `exp(ln x)` da `Positive`→`NonZero`);
+  `simplify_tracked()`; propagazione a `integrate`/`solve`; congiunzioni tra
+  condizioni. Sblocca i residui `abs` real-domain di B.1/B.2 quando fatto.
 - **✅ SPEC CREATA 2026-07-15**: `MISSING_FEATURES_SPECS/Domain_Conditions_Propagation.md` — **decisione architetturale approvata dall'utente: opzione (b)** side-conditions accumulate in `CASContext`/cache, esposte accanto al risultato (`last_side_conditions()`), MAI nell'AST. `simplify` resta bit-per-bit identico in output; fase 1 = solo registrazione di ciò che già avviene. Ogni citazione a codice **verificata leggendo il sorgente** (non dedotta) — il primo abbozzo conteneva 4 imprecisioni trovate e corrette in sede di verifica (vedi errata in cima al file): il sito reale della cancellazione `x/x→1` è `Simplifier::simplify_product_factors` (`simplify_arithmetic_chain.cpp:433`), non `merge_symbolic_factors` (quella è `static`, priva di accesso al contesto); `exp(ln x)→x` è **già** condizionato a `is_known_positive` (nessun gap fase-1 lì, è il pattern-modello).
 - **Origine**: metà scartata del WIP branch-cut (commit `468351c` ne ha committato solo la parte branch-cut). Due tentativi di rendere `simplify` conservativo sul dominio sono stati **misurati e respinti**:
   - `merge_symbolic_factors` che rifiuta di cancellare `x·x⁻¹` senza `x≠0` provato → lascia due fattori con la stessa base, **rompe la forma canonica**; 26 test rossi (Risch, Gruntz, substitution, SqrtFold) e `BronsteinCorpus` da ~20s a 632s.
@@ -318,7 +351,7 @@ A16..A24 (debiti minori) — indipendenti, inframmezzabili
 
 ## E — Ordine raccomandato
 
-> **Avanzamento 2026-07-15**: **A6 CHIUSA** (Brick 1-4 fatti; `galois_group` copre deg 8..10 end-to-end; HC-F8-PENDING-09 chiusa). **A31 e A7 hanno entrambe spec pronte e verificate a codice** (`Domain_Conditions_Propagation.md`, `Meijer_G_Slater.md`) — decisione utente: **implementare A31 fase 1 per prima**, A7 in coda. Minori intercalabili: A22 (Padé Q(π,e,√)), A18-residuo (osservabilità `false`→`Unimplemented`, R2/R3). A5/A13/A11/A26 residui = by-design, riaprire solo con driver reale. Residuo perf noto A6: passo Stauduhar deep deg-9/10 (>90 s) — soffitto documentato, non correttezza.
+> **Avanzamento 2026-07-15**: **A6 CHIUSA** (Brick 1-4 fatti; `galois_group` copre deg 8..10 end-to-end; HC-F8-PENDING-09 chiusa). **A31 fase 1 IMPLEMENTATA** (side-conditions in `CASContext`, 2 siti verificati, 13 test, quick suite 2715/2715, benchmark eseguito) — fase 2 residua (censimento completo altri siti + regole B.1 opt-in). Prossima linea attiva = **A7** (Meijer-G, spec `Meijer_G_Slater.md` pronta e verificata, in coda per decisione utente). Minori intercalabili: A22 (Padé Q(π,e,√)), A18-residuo (osservabilità `false`→`Unimplemented`, R2/R3). A5/A13/A11/A26 residui = by-design, riaprire solo con driver reale. Residuo perf noto A6: passo Stauduhar deep deg-9/10 (>90 s) — soffitto documentato, non correttezza.
 >
 > ⬇️ avanzamento 2026-06-28 (storico): A2 ✅ (388f6f5) · A10 ✅ chiuso con probe (156b18a) · A16 chiarito = deferral ledgered post-parità (non E1) · A4/A12/A14/A15/A17/A24 = già FATTO/stale. Quick-win esauriti.
 >

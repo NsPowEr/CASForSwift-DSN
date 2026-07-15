@@ -430,7 +430,19 @@ Result<ExprPtr> Simplifier::simplify_product_factors(
     if (!is_neg && (!(coefficient == ComplexRational::one()) || symbolic.empty()))
         normalized.push_back(make_complex(arena_, coefficient));
     for (const auto& [base, exp] : symbolic) {
-        if (exp.is_zero()) continue;
+        if (exp.is_zero()) {
+            // A31 fase 1 (Domain_Conditions_Propagation.md §4.3.1): dropping
+            // base^0 (the real site of x/x -> 1 and x*x^-1 -> 1 for
+            // Product-syntax input, which bypasses the rewrite_provider Div
+            // path in builtin_rewrite_algebraic.cpp) presupposes base != 0
+            // -- 0^0 is not universally 1. Registered unless already proven.
+            if (context_ != nullptr) {
+                auto cond = context_->emit_side_condition(
+                    DomainConditionKind::NonZero, base);
+                if (cond.is_error()) return fail<ExprPtr>(cond.error());
+            }
+            continue;
+        }
         normalized.push_back(exp == BigInt(1)
             ? base
             : arena_.make<Binary>(BinaryOp::Pow, base, make_integer(arena_, exp)));

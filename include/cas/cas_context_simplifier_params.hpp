@@ -89,6 +89,21 @@ struct CASContextSimplifierParams {
         intern_shards_ = n;
     }
 
+    // A31 fase 1 (Domain_Conditions_Propagation.md §3.5): bound on the number
+    // of distinct DomainCondition entries a single top-level simplify() call
+    // may accumulate (SideConditionSet, side_conditions.hpp). Exceeded ->
+    // CASContext::emit_side_condition returns a structured Unimplemented
+    // (SIDE_CONDITION_BUDGET_EXCEEDED), never a silent drop. Default 256: no
+    // legitimate simplify() call needs hundreds of distinct domain
+    // assumptions in one pass; mirrors the other small-working-set defaults
+    // in this struct (not derived from a formal bound, so kept generous).
+    [[nodiscard]] std::size_t max_side_conditions() const noexcept {
+        return max_side_conditions_;
+    }
+    void set_max_side_conditions(std::size_t n) noexcept {
+        max_side_conditions_ = n;
+    }
+
 protected:
     int           max_simplification_depth_{300};
     std::size_t   max_recursion_depth_{256U};
@@ -101,6 +116,7 @@ protected:
     int           max_trig_exact_denom_{100};
     std::size_t   simplify_sqrt_trial_division_bound_{10000U};
     bool          branch_cut_aware_logexp_{false};
+    std::size_t   max_side_conditions_{256U};
 };
 
 }  // namespace cas::symbolic

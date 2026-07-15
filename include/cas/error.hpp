@@ -73,6 +73,7 @@ namespace error::reason_codes {
     static constexpr const char* RECURSION_DEPTH_EXCEEDED     = "RECURSION_DEPTH_EXCEEDED";
     static constexpr const char* CYCLE_DETECTED                = "CYCLE_DETECTED";
     static constexpr const char* OPS_BUDGET_EXCEEDED           = "OPS_BUDGET_EXCEEDED";
+    static constexpr const char* SIDE_CONDITION_BUDGET_EXCEEDED = "SIDE_CONDITION_BUDGET_EXCEEDED";
     static constexpr const char* GENERIC                       = "GENERIC";
 }  // namespace error::reason_codes
 

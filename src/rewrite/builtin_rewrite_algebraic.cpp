@@ -117,7 +117,19 @@ Result<ExprPtr> try_rewrite_algebraic(
                             auto d_expr = algebra::integer_coefficients_to_expr(d_poly, *var, *context);
                             
                             if (n_expr.is_ok() && d_expr.is_ok()) {
-                                if (!d_poly.is_zero() && d_poly.degree() == 0 && d_poly[0] == BigInt(1)) return n_expr;
+                                if (!d_poly.is_zero() && d_poly.degree() == 0 && d_poly[0] == BigInt(1)) {
+                                    // A31 fase 1 (Domain_Conditions_Propagation.md
+                                    // §4.3.2): GCD-cancellation collapsing the
+                                    // denominator to 1 (e.g. x/x -> 1 for the
+                                    // Div syntax, which reaches this GCD path
+                                    // BEFORE the core Binary::Div handler --
+                                    // Meccanismo 2 of §1.1) presupposes the
+                                    // ORIGINAL denominator was != 0.
+                                    auto cond = context->emit_side_condition(
+                                        DomainConditionKind::NonZero, binary->right);
+                                    if (cond.is_error()) return fail<ExprPtr>(cond.error());
+                                    return n_expr;
+                                }
                                 return ok(arena.make<Binary>(BinaryOp::Div, n_expr.value(), d_expr.value()));
                             }
                         }

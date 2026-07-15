@@ -4,6 +4,7 @@
 #include "cas/cas_cache_keys.hpp"
 #include "cas/cas_context_params.hpp"
 #include "cas/result.hpp"
+#include "cas/side_conditions.hpp"
 #include "cas/trace.hpp"
 
 #include <atomic>
@@ -194,6 +195,22 @@ public:
     [[nodiscard]] Assumptions& assumptions() noexcept;
     [[nodiscard]] const Assumptions& assumptions() const noexcept;
 
+    // A31 fase 1 (Domain_Conditions_Propagation.md) — side-conditions
+    // accumulated by the LAST top-level simplify() call (nested/recursive
+    // calls inside it accumulate into the same set; a call whose result was
+    // served from cache re-merges the conditions recorded when that entry
+    // was first computed). simplify()'s ExprPtr output is unaffected: this
+    // is purely an opt-in side channel.
+    [[nodiscard]] const SideConditionSet& last_side_conditions() const noexcept;
+
+    // Registers that a simplification step just applied is valid only where
+    // `kind` holds of `subject` — UNLESS ctx.assumptions() already proves it
+    // (a fact of the input needs no registration). Called by rewrite sites
+    // that apply a domain-restricted identity (e.g. x/x -> 1 needs x != 0).
+    // Fails structured (Unimplemented) only if max_side_conditions() would be
+    // exceeded; never drops a condition silently.
+    [[nodiscard]] Result<void> emit_side_condition(DomainConditionKind kind, ExprPtr subject);
+
     [[nodiscard]] AstArena& arena() noexcept;
     [[nodiscard]] const AstArena& arena() const noexcept;
 
@@ -373,7 +390,17 @@ struct IntegrateHash {
     }
 };
 
-CacheContainer<ExprPtr, ExprPtr, ExprHash, ExprEqual> simplify_cache_;
+// A31 fase 1: a simplify_cache_ entry carries not just the memoized result
+// but the SideConditionSet that was emitted while computing it, so a cache
+// HIT re-merges those conditions into side_conditions_ instead of silently
+// losing them (spec §4.2 — without this, hitting the cache a second time
+// would report fewer side-conditions than computing it fresh).
+struct SimplifyCacheEntry {
+    ExprPtr result;
+    SideConditionSet conditions;
+};
+
+CacheContainer<ExprPtr, SimplifyCacheEntry, ExprHash, ExprEqual> simplify_cache_;
 CacheContainer<DiffKey, ExprPtr, DiffHash> diff_cache_;
 CacheContainer<IntegrateKey, ExprPtr, IntegrateHash> integrate_cache_;
 
@@ -383,6 +410,13 @@ CacheContainer<IntegrateKey, ExprPtr, IntegrateHash> integrate_cache_;
 // mid-session (e.g. assume(x>0); simplify(abs(x)); assume(x<0); ...).
 mutable std::uint64_t last_assumptions_revision_{0};
 SimplifyHints hints_;
+
+// A31 fase 1: side-conditions accumulated by the current/last top-level
+// simplify() call. Cleared only when a NEW top-level call begins (mirrors
+// the operation_active_/ops_count_ pattern already used for A30's ops
+// budget); nested/recursive simplify() calls inside one top-level call
+// accumulate into the same set. See emit_side_condition / last_side_conditions.
+SideConditionSet side_conditions_;
 };
 
 inline ScopedSimplifyHint::ScopedSimplifyHint(CASContext& ctx, SimplifyHints hints) noexcept

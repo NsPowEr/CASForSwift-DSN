@@ -137,7 +137,12 @@ Result<ExprPtr> CASContext::simplify(ExprPtr expr) {
 
     if (caching_enabled_ && !trace_enabled_) {
         if (auto cached = simplify_cache_.get(expr)) {
-            return ok(*cached);
+            // A31 fase 1 (spec §4.2): a cache hit must re-emit the
+            // conditions that were recorded when this entry was first
+            // computed, or a second simplify(same expr) would silently
+            // under-report last_side_conditions() vs the first call.
+            side_conditions_.merge(cached->conditions);
+            return ok(cached->result);
         }
     }
 
@@ -147,8 +152,13 @@ Result<ExprPtr> CASContext::simplify(ExprPtr expr) {
         trace_capture_active_ = trace_enabled_;
         trace_.clear();
         ops_count_ = 0;
+        side_conditions_.clear();
         operation_started_at_ = std::chrono::steady_clock::now();
     }
+    // A31 fase 1: snapshot before processing `expr` so the PUT below can
+    // store exactly the conditions this specific call contributed, not the
+    // full accumulated set of a multi-expression outer operation.
+    const SideConditionSet conditions_mark = side_conditions_;
     auto result = symbolic::simplify(expr, *this);
     if (owns_operation) {
         operation_active_ = false;
@@ -165,7 +175,8 @@ Result<ExprPtr> CASContext::simplify(ExprPtr expr) {
     }
 
     if (caching_enabled_ && !trace_enabled_ && result.is_ok()) {
-        simplify_cache_.put(expr, result.value());
+        simplify_cache_.put(expr, SimplifyCacheEntry{
+            result.value(), side_conditions_.since(conditions_mark)});
     }
 
 #ifndef NDEBUG
@@ -204,12 +215,40 @@ void CASContext::collect_garbage(const std::vector<ExprPtr*>& external_roots) {
     }
 
     if (!simplify_cache_.empty()) {
-        CacheContainer<ExprPtr, ExprPtr, ExprHash, ExprEqual> new_simplify_cache(simplify_cache_.max_size());
+        CacheContainer<ExprPtr, SimplifyCacheEntry, ExprHash, ExprEqual> new_simplify_cache(simplify_cache_.max_size());
         for (auto& it : simplify_cache_) {
-            new_simplify_cache.put(clone_into_arena(it.first, new_arena, cache), clone_into_arena(it.second.first, new_arena, cache));
+            const SimplifyCacheEntry& entry = it.second.first;
+            // A31 fase 1: each condition's `subject` is an ExprPtr rooted in
+            // the OLD arena — must be re-interned exactly like every other
+            // ExprPtr root, or last_side_conditions()/cache hits after a GC
+            // would dereference stale memory.
+            SideConditionSet new_conditions;
+            new_conditions.set_max_size(entry.conditions.max_size());
+            for (const auto& c : entry.conditions.items()) {
+                new_conditions.add(DomainCondition{
+                    c.kind, clone_into_arena(c.subject, new_arena, cache)});
+            }
+            new_simplify_cache.put(
+                clone_into_arena(it.first, new_arena, cache),
+                SimplifyCacheEntry{
+                    clone_into_arena(entry.result, new_arena, cache),
+                    std::move(new_conditions)});
         }
         new_simplify_cache.metrics() = simplify_cache_.metrics();
         simplify_cache_ = std::move(new_simplify_cache);
+    }
+
+    {
+        // A31 fase 1: re-intern the live side_conditions_ accumulator too —
+        // it holds ExprPtr subjects from the OLD arena until the next
+        // top-level simplify() call clears it.
+        SideConditionSet new_side_conditions;
+        new_side_conditions.set_max_size(side_conditions_.max_size());
+        for (const auto& c : side_conditions_.items()) {
+            new_side_conditions.add(DomainCondition{
+                c.kind, clone_into_arena(c.subject, new_arena, cache)});
+        }
+        side_conditions_ = std::move(new_side_conditions);
     }
 
     if (!diff_cache_.empty()) {

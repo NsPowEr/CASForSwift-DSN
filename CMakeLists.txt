@@ -168,6 +168,7 @@ set(CAS_SYMBOLIC_SOURCES
     src/symbolic/simplify_complex.cpp
     src/symbolic/simplify_utils.cpp
     src/symbolic/context_core.cpp
+    src/symbolic/side_conditions.cpp
     src/symbolic/context_params.cpp
     src/symbolic/context_helpers.cpp
     src/symbolic/context_utils.cpp
@@ -657,6 +658,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/numtheory/test_miller_rabin.cpp
         test/unit/algebra/test_multivariate_square_free.cpp
         test/unit/symbolic/test_gc.cpp
+        test/unit/symbolic/test_side_conditions.cpp
         test/unit/symbolic/test_gaps.cpp
 
         test/unit/ast/test_ast_model.cpp
