@@ -80,6 +80,13 @@ enum class BuiltinOp : std::uint16_t {
     // F8.0-6.1: Unwinding number  K(z) = ⌈(Im(z) − π) / (2π)⌉.
     // Encodes branch-cut information so that  ln(exp(z)) = z + 2πi·K(z).
     UnwindingNumber,
+    // A7 Brick 1 — Meijer G-function G^{m,n}_{p,q}(z | a_1..a_p; b_1..b_q).
+    // FuncCall::args layout: [m, n, p, q, a_1..a_p, b_1..b_q, z] (flat, size
+    // = 4 + p + q + 1). m,n,p,q are IntegerLit; construction/validation goes
+    // through the make_meijerg factory (A7 Brick 2), not here — this enum
+    // entry only gives the node a name for parse/print round-trip.
+    // Spec: MISSING_FEATURES_SPECS/Meijer_G_Slater.md §7.
+    MeijerG,
 };
 
 [[nodiscard]] constexpr BuiltinOp get_builtin_op(std::string_view name) noexcept {
@@ -155,6 +162,7 @@ enum class BuiltinOp : std::uint16_t {
     if (name == "EllipticPi" || name == "ellipticPi") return BuiltinOp::EllipticPi;
     if (name == "EllipticF" || name == "ellipticF") return BuiltinOp::EllipticF;
     if (name == "UnwindingNumber" || name == "K") return BuiltinOp::UnwindingNumber;
+    if (name == "MeijerG") return BuiltinOp::MeijerG;
     return BuiltinOp::Unknown;
 }
 
@@ -231,6 +239,7 @@ enum class BuiltinOp : std::uint16_t {
         case BuiltinOp::Factorial: return "factorial";
         case BuiltinOp::Erfc: return "erfc";
         case BuiltinOp::UnwindingNumber: return "UnwindingNumber";
+        case BuiltinOp::MeijerG: return "MeijerG";
         case BuiltinOp::Unknown: return "unknown";
     }
     return "unknown";

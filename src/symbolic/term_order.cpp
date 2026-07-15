@@ -172,6 +172,9 @@ int get_builtin_precedence(BuiltinOp op) noexcept {
     case BuiltinOp::EllipticE:  return 88;
     case BuiltinOp::EllipticPi: return 89;
     case BuiltinOp::EllipticF:  return 90;
+    // A7: Meijer G generalises the hypergeometric/elliptic family (§3 of
+    // Meijer_G_Slater.md), so it sorts above them in this tier.
+    case BuiltinOp::MeijerG:    return 91;
     case BuiltinOp::Unknown:    return 1;
     }
     return 0;
