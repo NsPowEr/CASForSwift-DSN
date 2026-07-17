@@ -889,6 +889,7 @@ test/unit/algebra/test_half_gcd.cpp
         test/unit/calculus/test_ode_kovacic_case2.cpp
         test/unit/calculus/test_ode_kovacic_case3.cpp
         test/unit/calculus/test_integrate_inverse_trig.cpp
+        test/unit/calculus/test_integrate_exp_rational.cpp
         test/unit/test_ode_critical.cpp
         test/unit/test_ode_class_f5.cpp
         test/unit/test_ode_solv_f5.cpp

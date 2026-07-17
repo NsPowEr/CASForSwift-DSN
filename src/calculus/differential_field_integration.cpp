@@ -261,6 +261,9 @@ Result<ExprPtr> integrate_rothstein_trager(
     }
 
     std::vector<ExprPtr> integral_terms;
+    // (root, v) pairs of the emitted log terms — needed for the
+    // hyperexponential residue computation below (Bronstein §5.9).
+    std::vector<std::pair<ExprPtr, ExprPtr>> log_args;
     for (ExprPtr root_raw : unique_roots) {
         // A27: Rothstein-Trager is only valid for CONSTANT roots (the c_i in
         // Σ c_i·ln v_i live in Const(K)).  A root depending on the integration
@@ -293,6 +296,7 @@ Result<ExprPtr> integrate_rothstein_trager(
         ExprPtr ln_v = arena.make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{abs_v});
         ExprPtr term = arena.make<Product>(std::vector<ExprPtr>{root, ln_v});
         integral_terms.push_back(term);
+        log_args.emplace_back(root, v);
     }
 
     if (integral_terms.empty()) {
@@ -300,11 +304,64 @@ Result<ExprPtr> integrate_rothstein_trager(
             .kind = CASErrorKind::Unimplemented,
             .message = "Rothstein-Trager: no valid GCD terms computed (roots may be algebraic/RootOf)",
         });
-    } else if (integral_terms.size() == 1) {
-        return ok(integral_terms[0]);
-    } else {
-        return ok(arena.make<Sum>(std::move(integral_terms)));
     }
+
+    // Bronstein §5.9 (IntegrateHyperexponential): when the topmost monomial t
+    // is hyperexponential, deg_t(Dv) = deg_t(v), so D(ln v) = Dv/v carries a
+    // polynomial part and the residue h − Σ cᵢ·Dvᵢ/vᵢ is in general a NONZERO
+    // element of k that must be integrated recursively over k.  Dropping it
+    // silently returned −ln|eˣ+1| for ∫ 1/(1+eˣ) dx (correct: x − ln(eˣ+1)).
+    // For primitive (log) towers and the rational base case the residue is 0
+    // by Theorem 5.6.1, so this block is exp-only by theorem, not shortcut.
+    const bool topmost_is_exp = !field.extensions().empty()
+        && field.extensions().back().type == ExtensionType::Exponential
+        && field.extensions().back().t_var.name == t_var.name;
+    if (topmost_is_exp) {
+        std::vector<ExprPtr> parts;
+        parts.push_back(arena.make<Binary>(BinaryOp::Div, P, Q));
+        for (const auto& [root, v] : log_args) {
+            auto dv_res = field.derive_in_generators(v, ctx);
+            if (dv_res.is_error()) return fail<ExprPtr>(dv_res.error());
+            parts.push_back(arena.make<Product>(std::vector<ExprPtr>{
+                arena.make<IntegerLit>(BigInt(-1)), root, dv_res.value(),
+                arena.make<Binary>(BinaryOp::Pow, v,
+                    arena.make<IntegerLit>(BigInt(-1)))}));
+        }
+        ExprPtr residual = arena.make<Sum>(std::move(parts));
+        if (auto tog = algebra::together(residual, ctx); tog.is_ok())
+            residual = tog.value();
+        if (auto s = ctx.simplify(residual); s.is_ok()) residual = s.value();
+        if (depends_on(residual, t_var)) {
+            // The RT invariant h − Σ cᵢ·Dvᵢ/vᵢ ∈ k could not be certified
+            // (dropped root or simplify shortfall) — bail, never guess.
+            return make_unimplemented<ExprPtr>(
+                "calculus", "integrate_rothstein_trager",
+                "hyperexponential residue still depends on the topmost "
+                "generator; log part alone would be silently wrong",
+                cas::error::reason_codes::RISCH_EXPONENTIAL_DE,
+                "Strengthen together/simplify over the tower or handle the "
+                "dropped resultant roots (Bronstein §5.9)",
+                "T1-2026-07-16");
+        }
+        bool residual_zero = false;
+        if (const auto* il = expr_cast<IntegerLit>(residual))
+            residual_zero = il->value.is_zero();
+        if (const auto* rl = expr_cast<RationalLit>(residual))
+            residual_zero = rl->numerator.is_zero();
+        if (!residual_zero) {
+            auto orig_res = field.from_field_generators(residual, ctx);
+            if (orig_res.is_error()) return orig_res;
+            // residual ∈ k: one extension fewer — recursion terminates.
+            auto rec = integrate(orig_res.value(), field.base_var(), ctx);
+            if (rec.is_error()) return rec;  // clean bail, never silent
+            integral_terms.push_back(rec.value());
+        }
+    }
+
+    if (integral_terms.size() == 1) {
+        return ok(integral_terms[0]);
+    }
+    return ok(arena.make<Sum>(std::move(integral_terms)));
 }
 
 } // namespace cas::calculus
