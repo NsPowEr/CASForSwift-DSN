@@ -58,6 +58,15 @@ SLOW_OK=(
     GaloisDeg8E2E.ReducibleRecursionDeg8                                 # ~8s (ricorsione fattori deg-8, macOS ASan)
     GaloisDeg8E2E.ReducibleRecursionDeg9                                 # ~21s (ricorsione fattori deg-9, macOS ASan)
     GaloisDeg8E2E.ReducibleRecursionDeg10                                # ~22s (ricorsione fattori deg-10, macOS ASan)
+    # 2026-07-16: i 4 test sotto (>100s ciascuno, verdi) assorbivano il 49%
+    # del quick (574s/1176s) portandolo al 98% del cap 1200s. Tempi verificati
+    # ISOLATI (WeierstrassDirectProbe 196s da solo → intrinseco, non carico).
+    # WeierstrassDirectProbe è un probe diagnostico senza asserzioni: il suo
+    # costo vive in weierstrass_zero_diff/simplify → candidato indagine perf.
+    IntegrateInverseTrigTest.WeierstrassDirectProbe                       # ~196-222s (weierstrass_zero_diff su diff di antiderivate)
+    IntegrationAdvancedTest.RischDE_ExpQuadraticArg_HigherDegree          # ~142s (RischDE grado alto, macOS ASan)
+    DefiniteSummationTest.QuadraticIrreducibleLinearNum_ViaRootOfDigamma  # ~108s (RootOf digamma, macOS ASan)
+    DefiniteSummationTest.QuadraticIrreducibleDenom_ViaRootOfDigamma      # ~101s (RootOf digamma, macOS ASan)
 )
 
 # Quarantena (noti-rossi) — caricata dal file governato.
@@ -79,10 +88,11 @@ join_colon() { local IFS=':'; echo "$*"; }
 # Due dimensioni ORTOGONALI (tenerle separate evita che --slow e --print-filter
 # si sovrascrivano): SUITE = cosa escludere; ACTION = cosa fare.
 POSITIVE_FILTER=''
-# Misura reale suite quick: ~803s (2565 test, macOS arm64 M1 Pro, ASan,
-# 2026-07-09). Cap = misura + ~50% margine anti-flake da carico; se la suite
-# sfora QUESTO cap, è una regressione di complessità da indagare, non un
-# numero da alzare alla cieca.
+# Misura reale suite quick: ~1178s @2729 test (2026-07-16, isolata) PRIMA
+# dello spostamento dei 4 test >100s in SLOW_OK → attesa ~600s dopo. Cap =
+# misura + ~50% margine anti-flake da carico; se la suite sfora QUESTO cap,
+# è una regressione di complessità da indagare, non un numero da alzare
+# alla cieca. (Storico: ~803s @2565 test, 2026-07-09.)
 CAP=1200
 SUITE='quick'          # quick | slow
 ACTION='run'           # run | print | quarantine

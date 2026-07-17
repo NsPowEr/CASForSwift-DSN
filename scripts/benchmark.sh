@@ -12,6 +12,10 @@ mode="run"
 output_file=""
 report_json=""
 strict_metrics=0
+# Su questa macchina (laptop, no core pinning) la varianza run-a-run sulle
+# metriche sub-millisecondo arriva a 2× (misurato 2026-07-16): un singolo
+# campione non è un segnale. Default: mediana per-metrica di 5 run.
+runs=5
 
 resolve_path() {
   local raw_path="$1"
@@ -60,6 +64,10 @@ while [[ $# -gt 0 ]]; do
       strict_metrics=1
       shift
       ;;
+    --runs)
+      runs="$2"
+      shift 2
+      ;;
     *)
       echo "argomento non supportato: $1" >&2
       exit 1
@@ -83,8 +91,56 @@ cmake -S "$repo_root" -B "$build_dir" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCAS_
 cmake --build "$build_dir" --target cas_benchmarks
 
 tmp_output="$(mktemp "${TMPDIR:-/tmp}/cas-bench-output.XXXXXX")"
-trap 'rm -f "$tmp_output"' EXIT
-"$build_dir/cas_benchmarks" | tee "$tmp_output"
+tmp_runs="$(mktemp "${TMPDIR:-/tmp}/cas-bench-runs.XXXXXX")"
+trap 'rm -f "$tmp_output" "$tmp_runs"' EXIT
+
+if ! [[ "$runs" =~ ^[0-9]+$ ]] || [[ "$runs" -lt 1 ]]; then
+  echo "--runs richiede un intero >= 1 (ricevuto: $runs)" >&2
+  exit 1
+fi
+
+# Misure sub-millisecondo sono garbage sotto carico (2026-07-16: load 33+ da
+# processi utente ha raddoppiato poly_gcd in 2 minuti a codice identico).
+# Warning esplicito, non blocco: chi misura deve SAPERE, il numero finisce
+# comunque nel log.
+load_1min="$(sysctl -n vm.loadavg 2>/dev/null | awk '{print $2}' || uptime | awk -F'averages?: ' '{print $2}' | awk '{print $1}')"
+ncpu="$(sysctl -n hw.ncpu 2>/dev/null || echo 8)"
+if python3 -c "import sys; sys.exit(0 if float('$load_1min'.replace(',', '.')) > 0.5 * int('$ncpu') else 1)" 2>/dev/null; then
+  echo "⚠ ATTENZIONE: load average 1-min = $load_1min con $ncpu CPU — la macchina è" >&2
+  echo "  sotto carico; le misure saranno gonfiate e ad alta varianza. Per un" >&2
+  echo "  baseline o un gate affidabile, rieseguire a macchina scarica." >&2
+fi
+
+for ((i = 1; i <= runs; i++)); do
+  echo "── run $i/$runs ──" >&2
+  timeout 300 "$build_dir/cas_benchmarks" | tee -a "$tmp_runs" >&2
+done
+
+# Mediana per metrica sui run raccolti (robusta agli outlier di scheduling).
+python3 - "$tmp_runs" <<'PY' | tee "$tmp_output"
+import statistics
+import sys
+
+samples: dict[str, list[float]] = {}
+order: list[str] = []
+with open(sys.argv[1], encoding="utf-8") as fh:
+    for line in fh:
+        parts = line.split()
+        if len(parts) != 2:
+            continue
+        name, value = parts
+        try:
+            v = float(value)
+        except ValueError:
+            continue
+        if name not in samples:
+            samples[name] = []
+            order.append(name)
+        samples[name].append(v)
+
+for name in order:
+    print(f"{name} {statistics.median(samples[name]):.3f}")
+PY
 
 if [[ -n "$output_file" ]]; then
   mkdir -p "$(dirname "$output_file")"

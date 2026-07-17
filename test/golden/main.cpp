@@ -188,6 +188,21 @@ int main(int argc, char* argv[]) {
         }
         if (area.empty()) area = "unknown";
 
+        // The corpus "assume" field is NOT applied (neither to the CAS
+        // context nor to the Maxima reference generation).  Comparing under
+        // silently different domains than the corpus author intended would
+        // be misleading — make the debt visible on every run until the
+        // field is actually wired up (TASKLIST A32).
+        {
+            std::string assume_str = json_string_field(line, "assume");
+            if (!assume_str.empty()) {
+                std::cout << "  WARN [" << std::setw(3) << idx
+                          << "] \"assume\": \"" << assume_str
+                          << "\" present in corpus but NOT applied "
+                          << "(A32: runner+Maxima refs ignore it)\n";
+            }
+        }
+
         auto& stats = area_stats[area];
 
         // Reset context state between entries (variables and assumptions only;
