@@ -158,6 +158,14 @@ private:
 
 class Substituter;
 
+// A31 fase 2 (Domain_Conditions_Propagation.md §10.4): result of
+// CASContext::simplify_tracked — the simplified expression together with
+// exactly the domain conditions that call reported.
+struct Simplified {
+    ExprPtr expr;
+    SideConditionSet conditions;
+};
+
 struct SimplifyHints {
     bool fold_exp_products = false;
 };
@@ -210,6 +218,11 @@ public:
     // Fails structured (Unimplemented) only if max_side_conditions() would be
     // exceeded; never drops a condition silently.
     [[nodiscard]] Result<void> emit_side_condition(DomainConditionKind kind, ExprPtr subject);
+
+    // A31 fase 2 (spec §10.4): simplify() plus a snapshot of exactly the
+    // conditions this call reported (cache hit or miss). Result and side
+    // effects identical to calling simplify() then last_side_conditions().
+    [[nodiscard]] Result<Simplified> simplify_tracked(ExprPtr expr);
 
     [[nodiscard]] AstArena& arena() noexcept;
     [[nodiscard]] const AstArena& arena() const noexcept;

@@ -141,6 +141,12 @@ Result<ExprPtr> CASContext::simplify(ExprPtr expr) {
             // conditions that were recorded when this entry was first
             // computed, or a second simplify(same expr) would silently
             // under-report last_side_conditions() vs the first call.
+            // A31 fase 2 (spec §10.1): a TOP-LEVEL hit must also reset the
+            // accumulator first — without this, a hit following an unrelated
+            // top-level call merged into that call's leftover set and
+            // over-reported (a/a, b/b, a/a-hit -> {a,b} instead of {a}).
+            // An inner hit (operation_active_) keeps merging without reset.
+            if (!operation_active_) side_conditions_.clear();
             side_conditions_.merge(cached->conditions);
             return ok(cached->result);
         }

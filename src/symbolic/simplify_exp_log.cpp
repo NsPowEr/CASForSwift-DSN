@@ -23,10 +23,24 @@ Result<ExprPtr> Simplifier::simplify_funcall_exp_log_sqrt(
         // rule was applied unconditionally — wrong for symbolic x.
         // Reference: Bronstein "Symbolic Integration" §3.3.
         if (const auto* ln_call = expr_cast<FuncCall>(args.front());
-            ln_call && ln_call->func_id == BuiltinOp::Ln && ln_call->args.size() == 1U) {
+            ln_call
+            && (ln_call->func_id == BuiltinOp::Ln || ln_call->func_id == BuiltinOp::Log)
+            && ln_call->args.size() == 1U) {
             ExprPtr ln_arg = ln_call->args[0];
             if (is_known_positive(ln_arg)) {
                 return ok(ln_arg);
+            }
+            // A31 fase 2 (Domain_Conditions_Propagation.md §10.3.R1): on the
+            // principal branch exp(ln z) = z is exact for EVERY z != 0 (ln is
+            // a right inverse of exp, including on the cut: exp(ln(-1)) =
+            // exp(i*pi) = -1). Opt-in: rewrite and register NonZero(z).
+            if (context_ != nullptr && context_->conditional_domain_rules()
+                && !is_zero_expr(ln_arg)) {
+                auto cond = context_->emit_side_condition(
+                    DomainConditionKind::NonZero, ln_arg);
+                if (cond.is_error()) return fail<ExprPtr>(cond.error());
+                return traced_result(RuleId::SimplifyExpLnPositive,
+                    target_before, ln_arg);
             }
             // Otherwise keep symbolic exp(ln(arg)).
         }
@@ -168,6 +182,34 @@ Result<ExprPtr> Simplifier::simplify_funcall_exp_log_sqrt(
             return traced_result(RuleId::SimplifyLnExp, target_before,
                 build_branch_aware_logexp(exp_call->args[0]));
 
+        // A31 fase 2 (Domain_Conditions_Propagation.md §10.3.R2a):
+        // ln(b^e) -> e*ln(b), base != E (the E case is the exact rule above).
+        // Exact when b > 0 real and e real: b^e = exp(e*ln b) with e*ln b
+        // real, so ln never leaves the principal strip. Opt-in: rewrite and
+        // register Positive(b) and Real(e); refuse when the assumptions
+        // prove the base non-positive (contradiction guard).
+        if (const auto* power = expr_cast<Binary>(args.front());
+            power != nullptr && power->op == BinaryOp::Pow
+            && !is_constant_expr(power->left, MathConstant::E)
+            && context_ != nullptr && context_->conditional_domain_rules()
+            && !is_zero_expr(power->left)
+            && !is_known_negative(power->left)) {
+            auto cond_base = context_->emit_side_condition(
+                DomainConditionKind::Positive, power->left);
+            if (cond_base.is_error()) return fail<ExprPtr>(cond_base.error());
+            auto cond_exp = context_->emit_side_condition(
+                DomainConditionKind::Real, power->right);
+            if (cond_exp.is_error()) return fail<ExprPtr>(cond_exp.error());
+            ExprPtr ln_base = arena_.make<FuncCall>(BuiltinOp::Ln,
+                std::vector<ExprPtr>{power->left});
+            auto rewritten = simplify_expr(arena_.make<Binary>(
+                BinaryOp::Mul, power->right, ln_base));
+            if (rewritten.is_ok())
+                append_trace(RuleId::SimplifyLnPowerPositiveBase,
+                    target_before, rewritten.value());
+            return rewritten;
+        }
+
         // ln(a*b) -> ln(a) + ln(b) for a,b > 0
         // F8.0-6.2 / Task 20 BC-3 (Branch_Cut_Propagation.md §2 rule 4):
         //   ln(z1·z2) = ln(z1) + ln(z2) - 2πi · K(ln(z1) + ln(z2))
@@ -187,7 +229,34 @@ Result<ExprPtr> Simplifier::simplify_funcall_exp_log_sqrt(
                 }
                 return simplify_expr(arena_.make<Sum>(std::move(ln_factors)));
             }
+            // A31 fase 2 (§10.3.R2b): opt-in expansion with registration of
+            // Positive(f) for every factor not already proven positive
+            // (emit_side_condition drops proven ones, §3.3). Contradiction
+            // guard: a factor proven negative keeps the refusal. When
+            // strict_branch_cuts is ALSO on, the exact unwinding form below
+            // wins over the conditioned generic form.
             const bool strict = (context_ != nullptr) && context_->strict_branch_cuts();
+            if (!strict && context_ != nullptr
+                && context_->conditional_domain_rules()) {
+                bool any_negative = false;
+                for (auto f : prod->factors)
+                    if (is_known_negative(f) || is_zero_expr(f)) { any_negative = true; break; }
+                if (!any_negative) {
+                    for (auto f : prod->factors) {
+                        auto cond = context_->emit_side_condition(
+                            DomainConditionKind::Positive, f);
+                        if (cond.is_error()) return fail<ExprPtr>(cond.error());
+                    }
+                    std::vector<ExprPtr> ln_factors;
+                    for (auto f : prod->factors) {
+                        auto res = simplify_expr(arena_.make<FuncCall>(BuiltinOp::Ln,
+                            std::vector<ExprPtr>{f}));
+                        if (res.is_error()) return res;
+                        ln_factors.push_back(res.value());
+                    }
+                    return simplify_expr(arena_.make<Sum>(std::move(ln_factors)));
+                }
+            }
             if (strict && prod->factors.size() >= 2U) {
                 // Build  Σ ln(fᵢ)  +  Σ_{i<j}  −2πi · K(ln(fᵢ) + ln(fⱼ))
                 // The pairwise K(·) terms encode the multi-factor unwinding by
@@ -226,6 +295,26 @@ Result<ExprPtr> Simplifier::simplify_funcall_exp_log_sqrt(
                 ExprPtr diff = arena_.make<Binary>(BinaryOp::Sub, ln_a, ln_b);
                 ExprPtr correction = symbolic::branch_cut::make_log_quotient_correction(div->left, div->right, arena_);
                 return simplify_expr(arena_.make<Binary>(BinaryOp::Add, diff, correction));
+            }
+            // A31 fase 2 (§10.3.R2c): opt-in ln(a/b) -> ln(a) - ln(b) with
+            // Positive(a), Positive(b) registered (proven ones dropped,
+            // §3.3); refusal preserved when either side is proven negative
+            // or zero (contradiction guard). strict handled above (exact
+            // unwinding form wins).
+            if (context_ != nullptr && context_->conditional_domain_rules()
+                && !is_known_negative(div->left) && !is_zero_expr(div->left)
+                && !is_known_negative(div->right) && !is_zero_expr(div->right)) {
+                auto cond_a = context_->emit_side_condition(
+                    DomainConditionKind::Positive, div->left);
+                if (cond_a.is_error()) return fail<ExprPtr>(cond_a.error());
+                auto cond_b = context_->emit_side_condition(
+                    DomainConditionKind::Positive, div->right);
+                if (cond_b.is_error()) return fail<ExprPtr>(cond_b.error());
+                auto ln_a = simplify_expr(arena_.make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{div->left}));
+                if (ln_a.is_error()) return ln_a;
+                auto ln_b = simplify_expr(arena_.make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{div->right}));
+                if (ln_b.is_error()) return ln_b;
+                return simplify_expr(arena_.make<Binary>(BinaryOp::Sub, ln_a.value(), ln_b.value()));
             }
             // If not positive and not strict, do not expand ln(z1/z2) as it violates branch cuts on complex numbers.
         }

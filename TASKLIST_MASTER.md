@@ -237,7 +237,26 @@ Ordinati per severità/impatto decrescente. Ogni voce verificata aperta a codice
 ### A29 · Anti-monolito: split `risch_rde_bronstein.cpp` (538 LOC) + `risch_parametric_rational.cpp` (593 LOC) — ✅ FATTO 2026-07-07 (alias SPLIT-RISCH-RDE) — `[E1·C1·S2·R2]`
 - **Chiusura**: split per unità funzionale, zero cambi di logica. `risch_rde_bronstein.cpp` (252) + nuovo `risch_rde_parametric_field.cpp` (306, tower descent parametrico); `risch_parametric_rational.cpp` (352, f≠0 P/D-ansatz) + nuovo `risch_parametric_limited.cpp` (248, f=0 limited integration). Helper condivisi (`poly_coeffs_q`, `rational_to_expr`) promossi inline in `risch_parametric_internal.hpp`. Whitelist svuotata. Gate: 97/97 test Risch mirati verdi, build -Werror pulita.
 
-### A31 · Propagazione condizioni di dominio (`x≠0`) attraverso simplify — ✅ FASE 1 FATTA 2026-07-15 (opzione b implementata; fase 2 residua) — `[E4·C4·S3·R2]`
+### A31 · Propagazione condizioni di dominio (`x≠0`) attraverso simplify — ✅ FASE 1+2 FATTE (f1 2026-07-15, f2 2026-07-17; residuo = fase 3 su driver reale) — `[E4·C4·S3·R2]`
+- **✅ FASE 2 IMPLEMENTATA 2026-07-17** (spec §10, addendum verificato a codice):
+  (a) **fix bug latente fase 1**: cache-hit top-level non azzerava l'accumulatore
+  (`context_core.cpp` ramo hit) → sequenza a/a, b/b, a/a-hit over-riportava
+  {NonZero a, NonZero b}; ora `!operation_active_` ⇒ clear prima del merge;
+  (b) flag **`set_conditional_domain_rules(bool)`** (default false, output
+  invariato) + **5 regole B.1** con emissione condizioni: R1 `exp(ln z)→z`
+  NonZero(z) (2 siti: FuncCall Exp + Pow(E,·); inner accetta Ln E Log),
+  R2a `ln(b^e)→e·ln b` Positive(b)+Real(e), R2b/R2c `ln(a·b)`/`ln(a/b)`
+  Positive per fattore, R3 `abs(b^2k)→b^2k` Real(b), R4 `0^e→0` Positive(e)
+  (esponenti letterali esclusi: semantica esatta preservata), R5
+  `sqrt(b²)→abs(b)` Real(b); guardie anti-contraddizione (base/esponente
+  provati negativi ⇒ rifiuto preservato); `strict_branch_cuts` vince sul flag;
+  (c) **`simplify_tracked()`** → `Simplified{expr, conditions}`;
+  (d) **golden runner §10.5**: entry con `assume` ⇒ flag ON per-entry + stampa
+  `INFO conditions taken:` (WARN A32 resta). Golden simplify **110/6 → 116/0**.
+- **Test fase 2**: `test/unit/symbolic/test_conditional_rules.cpp` 16/16
+  (flag-off invarianza, output+set esatto per regola, controprova §3.3,
+  guardia contraddizione, fix §10.1, tracked miss+hit, certificato numerico
+  multi-punto R3/R5); gate mirato simplify/sqrt/log/abs/power 424/424.
 - **✅ FASE 1 IMPLEMENTATA 2026-07-15**: `include/cas/side_conditions.hpp` +
   `src/symbolic/side_conditions.cpp` — `SideConditionSet` (dedup + subsumption
   Positive⊃NonZero,NonNegative) + `CASContext::emit_side_condition` (skip se
@@ -265,12 +284,11 @@ Ordinati per severità/impatto decrescente. Ogni voce verificata aperta a codice
   `parse_implicit_mul_ms 0.007`, `simplify_basic_ms 0.067`,
   `poly_gcd_subresultant_ms 1.750`; nessun `baseline_release.txt` per
   confronto relativo, come già in A6/A7 questa sessione).
-- **Residuo (fase 2, spec §9)**: censimento completo di ALTRI siti fase-1 oltre
-  i 2 verificati (stesso metodo: leggere il codice, mai la memoria/ledger);
-  `enable_conditional_rules()` per le regole B.1 real-domain oggi rifiutate
-  (`log(xⁿ)`, `abs(x²)`, `0^x`, `exp(ln x)` da `Positive`→`NonZero`);
-  `simplify_tracked()`; propagazione a `integrate`/`solve`; congiunzioni tra
-  condizioni. Sblocca i residui `abs` real-domain di B.1/B.2 quando fatto.
+- **Residuo (fase 3, spec §10 nota iniziale — riaprire solo con driver reale)**:
+  propagazione a `integrate`/`solve`; congiunzioni tra condizioni; A32 (parser
+  predicati `assume` + refs Maxima coordinate). Il censimento di eventuali
+  ulteriori siti fase-1 resta un compito a metodo fissato (leggere il codice,
+  mai la memoria/ledger) da svolgere quando un caso reale lo segnala.
 - **✅ SPEC CREATA 2026-07-15**: `MISSING_FEATURES_SPECS/Domain_Conditions_Propagation.md` — **decisione architetturale approvata dall'utente: opzione (b)** side-conditions accumulate in `CASContext`/cache, esposte accanto al risultato (`last_side_conditions()`), MAI nell'AST. `simplify` resta bit-per-bit identico in output; fase 1 = solo registrazione di ciò che già avviene. Ogni citazione a codice **verificata leggendo il sorgente** (non dedotta) — il primo abbozzo conteneva 4 imprecisioni trovate e corrette in sede di verifica (vedi errata in cima al file): il sito reale della cancellazione `x/x→1` è `Simplifier::simplify_product_factors` (`simplify_arithmetic_chain.cpp:433`), non `merge_symbolic_factors` (quella è `static`, priva di accesso al contesto); `exp(ln x)→x` è **già** condizionato a `is_known_positive` (nessun gap fase-1 lì, è il pattern-modello).
 - **Origine**: metà scartata del WIP branch-cut (commit `468351c` ne ha committato solo la parte branch-cut). Due tentativi di rendere `simplify` conservativo sul dominio sono stati **misurati e respinti**:
   - `merge_symbolic_factors` che rifiuta di cancellare `x·x⁻¹` senza `x≠0` provato → lascia due fattori con la stessa base, **rompe la forma canonica**; 26 test rossi (Risch, Gruntz, substitution, SqrtFold) e `BronsteinCorpus` da ~20s a 632s.
@@ -364,6 +382,8 @@ A16..A24 (debiti minori) — indipendenti, inframmezzabili
 
 ## E — Ordine raccomandato
 
+> **Avanzamento 2026-07-17**: **A31 FASE 2 FATTA** (flag `conditional_domain_rules` + regole R1-R5 con emissione condizioni, fix bug cache-hit fase 1, `simplify_tracked()`, golden runner consuma il flag per le entry con `assume` — golden simplify 110/6 → 116/0, ratchet in miglioramento). Residuo A31 = fase 3 (integrate/solve, congiunzioni) su driver reale. A32 resta aperta (parser predicati + refs Maxima con assume).
+>
 > **Avanzamento 2026-07-16**: **A33 CHIUSA** (silent-wrong ∫ razionali-in-exp, residuo iperesponenziale §5.9 — 8/8 test nuovi, 285/285 gate mirato, golden integrate 121/1, ratchet golden VERDE a 928/16 senza ritocchi). **A32 APERTA** (campo `assume` del corpus golden mai applicato; WARN visibile nel runner). Infra: manifest Maxima robusto ai bump di revision Homebrew (contenuto normalizzato, verificato 308/310 identici al bump _5→_6); benchmark.sh → mediana-di-5 + warning load (A/B worktree ha certificato: il "drift +41-77%" era ambiente di misura, NON codice — vedi `test/benchmarks/BASELINE_NOTES.md`; residuo software reale: simplify +21%/arena +14% da A30+A31, deliberato); test_quick.sh: 4 test >100s (49% della suite) spostati in SLOW_OK, quick atteso ~600s — `WeierstrassDirectProbe` (196s isolato, probe senza asserzioni) = candidato indagine perf su `weierstrass_zero_diff`.
 >
 > **Avanzamento 2026-07-15**: **A6 CHIUSA** (Brick 1-4 fatti; `galois_group` copre deg 8..10 end-to-end; HC-F8-PENDING-09 chiusa). **A31 fase 1 IMPLEMENTATA** (side-conditions in `CASContext`, 2 siti verificati, 13 test, quick suite 2715/2715, benchmark eseguito) — fase 2 residua (censimento completo altri siti + regole B.1 opt-in). Prossima linea attiva = **A7** (Meijer-G, spec `Meijer_G_Slater.md` pronta e verificata, in coda per decisione utente). Minori intercalabili: A22 (Padé Q(π,e,√)), A18-residuo (osservabilità `false`→`Unimplemented`, R2/R3). A5/A13/A11/A26 residui = by-design, riaprire solo con driver reale. Residuo perf noto A6: passo Stauduhar deep deg-9/10 (>90 s) — soffitto documentato, non correttezza.

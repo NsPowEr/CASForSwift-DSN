@@ -105,4 +105,12 @@ const SideConditionSet& CASContext::last_side_conditions() const noexcept {
     return side_conditions_;
 }
 
+Result<Simplified> CASContext::simplify_tracked(ExprPtr expr) {
+    // §10.4: after the §10.1 fix, last_side_conditions() is exactly this
+    // call's set on both the cache-hit and the cache-miss path.
+    auto result = simplify(expr);
+    if (result.is_error()) return fail<Simplified>(result.error());
+    return ok(Simplified{result.value(), side_conditions_});
+}
+
 }  // namespace cas::symbolic

@@ -660,6 +660,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/algebra/test_multivariate_square_free.cpp
         test/unit/symbolic/test_gc.cpp
         test/unit/symbolic/test_side_conditions.cpp
+        test/unit/symbolic/test_conditional_rules.cpp
         test/unit/symbolic/test_meijerg.cpp
         test/unit/symbolic/test_gaps.cpp
 

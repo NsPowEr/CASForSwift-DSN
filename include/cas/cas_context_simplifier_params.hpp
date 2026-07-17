@@ -104,6 +104,20 @@ struct CASContextSimplifierParams {
         max_side_conditions_ = n;
     }
 
+    // A31 fase 2 (Domain_Conditions_Propagation.md §10.2): opt-in switch for
+    // the conditional domain-sensitive rewrite rules of §10.3 (exp(ln z)->z,
+    // ln(b^e)->e*ln(b), abs(b^2k)->b^2k, 0^e->0, sqrt(b^2)->abs(b), log
+    // product/quotient expansion). Default false = simplify() output stays
+    // bit-per-bit identical to fase 1. A consumer switching this on declares
+    // it reads last_side_conditions() (§4.3.5) — every rule application
+    // registers the domain conditions it assumed.
+    void set_conditional_domain_rules(bool on) noexcept {
+        conditional_domain_rules_ = on;
+    }
+    [[nodiscard]] bool conditional_domain_rules() const noexcept {
+        return conditional_domain_rules_;
+    }
+
     // A7 (Meijer_G_Slater.md §7.3, §8.3): p+q above this -> Unimplemented
     // diagnostic at make_meijerg (never a silent truncation of the parameter
     // list). Default 20: generous over every table §5 entry (p+q <= 5) and
@@ -148,6 +162,7 @@ protected:
     int           max_trig_exact_denom_{100};
     std::size_t   simplify_sqrt_trial_division_bound_{10000U};
     bool          branch_cut_aware_logexp_{false};
+    bool          conditional_domain_rules_{false};
     std::size_t   max_side_conditions_{256U};
     std::size_t   meijerg_max_param_count_{20U};
     std::size_t   meijerg_max_conversion_depth_{8U};

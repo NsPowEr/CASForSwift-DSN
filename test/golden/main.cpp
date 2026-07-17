@@ -188,20 +188,21 @@ int main(int argc, char* argv[]) {
         }
         if (area.empty()) area = "unknown";
 
-        // The corpus "assume" field is NOT applied (neither to the CAS
-        // context nor to the Maxima reference generation).  Comparing under
-        // silently different domains than the corpus author intended would
-        // be misleading — make the debt visible on every run until the
-        // field is actually wired up (TASKLIST A32).
-        {
-            std::string assume_str = json_string_field(line, "assume");
-            if (!assume_str.empty()) {
-                std::cout << "  WARN [" << std::setw(3) << idx
-                          << "] \"assume\": \"" << assume_str
-                          << "\" present in corpus but NOT applied "
-                          << "(A32: runner+Maxima refs ignore it)\n";
-            }
+        // A31 fase 2 (Domain_Conditions_Propagation.md §10.5): for entries
+        // whose author declared the intended domain via "assume", enable the
+        // conditional domain rules — the CAS output then matches Maxima's
+        // real-generic-point reference and every domain restriction taken is
+        // REGISTERED (printed below, INFO line). The "assume" predicate
+        // itself is still not parsed/applied (neither CAS-side nor in the
+        // Maxima refs) — that remains A32; keep the WARN visible.
+        const std::string assume_str = json_string_field(line, "assume");
+        if (!assume_str.empty()) {
+            std::cout << "  WARN [" << std::setw(3) << idx
+                      << "] \"assume\": \"" << assume_str
+                      << "\" declared but not parsed (A32); conditional "
+                      << "domain rules ON for this entry (A31 §10.5)\n";
         }
+        ctx.set_conditional_domain_rules(!assume_str.empty());
 
         auto& stats = area_stats[area];
 
@@ -402,6 +403,26 @@ int main(int argc, char* argv[]) {
                       << input_str << " => " << cas_result.error().message << "\n";
             ++idx;
             continue;
+        }
+
+        // A31 §10.5: show the domain conditions registered while evaluating
+        // this entry (the flag's contract: whoever enables it reads them).
+        // Best effort: multi-call pipelines report the LAST top-level set.
+        if (!assume_str.empty() && !ctx.last_side_conditions().empty()) {
+            std::cout << "  INFO [" << std::setw(3) << idx << "] conditions taken:";
+            for (const auto& c : ctx.last_side_conditions().items()) {
+                const char* kind_name = "?";
+                switch (c.kind) {
+                    case symbolic::DomainConditionKind::NonZero:     kind_name = "nonzero"; break;
+                    case symbolic::DomainConditionKind::Positive:    kind_name = "positive"; break;
+                    case symbolic::DomainConditionKind::NonNegative: kind_name = "nonnegative"; break;
+                    case symbolic::DomainConditionKind::Real:        kind_name = "real"; break;
+                    case symbolic::DomainConditionKind::IntegerVal:  kind_name = "integer"; break;
+                    case symbolic::DomainConditionKind::PrincipalBranch: kind_name = "principal-branch"; break;
+                }
+                std::cout << " " << kind_name << "(" << format_expr(c.subject) << ")";
+            }
+            std::cout << "\n";
         }
 
         // --- Step 2: Read Maxima output file ---

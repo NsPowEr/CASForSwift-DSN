@@ -147,7 +147,20 @@ Result<ExprPtr> Simplifier::simplify_funcall_sqrt(
                         std::vector<ExprPtr>{power->left}));
             }
             // x not provably real.
+            // A31 fase 2 (Domain_Conditions_Propagation.md §10.3.R5):
+            // sqrt(b^2) -> abs(b), exact when b is real. Opt-in: rewrite and
+            // register Real(b). strict_branch_cuts (exact unwinding form
+            // below) wins over the conditioned generic form.
             const bool strict = (context_ != nullptr) && context_->strict_branch_cuts();
+            if (!strict && context_ != nullptr
+                && context_->conditional_domain_rules()) {
+                auto cond = context_->emit_side_condition(
+                    DomainConditionKind::Real, power->left);
+                if (cond.is_error()) return fail<ExprPtr>(cond.error());
+                return traced_result(RuleId::SimplifySqrtSquare, target_before,
+                    arena_.make<FuncCall>(BuiltinOp::Abs,
+                        std::vector<ExprPtr>{power->left}));
+            }
             if (strict) {
                 // F8.0-6.2 / Task 20 BC-1 (Branch_Cut_Propagation.md §2 rule 1):
                 //   sqrt(z²) = z · (-1)^K(2·ln(z))

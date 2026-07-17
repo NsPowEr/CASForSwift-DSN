@@ -206,6 +206,22 @@ Result<ExprPtr> Simplifier::simplify_power(ExprPtr base, ExprPtr exponent, ExprP
         if (exp_check.is_ok() && exp_check.value() && exp_rat_check.value.is_integer() && !exp_rat_check.value.numerator().is_negative() && !exp_rat_check.value.numerator().is_zero()) {
             return traced_result(RuleId::SimplifyZeroPowerPositive, target_before, make_integer(arena_, BigInt(0)));
         }
+        // A31 fase 2 (Domain_Conditions_Propagation.md §10.3.R4): 0^e -> 0
+        // for a SYMBOLIC exponent, exact when Re(e) > 0 (§1). The vocabulary
+        // has no real-part predicate (§3.2), so the stronger Positive(e) is
+        // registered — sound, possibly over-restrictive. Literal exponents
+        // stay with the exact branch above; a provably negative or zero
+        // exponent keeps the refusal (contradiction guard; 0^0 and 0^-k are
+        // handled by the dedicated branches elsewhere in this function).
+        if (context_ != nullptr && context_->conditional_domain_rules()
+            && !(exp_check.is_ok() && exp_check.value())
+            && !is_zero_expr(exponent) && !is_known_negative(exponent)) {
+            auto cond = context_->emit_side_condition(
+                DomainConditionKind::Positive, exponent);
+            if (cond.is_error()) return fail<ExprPtr>(cond.error());
+            return traced_result(RuleId::SimplifyZeroPowerPositive,
+                target_before, make_integer(arena_, BigInt(0)));
+        }
     }
 
     if (is_constant_expr(base, MathConstant::E)) {
@@ -226,10 +242,25 @@ Result<ExprPtr> Simplifier::simplify_power(ExprPtr base, ExprPtr exponent, ExprP
         // applicava la cancellazione anche a simboli ignoti.
         // Riferimento math: Bronstein "Symbolic Integration" §3.3.
         const auto* call = expr_cast<FuncCall>(exponent);
-        if (call != nullptr && call->func_id == BuiltinOp::Ln && call->args.size() == 1U) {
+        if (call != nullptr
+            && (call->func_id == BuiltinOp::Ln || call->func_id == BuiltinOp::Log)
+            && call->args.size() == 1U) {
             ExprPtr arg = call->args.front();
             if (is_known_positive(arg)) {
                 return traced_result(RuleId::SimplifyExpLnPositive, target_before, arg);
+            }
+            // A31 fase 2 (Domain_Conditions_Propagation.md §10.3.R1): on the
+            // principal branch E^(ln z) = z is exact for EVERY z != 0 (ln is
+            // a right inverse of exp, cut included). Opt-in: rewrite and
+            // register NonZero(z). Mirrors the FuncCall(Exp) site in
+            // simplify_exp_log.cpp.
+            if (context_ != nullptr && context_->conditional_domain_rules()
+                && !is_zero_expr(arg)) {
+                auto cond = context_->emit_side_condition(
+                    DomainConditionKind::NonZero, arg);
+                if (cond.is_error()) return fail<ExprPtr>(cond.error());
+                return traced_result(RuleId::SimplifyExpLnPositive,
+                    target_before, arg);
             }
             // Altrimenti: mantieni forma simbolica E^(ln(arg)).
         }

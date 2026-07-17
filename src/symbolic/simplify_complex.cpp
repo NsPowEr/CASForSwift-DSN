@@ -135,6 +135,24 @@ Result<ExprPtr> Simplifier::simplify_funcall_complex(
             if (const auto* c = expr_cast<Constant>(args.front());
                 c && c->value == MathConstant::I)
                 return ok(make_integer(arena_, BigInt(1)));
+            // A31 fase 2 (Domain_Conditions_Propagation.md §10.3.R3):
+            // abs(b^(2k)) -> b^(2k) for literal positive even exponent 2k,
+            // exact when b is real (refused today because e.g. b=i gives
+            // b^2 = -1). Opt-in: rewrite and register Real(b).
+            if (const auto* power = expr_cast<Binary>(args.front());
+                power != nullptr && power->op == BinaryOp::Pow
+                && context_ != nullptr && context_->conditional_domain_rules()) {
+                const auto* exp_lit = expr_cast<IntegerLit>(power->right);
+                if (exp_lit != nullptr && !exp_lit->value.is_negative()
+                    && !exp_lit->value.is_zero()
+                    && (exp_lit->value % BigInt(2)).is_zero()) {
+                    auto cond = context_->emit_side_condition(
+                        DomainConditionKind::Real, power->left);
+                    if (cond.is_error()) return fail<ExprPtr>(cond.error());
+                    return traced_result(RuleId::SimplifyAbsPositive,
+                        target_before, args.front());
+                }
+            }
             // abs(a + b*I) = sqrt(a^2 + b^2)
             if (parts) {
                 ExprPtr a_sq = arena_.make<Binary>(BinaryOp::Pow,
