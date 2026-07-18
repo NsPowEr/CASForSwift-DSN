@@ -56,4 +56,25 @@ struct MeijerGView {
 // IntegerLit) -- this should only happen if a node bypassed make_meijerg.
 [[nodiscard]] Result<MeijerGView> view_meijerg(const FuncCall& call);
 
+// A7 step 3 (Meijer_G_Slater.md §5, §3.1) -- elementary/hypergeometric to
+// Meijer G. Returns an expression MATHEMATICALLY EQUAL to `expr` whose
+// transcendental core is a MeijerG node (typically prefactor * G); the input
+// is returned untouched only never -- unsupported shapes fail with a
+// structured Unimplemented (never a silent passthrough). Table entries §5.1-
+// 5.8 are the fast path; hypergeometric nodes route through the GENERAL
+// DLMF 16.18.1 bridge below (CLAUDE.md cat. 8: table = fast path only).
+// Not yet representable (missing engine prerequisite, see TASKLIST A7):
+// incomplete gamma §5.9 (no BuiltinOp for Gamma(a,z)/gamma(a,z) exists).
+[[nodiscard]] Result<ExprPtr> to_meijerg(CASContext& ctx, ExprPtr expr);
+
+// General pFq -> G bridge (DLMF 16.18.1, spec §3.1), valid for p <= q+1:
+//   pFq(alpha; beta; z) = [prod Gamma(beta) / prod Gamma(alpha)] *
+//     G^{1,p}_{p,q+1}(-z | 1-alpha_1..1-alpha_p ; 0, 1-beta_1..1-beta_q).
+// Fails structured when p > q+1, or when any alpha_k / beta_k is decidably a
+// nonpositive integer (Gamma pole: the pFq degenerates to a polynomial /
+// is undefined -- the bridge formula does not apply there).
+[[nodiscard]] Result<ExprPtr> pfq_to_meijerg(
+    CASContext& ctx,
+    std::vector<ExprPtr> alpha, std::vector<ExprPtr> beta, ExprPtr z);
+
 }  // namespace cas::symbolic

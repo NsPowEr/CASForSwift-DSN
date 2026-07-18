@@ -170,6 +170,7 @@ set(CAS_SYMBOLIC_SOURCES
     src/symbolic/context_core.cpp
     src/symbolic/side_conditions.cpp
     src/symbolic/meijerg_construct.cpp
+    src/symbolic/meijerg_convert.cpp
     src/symbolic/context_params.cpp
     src/symbolic/context_helpers.cpp
     src/symbolic/context_utils.cpp
@@ -662,6 +663,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/symbolic/test_side_conditions.cpp
         test/unit/symbolic/test_conditional_rules.cpp
         test/unit/symbolic/test_meijerg.cpp
+        test/unit/symbolic/test_meijerg_convert.cpp
         test/unit/symbolic/test_gaps.cpp
 
         test/unit/ast/test_ast_model.cpp
