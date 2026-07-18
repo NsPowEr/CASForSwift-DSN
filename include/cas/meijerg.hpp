@@ -67,6 +67,30 @@ struct MeijerGView {
 // incomplete gamma §5.9 (no BuiltinOp for Gamma(a,z)/gamma(a,z) exists).
 [[nodiscard]] Result<ExprPtr> to_meijerg(CASContext& ctx, ExprPtr expr);
 
+// A7 step 4 (Meijer_G_Slater.md §3.2) -- Slater expansion, the GENERAL
+// inverse path (DLMF 16.17.2): G^{m,n}_{p,q}(z) = sum_{k=1..m} A_k * pFq_k.
+// Preconditions enforced: p <= q; no two of b_1..b_m may differ by a
+// decidable integer (confluent poles need logarithmic terms -- structured
+// Unimplemented, never a wrong series). Each summand's pF(q-1) is emitted
+// as a closed form for (p,q-1) in {(0,0): exp, (1,0): binomial} or as a
+// Hypergeometric0F1/1F1/2F1 node; other arities have no engine node yet ->
+// structured Unimplemented (the G node simply stays, spec §9.4).
+[[nodiscard]] Result<ExprPtr> slater_expand(CASContext& ctx, const FuncCall& g);
+
+// A7 step 4 -- single-node inverse conversion: table §5 inverse fast path
+// (shape-gated on the canonical argument forms produced by to_meijerg,
+// recovering sin/cos/sinh/cosh/arctan/arcsin/erf/BesselJ/ln exactly) with
+// slater_expand as the general fallback (CLAUDE.md cat. 8). Fails
+// structured when neither path applies -- the caller may legitimately keep
+// the G node (it is a first-class node, not an error state).
+[[nodiscard]] Result<ExprPtr> from_meijerg(CASContext& ctx, const FuncCall& g);
+
+// Maps from_meijerg over every MeijerG node in `expr`, leaving nodes with
+// no known expansion INTACT (spec §9.4: staying in G form is a valid
+// outcome, not an error). Returns the original pointer when nothing
+// changed (Regola 2).
+[[nodiscard]] Result<ExprPtr> expand_meijerg_nodes(CASContext& ctx, ExprPtr expr);
+
 // General pFq -> G bridge (DLMF 16.18.1, spec §3.1), valid for p <= q+1:
 //   pFq(alpha; beta; z) = [prod Gamma(beta) / prod Gamma(alpha)] *
 //     G^{1,p}_{p,q+1}(-z | 1-alpha_1..1-alpha_p ; 0, 1-beta_1..1-beta_q).

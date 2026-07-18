@@ -4,6 +4,8 @@
 
 #include "simplify_impl.hpp"
 
+#include <utility>
+
 namespace cas::symbolic::detail {
 
 Result<ExprPtr> Simplifier::simplify_funcall_hyper_elliptic(
@@ -48,6 +50,12 @@ Result<ExprPtr> Simplifier::simplify_funcall_hyper_elliptic(
     }
     if (op == BuiltinOp::Hypergeometric2F1 && args.size() == 4U) {
         if (is_zero_expr(args[3])) return ok(make_integer(arena_, BigInt(1)));
+        // 2F1(a,b;c;z) = 2F1(b,a;c;z) (DLMF 15.2.1, series symmetric in the
+        // upper pair): canonicalize the order so structurally different
+        // constructions of the same function share one form (Regola 2).
+        if (canonical_compare(args[0], args[1]) > 0) {
+            std::swap(args[0], args[1]);
+        }
         if (symbols_equal(args[1], args[2])) {
             ExprPtr one_minus_z = arena_.make<Binary>(BinaryOp::Sub,
                 make_integer(arena_, BigInt(1)), args[3]);
