@@ -69,9 +69,14 @@ In parallelo dove possibile:
 - Benchmark gate se hot-path (skill `benchmark-gate`).
 - Commit atomico SOLO dei file della task (mai sweep del tree); messaggio
   dichiara eventuali HARDCODE-OF-PASSAGE.
+- Se hai toccato integrate/simplify: `bash scripts/check_golden_ratchet.sh`
+  OLTRE alla quick (il ratchet golden NON è nella quick — lezione 2026-07-19).
 - Aggiorna `TASKLIST_MASTER.md`: stato task (✅ FATTO / 🚧 checkpoint / ⛔
   BLOCCATA + causa). NESSUN altro file di stato: TASKLIST_MASTER.md è l'unico
   tracker.
+- **Raccomandazione routing (OBBLIGATORIA, ultima riga dell'iterazione)** —
+  `docs/rules/model-routing.md`:
+  `PROSSIMA SESSIONE → task: A<N> · modello: <Sonnet|Opus|Fable> · effort: <low|medium|high|max> · motivo: <classe C + modificatori>`
 
 ## Stop-conditions (interrompono l'iterazione, non si aggirano)
 

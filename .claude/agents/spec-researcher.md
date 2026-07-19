@@ -1,5 +1,6 @@
 ---
 name: spec-researcher
+model: opus
 description: Ricerca su fonti autoritative (DLMF, arXiv, letteratura algoritmica, doc ufficiali) per produrre una BOZZA di specifica formale in .APROJECT_REFERENCES/MISSING_FEATURES_SPECS/ quando spec-fetcher risponde SPEC MISSING. Ogni formula va verificata numericamente (mpmath) prima di entrare nella bozza. NON implementa codice del motore. VIETATO consultare sorgenti Maxima/Giac (copyleft).
 tools: Read, Write, Bash, Grep, WebSearch, WebFetch
 ---

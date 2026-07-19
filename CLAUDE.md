@@ -142,6 +142,7 @@ Enforcement meccanico: `.claude/hooks/guard_git_safety.sh` + `.claude/hooks/guar
 - **Parità Giac**: `PARITY_GIAC.md` = scoreboard di MISURA rigenerabile (skill `giac-parity-scan`), MAI tracker: ogni gap diventa task `A<N>` in `TASKLIST_MASTER.md`.
 - **Ciclo autonomo**: skill `next-task` (playbook /loop: pre-flight→spec→implement→gate, stop-conditions); lavoro fermo/ereditato → skill `stale-work-recovery` (forense prima, completamento poi); verifica numerica → skill `numeric-certify` (mpmath multi-punto).
 - **Anti-collisione**: hook `guard_gate_lock.sh` nega build/test se un gate è già in esecuzione (memoria no-concurrent-gates); hook Stop `stop_state_report.sh` segnala tree sporco a fine turno (debounced).
+- **Routing modello/effort**: [`docs/rules/model-routing.md`](docs/rules/model-routing.md) — capacità proporzionata alla classe C della task (C1-C2→Sonnet, C3→Opus, C4→Fable high); OGNI fine sessione dichiara `PROSSIMA SESSIONE → task · modello · effort · motivo`. Apertura sessione: prompt canonico in [`docs/SESSION_PROMPT.md`](docs/SESSION_PROMPT.md).
 
 ---
 
