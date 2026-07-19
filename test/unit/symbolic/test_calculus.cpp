@@ -624,11 +624,26 @@ TEST(CalculusIntegrateTest, AllowsRemovableRationalSingularityAfterExactCancella
     expect_equivalent(result.value(), expected.value());
 }
 
-TEST(CalculusIntegrateTest, RejectsNonElementaryCaseForNow) {
+TEST(CalculusIntegrateTest, SolvesGaussianViaMeijerGFallback) {
+    // Storia: questo test si chiamava RejectsNonElementaryCaseForNow e
+    // asseriva Unimplemented. Da A7 step 5 il fallback Meijer G POST-Risch
+    // produce la forma chiusa (sqrt(pi)/2)*erf(x) (Meijer_G_Slater.md §9.4),
+    // quindi il contratto è cambiato: successo + verifica per
+    // differenziazione (mai toString — D(F) − f deve semplificare a 0).
     symbolic::CASContext context;
-    auto integrated = integrate_input("exp(-x^2)", "x", context);
-    ASSERT_TRUE(integrated.is_error());
-    EXPECT_EQ(integrated.error().kind, CASErrorKind::Unimplemented);
+    auto integrand = parse_expr("exp(-x^2)", context.arena());
+    ASSERT_TRUE(integrand.is_ok());
+    auto integrated = integrate(integrand.value(), Symbol("x"), context);
+    ASSERT_TRUE(integrated.is_ok()) << integrated.error().message;
+    auto derivative = diff(integrated.value(), Symbol("x"), 1U, context);
+    ASSERT_TRUE(derivative.is_ok()) << derivative.error().message;
+    ExprPtr residual = context.arena().make<Binary>(BinaryOp::Sub,
+        derivative.value(), integrand.value());
+    auto zero = context.simplify(residual);
+    ASSERT_TRUE(zero.is_ok());
+    const auto* lit = expr_cast<IntegerLit>(zero.value());
+    EXPECT_TRUE(lit != nullptr && lit->value.is_zero())
+        << "D(F) - f non semplifica a zero";
 }
 
 TEST(CalculusLimitTest, ComputesDirectSubstitutionAndLHopitalCases) {

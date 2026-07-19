@@ -91,6 +91,33 @@ struct MeijerGView {
 // changed (Regola 2).
 [[nodiscard]] Result<ExprPtr> expand_meijerg_nodes(CASContext& ctx, ExprPtr expr);
 
+// A7 step 5 (Meijer_G_Slater.md §6) -- rewrite identities. Every rebuild
+// goes back through make_meijerg (the §2.2 guards re-run; an overlap is a
+// structured refusal). Formulas verified numerically in the spec.
+// §6.2 (DLMF 16.19.2): z^mu G(z|a;b) = G(z|a+mu;b+mu) -- returns the
+// shifted node (the caller owns the z^mu bookkeeping).
+[[nodiscard]] Result<ExprPtr> meijerg_power_shift(
+    CASContext& ctx, const FuncCall& g, ExprPtr mu);
+// §6.3 (DLMF 16.19.3): cancels every decidably-equal pair (upper n-group
+// param, lower outside-m param) to fixpoint; no pair -> identical rebuild.
+[[nodiscard]] Result<ExprPtr> meijerg_cancel_common_param(
+    CASContext& ctx, const FuncCall& g);
+// §6.1 (DLMF 16.19.1): builds G^{n,m}_{q,p}(1/z | 1-b ; 1-a) from g.
+[[nodiscard]] Result<ExprPtr> meijerg_invert_argument(
+    CASContext& ctx, const FuncCall& g);
+// §6.6 (h=-1): int G(t|a;b) dt = z * G^{m,n+1}_{p+1,q+1}(z | 0,a ; b,-1).
+// The argument of g must BE the integration variable's expression; callers
+// with G(c*x^r) substitute first (see integrate_meijerg.cpp).
+[[nodiscard]] Result<ExprPtr> meijerg_antiderivative(
+    CASContext& ctx, const FuncCall& g);
+// §6.5 (h=+1, DLMF 16.19.5 family; numerically certified 2026-07-19,
+// mpmath 3 shapes x 4 irrational points, err < 1e-41):
+//   z * d/dz G^{m,n}_{p,q}(z|a;b) = G^{m,n+1}_{p+1,q+1}(z | 0,a ; b, +1).
+// Returns the SHIFTED NODE only; the caller owns the (dz/dx)/z chain-rule
+// prefactor (see differentiate_rules.cpp).
+[[nodiscard]] Result<ExprPtr> meijerg_derivative_shift(
+    CASContext& ctx, const FuncCall& g);
+
 // General pFq -> G bridge (DLMF 16.18.1, spec §3.1), valid for p <= q+1:
 //   pFq(alpha; beta; z) = [prod Gamma(beta) / prod Gamma(alpha)] *
 //     G^{1,p}_{p,q+1}(-z | 1-alpha_1..1-alpha_p ; 0, 1-beta_1..1-beta_q).

@@ -172,6 +172,7 @@ set(CAS_SYMBOLIC_SOURCES
     src/symbolic/meijerg_construct.cpp
     src/symbolic/meijerg_convert.cpp
     src/symbolic/meijerg_from.cpp
+    src/symbolic/meijerg_identities.cpp
     src/symbolic/meijerg_slater.cpp
     src/symbolic/context_params.cpp
     src/symbolic/context_helpers.cpp
@@ -215,6 +216,8 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/integrate_substitution.cpp
     src/calculus/integrate_trig_substitution.cpp
     src/calculus/integrate_weierstrass.cpp
+    src/calculus/integrate_meijerg.cpp
+    src/calculus/integrate_rational_part.cpp
     src/calculus/integrate_hermite.cpp
     src/calculus/integrate_risch.cpp
     src/calculus/integrate_risch_rde.cpp
@@ -700,6 +703,7 @@ test/unit/symbolic/test_sqrt_fold.cpp
         test/unit/calculus/test_integrate_byparts.cpp
         test/unit/calculus/test_integrate_ibp_coverage.cpp
         test/unit/calculus/test_integrate_risch_smoke.cpp
+        test/unit/calculus/test_integrate_meijerg.cpp
         test/unit/calculus/test_integrate_bronstein_corpus.cpp
         test/unit/calculus/test_integrate_substitution.cpp
         test/unit/algebra/test_polynomial_sparse_interpolation.cpp

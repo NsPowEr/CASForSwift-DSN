@@ -1,6 +1,8 @@
 #include "differentiate_internal.hpp"
 #include "calculus_internal.hpp"
 
+#include "cas/meijerg.hpp"
+
 namespace cas::calculus {
 
 Result<ExprPtr> Differentiator::differentiate_unary(const Unary& unary, const Symbol& var) {
@@ -414,6 +416,33 @@ Result<ExprPtr> Differentiator::differentiate_function(const FuncCall& call, con
             ExprPtr ab_over_c = arena_.make<Binary>(BinaryOp::Div, ab, c);
             return ok(make_product(arena_, {ab_over_c, new_fc, z_d.value()}));
         }
+    }
+
+    // Meijer G (variable arity): §6.5 h=+1 theta-shift (DLMF 16.19.5 family,
+    // numerically certified — see meijerg_derivative_shift):
+    //   d/dx G(u|a;b) = (u'/u) * G^{m,n+1}_{p+1,q+1}(u | 0,a ; b, +1).
+    if (call.func_id == BuiltinOp::MeijerG) {
+        auto view = symbolic::view_meijerg(call);
+        if (view.is_error()) return fail<ExprPtr>(view.error());
+        for (ExprPtr p : view.value().a) {
+            if (depends_on(p, var)) {
+                return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
+                    "Differentiation of MeijerG w.r.t. parametri non supportata"));
+            }
+        }
+        for (ExprPtr p : view.value().b) {
+            if (depends_on(p, var)) {
+                return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
+                    "Differentiation of MeijerG w.r.t. parametri non supportata"));
+            }
+        }
+        ExprPtr z = view.value().z;
+        auto z_d = differentiate_once(z, var);
+        if (z_d.is_error()) return z_d;
+        auto shifted = symbolic::meijerg_derivative_shift(context_, call);
+        if (shifted.is_error()) return shifted;
+        ExprPtr chain = arena_.make<Binary>(BinaryOp::Div, z_d.value(), z);
+        return ok(make_product(arena_, {chain, shifted.value()}));
     }
 
     return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Differentiation is not implemented for function '" + call.name + "' with " + std::to_string(call.args.size()) + " arguments"));
