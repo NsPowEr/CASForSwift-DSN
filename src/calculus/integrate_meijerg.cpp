@@ -97,6 +97,74 @@ struct VarMonomial {
     return std::nullopt;
 }
 
+// True when the expression contains a node of the pFq/G/Bessel world — the
+// ops whose §5/§3.1 to_meijerg entries are SPECIAL-function sources (not the
+// elementary rows). Extend together with the table (e.g. incomplete gamma
+// when §5.9 lands). Governs the §9.4 result policy below: a Meijer G
+// antiderivative is a first-class RESULT only when the integrand already
+// lives in this world; for purely elementary integrands an unfolded G means
+// "inverse table cannot fold this yet" -> structured Unimplemented (the
+// pre-A7 behaviour, never a readability downgrade vs the elementary form
+// that may exist).
+[[nodiscard]] bool contains_special_fn_node(ExprPtr e) {
+    if (e == nullptr) return false;
+    if (const auto* call = expr_cast<FuncCall>(e)) {
+        switch (call->func_id) {
+            case BuiltinOp::MeijerG:
+            case BuiltinOp::BesselJ:
+            case BuiltinOp::Hypergeometric0F1:
+            case BuiltinOp::Hypergeometric1F1:
+            case BuiltinOp::Hypergeometric2F1:
+                return true;
+            default: break;
+        }
+        for (ExprPtr a : call->args)
+            if (contains_special_fn_node(a)) return true;
+        return false;
+    }
+    if (const auto* prod = expr_cast<Product>(e)) {
+        for (ExprPtr f : prod->factors)
+            if (contains_special_fn_node(f)) return true;
+        return false;
+    }
+    if (const auto* sum = expr_cast<Sum>(e)) {
+        for (ExprPtr t : sum->terms)
+            if (contains_special_fn_node(t)) return true;
+        return false;
+    }
+    if (const auto* bin = expr_cast<Binary>(e))
+        return contains_special_fn_node(bin->left)
+            || contains_special_fn_node(bin->right);
+    if (const auto* un = expr_cast<Unary>(e))
+        return contains_special_fn_node(un->operand);
+    return false;
+}
+
+[[nodiscard]] bool contains_meijerg_node(ExprPtr e) {
+    if (e == nullptr) return false;
+    if (const auto* call = expr_cast<FuncCall>(e)) {
+        if (call->func_id == BuiltinOp::MeijerG) return true;
+        for (ExprPtr a : call->args)
+            if (contains_meijerg_node(a)) return true;
+        return false;
+    }
+    if (const auto* prod = expr_cast<Product>(e)) {
+        for (ExprPtr f : prod->factors)
+            if (contains_meijerg_node(f)) return true;
+        return false;
+    }
+    if (const auto* sum = expr_cast<Sum>(e)) {
+        for (ExprPtr t : sum->terms)
+            if (contains_meijerg_node(t)) return true;
+        return false;
+    }
+    if (const auto* bin = expr_cast<Binary>(e))
+        return contains_meijerg_node(bin->left) || contains_meijerg_node(bin->right);
+    if (const auto* un = expr_cast<Unary>(e))
+        return contains_meijerg_node(un->operand);
+    return false;
+}
+
 // Post-pass over the expanded antiderivative: fold (c*x^r)^s -> c^s * x^{r*s}
 // wherever the base is a var-monomial and s is a rational literal (Sqrt = s
 // 1/2). This is the explicit implementation of the Mellin half-line
@@ -327,6 +395,22 @@ Result<ExprPtr> integrate_meijerg_fallback(
     ExprPtr folded = fold.walk(expanded.value());
     auto simplified = ctx.simplify(folded);
     if (simplified.is_error()) return simplified;
+
+    // §9.4 result policy (see contains_special_fn_node): an antiderivative
+    // still carrying a Meijer G node is returned as-is only for integrands
+    // of the special world; on purely elementary integrands it would be a
+    // readability downgrade (an elementary form may exist that the inverse
+    // table cannot reach yet) -> structured refusal, golden stays a SKIP.
+    if (contains_meijerg_node(simplified.value())
+        && !contains_special_fn_node(expr)) {
+        return make_unimplemented<ExprPtr>(
+            "calculus", "integrate_meijerg_fallback",
+            "unfolded Meijer G on purely elementary integrand",
+            cas::error::reason_codes::GENERIC,
+            "Extend from_meijerg inverse table / Slater folds for this "
+            "G shape (Meijer_G_Slater.md §5 inverse, A7 residuo)",
+            "A7");
+    }
     if (fold.conditional) {
         auto cond = ctx.emit_side_condition(
             symbolic::DomainConditionKind::Positive,

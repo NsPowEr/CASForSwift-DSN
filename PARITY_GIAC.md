@@ -1,6 +1,6 @@
 # PARITY GIAC — Scoreboard CAS vs Giac 2.0.0
 
-> Generato: 2026-07-19T15:54:44 · `python3 scripts/giac_parity_report.py`
+> Generato: 2026-07-19T23:56:35 · `python3 scripts/giac_parity_report.py`
 > **Artefatto di MISURA, non tracker**: ogni gap da chiudere va elaborato
 > come task in `TASKLIST_MASTER.md` (single source of truth).
 > giac% = risposte in forma chiusa di giac sul corpus (copertura oracle).
@@ -22,7 +22,7 @@
 | special_fn | 80 | 34 | 46 | 0 | 42% | 75/0/5 | 94% | -51 |
 
 ⚠ **Dati CAS stantii** (mtime `golden_<area>.json` più vecchio di 7g rispetto al più recente — il Δ misura un motore vecchio, rigenerare con `run_golden_measurement.sh --area <a> --skip-maxima` dopo rebuild del runner):
-- `bronstein`: 28 giorni indietro
+- `bronstein`: 31 giorni indietro
 
 ## Aree oltre soglia (Δ > 10 pp) — candidati task
 
