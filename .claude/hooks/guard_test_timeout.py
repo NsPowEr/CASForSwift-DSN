@@ -27,7 +27,48 @@ GTEST_BINS = {
 }
 BENCH_BINS = {"benchmark_tests", "cas_benchmarks"}
 
-segments = re.split(r"&&|\|\||;|\||\n", cmd)
+def split_segments(s):
+    """Split a shell command line on unquoted && || ; | and newlines.
+
+    A quote-blind re.split broke quoted arguments apart (A36:
+    pgrep -lf "a|b|cas_foundation_tests" produced a phantom segment whose
+    first token was a test binary -> false deny). Quote state is tracked so
+    separators inside single/double quotes never split.
+    """
+    out, cur, i, n = [], [], 0, len(s)
+    in_sq = in_dq = False
+    while i < n:
+        c = s[i]
+        if in_sq:
+            cur.append(c)
+            if c == "'":
+                in_sq = False
+        elif in_dq:
+            cur.append(c)
+            if c == '\\' and i + 1 < n:
+                cur.append(s[i + 1]); i += 1
+            elif c == '"':
+                in_dq = False
+        elif c == "'":
+            in_sq = True; cur.append(c)
+        elif c == '"':
+            in_dq = True; cur.append(c)
+        elif c == '\\' and i + 1 < n:
+            cur.append(c); cur.append(s[i + 1]); i += 1
+        elif c == '\n' or c == ';':
+            out.append(''.join(cur)); cur = []
+        elif c == '&' and i + 1 < n and s[i + 1] == '&':
+            out.append(''.join(cur)); cur = []; i += 1
+        elif c == '|':
+            # covers both | and || (the empty middle segment is harmless)
+            out.append(''.join(cur)); cur = []
+        else:
+            cur.append(c)
+        i += 1
+    out.append(''.join(cur))
+    return out
+
+segments = split_segments(cmd)
 
 def tokenize(seg):
     try:

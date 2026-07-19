@@ -4,7 +4,8 @@
 >
 > Questo file è un **indice operativo**. Il dettaglio normativo vive in `docs/rules/`
 > e si carica on-demand quando pertinente — così il context resta libero a scala 4x.
-> Stato corrente del progetto: **`STATE.md`** (non i vecchi `*_SESSION_*.md`, ora in `docs/archive/`).
+> Stato corrente del progetto: **`TASKLIST_MASTER.md`** (single source of truth; i vecchi
+> tracker `STATE.md`/`PLAN_*`/`TODO*`/`CAS_TASKS.md` sono SUPERSEDED, in `docs/archive/`).
 
 ---
 
@@ -19,7 +20,7 @@ Il commit message DEVE dichiarare ogni hardcode-of-passage. PR con hardcode non 
 **Vietati**: lookup table chiuse quando esiste algoritmo generale; scorciatoie "passa il test attuale"; pattern matching su forma al posto di algoritmo strutturale; bail-out su tipo/range; costanti magiche al posto di parametri `CASContext`.
 
 ### 0.1 — Mandatory Specification Check (anti-allucinazione)
-Prima di scrivere codice per un task di `PLAN_HP_PRIME_PARITY.md`/`CAS_TASKS.md`: `ls -lR .APROJECT_REFERENCES/MISSING_FEATURES_SPECS/`, leggi la spec `.md` pertinente, e dichiara *"Ho letto la specifica formale [NomeFile.md] e implementerò le formule e i vincoli ivi contenuti"*. Subagent spawnato → l'orchestratore gli passa il path assoluto della spec. Codice senza spec letta = INVALIDO.
+Prima di scrivere codice per un task di `TASKLIST_MASTER.md`: `ls -lR .APROJECT_REFERENCES/MISSING_FEATURES_SPECS/`, leggi la spec `.md` pertinente, e dichiara *"Ho letto la specifica formale [NomeFile.md] e implementerò le formule e i vincoli ivi contenuti"*. Subagent spawnato → l'orchestratore gli passa il path assoluto della spec. Codice senza spec letta = INVALIDO.
 
 ### 0.2 — Divieto assoluto di disabilitare test
 **MAI** disabilitare test, commentare asserzioni, alterare benchmark per nascondere fallimenti. Test rosso = bug matematico/architetturale da risolvere nel motore. Vietati `#if 0`, macro `DISABLE`, commenti elusivi → rigetto immediato.
@@ -70,8 +71,8 @@ Il Parser **deve** iniettare implicitamente `*` tra Primary Expressions adiacent
 ### 5. Gestione DecimalLit (confine simbolico/numerico)
 `DecimalLit` ammessi solo per preservare l'input utente. Il core simbolico ritorna `CASErrorKind::Unimplemented` se un'operazione algebrica richiede di operare su `DecimalLit`. Il calcolo numerico è fallback esplicito.
 
-### 6. Maxima Reference Oracle — GPL-2.0-only, NON modificabile
-Maxima 5.49.0 (`/opt/homebrew/Cellar/maxima/5.49.0/`) è l'oracolo della golden suite. **VIETATO** modificare/patchare/ricompilare qualsiasi sorgente/binario/`.lisp`/`.mac`/`.fas` Maxima, o embeddarne output nei binari. Uso ammesso: solo fork/exec (`maxima --very-quiet --batch-string=...`) + parsing testuale. Integrità via `scripts/verify_maxima_integrity.sh` (SHA-256 pinned). Motivo: modifica → derivative work copyleft + oracolo non più indipendente. **Dettaglio → [`docs/rules/maxima-oracle.md`](docs/rules/maxima-oracle.md)**.
+### 6. Reference Oracles (Maxima + Giac) — copyleft, NON modificabili
+Maxima 5.49.0 (`/opt/homebrew/Cellar/maxima/5.49.0/`, GPL-2.0-only) è l'oracolo primario della golden suite; Giac 2.0.0 (`~/xcas-oracle/`, symlink `/opt/homebrew/bin/icas`, GPL-3.0-or-later) è il **secondo oracolo** (F7.5.G1) e il target di parità. **VIETATO** per entrambi: modificare/patchare/ricompilare sorgenti/binari, o embeddarne output nei binari CAS. Uso ammesso: solo fork/exec (`maxima --very-quiet --batch-string=...`; `icas` con input su stdin) + parsing testuale. Integrità: `scripts/verify_maxima_integrity.sh` e `scripts/giac_integrity.sh` (SHA-256 pinned). Motivo: modifica → derivative work copyleft + oracolo non più indipendente. **Dettaglio → [`docs/rules/maxima-oracle.md`](docs/rules/maxima-oracle.md)**.
 
 ---
 
@@ -95,6 +96,19 @@ Maxima 5.49.0 (`/opt/homebrew/Cellar/maxima/5.49.0/`) è l'oracolo della golden 
 4. Attendere intervento umano. Nessuna ulteriore esecuzione senza autorizzazione.
 
 **Git safety**: solo `git stash push` per backup. NO `git reset --hard`, NO `git restore --source`.
+
+---
+
+## REGOLA EVIDENCE-FIRST (azioni distruttive o pesanti)
+
+Nessuna azione difficile da annullare — cancellazione di file/dir, `git rm`, rewrite di massa, spostamenti strutturali, disattivazione di infrastruttura — senza PRIMA raccogliere **motivazioni oggettive verificate a fatti**:
+
+1. **Prove**: riferimenti reali al target (grep/graphify su script/CMake/hook/docs), stato `git ls-files` (tracked?), mtime/provenienza, rigenerabilità. "Sembra inutile" NON è una prova.
+2. **Classifica il target**: (a) **rigenerabile al 100%** (output di build, cache) → cancellabile; (b) **tracked** → `git rm`/`git mv` (la storia recupera sempre); (c) **untracked unico** → MAI cancellare: spostare in attic (`~/cas-attic-<data>/`) o `git stash push`.
+3. **Reversibilità dichiarata PRIMA di agire**: per ogni target, esplicita come si torna indietro.
+4. **Dubbio residuo → chiedere all'utente**, presentando le prove raccolte, non un'opinione.
+
+Enforcement meccanico: `.claude/hooks/guard_git_safety.sh` + `.claude/hooks/guard_rm_safety.sh` (deny sui pattern distruttivi; l'umano può sempre eseguire a mano nel proprio terminale). La regola vale anche per ciò che i hook non possono intercettare (script Python, `shutil.rmtree`, overwrite via redirect). Case-study di riferimento: root cleanup 2026-07-19.
 
 ---
 
@@ -124,7 +138,10 @@ Maxima 5.49.0 (`/opt/homebrew/Cellar/maxima/5.49.0/`) è l'oracolo della golden 
 
 - **Codice**: `graphify query "<domanda>"` PRIMA di grep raw (subgraph scoped, molto più piccolo). `graphify path/explain` per relazioni/concetti. `graphify update .` dopo modifiche (auto via hook `graphify_autoupdate.sh`).
 - **Ledger/task**: NON aprire i markdown da 100-180 KB per una voce. Usa `python3 scripts/ledger_index.py {hc <id> | task <id> | search <testo> | open | stats}`.
-- **Stato**: `STATE.md`. **Storico**: `docs/archive/`. **Regole dettaglio**: `docs/rules/`.
+- **Stato**: `TASKLIST_MASTER.md`. **Storico**: `docs/archive/`. **Regole dettaglio**: `docs/rules/`.
+- **Parità Giac**: `PARITY_GIAC.md` = scoreboard di MISURA rigenerabile (skill `giac-parity-scan`), MAI tracker: ogni gap diventa task `A<N>` in `TASKLIST_MASTER.md`.
+- **Ciclo autonomo**: skill `next-task` (playbook /loop: pre-flight→spec→implement→gate, stop-conditions); lavoro fermo/ereditato → skill `stale-work-recovery` (forense prima, completamento poi); verifica numerica → skill `numeric-certify` (mpmath multi-punto).
+- **Anti-collisione**: hook `guard_gate_lock.sh` nega build/test se un gate è già in esecuzione (memoria no-concurrent-gates); hook Stop `stop_state_report.sh` segnala tree sporco a fine turno (debounced).
 
 ---
 

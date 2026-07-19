@@ -14,7 +14,39 @@
           },
           {
             "type": "command",
+            "command": ".claude/hooks/guard_git_safety.sh"
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/guard_rm_safety.sh"
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/guard_gate_lock.sh"
+          },
+          {
+            "type": "command",
             "command": ".claude/hooks/guard_anti_loop.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/stop_state_report.sh"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/session_state.sh"
           }
         ]
       }
