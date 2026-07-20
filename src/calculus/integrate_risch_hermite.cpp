@@ -3,8 +3,9 @@
 // Bronstein "Symbolic Integration I", Chapters 5-6 (rational part).
 //
 // Public API (declared in integrate_risch_internal.hpp):
-//   integrate_log_polynomial_part()        — ∫ poly-in-ln(u) dx
 //   integrate_risch_poly_and_rational_part() — steps 3..end of integrate_risch
+// integrate_log_polynomial_part() (∫ poly-in-ln(u) dx) moved to
+// integrate_risch_logpoly.cpp (anti-monolith split).
 
 #include "integrate_risch_internal.hpp"
 #include "integrate_engine.hpp"
@@ -21,91 +22,16 @@
 
 namespace cas::calculus {
 
-// Integrate the polynomial-in-t part of a single logarithmic extension
-// tower:  ∫ Σ_{k=0..n} a_k(x) * t^k dx,   where t = ln(u(x)),  Dt = u'/u.
-//
-// Standard ansatz:  the antiderivative is again a polynomial in t,
-//   B(t) = Σ_{k=0..n} b_k(x) * t^k,   with
-//
-//   d/dx B(t)
-//     = Σ b_k'(x) * t^k + Σ k * b_k(x) * (u'/u) * t^{k-1}
-//     = b_n' * t^n + Σ_{k=0..n-1} [ b_k' + (k+1) * b_{k+1} * (u'/u) ] * t^k.
-//
-// Matching coefficients with a_k * t^k gives the descending recursion
-//   b_n = ∫ a_n dx
-//   b_k = ∫ [ a_k - (k+1) * b_{k+1} * (u'/u) ] dx,   for k = n-1, ..., 0.
-//
-// Each integration is in the lower field Q(x) via integrate().
-// Failures propagate as Unimplemented.
-Result<ExprPtr> integrate_log_polynomial_part(
+// Defined in integrate_risch_logpoly.cpp (anti-monolith split); uses
+// algebra::PolyExpr, so the declaration needs polynomial_internal.hpp visible
+// at the call site (already included above).
+[[nodiscard]] Result<ExprPtr> integrate_log_polynomial_part(
     const algebra::PolyExpr& quot,
     ExprPtr u_arg,
     const Symbol& t_top,
     const Symbol& var,
-    symbolic::CASContext& context) {
-    AstArena& arena = context.arena();
-
-    if (quot.empty()) {
-        return ok(arena.make<IntegerLit>(BigInt(0)));
-    }
-    const std::size_t deg = quot.size() - 1U;
-
-    // u'/u (simplified once up front)
-    auto du_res = diff(u_arg, var, 1U, context);
-    if (du_res.is_error()) return fail<ExprPtr>(du_res.error());
-    ExprPtr du_over_u = arena.make<Binary>(BinaryOp::Div, du_res.value(), u_arg);
-    if (auto s = context.simplify(du_over_u); s.is_ok()) du_over_u = s.value();
-
-    std::vector<ExprPtr> b(deg + 1U, ExprPtr{});
-
-    for (std::ptrdiff_t k = static_cast<std::ptrdiff_t>(deg); k >= 0; --k) {
-        const std::size_t kz = static_cast<std::size_t>(k);
-        ExprPtr a_k = (kz < quot.size()) ? quot[kz] : ExprPtr{};
-        if (!a_k) a_k = arena.make<IntegerLit>(BigInt(0));
-
-        // rhs = a_k  -  (k+1) * b_{k+1} * (u'/u)
-        ExprPtr rhs = a_k;
-        if (kz + 1U <= deg && b[kz + 1U]) {
-            ExprPtr kp1 = arena.make<IntegerLit>(BigInt(static_cast<std::int64_t>(kz + 1U)));
-            ExprPtr correction = arena.make<Product>(std::vector<ExprPtr>{kp1, b[kz + 1U], du_over_u});
-            rhs = arena.make<Binary>(BinaryOp::Sub, rhs, correction);
-        }
-        if (auto s = context.simplify(rhs); s.is_ok()) rhs = s.value();
-
-        auto b_k_res = integrate(rhs, var, context);
-        if (b_k_res.is_error()) {
-            return b_k_res;
-        }
-        b[kz] = b_k_res.value();
-    }
-
-    // Build B(t) = Σ b_k * t^k.
-    std::vector<ExprPtr> terms;
-    terms.reserve(b.size());
-    ExprPtr t_sym = arena.make<Symbol>(t_top.name);
-    for (std::size_t k = 0; k < b.size(); ++k) {
-        if (!b[k]) continue;
-        if (const auto* il = expr_cast<IntegerLit>(b[k]); il && il->value.is_zero()) continue;
-        ExprPtr term;
-        if (k == 0U) {
-            term = b[k];
-        } else if (k == 1U) {
-            term = arena.make<Binary>(BinaryOp::Mul, b[k], t_sym);
-        } else {
-            ExprPtr t_pow = arena.make<Binary>(
-                BinaryOp::Pow,
-                t_sym,
-                arena.make<IntegerLit>(BigInt(static_cast<std::int64_t>(k))));
-            term = arena.make<Binary>(BinaryOp::Mul, b[k], t_pow);
-        }
-        terms.push_back(term);
-    }
-    if (terms.empty()) return ok(arena.make<IntegerLit>(BigInt(0)));
-    if (terms.size() == 1U) return ok(terms.front());
-    ExprPtr raw = arena.make<Sum>(std::move(terms));
-    if (auto s = context.simplify(raw); s.is_ok()) return ok(s.value());
-    return ok(raw);
-}
+    const DifferentialField& lower_field,
+    symbolic::CASContext& context);
 
 // True if `e` contains an elementary transcendental function (exp/ln/trig/
 // inverse-trig/…) whose argument depends on `var` — i.e. `e` is not a pure
@@ -143,27 +69,24 @@ Result<ExprPtr> integrate_log_polynomial_part(
     return false;
 }
 
+// HARDCODE-OF-PASSAGE: HC-A38-01 (see HARDCODE_LEDGER.md)
 // Decide whether the t_top-polynomial coefficient `coeff` makes the polynomial-
-// quotient integration UNSOUND and the integral non-elementary here.
+// quotient integration UNSOUND here.
 //
-// The branch below integrates each coefficient with the lower-field integrate(),
-// which treats every free symbol — INCLUDING a sibling generator t_j = exp(u)
-// or ln(u) — as a constant in `var` (D(t_j) is unknown to the bare symbol).
-// That is correct only when the coefficient lies in the base field Q(var).
-//
-// A coefficient that mixes in a sibling generator splits into two cases:
-//   • REDUCIBLE — mapping the generators back to their real forms collapses the
-//     coefficient to a rational function of `var` (e.g. x·exp(-ln x) → 1, the
-//     integrating factor in a Bernoulli/linear ODE).  These stay integrable and
-//     are left to the existing path unchanged.
-//   • IRREDUCIBLE — a genuine foreign transcendental survives (e.g. e^{-x}·ln x
-//     from ∫ e^{-x}·ln(x) dx).  Integrating the symbol form as if D(e^{-x})=0
-//     produced the silently-wrong closed form e^{-x}·(x·ln x − x); since the
-//     integral is in fact non-elementary, bail to Unimplemented (REGOLA ZERO:
-//     "mai output sbagliato").
-//
-// Rational integrands and single-generator towers never reach the irreducible
-// case (no sibling generators), so neither is affected.
+// The branch below integrates each coefficient with the lower-field machinery
+// (limited_integrate_field first, plain integrate() as fallback).  Both are
+// verified/sound in isolation, but A38 found that letting a coefficient carry
+// a LOWER-TOWER generator (nested log-in-log, or an unrelated sibling like an
+// exp generator) can drive the fallback's recursive integrate() call back into
+// a STRUCTURALLY IDENTICAL polynomial-quotient sub-problem — an unbounded
+// recursion (reproduced empirically: entry trace cycles kz=1→kz=0→kz=1... with
+// no shrinking measure).  Until that recursion is bounded by a real
+// termination argument (HC-A38-01), bail here — Unimplemented, never a hang
+// or a silent wrong answer (REGOLA ZERO).  Rational integrands and
+// single-generator towers never carry a sibling generator, so neither is
+// affected; this is exactly why the existing end-to-end regression suite
+// (including plain ∫ln(x)dx through the NEW limited_integrate_field-aware
+// kz≥1 path) stays green.
 [[nodiscard]] static bool coeff_blocks_poly_quotient(
     ExprPtr coeff, const Symbol& t_top, const DifferentialField& field,
     const Symbol& var, symbolic::CASContext& context) {
@@ -240,29 +163,44 @@ Result<ExprPtr> integrate_risch_poly_and_rational_part(
                     const bool handle_log_polynomial = (ext.type == ExtensionType::Logarithmic);
 
                     if (handle_log_polynomial) {
-                        // Soundness precondition (REGOLA ZERO): the log-polynomial
-                        // ansatz integrates each coefficient in the lower field
-                        // via integrate(), which treats a sibling generator symbol
-                        // (e.g. the exp generator left in ∫ e^{-x}·ln(x) dx) as a
-                        // constant in `var` — silently producing the wrong closed
-                        // form e^{-x}·(x·ln x − x).  Bail when an *irreducible*
-                        // sibling transcendental survives (the integral is then
-                        // non-elementary); reducible coefficients fall through.
+                        // Soundness precondition: bail when a coefficient carries a
+                        // lower-tower generator that doesn't reduce away (nested
+                        // log-in-log, or an unrelated sibling like an exp generator).
+                        // A38 wired the §5.10 per-degree recursion below to the
+                        // tower-recursive parametric solver (limited_integrate_field,
+                        // A1+A26) and confirmed it is sound and reachable for
+                        // single-generator towers, but for a lower-generator-carrying
+                        // coefficient the fallback's recursive integrate() call was
+                        // observed to re-enter a structurally identical polynomial-
+                        // quotient sub-problem with no shrinking measure (unbounded
+                        // recursion, reproduced via trace).  Bounding that recursion
+                        // is tracked as a follow-up (see TASKLIST_MASTER.md); until
+                        // then, Unimplemented here — never a hang or a silent wrong
+                        // answer (REGOLA ZERO).
                         for (std::size_t k = 0; k < quot.size(); ++k) {
                             if (coeff_blocks_poly_quotient(quot[k], t_top, field, var, context)) {
                                 return make_unimplemented<ExprPtr>(
                                     "calculus", "integrate_risch",
                                     "log-polynomial coefficient carries an "
-                                    "irreducible sibling generator (e.g. exp inside "
-                                    "a ln-polynomial coefficient); not elementary-"
-                                    "integrable by the single-level Risch pipeline",
+                                    "irreducible sibling/lower generator (e.g. exp "
+                                    "inside a ln-polynomial coefficient, or a nested "
+                                    "log-in-log tower); the field-aware §5.10 recursion "
+                                    "cannot yet bound its fallback recursion for this "
+                                    "shape",
                                     cas::error::reason_codes::RISCH_LOG_EXTENSION_GENERAL,
-                                    "Extend the Risch structure theorem to multi-level "
-                                    "exp/log towers (Bronstein §5)",
+                                    "Bound the fallback recursion for lower-generator "
+                                    "coefficients in integrate_log_polynomial_part "
+                                    "(Bronstein §5)",
                                     "F0.8");
                             }
                         }
-                        auto B_res = integrate_log_polynomial_part(quot, ext.argument, t_top, var, context);
+                        // The lower field k = Q(x, t_1..t_{n-1}) is where the §5.10
+                        // per-degree limited integration problems live (A38).
+                        DifferentialField lower_field(field.base_var(),
+                            std::vector<DifferentialExtension>(
+                                field.extensions().begin(), field.extensions().end() - 1U));
+                        auto B_res = integrate_log_polynomial_part(
+                            quot, ext.argument, t_top, var, lower_field, context);
                         if (B_res.is_error()) return fail<ExprPtr>(B_res.error());
                         int_terms.push_back(B_res.value());
                     }

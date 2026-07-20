@@ -400,6 +400,29 @@ using MRVSet = std::set<ExprPtr, MRVCompare>;
 [[nodiscard]] Result<std::vector<ParametricRischDeQSolution>> solve_risch_de_parametric_field(
     ExprPtr f, const std::vector<ExprPtr>& g_vec, std::size_t ext_idx, const DifferentialField& field, symbolic::CASContext& ctx);
 
+/// @brief Solution of the Limited Integration Problem over a tower (A38).
+struct LimitedIntegrationFieldSolution {
+    ExprPtr v;                  ///< the K-part of the decomposition
+    std::vector<Rational> c;    ///< constants c_1..c_m on w_1..w_m
+};
+
+/// @brief Limited Integration over K = Q(x, t_1..t_n) (Bronstein §7.2, eq. 7.30):
+/// given f, w_1..w_m ∈ K, find v ∈ K and c_i ∈ Const(K) = Q with
+///   f = D(v) + Σ_i c_i·w_i.
+/// Solved as the parametric Risch DE (7.36)  D(v) = c_0·f + Σ c_i·(−w_i)  under
+/// the constraint c_0 = 1, via solve_risch_de_parametric_field (§7.1) — the
+/// route Bronstein recommends for arbitrary w_i.  This is the wiring that makes
+/// the parametric tower solver reachable from integrate() (A38; the solver
+/// itself came from A1 + A26).  Sound by construction: the returned pair is
+/// re-verified by exact back-substitution in the tower.  A tower in which no
+/// solution has c_0 = 1 is a legitimate NEGATIVE, reported as a distinct
+/// diagnostic (RISCH_NO_MATCH), never silence.
+[[nodiscard]] Result<LimitedIntegrationFieldSolution> limited_integrate_field(
+    ExprPtr f,
+    const std::vector<ExprPtr>& w_vec,
+    const DifferentialField& field,
+    symbolic::CASContext& ctx);
+
 /// @brief Parametric PolyRischDE, non-cancellation case (Bronstein §7.1,
 /// ParamPolyRischDENoCancel1 — "When deg(b) is Large Enough").  Solves the
 /// cleared parametric equation  D(q) + f_new·q = Σ_i c_i·g_new_i  for q ∈ K[t]

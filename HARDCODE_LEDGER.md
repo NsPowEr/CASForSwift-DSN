@@ -15,6 +15,42 @@
 
 ---
 
+### HC-A38-01 — coeff_blocks_poly_quotient: bail-out su coefficiente con generatore lower-tower/sibling — APERTO (2026-07-20)
+- **File**: `src/calculus/integrate_risch_hermite.cpp` (`coeff_blocks_poly_quotient` +
+  `has_var_transcendental`, call site in `integrate_risch_poly_and_rational_part`).
+- **Categoria CLAUDE.md**: 4 — Bail-out su tipo/forma dato. Esplicito e
+  diagnostico (`Unimplemented`, reason `RISCH_LOG_EXTENSION_GENERAL`), mai
+  silenzioso: sempre sound, non causa mai output sbagliato.
+- **Descrizione**: task A38 ha wired `limited_integrate_field` (Bronstein §7.2)
+  in `integrate_log_polynomial_part`, rendendo raggiungibile da `integrate()`
+  reale il solver parametrico tower-recursive (A1/A26) per il livello top di
+  un polinomio-in-log. Quando `limited_integrate_field` fallisce, il codice
+  ricade su un `integrate()` ricorsivo nel campo inferiore (comportamento
+  preesistente). Per un coefficiente che porta un generatore del campo
+  inferiore NON riducibile a razionale (torre log-in-log annidata, o un
+  generatore sibling indipendente come un exp estraneo), questo fallback è
+  stato osservato EMPIRICAMENTE (trace strumentato) rientrare in un
+  sotto-problema strutturalmente identico — ricorsione non limitata, mai
+  terminante (riprodotto con `∫(1/x + 1/(x·ln x))·ln(ln x) dx`, trace: kz=1→
+  kz=0→rientra in kz=1 con lo stesso stato). `coeff_blocks_poly_quotient`
+  blocca questo caso con `Unimplemented` prima che il fallback venga tentato.
+- **Fix corretto**: (a) bound di terminazione esplicito sulla ricorsione
+  `integrate_log_polynomial_part → integrate() → integrate_log_polynomial_part`
+  (misura: altezza torre inferiore + grado in t_top, decrescente per
+  costruzione), oppure (b) estendere `limited_integrate_field`/il solver
+  parametrico a operare correttamente su coefficienti multi-generatore così
+  che il fallback ricorsivo non sia più necessario in quel ramo (Bronstein
+  §5, teorema di struttura generale su torri annidate).
+- **Blocking dependency**: nessuna, è un problema di limitatezza della
+  ricorsione, non di prerequisito mancante. Da aprire come sotto-task
+  esplicito sotto A38 in `TASKLIST_MASTER.md` quando qualcuno riprende il
+  lavoro su torri log-in-log annidate.
+- **Test**: `test/unit/calculus/test_risch_limited_integrate.cpp`,
+  `EndToEnd_NestedLogTower_IsCleanDiagnosticNotHang` — asserisce che il caso
+  ritorna `Unimplemented` (non un hang, non un risultato sbagliato).
+
+---
+
 ### HC-F70-A43-EXTENDED-REAL — Extended-Real AST — CHIUSO (F7.5.F1 Phase 2)
 - **File**: `include/cas/ast.hpp` (`enum class MathConstant`),
   `include/cas/extended_real.hpp` (predicati + factory),

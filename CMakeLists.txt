@@ -222,9 +222,11 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/integrate_risch.cpp
     src/calculus/integrate_risch_rde.cpp
     src/calculus/integrate_risch_hermite.cpp
+    src/calculus/integrate_risch_logpoly.cpp
     src/calculus/risch_parametric.cpp
     src/calculus/risch_parametric_rational.cpp
     src/calculus/risch_parametric_limited.cpp
+    src/calculus/risch_limited_integrate.cpp
     src/calculus/risch_param_nocancel.cpp
     src/calculus/risch_constant_system.cpp
     src/calculus/risch_de_extensions.cpp
@@ -721,6 +723,7 @@ test/unit/algebra/test_cyclotomic_rootof_d2.cpp
         test/unit/calculus/test_integrate_risch_exp_mix.cpp
         test/unit/calculus/test_risch_parametric.cpp
         test/unit/calculus/test_risch_parametric_tower.cpp
+        test/unit/calculus/test_risch_limited_integrate.cpp
         test/unit/calculus/test_risch_de_extensions.cpp
         test/unit/calculus/test_risch_exp_expand.cpp
         test/unit/calculus/test_risch_nested_transcendental.cpp
