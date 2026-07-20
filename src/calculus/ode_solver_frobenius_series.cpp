@@ -210,17 +210,36 @@ Result<ExprPtr> build_log_branch(
                 b[n] = make_int(arena, 0);  // genuine free parameter
                 continue;
             }
-            // Secondary resonance with non-zero forcing: the single-log
-            // ansatz cannot absorb it — an extended log-power construction
-            // would be required.  Bail explicitly (REGOLA ZERO).
+            // GUARD DIFENSIVO — IRRAGGIUNGIBILE PER IL 2° ORDINE (prova).
+            // Questo è un solver Frobenius di 2° ordine: l'indiciale è la
+            // quadratica I(ρ)=ρ²+(p0−1)ρ+q0 con esattamente due radici, e il
+            // log-branch è invocato SOLO quando differiscono per un intero
+            // positivo N (r_large = r_small + N, `integer_gap`).  Qui
+            // r2 = r_small, quindi il denominatore della ricorrenza è
+            //   denom(n) = I(n+r2) = (n+r2−r_large)(n+r2−r_small) = (n−N)·n,
+            // che si annulla SOLO per n=0 e n=N.  n=N è già gestito sopra
+            // (`if (n == N)`, dove c·h_0 fissa il coefficiente del log) e n=0 è
+            // il termine di testa: per ogni n∈{1,…,num_terms}\{N} vale
+            // denom≠0 (letterale, radici razionali quando il gap è intero).
+            // Una "risonanza secondaria" a n>N richiederebbe un TERZO zero
+            // indiciale — impossibile per una quadratica.  L'ansatz a singolo
+            // log è dunque COMPLETO per il 2° ordine (teoria classica di
+            // Frobenius: due soluzioni indipendenti, al più una logaritmica).
+            // Empiricamente non scatta mai (test Bessel₁ gap N=2 con log reale
+            // + Euler gap N=5 degenere).  Il guard resta come rete di
+            // sicurezza sound: diventerebbe raggiungibile solo estendendo il
+            // solver a ODE di ordine ≥3 (indiciale di grado ≥3, più livelli di
+            // risonanza) — fuori scope A5.  Ledger/tasklist: A5 chiuso come
+            // non-gap provato.  Mai silent-wrong: se mai raggiunto, Unimplemented.
             return make_unimplemented<ExprPtr>(UnimplementedInfo{
                 .module      = "calculus",
                 .function    = "build_log_branch",
                 .input_shape = "Frobenius secondary resonance at n=" +
-                               std::to_string(n) + " with non-zero forcing",
+                               std::to_string(n) + " with non-zero forcing "
+                               "(unreachable for 2nd-order indicial)",
                 .reason      = cas::error::reason_codes::SERIES_GENERAL,
-                .suggestion  = "Multiple resonance levels require an extended "
-                               "log-power construction",
+                .suggestion  = "Extended log-power construction — only for "
+                               "order >= 3 ODEs (out of A5 scope)",
                 .ticket      = "A5"
             });
         }

@@ -216,6 +216,38 @@ TEST_F(FrobeniusTest, BesselOrder1_ResonantLogBranch) {
         << "expected x^(-1) (y_2 leading) in: " << debug_print(y);
 }
 
+// ── A5 / F5.3 — Log-branch a gap intero N = 3 (regressione: il guard di
+// "risonanza secondaria" è irraggiungibile per il 2° ordine) ────────────────
+//
+// ODE:  x² y'' − 2x y' + x y = 0.
+//   p̃ = x·p = −2         → p0 = −2, p_k = 0 (k≥1)
+//   q̃ = x²·q = x         → q0 = 0,  q1 = 1
+//   Indiciale: r² − 3r = r(r−3),  radici r = 3, 0,  gap N = 3.
+// Il coefficiente incrociato q1 = 1 produce forcing non nullo al livello di
+// risonanza n = N = 3 (S_3 = 1/4, h_0 = N = 3 ⇒ c_log = −1/12 ≠ 0): log reale.
+// La ricorrenza per b_n prosegue oltre n = 3 (denom = n(n−3) ≠ 0 per n>3):
+// nessuna risonanza secondaria — l'ansatz a singolo log è COMPLETO per il 2°
+// ordine.  Gap maggiore del Bessel₁ (N=2): esercita più passi della ricorrenza.
+TEST_F(FrobeniusTest, IntegerGap3_LogBranchNoSecondaryResonance) {
+    ExprPtr a2 = E("x^2");
+    ExprPtr a1 = E("-2*x");
+    ExprPtr a0 = E("x");
+    Symbol x("x");
+
+    auto result = calculus::solve_ode_frobenius_at_zero(a2, a1, a0, x, 6U, *ctx);
+    // Il punto chiave: NON è Unimplemented (il guard secondary-resonance non
+    // scatta), e il ramo logaritmico si costruisce fino in fondo.
+    ASSERT_TRUE(result.is_ok()) << "err=" << (result.is_error() ? result.error().message : std::string{});
+
+    ExprPtr y = result.value();
+    EXPECT_TRUE(contains_ln_x(y, "x"))
+        << "expected ln(x) (log-branch, gap N=3) in: " << debug_print(y);
+
+    ExprPtr exp3 = ctx->arena().make<IntegerLit>(BigInt(3));
+    EXPECT_TRUE(contains_x_power(y, "x", exp3, *ctx))
+        << "expected x^3 (y_1 leading) in: " << debug_print(y);
+}
+
 // ── A5 / F5.3 — Double indicial root (gap N = 0), logarithmic second solution ──
 //
 // Euler with a repeated indicial root:  x² y'' − x y' + y = 0.
