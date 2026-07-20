@@ -63,6 +63,24 @@ struct CASContextCalculusParams {
         return integration_max_intervals_;
     }
 
+    // ── Confluent hypergeometric ₁F₁ series (A7 §6.7 numeric shadow) ───────
+    // Kummer series Σ (a)_k/(b)_k · z^k/k!. Entire in z ⇒ converges everywhere,
+    // but a large |z| or near-cancelling parameters may need more terms than the
+    // default before the relative term ratio drops below tol; both bounds are
+    // configurable so a caller can trade cost for reach (Unimplemented otherwise).
+    void set_hypergeometric_1f1_max_terms(std::size_t n) noexcept {
+        hypergeometric_1f1_max_terms_ = n;
+    }
+    [[nodiscard]] std::size_t hypergeometric_1f1_max_terms() const noexcept {
+        return hypergeometric_1f1_max_terms_;
+    }
+    void set_hypergeometric_1f1_rel_tol(double t) noexcept {
+        hypergeometric_1f1_rel_tol_ = t;
+    }
+    [[nodiscard]] double hypergeometric_1f1_rel_tol() const noexcept {
+        return hypergeometric_1f1_rel_tol_;
+    }
+
     // ── Bessel half-integer recurrence expansion bound (F7.5.E2) ───────────
     void set_max_bessel_half_integer_order(unsigned int n) noexcept {
         max_bessel_half_integer_order_ = n;
@@ -166,6 +184,8 @@ protected:
     std::size_t   max_integration_depth_{16U};
     bool          expand_bessel_recurrence_{false};
     unsigned int  max_bessel_half_integer_order_{64U};
+    std::size_t   hypergeometric_1f1_max_terms_{4000U};
+    double        hypergeometric_1f1_rel_tol_{1e-16};
     double        integration_abs_tol_{1e-10};
     double        integration_rel_tol_{1e-8};
     std::size_t   integration_max_intervals_{4096U};

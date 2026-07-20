@@ -31,6 +31,8 @@ public:
 private:
     NumericEnv env_;
     std::size_t max_recursion_depth_{256U};
+    std::size_t hyp_1f1_max_terms_{4000U};
+    double hyp_1f1_rel_tol_{1e-16};
     std::size_t current_depth_{0U};
     std::unordered_set<ExprPtr, ExprHash> active_nodes_;
 };

@@ -18,7 +18,10 @@ namespace {
 } // namespace
 
 NumericEvaluator::NumericEvaluator(symbolic::CASContext& ctx, const NumericEnv& env)
-    : env_(env), max_recursion_depth_(ctx.max_recursion_depth()) {}
+    : env_(env),
+      max_recursion_depth_(ctx.max_recursion_depth()),
+      hyp_1f1_max_terms_(ctx.hypergeometric_1f1_max_terms()),
+      hyp_1f1_rel_tol_(ctx.hypergeometric_1f1_rel_tol()) {}
 
 Result<double> NumericEvaluator::evaluate(ExprPtr expr) {
     if (!expr) {
@@ -183,7 +186,34 @@ Result<double> NumericEvaluator::evaluate(ExprPtr expr) {
                 if (node.func_id == BuiltinOp::Acos) return ok(std::acos(args[0]));
                 if (node.func_id == BuiltinOp::Atan) return ok(std::atan(args[0]));
                 if (node.name == "atan2") return ok(std::atan2(args[0], args[1]));
-                
+
+                // Confluent hypergeometric ₁F₁(a;b;z) = Σ_k (a)_k/(b)_k · z^k/k!.
+                // Entire in z ⇒ the Maclaurin series converges for every finite
+                // argument (no analytic-continuation trap, unlike ₂F₁): summed
+                // by the exact term ratio t_{k+1}/t_k = (a+k)z/((b+k)(k+1)).
+                // b a non-positive integer is a Γ-pole ⇒ undefined (structured
+                // error, never a wrong value).
+                if (node.func_id == BuiltinOp::Hypergeometric1F1 && args.size() == 3U) {
+                    const double a = args[0], b = args[1], z = args[2];
+                    if (b <= 0.0 && std::floor(b) == b)
+                        return fail<double>(make_error(CASErrorKind::Undefined,
+                            "1F1: parameter b is a non-positive integer (Gamma pole)"));
+                    double term = 1.0, sum = 1.0;
+                    const auto max_terms = static_cast<int>(hyp_1f1_max_terms_);
+                    for (int k = 0; k < max_terms; ++k) {
+                        term *= (a + k) * z / ((b + k) * (k + 1));
+                        sum += term;
+                        if (k > 4 && std::abs(term) <= hyp_1f1_rel_tol_ * std::abs(sum))
+                            return ok(sum);
+                    }
+                    return make_unimplemented<double>(
+                        "numeric", "NumericEvaluator::evaluate",
+                        "1F1 series did not converge in double precision",
+                        error::reason_codes::NUMERIC_UNSUPPORTED_FUNCTION,
+                        "Use a higher-precision evaluator for this 1F1 argument",
+                        "A7");
+                }
+
                 // F0.8-MIGRATED
                 return make_unimplemented<double>(
                     "numeric", "NumericEvaluator::evaluate",

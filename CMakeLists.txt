@@ -217,6 +217,7 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/integrate_trig_substitution.cpp
     src/calculus/integrate_weierstrass.cpp
     src/calculus/integrate_meijerg.cpp
+    src/calculus/integrate_mellin_convolution.cpp
     src/calculus/integrate_rational_part.cpp
     src/calculus/integrate_hermite.cpp
     src/calculus/integrate_risch.cpp
@@ -707,6 +708,7 @@ test/unit/symbolic/test_sqrt_fold.cpp
         test/unit/calculus/test_integrate_ibp_coverage.cpp
         test/unit/calculus/test_integrate_risch_smoke.cpp
         test/unit/calculus/test_integrate_meijerg.cpp
+        test/unit/calculus/test_integrate_mellin_convolution.cpp
         test/unit/calculus/test_integrate_bronstein_corpus.cpp
         test/unit/calculus/test_integrate_substitution.cpp
         test/unit/algebra/test_polynomial_sparse_interpolation.cpp
