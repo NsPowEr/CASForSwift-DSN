@@ -215,22 +215,58 @@ TEST_F(RischLimitedIntegrate, EndToEnd_SingleLevelLogPolynomial_ViaLimitedIntegr
 
 // Torre log ANNIDATA (t_1=ln(x), t_2=ln(ln(x))): la ricorsione §5.10 al
 // livello top produce un coefficiente che porta il generatore t_1 del campo
-// inferiore.  A38 ha scoperto che il fallback ricorsivo su tali coefficienti
-// può rientrare in un sotto-problema strutturalmente identico (ricorsione
-// non limitata, riprodotta empiricamente via trace) — vedi il commento su
-// coeff_blocks_poly_quotient in integrate_risch_hermite.cpp.  Finché quella
-// ricorsione non è limitata (follow-up in TASKLIST_MASTER.md), il guard
-// preesistente blocca questo caso con un Unimplemented pulito: NON un hang,
-// NON un risultato sbagliato.
-TEST_F(RischLimitedIntegrate, EndToEnd_NestedLogTower_IsCleanDiagnosticNotHang) {
+// inferiore.  Prima di HC-A38-01 il fallback per-livello faceva un
+// root-restart su `integrate()` generico, che RICOSTRUISCE la torre da capo:
+// né l'altezza né il grado decrescevano e la ricorsione rientrava in un
+// sotto-problema identico (loop infinito riprodotto via trace).  Ora il
+// fallback è dispatchato sul CAMPO INFERIORE (Bronstein §5.2/§5.7: la
+// ricorsione elimina un monomio), quindi termina per costruzione.
+//
+// Esito richiesto: termina, e se produce un'antiderivata questa DEVE
+// verificare D(∫f) = f (mai un risultato sbagliato, REGOLA ZERO).
+TEST_F(RischLimitedIntegrate, EndToEnd_NestedLogTower_TerminatesAndIsSound) {
     Symbol x("x");
     ExprPtr f = parse_expr("(1/x + 1/(x*ln(x)))*ln(ln(x))", arena());
 
+    // Stato 2026-07-20: TERMINA (era un loop infinito) e riporta Unimplemented.
+    // L'integrale È elementare (= ln(ln x)²/2 + ln(x)·ln(ln x) − ln(x)); la
+    // completezza residua NON è più un problema di ricorsione ma del solver
+    // §7.2: limited_integrate_field non risolve una forzante con denominatore
+    // nel generatore (base case Q(x) polynomial-only, HC-A26-PRIMITIVE-PARAMQ-
+    // RATIONAL).  Se un giorno passa, il ramo is_ok qui sotto lo blinda.
     auto F = integrate(f, x, ctx);
-    ASSERT_TRUE(F.is_error())
-        << "atteso Unimplemented (gap noto, follow-up A38); se ora passa, "
-           "promuovere questo test a verifica end-to-end positiva";
-    EXPECT_EQ(F.error().kind, CASErrorKind::Unimplemented);
+    if (F.is_ok()) {
+        auto dF = diff(F.value(), x, 1U, ctx);
+        ASSERT_TRUE(dF.is_ok()) << dF.error().message;
+        ExprPtr delta = arena().make<Binary>(BinaryOp::Sub, dF.value(), f);
+        EXPECT_TRUE(is_zero_expr(delta, ctx))
+            << "D(∫f) ≠ f — antiderivata sbagliata sulla torre annidata";
+    } else {
+        EXPECT_EQ(F.error().kind, CASErrorKind::Unimplemented);
+    }
+}
+
+// Soundness sul caso NON elementare con generatore sibling: ∫ e^{-x}·ln(x) dx
+// non ha forma chiusa elementare.  Il vecchio guard `coeff_blocks_poly_quotient`
+// (rimosso da HC-A38-01) esisteva anche per impedire che questo integrale
+// producesse la forma silenziosamente sbagliata e^{-x}·(x·ln x − x), che nasce
+// trattando il generatore exp come costante in x.  Ora che il fallback è
+// field-aware (campo inferiore, D(t_exp) noto), quel percorso non è più
+// raggiungibile: il test blinda l'invariante.
+TEST_F(RischLimitedIntegrate, EndToEnd_SiblingExpCoefficient_NeverSilentlyWrong) {
+    Symbol x("x");
+    ExprPtr f = parse_expr("exp(-x)*ln(x)", arena());
+
+    auto F = integrate(f, x, ctx);
+    if (F.is_ok()) {
+        auto dF = diff(F.value(), x, 1U, ctx);
+        ASSERT_TRUE(dF.is_ok()) << dF.error().message;
+        ExprPtr delta = arena().make<Binary>(BinaryOp::Sub, dF.value(), f);
+        EXPECT_TRUE(is_zero_expr(delta, ctx))
+            << "D(∫f) ≠ f — regressione silent-wrong su ∫e^{-x}·ln(x)dx";
+    } else {
+        EXPECT_EQ(F.error().kind, CASErrorKind::Unimplemented);
+    }
 }
 
 // Non-regressione del caso classico che passava già dal fast-path

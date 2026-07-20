@@ -15,9 +15,34 @@
 
 ---
 
-### HC-A38-01 — coeff_blocks_poly_quotient: bail-out su coefficiente con generatore lower-tower/sibling — APERTO (2026-07-20)
-- **File**: `src/calculus/integrate_risch_hermite.cpp` (`coeff_blocks_poly_quotient` +
-  `has_var_transcendental`, call site in `integrate_risch_poly_and_rational_part`).
+### HC-A38-01 — coeff_blocks_poly_quotient: bail-out su coefficiente con generatore lower-tower/sibling — ✅ CHIUSO 2026-07-20
+- **✅ RISOLTO 2026-07-20 (stessa giornata dell'apertura)**: la causa radice non era
+  algebrica ma **strutturale**. Riletta la spec (Bronstein §5.2/§5.7, righe 4161-4167
+  e 4694): la ricorsione dell'algoritmo di integrazione su torre DEVE muoversi lungo
+  esattamente due assi — (a) eliminare un monomio, ricorrendo su `k = C(t_1..t_{n-1})`,
+  oppure (b) abbassare `deg_t(p)` a torre fissa. Il fallback per-livello di
+  `integrate_log_polynomial_part` faceva invece un **root-restart su `integrate()`
+  generico**, che RICOSTRUISCE la torre differenziale dall'espressione: né l'altezza
+  né il grado decrescono, e la ricorsione può rientrare in un sotto-problema
+  identico (esattamente il loop osservato). Fix: il fallback è ora dispatchato sul
+  **campo inferiore** — `integrate_risch_poly_and_rational_part(..., lower_field, ...)`
+  quando `k ⊋ Q(x)`, e solo per `k = Q(x)` (nessun generatore da ricostruire, base
+  case provabilmente non rientrante) si usa l'integratore generico. L'altezza della
+  torre è così strettamente decrescente = misura di terminazione del teorema.
+  `coeff_blocks_poly_quotient` e `has_var_transcendental` sono stati **rimossi**
+  (il bail-out Cat-4 non serve più). Test: `EndToEnd_NestedLogTower_TerminatesAndIsSound`
+  (era loop infinito → ora termina in ~4.7s) e
+  `EndToEnd_SiblingExpCoefficient_NeverSilentlyWrong` (blinda ∫e^{-x}·ln(x)dx contro
+  la vecchia forma silenziosamente sbagliata `e^{-x}(x·ln x − x)`).
+- **Completezza residua (NON questa voce)**: la torre log-in-log annidata ora termina
+  ma riporta `Unimplemented` invece dell'antiderivata (che esiste:
+  `ln(ln x)²/2 + ln(x)·ln(ln x) − ln(x)`). Il limite è nel solver §7.2:
+  `limited_integrate_field` non risolve una forzante con denominatore nel generatore,
+  cioè il base case `Q(x)` polynomial-only già tracciato da
+  **HC-A26-PRIMITIVE-PARAMQ-RATIONAL**. Nessuna nuova voce di ledger: il debito è
+  quello, un livello più in alto.
+- **File**: `src/calculus/integrate_risch_logpoly.cpp` (fix); guard rimosso da
+  `src/calculus/integrate_risch_hermite.cpp`.
 - **Categoria CLAUDE.md**: 4 — Bail-out su tipo/forma dato. Esplicito e
   diagnostico (`Unimplemented`, reason `RISCH_LOG_EXTENSION_GENERAL`), mai
   silenzioso: sempre sound, non causa mai output sbagliato.

@@ -33,79 +33,6 @@ namespace cas::calculus {
     const DifferentialField& lower_field,
     symbolic::CASContext& context);
 
-// True if `e` contains an elementary transcendental function (exp/ln/trig/
-// inverse-trig/…) whose argument depends on `var` — i.e. `e` is not a pure
-// rational function of `var`.
-[[nodiscard]] static bool has_var_transcendental(ExprPtr e, const Symbol& var) {
-    if (!e) return false;
-    if (const auto* fc = expr_cast<FuncCall>(e)) {
-        bool arg_has_var = false;
-        for (ExprPtr a : fc->args) if (depends_on(a, var)) { arg_has_var = true; break; }
-        if (arg_has_var) {
-            switch (fc->func_id) {
-                case BuiltinOp::Exp: case BuiltinOp::Ln:  case BuiltinOp::Log:
-                case BuiltinOp::Sin: case BuiltinOp::Cos: case BuiltinOp::Tan:
-                case BuiltinOp::Sec: case BuiltinOp::Csc: case BuiltinOp::Cot:
-                case BuiltinOp::Asin: case BuiltinOp::Acos: case BuiltinOp::Atan:
-                case BuiltinOp::Unknown:  // asinh/acosh/… parsed as Unknown
-                    return true;
-                default: break;
-            }
-        }
-        for (ExprPtr a : fc->args) if (has_var_transcendental(a, var)) return true;
-        return false;
-    }
-    if (const auto* b = expr_cast<Binary>(e))
-        return has_var_transcendental(b->left, var) || has_var_transcendental(b->right, var);
-    if (const auto* u = expr_cast<Unary>(e)) return has_var_transcendental(u->operand, var);
-    if (const auto* s = expr_cast<Sum>(e)) {
-        for (ExprPtr t : s->terms) if (has_var_transcendental(t, var)) return true;
-        return false;
-    }
-    if (const auto* p = expr_cast<Product>(e)) {
-        for (ExprPtr f : p->factors) if (has_var_transcendental(f, var)) return true;
-        return false;
-    }
-    return false;
-}
-
-// HARDCODE-OF-PASSAGE: HC-A38-01 (see HARDCODE_LEDGER.md)
-// Decide whether the t_top-polynomial coefficient `coeff` makes the polynomial-
-// quotient integration UNSOUND here.
-//
-// The branch below integrates each coefficient with the lower-field machinery
-// (limited_integrate_field first, plain integrate() as fallback).  Both are
-// verified/sound in isolation, but A38 found that letting a coefficient carry
-// a LOWER-TOWER generator (nested log-in-log, or an unrelated sibling like an
-// exp generator) can drive the fallback's recursive integrate() call back into
-// a STRUCTURALLY IDENTICAL polynomial-quotient sub-problem — an unbounded
-// recursion (reproduced empirically: entry trace cycles kz=1→kz=0→kz=1... with
-// no shrinking measure).  Until that recursion is bounded by a real
-// termination argument (HC-A38-01), bail here — Unimplemented, never a hang
-// or a silent wrong answer (REGOLA ZERO).  Rational integrands and
-// single-generator towers never carry a sibling generator, so neither is
-// affected; this is exactly why the existing end-to-end regression suite
-// (including plain ∫ln(x)dx through the NEW limited_integrate_field-aware
-// kz≥1 path) stays green.
-[[nodiscard]] static bool coeff_blocks_poly_quotient(
-    ExprPtr coeff, const Symbol& t_top, const DifferentialField& field,
-    const Symbol& var, symbolic::CASContext& context) {
-    if (!coeff) return false;
-    bool has_sibling = false;
-    for (const auto& ext : field.extensions()) {
-        if (ext.t_var.name == t_top.name) continue;
-        if (depends_on(coeff, ext.t_var)) { has_sibling = true; break; }
-    }
-    if (!has_sibling) return false;
-    // Map the generator symbols back to their real expressions and simplify; a
-    // surviving var-transcendental marks a genuinely non-elementary coefficient.
-    auto real = field.from_field_generators(coeff, context);
-    if (real.is_error()) return true;  // cannot verify reducibility → safe bail
-    ExprPtr c = real.value();
-    if (auto s = context.simplify(c); s.is_ok()) c = s.value();
-    return has_var_transcendental(c, var);
-}
-
 // Steps 3..end of integrate_risch():
 //   3.  Decompose gen_expr into P/Q w.r.t. topmost generator t_n.
 //   3b. Extract polynomial quotient; handle base and transcendental cases.
@@ -163,37 +90,14 @@ Result<ExprPtr> integrate_risch_poly_and_rational_part(
                     const bool handle_log_polynomial = (ext.type == ExtensionType::Logarithmic);
 
                     if (handle_log_polynomial) {
-                        // Soundness precondition: bail when a coefficient carries a
-                        // lower-tower generator that doesn't reduce away (nested
-                        // log-in-log, or an unrelated sibling like an exp generator).
-                        // A38 wired the §5.10 per-degree recursion below to the
-                        // tower-recursive parametric solver (limited_integrate_field,
-                        // A1+A26) and confirmed it is sound and reachable for
-                        // single-generator towers, but for a lower-generator-carrying
-                        // coefficient the fallback's recursive integrate() call was
-                        // observed to re-enter a structurally identical polynomial-
-                        // quotient sub-problem with no shrinking measure (unbounded
-                        // recursion, reproduced via trace).  Bounding that recursion
-                        // is tracked as a follow-up (see TASKLIST_MASTER.md); until
-                        // then, Unimplemented here — never a hang or a silent wrong
-                        // answer (REGOLA ZERO).
-                        for (std::size_t k = 0; k < quot.size(); ++k) {
-                            if (coeff_blocks_poly_quotient(quot[k], t_top, field, var, context)) {
-                                return make_unimplemented<ExprPtr>(
-                                    "calculus", "integrate_risch",
-                                    "log-polynomial coefficient carries an "
-                                    "irreducible sibling/lower generator (e.g. exp "
-                                    "inside a ln-polynomial coefficient, or a nested "
-                                    "log-in-log tower); the field-aware §5.10 recursion "
-                                    "cannot yet bound its fallback recursion for this "
-                                    "shape",
-                                    cas::error::reason_codes::RISCH_LOG_EXTENSION_GENERAL,
-                                    "Bound the fallback recursion for lower-generator "
-                                    "coefficients in integrate_log_polynomial_part "
-                                    "(Bronstein §5)",
-                                    "F0.8");
-                            }
-                        }
+                        // HC-A38-01 closed: coefficients carrying a lower-tower
+                        // generator (nested log-in-log, sibling exp, ...) no longer
+                        // need a bail-out here.  integrate_log_polynomial_part now
+                        // dispatches its per-degree fallback on the LOWER field
+                        // (Bronstein §5.2/§5.7 termination axis) instead of
+                        // root-restarting the generic integrate(), so the recursion
+                        // is bounded by the strictly-decreasing tower height.
+                        //
                         // The lower field k = Q(x, t_1..t_{n-1}) is where the §5.10
                         // per-degree limited integration problems live (A38).
                         DifferentialField lower_field(field.base_var(),

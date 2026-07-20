@@ -127,12 +127,38 @@ Result<ExprPtr> integrate_log_polynomial_part(
             // Fall through: c = 0 special case (previous behaviour).
         }
 
-        // Plain integration needs FuncCall(Ln/Exp) form to recurse through its
-        // own Risch pipeline, not opaque generator symbols.
-        ExprPtr rhs_original = rhs;
-        if (auto orig = lower_field.from_field_generators(rhs, context); orig.is_ok())
-            rhs_original = orig.value();
-        auto b_k_res = integrate(rhs_original, var, context);
+        // Fallback when limited integration is not available for this level
+        // (our §7.2 solver is incomplete, so "no solution" here does not yet
+        // prove non-integrability the way Bronstein's LimitedIntegrate does).
+        //
+        // TERMINATION (HC-A38-01, Bronstein §5.2/§5.7): the recursion must move
+        // along one of exactly two axes — eliminate a monomial (recurse on
+        // k = C(t_1..t_{n-1})), or lower deg_t(p) at fixed tower.  A root-restart
+        // on the generic integrate() does neither: it REBUILDS the full tower
+        // from the expression, so the sub-problem can be structurally identical
+        // to the current one (observed empirically on a nested log-in-log tower:
+        // kz=1 → kz=0 → back to kz=1 with the same state, forever).  Dispatching
+        // on `lower_field` instead keeps the tower height strictly decreasing,
+        // which is the measure the algorithm's termination proof relies on.
+        auto compute_b_k = [&]() -> Result<ExprPtr> {
+            if (lower_field.extensions().empty()) {
+                // k = Q(x): no generators left for a tower rebuild to recreate,
+                // so the generic integrator is the base case of the recursion
+                // and provably cannot re-enter this function.  It also needs
+                // FuncCall(Ln/Exp) form rather than opaque generator symbols.
+                ExprPtr rhs_original = rhs;
+                if (auto orig = lower_field.from_field_generators(rhs, context); orig.is_ok())
+                    rhs_original = orig.value();
+                return integrate(rhs_original, var, context);
+            }
+            // k ⊋ Q(x): stay inside the field-aware pipeline one level down.
+            // rhs is already an element of k in generator form, which is exactly
+            // the `gen_expr` contract of integrate_risch_poly_and_rational_part.
+            ExprPtr zero = arena.make<IntegerLit>(BigInt(0));
+            return integrate_risch_poly_and_rational_part(
+                rhs, rhs, var, lower_field, zero, context);
+        };
+        auto b_k_res = compute_b_k();
         if (b_k_res.is_error()) {
             return b_k_res;
         }
