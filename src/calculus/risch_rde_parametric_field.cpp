@@ -189,17 +189,25 @@ Result<std::vector<ParametricRischDeQSolution>> solve_risch_de_parametric_field(
     // della forzante quando il termine di grado massimo si cancella contro
     // f_new·q (es. t = log x, f_new = −1/x, g = 1 → q = x·t di grado 1 con
     // forzante di grado 0).  Il vecchio dg_max troncava a 0 e perdeva q.
-    // HARDCODE-OF-PASSAGE: HC-A26-RDEBOUND-CANCEL-GAP — il branch di
-    // cancellazione di testa §6.3.3 (α = lc(b)/lc(a) derivata logaritmica →
-    // limited-integration in k) può alzare n ancora OLTRE dg_max+1.  Qui non è
-    // implementato: se in un caso reale la cancellazione di testa si verifica,
-    // N resta sottostimato e la ricorsione per-grado non esplora il grado in
-    // cui vive la soluzione → famiglia INCOMPLETA.  NON è silent-wrong: ogni
-    // soluzione trovata è verificata per back-substitution, quindi una
-    // soluzione mancante fa solo tornare una famiglia più piccola, che a monte
-    // risale come Unimplemented (mai un integrale sbagliato) — contratto
-    // REGOLA ZERO rispettato, gap di sola completezza.  Ledger HC-A26-RDEBOUND-
-    // CANCEL-GAP.  Sovrastimare N è sempre SOUND (candidati extra verificati).
+    //
+    // COMPLETEZZA (d_a = 0, monomio log/primitivo — dimostrazione, non gap).
+    // Il branch di cancellazione di testa §6.3.3 scatta solo se
+    // α = −f_new = Dz/z è una derivata logaritmica (z ∈ k*).  Sostituendo
+    // q = z·h nell'equazione D(q) + f_new·q = c si ha
+    //   D(z·h) + f_new·z·h = z·Dh + h·(Dz + f_new·z) = z·Dh   (Dz = −f_new·z),
+    // cioè Dh = c/z.  Poiché deg_t(c/z) ≤ dg_max (z ∈ k, grado 0 in t) e
+    // l'integrazione primitiva alza il grado in t di ESATTAMENTE uno,
+    // deg(q) = deg(h) ≤ dg_max + 1.  Se invece α NON è derivata logaritmica,
+    // l'eq. di testa omogenea D(q_n) + f_new·q_n = 0 non ha soluzione k non
+    // nulla per n > dg_max, quindi deg(q) ≤ dg_max.  In entrambi i casi
+    // N = dg_max + 1 è un bound COMPLETO — l'incremento di cancellazione è già
+    // incluso.  Nessuna soluzione di grado dg_max+2 può esistere: richiederebbe
+    // η = Dt derivata di un elemento di k, ma ∫η = log(u) ∉ k (è ciò che rende
+    // t trascendente).  Il "further increment oltre dg_max+1" temuto dal ledger
+    // HC-A26-RDEBOUND-CANCEL-GAP è il ramo generale d_a > 0; con d_a = 0 (a = 1
+    // dopo il clearing per D) i due sotto-rami collassano in ≤ dg_max+1.  Non è
+    // un gap.  (Sovrastimare N sarebbe comunque SOUND: candidati extra
+    // verificati per back-substitution.)
     int N = 0;
     if (ext.type == ExtensionType::Logarithmic) {
         // d_a = 0: d_b>d_a (df>0) → max(0, d_c−d_b); d_b≤d_a (df≤0) → d_c+1.
