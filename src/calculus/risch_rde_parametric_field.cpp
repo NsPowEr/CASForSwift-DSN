@@ -51,6 +51,61 @@ Result<std::vector<ParametricRischDeQSolution>> solve_risch_de_parametric_field(
     const Symbol& t = ext.t_var;
     const std::size_t m = g_vec.size();
 
+    // HC-A26-PRIMITIVE-PARAMQ-RATIONAL — cancellazione dei poli fra le forzanti.
+    //
+    // Caso PRIMITIVO (t = log(u), Dt ∈ k): Teorema 5.1.1 ⇒ S = k, e la formula
+    // (5.1) dà k⟨t⟩ = k[t].  Quindi ogni soluzione q sta in k[t] e il membro
+    // sinistro a·D(q) + b·q è polinomiale in t: di conseguenza Σ_i c_i·g_i deve
+    // essere polinomiale in t ANCHE QUANDO le singole g_i hanno poli — i poli
+    // devono cancellarsi nella combinazione.  È un vincolo Q-lineare sui c_i.
+    //
+    // Il bound di denominatore sottostante (D = lcm dei denominatori) assume
+    // invece che la soluzione erediti i poli delle forzanti: moltiplica per D e
+    // produce f_new = f − D'/D non polinomiale, facendo fallire il descent con
+    // "f_new is not polynomial" anche quando una soluzione polinomiale esiste
+    // (repro: g = (1/x + 1/(x·t), −1/(x·t)) su t = log x, soluzione y = t con
+    // c₀ = c₁ = 1; misurato D = t·x², f_new = −2/x − 1/(t·x)).
+    //
+    // Riduciamo perciò la famiglia al sottospazio in cui i poli si cancellano:
+    // le forzanti ridotte sono polinomiali in t e il descent ordinario funziona.
+    // La ricorsione termina in ≤2 livelli — le forzanti ridotte non hanno poli,
+    // quindi la seconda chiamata riceve `nullopt` e prosegue diretta.
+    //
+    // Vincolo di applicabilità (esplicito, non silenzioso): serve f polinomiale
+    // in t.  Con f avente poli occorre il ParamRdeNormalDenominator completo
+    // (SplitFactor + WeakNormalizer su torre, Bronstein §6.1/§7.1), fuori scope
+    // qui: in quel caso si prosegue sul percorso ordinario invariato.
+    if (ext.type == ExtensionType::Logarithmic) {
+        bool f_is_poly_in_t = algebra::parse_polynomial(f, t, ctx).is_ok();
+        if (f_is_poly_in_t) {
+            auto red = reduce_parametric_forcing_poles(g_vec, t, field.base_var(), ctx);
+            if (red.is_ok() && red.value().has_value()) {
+                const auto& R = red.value().value();
+                if (R.g_reduced.empty()) {
+                    // Nessuna combinazione cancella i poli ⇒ nessuna soluzione
+                    // (esito legittimo, non un errore).
+                    return ok(std::vector<ParametricRischDeQSolution>{});
+                }
+                auto sub = solve_risch_de_parametric_field(f, R.g_reduced, ext_idx, field, ctx);
+                if (sub.is_error()) return sub;
+                // Rimappa le costanti sulla famiglia originale:
+                // c_i = Σ_j d_j · basis[j][i].
+                std::vector<ParametricRischDeQSolution> out;
+                out.reserve(sub.value().size());
+                for (const auto& sol : sub.value()) {
+                    std::vector<Rational> c(m, Rational(BigInt(0)));
+                    for (std::size_t j = 0; j < R.basis.size() && j < sol.c.size(); ++j) {
+                        if (sol.c[j].numerator().is_zero()) continue;
+                        for (std::size_t i = 0; i < m; ++i)
+                            c[i] = c[i] + sol.c[j] * R.basis[j][i];
+                    }
+                    out.push_back({sol.y, std::move(c)});
+                }
+                return ok(std::move(out));
+            }
+        }
+    }
+
     // Denominator bound: LCM of denominators of f and all g_i
     auto f_parts_res = algebra::apart_num_den(f, ctx);
     if (f_parts_res.is_error()) return fail<std::vector<ParametricRischDeQSolution>>(f_parts_res.error());
@@ -123,16 +178,32 @@ Result<std::vector<ParametricRischDeQSolution>> solve_risch_de_parametric_field(
     int df = static_cast<int>(poly_degree(f_poly));
     if (is_zero_poly(f_poly)) df = -1;
 
-    // Degree bound N
+    // Degree bound N — Bronstein §6.3/§7.1 RdeBoundDegreePrim / ParamRdeBoundDegreePrim.
+    // Dopo il clearing per D l'equazione è  D(q) + f_new·q = Σ c_i·g_new_i,
+    // cioè "a" = 1 ⇒ d_a = 0 (nessun coefficiente su Dq).  Con d_a = 0 la
+    // formula è:
+    //   d_b > d_a (df > 0)        → n = max(0, d_c − d_b)          (ramo df>0)
+    //   d_b ≤ d_a (df ≤ 0)        → n = max(0, d_c − d_a + 1) = d_c + 1
+    // Il ramo df == 0 rientra nel SECONDO caso (d_b = d_a = 0), quindi
+    // n = dg_max + 1, NON dg_max: la soluzione può avere grado uno in più
+    // della forzante quando il termine di grado massimo si cancella contro
+    // f_new·q (es. t = log x, f_new = −1/x, g = 1 → q = x·t di grado 1 con
+    // forzante di grado 0).  Il vecchio dg_max troncava a 0 e perdeva q.
+    // HARDCODE-OF-PASSAGE: HC-A26-RDEBOUND-CANCEL-GAP — il branch di
+    // cancellazione di testa §6.3.3 (α = lc(b)/lc(a) derivata logaritmica →
+    // limited-integration in k) può alzare n ancora OLTRE dg_max+1.  Qui non è
+    // implementato: se in un caso reale la cancellazione di testa si verifica,
+    // N resta sottostimato e la ricorsione per-grado non esplora il grado in
+    // cui vive la soluzione → famiglia INCOMPLETA.  NON è silent-wrong: ogni
+    // soluzione trovata è verificata per back-substitution, quindi una
+    // soluzione mancante fa solo tornare una famiglia più piccola, che a monte
+    // risale come Unimplemented (mai un integrale sbagliato) — contratto
+    // REGOLA ZERO rispettato, gap di sola completezza.  Ledger HC-A26-RDEBOUND-
+    // CANCEL-GAP.  Sovrastimare N è sempre SOUND (candidati extra verificati).
     int N = 0;
     if (ext.type == ExtensionType::Logarithmic) {
-        if (df > 0) {
-            N = std::max(0, dg_max - df);
-        } else if (df == 0) {
-            N = dg_max;
-        } else {
-            N = dg_max + 1;
-        }
+        // d_a = 0: d_b>d_a (df>0) → max(0, d_c−d_b); d_b≤d_a (df≤0) → d_c+1.
+        N = (df > 0) ? std::max(0, dg_max - df) : dg_max + 1;
     } else { // Exponential
         if (df > 0) {
             N = std::max(0, dg_max - df);

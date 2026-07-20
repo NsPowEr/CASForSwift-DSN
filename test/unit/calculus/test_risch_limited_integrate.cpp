@@ -164,10 +164,10 @@ TEST_F(RischLimitedIntegrate, LogTower_ForcingIsTheMonomialDerivative) {
 
 // Torre log, forzante MISTA (rational + η): a_1 = 1/x + 1/(x·t) è la
 // combinazione D(t) + 1·η che serve per il livello top di una torre
-// log-in-log (vedi commento su EndToEnd_NestedLogTower_* sotto).  Documenta
-// il limite ATTUALE del solver base Q(x) su questa forma (denominatore in t
-// al livello base): diagnostico pulito, mai un valore sbagliato.
-TEST_F(RischLimitedIntegrate, LogTower_MixedForcingIsSoundOrDiagnostic) {
+// log-in-log.  HC-A26-PRIMITIVE-PARAMQ-RATIONAL (cancellazione dei poli +
+// degree bound §6.3): questa forma ORA si risolve (v = t, c = 1), non è più
+// un diagnostico.
+TEST_F(RischLimitedIntegrate, LogTower_MixedForcing_Solved) {
     Symbol x("x");
     ExprPtr integrand = parse_expr("ln(x)", arena());
     auto field_res = DifferentialField::build(integrand, x, ctx);
@@ -184,11 +184,8 @@ TEST_F(RischLimitedIntegrate, LogTower_MixedForcingIsSoundOrDiagnostic) {
     ExprPtr f = arena().make<Binary>(BinaryOp::Add, a1, eta_gen);
 
     auto res = limited_integrate_field(f, {eta_gen}, field, ctx);
-    if (res.is_ok()) {
-        EXPECT_TRUE(verify_limited(f, {eta_gen}, res.value(), field, ctx));
-    } else {
-        EXPECT_EQ(res.error().kind, CASErrorKind::Unimplemented);
-    }
+    ASSERT_TRUE(res.is_ok()) << res.error().message;
+    EXPECT_TRUE(verify_limited(f, {eta_gen}, res.value(), field, ctx));
 }
 
 // ------------------------------------------------------- end-to-end §5.10
@@ -213,18 +210,17 @@ TEST_F(RischLimitedIntegrate, EndToEnd_SingleLevelLogPolynomial_ViaLimitedIntegr
         << "D(∫f) ≠ f — l'antiderivata prodotta non è corretta";
 }
 
-// Torre log ANNIDATA (t_1=ln(x), t_2=ln(ln(x))): la ricorsione §5.10 al
-// livello top produce un coefficiente che porta il generatore t_1 del campo
-// inferiore.  Prima di HC-A38-01 il fallback per-livello faceva un
-// root-restart su `integrate()` generico, che RICOSTRUISCE la torre da capo:
-// né l'altezza né il grado decrescevano e la ricorsione rientrava in un
-// sotto-problema identico (loop infinito riprodotto via trace).  Ora il
-// fallback è dispatchato sul CAMPO INFERIORE (Bronstein §5.2/§5.7: la
-// ricorsione elimina un monomio), quindi termina per costruzione.
-//
-// Esito richiesto: termina, e se produce un'antiderivata questa DEVE
-// verificare D(∫f) = f (mai un risultato sbagliato, REGOLA ZERO).
-TEST_F(RischLimitedIntegrate, EndToEnd_NestedLogTower_TerminatesAndIsSound) {
+// Torre log ANNIDATA (t_1=ln(x), t_2=ln(ln(x))):
+//   ∫ (1/x + 1/(x·ln x))·ln(ln x) dx  =  ln(ln x)²/2 + ln(x)·ln(ln x) − ln(x).
+// Percorso completo di questa sessione:
+//   • HC-A38-01: la ricorsione §5.10 scende sul campo inferiore (prima era un
+//     loop infinito da root-restart);
+//   • HC-A26 pole-cancel: la famiglia di forzanti al livello top ha poli in
+//     t_1 che si cancellano (c₀=c₁) → forzante ridotta polinomiale;
+//   • HC-A26 degree bound §6.3: N = dg_max+1, non dg_max, per catturare
+//     q = x·t di grado uno più della forzante.
+// Esito: antiderivata corretta, verificata per derivazione (D(∫f) = f).
+TEST_F(RischLimitedIntegrate, EndToEnd_NestedLogTower_Solved) {
     Symbol x("x");
     ExprPtr f = parse_expr("(1/x + 1/(x*ln(x)))*ln(ln(x))", arena());
 
@@ -235,15 +231,12 @@ TEST_F(RischLimitedIntegrate, EndToEnd_NestedLogTower_TerminatesAndIsSound) {
     // nel generatore (base case Q(x) polynomial-only, HC-A26-PRIMITIVE-PARAMQ-
     // RATIONAL).  Se un giorno passa, il ramo is_ok qui sotto lo blinda.
     auto F = integrate(f, x, ctx);
-    if (F.is_ok()) {
-        auto dF = diff(F.value(), x, 1U, ctx);
-        ASSERT_TRUE(dF.is_ok()) << dF.error().message;
-        ExprPtr delta = arena().make<Binary>(BinaryOp::Sub, dF.value(), f);
-        EXPECT_TRUE(is_zero_expr(delta, ctx))
-            << "D(∫f) ≠ f — antiderivata sbagliata sulla torre annidata";
-    } else {
-        EXPECT_EQ(F.error().kind, CASErrorKind::Unimplemented);
-    }
+    ASSERT_TRUE(F.is_ok()) << F.error().message;
+    auto dF = diff(F.value(), x, 1U, ctx);
+    ASSERT_TRUE(dF.is_ok()) << dF.error().message;
+    ExprPtr delta = arena().make<Binary>(BinaryOp::Sub, dF.value(), f);
+    EXPECT_TRUE(is_zero_expr(delta, ctx))
+        << "D(∫f) ≠ f — antiderivata sbagliata sulla torre annidata";
 }
 
 // Soundness sul caso NON elementare con generatore sibling: ∫ e^{-x}·ln(x) dx

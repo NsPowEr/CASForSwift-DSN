@@ -400,6 +400,27 @@ using MRVSet = std::set<ExprPtr, MRVCompare>;
 [[nodiscard]] Result<std::vector<ParametricRischDeQSolution>> solve_risch_de_parametric_field(
     ExprPtr f, const std::vector<ExprPtr>& g_vec, std::size_t ext_idx, const DifferentialField& field, symbolic::CASContext& ctx);
 
+/// @brief Riduzione della famiglia di forzanti di una Risch DE parametrica su
+/// monomio primitivo, per cancellazione dei poli (Bronstein §7.1 + Teorema
+/// 5.1.1 / formula 5.1: nel caso primitivo k⟨t⟩ = k[t], quindi Σ c_i·g_i deve
+/// essere polinomiale in t anche quando le singole g_i hanno poli).
+struct ParametricForcingReduction {
+    std::vector<ExprPtr> g_reduced;             ///< forzanti ridotte, in k[t]
+    std::vector<std::vector<Rational>> basis;   ///< basis[j][i]: g_reduced[j] = Σ_i basis[j][i]·g_i
+};
+
+/// @brief Calcola il sottospazio {c : Σ c_i·g_i ∈ k[t]} e ne restituisce una
+/// base di forzanti (tutte polinomiali in t) più la matrice di cambio base.
+/// Ritorna `nullopt` quando non c'è nulla da fare (nessuna g_i ha poli in t),
+/// così il chiamante prosegue sul percorso ordinario.
+/// (HC-A26-PRIMITIVE-PARAMQ-RATIONAL.)
+[[nodiscard]] Result<std::optional<ParametricForcingReduction>>
+reduce_parametric_forcing_poles(
+    const std::vector<ExprPtr>& g_vec,
+    const Symbol& t,
+    const Symbol& base_var,
+    symbolic::CASContext& ctx);
+
 /// @brief Solution of the Limited Integration Problem over a tower (A38).
 struct LimitedIntegrationFieldSolution {
     ExprPtr v;                  ///< the K-part of the decomposition

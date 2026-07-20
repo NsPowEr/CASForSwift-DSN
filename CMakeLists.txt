@@ -227,6 +227,7 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/risch_parametric_rational.cpp
     src/calculus/risch_parametric_limited.cpp
     src/calculus/risch_limited_integrate.cpp
+    src/calculus/risch_param_pole_cancel.cpp
     src/calculus/risch_param_nocancel.cpp
     src/calculus/risch_constant_system.cpp
     src/calculus/risch_de_extensions.cpp
