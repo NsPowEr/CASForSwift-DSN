@@ -57,6 +57,57 @@ TEST(MeijerGRoundTripTest, Asin)     { expect_roundtrip("arcsin(x)"); }
 TEST(MeijerGRoundTripTest, Erf)      { expect_roundtrip("erf(x)"); }
 TEST(MeijerGRoundTripTest, BesselJ)  { expect_roundtrip("BesselJ(1/3, x)"); }
 
+// §10.4 — incomplete gamma (Meijer_G_Slater.md §5.9). Order 1/3 chosen so the
+// b-group (0, 1/3) is non-integer-spaced (the clean, non-confluent case).
+TEST(MeijerGRoundTripTest, GammaUpper) {
+    expect_roundtrip("gamma_incomplete(1/3, x)");
+}
+TEST(MeijerGRoundTripTest, GammaLower) {
+    expect_roundtrip("gamma_incomplete_lower(1/3, x)");
+}
+
+// from_meijerg direct: the §5.9 G shapes fold back to Γ/γ (not just via the
+// forward table). Γ(a,z) = G^{2,0}_{1,2}(z | 1 ; 0,a).
+TEST(MeijerGFromTest, UpperGammaShapeFolds) {
+    CASContext ctx;
+    AstArena& arena = ctx.arena();
+    ExprPtr z = parse_expr("z", ctx);
+    auto g = make_meijerg(ctx, 2, 0, {integer(arena, 1)},
+        {integer(arena, 0), rat(arena, 1, 3)}, z);
+    ASSERT_TRUE(g.is_ok());
+    const auto* g_call = expr_cast<FuncCall>(g.value());
+    ASSERT_NE(g_call, nullptr);
+    auto folded = from_meijerg(ctx, *g_call);
+    ASSERT_TRUE(folded.is_ok());
+    auto expected = ctx.simplify(parse_expr("gamma_incomplete(1/3, z)", ctx));
+    ASSERT_TRUE(expected.is_ok());
+    EXPECT_TRUE(ExprEqual{}(folded.value(), expected.value()));
+}
+
+// γ(a,z) = G^{1,1}_{1,2}(z | 1 ; a,0) with a ≠ 1/2 (distinct from the erf entry
+// that shares this shape only for a = 1/2 AND a squared argument).
+TEST(MeijerGFromTest, LowerGammaShapeFolds) {
+    CASContext ctx;
+    AstArena& arena = ctx.arena();
+    ExprPtr z = parse_expr("z", ctx);
+    auto g = make_meijerg(ctx, 1, 1, {integer(arena, 1)},
+        {rat(arena, 1, 3), integer(arena, 0)}, z);
+    ASSERT_TRUE(g.is_ok());
+    const auto* g_call = expr_cast<FuncCall>(g.value());
+    ASSERT_NE(g_call, nullptr);
+    auto folded = from_meijerg(ctx, *g_call);
+    ASSERT_TRUE(folded.is_ok());
+    auto expected = ctx.simplify(parse_expr("gamma_incomplete_lower(1/3, z)", ctx));
+    ASSERT_TRUE(expected.is_ok());
+    EXPECT_TRUE(ExprEqual{}(folded.value(), expected.value()));
+}
+
+// The erf entry (§5.7) must NOT be captured by the γ recognizer: erf(x)
+// still round-trips to erf, not to γ(1/2, x²).
+TEST(MeijerGFromTest, ErfStillWinsOverLowerGamma) {
+    expect_roundtrip("erf(x)");
+}
+
 TEST(MeijerGRoundTripTest, PowerExpProduct) {
     // z^{1/3} e^{-z}: the (1,0,0,1) node has NO table entry — this
     // round-trip exercises the GENERAL Slater path (0F0 closed form).

@@ -213,19 +213,32 @@ Result<ExprPtr> from_meijerg(CASContext& ctx, const FuncCall& g) {
         raw = inverse_0_2(ctx, v, g);
     } else if (v.m == 1U && v.n == 2U && v.p == 2U && v.q == 2U) {
         raw = inverse_2_2(ctx, v, g);
+    } else if (v.m == 2U && v.n == 0U && v.p == 1U && v.q == 2U
+               && is_rat(v.a[0], 1, 1)
+               && (is_zero_expr(v.b[0]) || is_zero_expr(v.b[1]))) {
+        // Γ(a,z) = G^{2,0}_{1,2}(z | 1 ; 0,a)  (§5.9, verified mpmath).
+        // The b-group {0, a} is canonicalized by the factory ⇒ order-insensitive:
+        // the literal 0 is the "0" of the formula, the other member is the order a
+        // (a = 0 ⇒ both members zero ⇒ Γ(0,z), still exact).
+        ExprPtr order = is_zero_expr(v.b[0]) ? v.b[1] : v.b[0];
+        raw = ok(arena.make<FuncCall>(BuiltinOp::GammaIncomplete,
+            std::vector<ExprPtr>{order, v.z}));
     } else if (v.m == 1U && v.n == 1U && v.p == 1U && v.q == 2U
-               && is_rat(v.a[0], 1, 1) && is_rat(v.b[0], 1, 2)
-               && is_zero_expr(v.b[1])) {
-        // erf u = (1/sqrt(pi)) G(u^2 | 1 ; 1/2 ; 0)
-        //   =>  G = sqrt(pi) erf(u)  (§5.7)
+               && is_rat(v.a[0], 1, 1) && is_zero_expr(v.b[1])) {
+        // Shape G^{1,1}_{1,2}(· | 1 ; b0 ; 0). Two §5 entries share it:
+        //   erf u = (1/sqrt(pi)) G(u^2 | 1 ; 1/2 ; 0) ⇒ sqrt(pi) erf(u)  (§5.7),
+        //   γ(a,z) =              G(z   | 1 ;  a  ; 0)                     (§5.9).
+        // erf is the elementary special case (b0 = 1/2 AND a square argument);
+        // otherwise the exact inverse is the lower incomplete gamma.
         auto shape = match_scaled_square(v.z);
-        if (shape.has_value() && coeff_is(*shape, 1, 1)) {
+        if (is_rat(v.b[0], 1, 2) && shape.has_value() && coeff_is(*shape, 1, 1)) {
             raw = ok(arena.make<Product>(std::vector<ExprPtr>{
                 sqrt_pi(arena),
                 arena.make<FuncCall>(BuiltinOp::Erf,
                     std::vector<ExprPtr>{shape->base})}));
         } else {
-            raw = slater_expand(ctx, g);
+            raw = ok(arena.make<FuncCall>(BuiltinOp::GammaIncompleteLower,
+                std::vector<ExprPtr>{v.b[0], v.z}));
         }
     } else {
         // No table signature: the GENERAL path (§3.2).

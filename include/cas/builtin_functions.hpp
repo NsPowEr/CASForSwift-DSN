@@ -28,6 +28,11 @@ enum class BuiltinOp : std::uint16_t {
     Abs,
     Sign,
     Gamma,
+    // A7 §5.9 — incomplete gamma (2-arg). Upper Γ(a,z) and lower γ(a,z).
+    // args = [a, z]. Spec: Meijer_G_Slater.md §5.9 (verified mpmath):
+    //   Γ(a,z) = G^{2,0}_{1,2}(z | 1 ; 0,a),  γ(a,z) = G^{1,1}_{1,2}(z | 1 ; a,0).
+    GammaIncomplete,
+    GammaIncompleteLower,
     Zeta,
     Erf,
     Floor,
@@ -112,6 +117,10 @@ enum class BuiltinOp : std::uint16_t {
     if (name == "abs") return BuiltinOp::Abs;
     if (name == "sign") return BuiltinOp::Sign;
     if (name == "gamma") return BuiltinOp::Gamma;
+    if (name == "gamma_incomplete" || name == "GammaUpper" || name == "Gamma_inc")
+        return BuiltinOp::GammaIncomplete;
+    if (name == "gamma_incomplete_lower" || name == "GammaLower")
+        return BuiltinOp::GammaIncompleteLower;
     if (name == "zeta") return BuiltinOp::Zeta;
     if (name == "erf") return BuiltinOp::Erf;
     if (name == "erfc") return BuiltinOp::Erfc;
@@ -189,6 +198,8 @@ enum class BuiltinOp : std::uint16_t {
         case BuiltinOp::Abs: return "abs";
         case BuiltinOp::Sign: return "sign";
         case BuiltinOp::Gamma: return "gamma";
+        case BuiltinOp::GammaIncomplete: return "gamma_incomplete";
+        case BuiltinOp::GammaIncompleteLower: return "gamma_incomplete_lower";
         case BuiltinOp::Zeta: return "zeta";
         case BuiltinOp::Erf: return "erf";
         case BuiltinOp::Floor: return "floor";

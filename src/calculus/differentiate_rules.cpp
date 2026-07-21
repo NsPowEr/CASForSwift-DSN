@@ -362,6 +362,30 @@ Result<ExprPtr> Differentiator::differentiate_function(const FuncCall& call, con
 
             return ok(make_product(arena_, {outer, x_derivative.value()}));
         }
+        if (call.func_id == BuiltinOp::GammaIncomplete
+            || call.func_id == BuiltinOp::GammaIncompleteLower) {
+            // A7 §5.9 (DLMF 8.8.13):  d/dz Γ(a,z) = −z^{a−1} e^{−z},
+            //                         d/dz γ(a,z) = +z^{a−1} e^{−z}.
+            // Differentiation w.r.t. the order a needs the incomplete-gamma
+            // derivative w.r.t. its first parameter (a Meijer-G / G-function
+            // series) — not implemented: structured error, never a wrong value.
+            ExprPtr a = call.args[0];
+            ExprPtr z = call.args[1];
+            if (depends_on(a, var)) {
+                return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
+                    "Differentiation of incomplete gamma w.r.t. order a not implemented"));
+            }
+            auto z_d = differentiate_once(z, var);
+            if (z_d.is_error()) return z_d;
+            ExprPtr kernel = make_product(arena_, {
+                make_power(arena_, z, make_sum(arena_, {a, make_integer(arena_, -1)})),
+                make_function(arena_, "exp",
+                    {make_unary(arena_, UnaryOp::Neg, z)})});
+            ExprPtr outer = call.func_id == BuiltinOp::GammaIncomplete
+                ? make_unary(arena_, UnaryOp::Neg, kernel)
+                : kernel;
+            return ok(make_product(arena_, {outer, z_d.value()}));
+        }
         if (call.func_id == BuiltinOp::Hypergeometric0F1) {
             ExprPtr b = call.args[0];
             ExprPtr z = call.args[1];

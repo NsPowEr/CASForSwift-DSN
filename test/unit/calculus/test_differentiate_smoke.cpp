@@ -52,6 +52,26 @@ TEST_F(DifferentiateSmokeTest, PowerRule) {
     EXPECT_TRUE(diff_equals("x^5", "5 * x^4"));
 }
 
+// A7 §5.9 (DLMF 8.8.13): d/dx Γ(a,x) = −x^{a−1} e^{−x}, d/dx γ(a,x) = +x^{a−1} e^{−x}.
+// mathematically_equal (not together+literal-zero, which is fragile on the
+// x^{a−1}·e^{−x} shape — cf. RationalPower below).
+TEST_F(DifferentiateSmokeTest, IncompleteGammaUpper) {
+    auto D = calculus::diff(parse("gamma_incomplete(3, x)"), x, 1U, ctx);
+    ASSERT_TRUE(D.is_ok()) << D.error().message;
+    auto eq = symbolic::mathematically_equal(D.value(),
+        parse("-x^(3-1) * exp(-x)"), ctx);
+    ASSERT_TRUE(eq.is_ok());
+    EXPECT_TRUE(eq.value());
+}
+TEST_F(DifferentiateSmokeTest, IncompleteGammaLower) {
+    auto D = calculus::diff(parse("gamma_incomplete_lower(3, x)"), x, 1U, ctx);
+    ASSERT_TRUE(D.is_ok()) << D.error().message;
+    auto eq = symbolic::mathematically_equal(D.value(),
+        parse("x^(3-1) * exp(-x)"), ctx);
+    ASSERT_TRUE(eq.is_ok());
+    EXPECT_TRUE(eq.value());
+}
+
 TEST_F(DifferentiateSmokeTest, RationalPower) {
     // diff(x^(1/2)) should return a non-trivial expression (engine may
     // emit (1/2)·x^(-1/2) in various structural forms; together() on

@@ -352,6 +352,18 @@ Result<ExprPtr> to_meijerg(CASContext& ctx, ExprPtr expr) {
             return ok(with_prefactor(arena, {inv_sqrt_pi}, g.value()));
         }
 
+        case BuiltinOp::GammaIncomplete: {  // §5.9: Γ(a,z) = G^{2,0}_{1,2}(z | 1 ; 0,a)
+            if (call->args.size() != 2U) break;
+            return make_meijerg(ctx, 2U, 0U, {int_lit(arena, 1)},
+                {int_lit(arena, 0), call->args[0]}, call->args[1]);
+        }
+
+        case BuiltinOp::GammaIncompleteLower: {  // §5.9: γ(a,z) = G^{1,1}_{1,2}(z | 1 ; a,0)
+            if (call->args.size() != 2U) break;
+            return make_meijerg(ctx, 1U, 1U, {int_lit(arena, 1)},
+                {call->args[0], int_lit(arena, 0)}, call->args[1]);
+        }
+
         case BuiltinOp::BesselJ: {  // §5.8: G^{1,0}_{0,2}(w^2/4 | ; nu/2 ; -nu/2)
             if (call->args.size() != 2U) break;
             ExprPtr nu = call->args[0];

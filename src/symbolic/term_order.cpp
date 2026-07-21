@@ -75,6 +75,11 @@ int get_builtin_precedence(BuiltinOp op) noexcept {
 
     // Gamma family.
     case BuiltinOp::Gamma:      return 92;
+    // A7 §5.9 incomplete gamma pair (2-arg), ranked just under the complete
+    // Gamma in the same Γ/ψ/B family window (free slots 86/87). Distinct values
+    // give a deterministic order between Γ and γ; identity stays by func_id.
+    case BuiltinOp::GammaIncomplete:      return 87;
+    case BuiltinOp::GammaIncompleteLower: return 86;
     case BuiltinOp::Digamma:    return 91;
     case BuiltinOp::Polygamma:  return 90;
     case BuiltinOp::Beta:       return 89;
