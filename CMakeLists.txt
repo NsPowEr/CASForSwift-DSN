@@ -688,6 +688,7 @@ if(CAS_ENABLE_TESTING)
         test/unit/symbolic/test_calculus.cpp
 test/unit/symbolic/test_unwinding_number.cpp
 test/unit/symbolic/test_sqrt_fold.cpp
+        test/unit/symbolic/test_strict_canonical.cpp
         test/unit/symbolic/test_complex_simplification.cpp
         test/unit/symbolic/test_extended_real.cpp
         test/unit/symbolic/test_simplify_hyperbolic_zero.cpp
