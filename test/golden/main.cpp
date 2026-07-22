@@ -117,6 +117,93 @@ static std::string format_expr(ExprPtr expr) {
 }
 
 // ---------------------------------------------------------------------------
+// A32 — parse the corpus "assume" predicate and register the symbol-level
+// domain restrictions on ctx, so simplify produces the same restricted output
+// as the assume-aware Maxima reference (run_golden_maxima.sh emits the matching
+// assume()/declare() directives). Grammar (a comma-separated conjunction):
+//   <sym> real | <sym> integer | <expr> (>=|>|!=|<=|<) <expr>
+// Only atoms of the form <bare symbol> vs 0 (or `real`/`integer`) change the
+// generic symbolic CAS output; expression-level facts (e.g. `a*d - b*c != 0`,
+// `n != -1`) do not alter it and are handled on the Maxima side only.
+// Returns the human-readable list of restrictions actually applied CAS-side.
+static std::string apply_assume_predicates(
+    cas::symbolic::CASContext& ctx, const std::string& assume_str) {
+    auto trim = [](std::string s) -> std::string {
+        const std::size_t a = s.find_first_not_of(" \t");
+        if (a == std::string::npos) return {};
+        const std::size_t b = s.find_last_not_of(" \t");
+        return s.substr(a, b - a + 1);
+    };
+    auto parse_expr = [&](const std::string& tok) -> ExprPtr {
+        auto lx = cas::Lexer(tok).tokenize();
+        if (!lx.is_ok()) return nullptr;
+        cas::Parser p(lx.value(), ctx.arena());
+        auto r = p.parse();
+        return r.is_ok() ? r.value() : nullptr;
+    };
+    std::string applied;
+    auto note = [&](const std::string& s) {
+        if (!applied.empty()) applied += ", ";
+        applied += s;
+    };
+    std::size_t start = 0;
+    while (start <= assume_str.size()) {
+        const std::size_t comma = assume_str.find(',', start);
+        const std::string atom = trim(assume_str.substr(
+            start, comma == std::string::npos ? std::string::npos : comma - start));
+        start = (comma == std::string::npos) ? assume_str.size() + 1 : comma + 1;
+        if (atom.empty()) continue;
+
+        auto ends_with = [&](const char* suf) {
+            const std::string s(suf);
+            return atom.size() >= s.size()
+                && atom.compare(atom.size() - s.size(), s.size(), s) == 0;
+        };
+        if (ends_with(" real")) {
+            if (const auto* s = expr_cast<Symbol>(
+                    parse_expr(trim(atom.substr(0, atom.size() - 5))))) {
+                ctx.assumptions().assume_real(*s); note(s->name + " real");
+            }
+            continue;
+        }
+        if (ends_with(" integer")) {
+            if (const auto* s = expr_cast<Symbol>(
+                    parse_expr(trim(atom.substr(0, atom.size() - 8))))) {
+                ctx.assumptions().assume_integer(*s); note(s->name + " integer");
+            }
+            continue;
+        }
+        // Relational atom. Test ">=" / "<=" / "!=" before "<" / ">".
+        static const char* kOps[] = {">=", "<=", "!=", ">", "<"};
+        for (const char* op : kOps) {
+            const std::size_t pos = atom.find(op);
+            if (pos == std::string::npos) continue;
+            const std::string op_s(op);
+            ExprPtr lhs = parse_expr(trim(atom.substr(0, pos)));
+            const std::string rhs = trim(atom.substr(pos + op_s.size()));
+            const auto* sym = expr_cast<Symbol>(lhs);
+            const bool rhs_zero = (rhs == "0");
+            if (sym != nullptr && rhs_zero) {
+                if (op_s == ">=") {
+                    ctx.assumptions().assume_greater_equal(lhs, ExprPtr());
+                    note(sym->name + " >= 0");
+                } else if (op_s == ">") {
+                    ctx.assumptions().assume_positive(*sym);
+                    note(sym->name + " > 0");
+                } else if (op_s == "!=") {
+                    ctx.assumptions().assume_nonzero(*sym);
+                    note(sym->name + " != 0");
+                }
+                // "<= 0" / "< 0" absent from the corpus; expression LHS or a
+                // non-zero RHS have no generic-output effect (Maxima side only).
+            }
+            break;
+        }
+    }
+    return applied;
+}
+
+// ---------------------------------------------------------------------------
 // Per-area statistics
 // ---------------------------------------------------------------------------
 struct AreaStats {
@@ -188,28 +275,33 @@ int main(int argc, char* argv[]) {
         }
         if (area.empty()) area = "unknown";
 
-        // A31 fase 2 (Domain_Conditions_Propagation.md §10.5): for entries
-        // whose author declared the intended domain via "assume", enable the
-        // conditional domain rules — the CAS output then matches Maxima's
-        // real-generic-point reference and every domain restriction taken is
-        // REGISTERED (printed below, INFO line). The "assume" predicate
-        // itself is still not parsed/applied (neither CAS-side nor in the
-        // Maxima refs) — that remains A32; keep the WARN visible.
+        // A32: the corpus "assume" predicate is now PARSED and applied — both
+        // CAS-side (symbol-level domain restrictions on ctx, below) and in the
+        // Maxima references (run_golden_maxima.sh emits the matching
+        // assume()/declare()). The A31 conditional-domain path stays enabled as
+        // a fallback for symbolic cases the explicit assumption does not prove.
         const std::string assume_str = json_string_field(line, "assume");
-        if (!assume_str.empty()) {
-            std::cout << "  WARN [" << std::setw(3) << idx
-                      << "] \"assume\": \"" << assume_str
-                      << "\" declared but not parsed (A32); conditional "
-                      << "domain rules ON for this entry (A31 §10.5)\n";
-        }
         ctx.set_conditional_domain_rules(!assume_str.empty());
 
         auto& stats = area_stats[area];
 
-        // Reset context state between entries (variables and assumptions only;
+        // Reset context state between entries (variables, caches AND assumptions;
         // arena is intentionally reused — all prior ExprPtrs remain valid).
         ctx.clear_variables();
         ctx.clear_caches();
+        ctx.clear_assumptions();
+
+        // A32: apply THIS entry's domain restrictions after the reset, so
+        // simplify matches the assume-aware Maxima reference for this line.
+        if (!assume_str.empty()) {
+            const std::string applied = apply_assume_predicates(ctx, assume_str);
+            std::cout << "  INFO [" << std::setw(3) << idx << "] assume \""
+                      << assume_str << "\""
+                      << (applied.empty()
+                              ? " (no CAS-side symbol restriction; Maxima-side only)"
+                              : " -> CAS: " + applied)
+                      << "\n";
+        }
 
         // F7.5.A3: arm per-entry timer. Handler will set interrupt flag.
         cas::golden::start_entry_timer(per_entry_timeout_sec);

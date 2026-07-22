@@ -18,7 +18,7 @@
 #   3) bash scripts/check_golden_ratchet.sh --report report.json --update-baseline
 #
 STATUS: SET
-PASS_FLOOR: 934
+PASS_FLOOR: 935
 FAIL_CEILING: 10
 TOLERANCE: 0
 #

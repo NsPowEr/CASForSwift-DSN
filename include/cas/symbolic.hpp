@@ -197,6 +197,11 @@ public:
 
     void define(const Symbol& symbol, ExprPtr value);
     void clear_variables() noexcept;
+    // Reset every assumption to the empty set (used e.g. by the golden runner
+    // between independent corpus entries so per-entry `assume` predicates do
+    // not leak). Callers that also cache should clear caches (assumption
+    // revision is reset, which the simplify cache keys on).
+    void clear_assumptions() noexcept;
     [[nodiscard]] std::optional<ExprPtr> lookup(const Symbol& symbol) const;
     [[nodiscard]] const std::unordered_map<std::string, ExprPtr>& variables() const noexcept { return variables_; }
 

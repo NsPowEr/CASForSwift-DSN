@@ -24,6 +24,10 @@ void CASContext::clear_variables() noexcept {
     variables_.clear();
 }
 
+void CASContext::clear_assumptions() noexcept {
+    assumptions_ = Assumptions{};
+}
+
 std::optional<ExprPtr> CASContext::lookup(const Symbol& symbol) const {
     const auto found = variables_.find(symbol.name);
     if (found == variables_.end()) {
