@@ -201,6 +201,13 @@ Result<ExprPtr> Simplifier::simplify_power(ExprPtr base, ExprPtr exponent, ExprP
         }
     }
     if (is_zero_expr(base)) {
+        // 0^x = 0 whenever x is PROVABLY positive (literal or assumption): exact
+        // and unconditional (no A31 side-condition). Covers 0^(1/2)=0; 0^0 and
+        // 0^(negative) stay symbolic (dedicated branches / conditional path below).
+        if (is_known_positive(exponent)) {
+            return traced_result(RuleId::SimplifyZeroPowerPositive, target_before,
+                make_integer(arena_, BigInt(0)));
+        }
         LiteralRational exp_rat_check;
         auto exp_check = try_get_exact_rational(exponent, exp_rat_check);
         if (exp_check.is_ok() && exp_check.value() && exp_rat_check.value.is_integer() && !exp_rat_check.value.numerator().is_negative() && !exp_rat_check.value.numerator().is_zero()) {

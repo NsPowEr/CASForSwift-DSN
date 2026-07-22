@@ -75,6 +75,42 @@ TEST_F(AdvancedAssumptionsTest, DomainConsistency) {
     EXPECT_TRUE(result.is_error());
 }
 
+// A32 prerequisite: 0^x = 0 when x is PROVABLY positive (assumption), exact and
+// unconditional. Uses the proven assumption, not an A31 side-condition.
+TEST_F(AdvancedAssumptionsTest, ZeroPower_PositiveExponent_FoldsToZero) {
+    auto x = sym("x");
+    ctx.assumptions().assume_positive(*expr_cast<Symbol>(x));
+    ExprPtr zero = ctx.arena().make<IntegerLit>(BigInt(0));
+    ExprPtr pow = ctx.arena().make<Binary>(BinaryOp::Pow, zero, x);
+    auto s = ctx.simplify(pow);
+    ASSERT_TRUE(s.is_ok());
+    const auto* il = expr_cast<IntegerLit>(s.value());
+    EXPECT_TRUE(il != nullptr && il->value.is_zero())
+        << "0^x with x>0 did not fold to 0";
+}
+
+// Literal positive non-integer exponent: 0^(1/2) = 0 (now covered by the
+// is_known_positive branch, previously integer-only).
+TEST_F(AdvancedAssumptionsTest, ZeroPower_PositiveRationalExponent_FoldsToZero) {
+    ExprPtr zero = ctx.arena().make<IntegerLit>(BigInt(0));
+    ExprPtr half = ctx.arena().make<RationalLit>(BigInt(1), BigInt(2));
+    auto s = ctx.simplify(ctx.arena().make<Binary>(BinaryOp::Pow, zero, half));
+    ASSERT_TRUE(s.is_ok());
+    const auto* il = expr_cast<IntegerLit>(s.value());
+    EXPECT_TRUE(il != nullptr && il->value.is_zero());
+}
+
+// Soundness guard: with NO sign knowledge, 0^x must NOT fold to 0 (0^0=1,
+// 0^negative undefined) — stays symbolic.
+TEST_F(AdvancedAssumptionsTest, ZeroPower_UnknownExponent_StaysSymbolic) {
+    auto x = sym("x");
+    ExprPtr zero = ctx.arena().make<IntegerLit>(BigInt(0));
+    auto s = ctx.simplify(ctx.arena().make<Binary>(BinaryOp::Pow, zero, x));
+    ASSERT_TRUE(s.is_ok());
+    EXPECT_EQ(expr_cast<IntegerLit>(s.value()), nullptr)
+        << "0^x with unknown-sign x wrongly folded";
+}
+
 TEST_F(AdvancedAssumptionsTest, NonlinearInference) {
     auto x = sym("x");
     ctx.assumptions().assume_greater(x, ctx.arena().make<IntegerLit>(1));
