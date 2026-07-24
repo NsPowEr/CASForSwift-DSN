@@ -127,16 +127,21 @@ Result<ExprPtr> LimitEngine::compute_quotient_limit(
     const QuotientView& quotient,
     const Result<ExprPtr>& direct) {
     // Divisione per zero durante sostituzione → espressione diverge al punto → trattata come ∞.
-    // Eccezione: ln(neg_arg) — se l'argomento ha segno negativo, è un errore di dominio.
+    // Eccezione: ln/log(arg) — il segno dell'infinito dipende dal segno con cui
+    // arg si avvicina a 0 (ln(0+)=-inf, ln(0-) è dominio non valido), e questa
+    // funzione non lo determina in generale (A41: was narrowed to the literal
+    // syntactic `ln(-x)` shape only, so ln(sin(x)) as x->0+ — genuinely -inf,
+    // not a sign we can't determine, just one this helper never tried to
+    // determine — silently became +inf here, flipping the sign of downstream
+    // pole/compositions built on it). Guessing +∞ would be a silently wrong
+    // answer whenever the true value is -∞; propagate the real domain error
+    // instead and let the caller fall back to another strategy (or report
+    // honest incompleteness) rather than commit to an unproven sign.
     auto as_infinity_if_undefined = [&](ExprPtr original_expr, Result<ExprPtr> r) -> Result<ExprPtr> {
         if (!r.is_error() || r.error().kind != CASErrorKind::Undefined) return r;
-        // ln(Unary(Neg, ...)) → argomento negativo → dominio non valido, NON convertire a ∞
         if (const auto* fc = expr_cast<FuncCall>(original_expr)) {
-            if (fc->func_id == BuiltinOp::Ln && fc->args.size() == 1U) {
-                if (expr_is<Unary>(fc->args[0]) &&
-                    expr_ref<Unary>(fc->args[0]).op == UnaryOp::Neg) {
-                    return r;
-                }
+            if ((fc->func_id == BuiltinOp::Ln || fc->func_id == BuiltinOp::Log) && fc->args.size() == 1U) {
+                return r;
             }
         }
         return ok(arena_.make<Constant>(MathConstant::Infinity));

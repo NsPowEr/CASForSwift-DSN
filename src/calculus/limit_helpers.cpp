@@ -215,19 +215,71 @@ std::optional<QuotientView> extract_quotient_view(ExprPtr expr, AstArena& arena)
         }
 
         if (const auto* sum = expr_cast<Sum>(expr)) {
-            std::vector<ExprPtr> numerator_terms;
-            ExprPtr common_denominator{};
+            // A41: simplify() distributes a quotient over a Sum into separate
+            // terms (e.g. (exp(x)-1-x)/x^2 -> exp(x)*x^-2 - x^-2 - x^-1), and
+            // those terms do NOT all share the same denominator (x^2 vs x)
+            // even though they came from a single original fraction. The old
+            // code required an IDENTICAL denominator across every term and
+            // gave up otherwise, so this whole Sum shape was invisible to the
+            // limit engine's quotient machinery — direct substitution then
+            // failed on the un-combined terms with a raw arithmetic error.
+            //
+            // General fix: combine via the standard cross-multiplication
+            // identity Σ(n_i/d_i) = (Σ n_i·Π_{j≠i} d_j) / Π_i d_i. This is
+            // always a VALID common denominator (not necessarily minimal —
+            // no polynomial-LCM machinery needed) for any number of terms with
+            // any denominators, polynomial or transcendental alike.
+            // Every term must itself be a genuine quotient (this is what
+            // distinguishes "a fraction that simplify() distributed over its
+            // sum" from an arbitrary sum that merely happens to contain one
+            // quotient-shaped term among unrelated others — forcing THAT into
+            // a combined fraction would fabricate a quotient view for
+            // expressions that never were one, misdirecting unrelated callers
+            // deeper in the limit engine, e.g. Gruntz/MRV growth comparison on
+            // a difference of surds that has nothing to do with division).
+            std::vector<ExprPtr> numerators;
+            std::vector<ExprPtr> denominators;
+            numerators.reserve(sum->terms.size());
+            denominators.reserve(sum->terms.size());
+            bool all_have_denominator = true;
             for (ExprPtr term : sum->terms) {
                 auto term_quotient = extract_quotient_view(term, arena);
-                if (!term_quotient.has_value()) return std::nullopt;
-                if (!common_denominator) common_denominator = term_quotient->denominator;
-                else if (symbolic::canonical_compare(common_denominator, term_quotient->denominator) != 0) return std::nullopt;
-                numerator_terms.push_back(term_quotient->numerator);
+                if (!term_quotient.has_value()) {
+                    all_have_denominator = false;
+                    break;
+                }
+                numerators.push_back(term_quotient->numerator);
+                denominators.push_back(term_quotient->denominator);
             }
-            if (common_denominator) {
+            if (all_have_denominator && !denominators.empty()) {
+                // Fast path: every term already shares one denominator —
+                // combine directly instead of squaring it into Π d_i.
+                bool same_denominator = true;
+                for (std::size_t i = 1; i < denominators.size(); ++i) {
+                    if (symbolic::canonical_compare(denominators[0], denominators[i]) != 0) {
+                        same_denominator = false;
+                        break;
+                    }
+                }
+                if (same_denominator) {
+                    return QuotientView{
+                        .numerator = make_sum(arena, std::move(numerators)),
+                        .denominator = denominators[0],
+                    };
+                }
+
+                std::vector<ExprPtr> combined_terms;
+                combined_terms.reserve(numerators.size());
+                for (std::size_t i = 0; i < numerators.size(); ++i) {
+                    std::vector<ExprPtr> factors{numerators[i]};
+                    for (std::size_t j = 0; j < denominators.size(); ++j) {
+                        if (j != i) factors.push_back(denominators[j]);
+                    }
+                    combined_terms.push_back(make_product(arena, std::move(factors)));
+                }
                 return QuotientView{
-                    .numerator = make_sum(arena, std::move(numerator_terms)),
-                    .denominator = common_denominator,
+                    .numerator = make_sum(arena, std::move(combined_terms)),
+                    .denominator = make_product(arena, denominators),
                 };
             }
         }
