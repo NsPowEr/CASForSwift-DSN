@@ -293,33 +293,26 @@ inline Result<ExprPtr> evaluate_cas(const std::string& input_str,
     }
 
     // --- gcd(p, q) ---
-    // Use univariate GCD for single-variable inputs only.
-    // Multivariate inputs (containing both x and y) are SKIPped: the
-    // multivariate GCD algorithm can exceed the runner's per-entry budget.
+    // polynomial_gcd_multivariate dispatches internally on the actual free-variable
+    // count of the parsed operands (single var -> univariate fast path, see
+    // gcd_multivariate_recursive vars.size()==1 branch), so a single call point
+    // covers both cases exactly and needs no string-based classification (A18
+    // removed the magic budget pad that used to make the multivariate path blow
+    // the per-entry budget; A37 removed the corresponding runner-side skip).
     if (cmd.fn == "gcd" && cmd.arg_strs.size() == 2) {
         auto p = parse_expr(cmd.arg_strs[0], ctx);
         if (!p.is_ok()) return p;
         auto q = parse_expr(cmd.arg_strs[1], ctx);
         if (!q.is_ok()) return q;
-        // Detect multivariate: if both 'x' and 'y' appear in either arg, SKIP
-        bool has_y = (cmd.arg_strs[0].find('y') != std::string::npos ||
-                      cmd.arg_strs[1].find('y') != std::string::npos);
-        bool has_x = (cmd.arg_strs[0].find('x') != std::string::npos ||
-                      cmd.arg_strs[1].find('x') != std::string::npos);
-        if (has_x && has_y)
-            return CASError{CASErrorKind::Unimplemented,
-                            "gcd: multivariate skipped in golden runner", std::nullopt};
-        Symbol var("x");
         ctx.set_timeout(std::chrono::milliseconds(5000));
-        auto result = algebra::polynomial_gcd(p.value(), q.value(), var, ctx);
+        auto result = algebra::polynomial_gcd_multivariate(p.value(), q.value(), ctx);
         ctx.set_timeout(std::chrono::milliseconds(1000)); // restore default
         return result;
     }
 
     // --- bare expression or simplify(e) ---
     if (cmd.fn == "" || cmd.fn == "simplify") {
-        auto expr_str = (cmd.fn == "") ? cmd.arg_strs[0] : cmd.arg_strs[0];
-        auto e = parse_expr(expr_str, ctx);
+        auto e = parse_expr(cmd.arg_strs[0], ctx);
         if (!e.is_ok()) return e;
         return ctx.simplify(e.value());
     }
