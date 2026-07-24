@@ -261,8 +261,12 @@ Result<ExprPtr> Differentiator::differentiate_function(const FuncCall& call, con
             ExprPtr E_minus_K = arena_.make<Binary>(BinaryOp::Sub, E_k, K_k);
             outer = arena_.make<Binary>(BinaryOp::Div, E_minus_K, k_arg);
         } else if (func_id == BuiltinOp::Gamma ) {
+            // A37: the canonical spelling is `gamma` (builtin_op_name). Emitting
+            // "Gamma" produced a FuncCall that builtin_from_name does NOT
+            // resolve, so the derivative carried an opaque unknown function and
+            // no downstream simplify or equality could recognise it as Γ.
             outer = make_product(arena_, {
-                make_function(arena_, "Gamma", {argument}),
+                make_function(arena_, std::string(builtin_op_name(BuiltinOp::Gamma)), {argument}),
                 make_function(arena_, "polygamma", {make_integer(arena_, 0), argument})
             });
         } else if (func_id == BuiltinOp::Abs) {
