@@ -716,6 +716,7 @@ test/unit/symbolic/test_sqrt_fold.cpp
         test/unit/calculus/test_integrate_bronstein_corpus.cpp
         test/unit/calculus/test_integrate_substitution.cpp
         test/unit/algebra/test_polynomial_sparse_interpolation.cpp
+        test/unit/algebra/test_lrt_subresultant_a45.cpp
         test/unit/algebra/test_algebraic_number_rootof.cpp
 test/unit/algebra/test_cyclotomic_rootof_d2.cpp
         test/unit/algebra/test_csolve_linear.cpp

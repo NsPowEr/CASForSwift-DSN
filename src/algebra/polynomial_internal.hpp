@@ -187,12 +187,17 @@ template <typename Coeff>
 // When the subresultant chain exceeds the deadline, returns Unimplemented.
 using ResultantDeadline = std::optional<std::chrono::steady_clock::time_point>;
 
+// A45: when chain_out is non-null it receives the full subresultant PRS
+// (R_0, R_1, ..., R_k), which Lazard-Rioboo-Trager needs on top of the
+// resultant itself (Bronstein, Symbolic_Integration_I.md:1823). Passing
+// nullptr keeps the previous behaviour exactly.
 template <typename Coeff>
 [[nodiscard]] Result<Coeff> resultant_generic(
     std::vector<Coeff> a,
     std::vector<Coeff> b,
     symbolic::CASContext* ctx = nullptr,
-    const ResultantDeadline& deadline = std::nullopt);
+    const ResultantDeadline& deadline = std::nullopt,
+    std::vector<std::vector<Coeff>>* chain_out = nullptr);
 
 void normalize_rational_coefficients(RatPoly& coefficients);
 [[nodiscard]] RatPoly add_rational_poly(const RatPoly& a, const RatPoly& b);

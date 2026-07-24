@@ -226,13 +226,23 @@ template <typename Coeff>
     return ok(std::move(remainder));
 }
 
+// Subresultant algorithm of Collins/Brown (Bronstein, Symbolic_Integration_I.md
+// :1044-1071). The gamma/beta recursion of spec lines 1019-1024 is tracked in
+// `c`/`b_scale` below; because `c` is carried across steps, the final `s_last`
+// already carries the tau_k correction factor of Theorem 1.5.3 (spec line 1035),
+// so this routine is correct on *defective* sequences too — the ones where
+// deg(R_{k-1}) > 1 and "resultant = last chain element" silently under-counts.
+// (Verified against sympy/Maxima on 21 cases, defective included:
+//  scripts/a45_prs_simulation.py.)
 template <typename Coeff>
 [[nodiscard]] Result<Coeff> resultant_generic(
     std::vector<Coeff> a,
     std::vector<Coeff> b,
     symbolic::CASContext* ctx,
-    const ResultantDeadline& deadline) {
+    const ResultantDeadline& deadline,
+    std::vector<std::vector<Coeff>>* chain_out) {
     using namespace resultant_detail;
+    if (chain_out != nullptr) chain_out->clear();
     auto deadline_check = [&]() -> bool {
         return deadline.has_value() && std::chrono::steady_clock::now() >= *deadline;
     };
@@ -279,6 +289,13 @@ template <typename Coeff>
 
     Coeff b_scale = (((n - m + 1U) % 2U) != 0U) ? minus_one : coeff_one_like(a.front(), ctx);
 
+    // R_0 and R_1 of the PRS. Note these are post-swap: if the caller passed
+    // deg(a) < deg(b) the chain is that of (b, a), matching Theorem 1.4.1.
+    if (chain_out != nullptr) {
+        chain_out->push_back(a);
+        chain_out->push_back(b);
+    }
+
     auto prem = pseudo_remainder_generic(a, b, ctx);
     if (prem.is_error()) return fail<Coeff>(prem.error());
     std::vector<Coeff> h = prem.value();
@@ -289,6 +306,7 @@ template <typename Coeff>
         coeff = std::move(scaled.value());
     }
     strip_trailing(h, ctx);
+    if (chain_out != nullptr && !is_zero_poly(h, ctx)) chain_out->push_back(h);
 
     Coeff lc = b.back();
     auto s_last_res = [&]() -> Result<Coeff> {
@@ -332,6 +350,7 @@ template <typename Coeff>
             coeff = std::move(scaled.value());
         }
         strip_trailing(h, ctx);
+        if (chain_out != nullptr && !is_zero_poly(h, ctx)) chain_out->push_back(h);
 
         lc = b.back();
         if (d_next > 1U) {

@@ -20,18 +20,23 @@ namespace {
     };
 }
 
+// A45: this used to read `if (!a || is_zero(a)) return b;`, i.e. it treated a
+// *zero* operand as the multiplicative identity — 0·b returned b. That is how a
+// spurious log term entered every Rioboo conversion whose R(z) has no linear
+// coefficient (a = 0, e.g. R = 4z²+1 for ∫dx/(x²+1)): the intended-to-vanish
+// `(-a/2)·log(norm)` came back as `log(norm)`. A null ExprPtr means "absent"
+// and is still skipped; a literal zero now correctly absorbs the product.
 [[nodiscard]] ExprPtr mul_expr_lrt(AstArena& arena, ExprPtr a, ExprPtr b) {
-    if (!a || is_zero_poly(PolyExpr({a}))) return b;
-    if (!b || is_zero_poly(PolyExpr({b}))) return a;
+    if (!a) return b;
+    if (!b) return a;
+    if (is_zero_poly(PolyExpr({a})) || is_zero_poly(PolyExpr({b}))) {
+        return poly_make_integer(arena, 0);
+    }
     return arena.make<Binary>(BinaryOp::Mul, a, b);
 }
 
 [[nodiscard]] ExprPtr div_expr_lrt(AstArena& arena, ExprPtr a, ExprPtr b) {
     return arena.make<Binary>(BinaryOp::Div, a, b);
-}
-
-[[nodiscard]] ExprPtr pow_expr_lrt(AstArena& arena, ExprPtr base, ExprPtr exp) {
-    return arena.make<Binary>(BinaryOp::Pow, base, exp);
 }
 
 [[nodiscard]] Result<PolyExpr> poly_derivative_lrt(const PolyExpr& poly, symbolic::CASContext& ctx) {
@@ -49,109 +54,86 @@ namespace {
     return ok(result);
 }
 
-[[nodiscard]] Result<PolyExpr> pseudo_remainder_lrt(PolyExpr A, const PolyExpr& B, symbolic::CASContext& ctx) {
-    if (is_zero_poly(B))
-        return fail<PolyExpr>(make_error_local(CASErrorKind::InvalidArgument, "Divisor cannot be zero"));
+// A45: the local subresultant PRS that used to live here (a `g`/`h` reduced-PRS
+// recursion) has been removed. It computed the chain correctly but took the last
+// degree-0 element as the resultant, which is only valid when deg(R_{k-1}) = 1;
+// on a *defective* last step it silently returned a resultant of too low a
+// degree (measured: 4 of the 21 cases in scripts/a45_prs_simulation.py, all four
+// in the golden corpus). resultant_generic (polynomial_resultant_generic.hpp)
+// implements the same Collins/Brown recursion of Bronstein's spec but carries
+// the gamma factor across steps, which applies the tau_k correction of Theorem
+// 1.5.3 — so integrate_rational_lrt now sources both the resultant and the PRS
+// from there, and there is only one such recursion in the engine.
 
-    std::size_t m = poly_degree(A);
-    std::size_t n = poly_degree(B);
-    if (m < n) return ok(std::move(A));
+// Mulders' correction, Bronstein Symbolic_Integration_I.md:1829-1830 (the step
+// missing from the original publication of Theorem 2.5.1, see footnote at line
+// 1836). Requires gcd(lc_x(S_i), Q_i) = 1; when it is not, S_i must be divided
+// by gcd(A_j, Q_i)^j for each factor A_j of the squarefree decomposition of
+// lc_x(S_i), otherwise S_i(alpha, x) can vanish at a root alpha of Q_i.
+[[nodiscard]] Result<PolyExpr> mulders_correction(
+    PolyExpr S_i, const RatPoly& Q_i, const Symbol& z_var, symbolic::CASContext& ctx) {
+    if (is_zero_poly(S_i) || Q_i.is_zero()) return ok(std::move(S_i));
 
-    ExprPtr b_n = leading_coefficient(B);
-    PolyExpr R = A;
+    auto lc_poly = parse_polynomial(leading_coefficient(S_i), z_var, ctx);
+    if (lc_poly.is_error()) return ok(std::move(S_i));
+    auto lc_rat = poly_to_rational_poly(lc_poly.value());
+    if (lc_rat.is_error()) return ok(std::move(S_i));
 
-    for (std::size_t step = 0; step <= m - n; ++step) {
-        if (is_zero_poly(R)) break;
-        std::size_t deg_r = poly_degree(R);
-        ExprPtr lc_r_before = leading_coefficient(R);  // save before scaling
+    auto [common, s_cofactor, t_cofactor] = extended_gcd_rational_poly(lc_rat.value(), Q_i);
+    (void)s_cofactor;
+    (void)t_cofactor;
+    // Coprime leading coefficient: the spec's requirement already holds and no
+    // division is needed. This is the overwhelmingly common case.
+    if (common.is_zero() || common.degree() == 0U) return ok(std::move(S_i));
 
-        for (auto& coeff : R.coefficients()) {
-            if (coeff) {
-                auto s = poly_simplify_expr(mul_expr_lrt(ctx.arena(), coeff, b_n), ctx);
-                if (s.is_error()) return fail<PolyExpr>(s.error());
-                coeff = s.value();
+    // Non-coprime: divide S_i by gcd(A_j, Q_i)^j over the squarefree
+    // decomposition of lc_x(S_i), coefficient by coefficient in K[z].
+    auto lc_expr = polynomial_to_expr(lc_poly.value(), z_var, ctx);
+    if (lc_expr.is_error()) return fail<PolyExpr>(lc_expr.error());
+    auto lc_sf = square_free_factorization(lc_expr.value(), z_var, ctx);
+    if (lc_sf.is_error()) return fail<PolyExpr>(lc_sf.error());
+
+    for (const auto& a_j : lc_sf.value().factors) {
+        auto a_poly = parse_polynomial(a_j.factor, z_var, ctx);
+        if (a_poly.is_error()) continue;
+        auto a_rat = poly_to_rational_poly(a_poly.value());
+        if (a_rat.is_error()) continue;
+        auto [g_j, sj, tj] = extended_gcd_rational_poly(a_rat.value(), Q_i);
+        (void)sj;
+        (void)tj;
+        if (g_j.is_zero() || g_j.degree() == 0U) continue;
+
+        for (unsigned int power = 0; power < a_j.multiplicity; ++power) {
+            PolyExpr divided;
+            divided.reserve(S_i.size());
+            bool exact = true;
+            for (const auto& coeff : S_i.coefficients()) {
+                if (!coeff) {
+                    divided.push_back(poly_make_integer(ctx.arena(), 0));
+                    continue;
+                }
+                auto c_poly = parse_polynomial(coeff, z_var, ctx);
+                if (c_poly.is_error()) { exact = false; break; }
+                auto c_rat = poly_to_rational_poly(c_poly.value());
+                if (c_rat.is_error()) { exact = false; break; }
+                auto [quot, rem] = div_rem_rational_poly(c_rat.value(), g_j);
+                if (!rem.is_zero()) { exact = false; break; }
+                PolyExpr quot_expr;
+                quot_expr.reserve(quot.size());
+                for (const auto& qc : quot.coefficients()) quot_expr.push_back(make_rational_expr(ctx.arena(), qc));
+                auto as_expr = polynomial_to_expr(quot_expr, z_var, ctx);
+                if (as_expr.is_error()) { exact = false; break; }
+                divided.push_back(as_expr.value());
             }
-        }
-
-        if (deg_r == m - step) {
-            ExprPtr lc_r = lc_r_before;
-            PolyExpr term = poly_make_monomial(lc_r, deg_r - n);
-
-            auto sub_term_res = poly_multiply(B, term, ctx);
-            if (sub_term_res.is_error()) return fail<PolyExpr>(sub_term_res.error());
-
-            auto sub_res = poly_subtract(R, sub_term_res.value(), ctx);
-            if (sub_res.is_error()) return fail<PolyExpr>(sub_res.error());
-            R = sub_res.value();
+            // The spec guarantees exactness; a non-exact division means the
+            // input violated a precondition, so stop correcting rather than
+            // silently returning a wrong S_i.
+            if (!exact) return ok(std::move(S_i));
+            normalize_poly(divided);
+            S_i = std::move(divided);
         }
     }
-    normalize_poly(R);
-    return ok(std::move(R));
-}
-
-struct SubresultantStep {
-    PolyExpr P;
-    std::size_t degree;
-};
-
-[[nodiscard]] Result<std::vector<SubresultantStep>> subresultant_prs_lrt(PolyExpr P1, PolyExpr P2, symbolic::CASContext& ctx) {
-    std::vector<SubresultantStep> steps;
-    
-    ExprPtr g = poly_make_integer(ctx.arena(), 1);
-    ExprPtr h = poly_make_integer(ctx.arena(), 1);
-    
-    steps.push_back({P1, poly_degree(P1)});
-    steps.push_back({P2, poly_degree(P2)});
-
-    while (true) {
-        std::size_t deg1 = poly_degree(P1);
-        std::size_t deg2 = poly_degree(P2);
-        if (deg1 < deg2) {
-             std::swap(P1, P2);
-             std::swap(deg1, deg2);
-        }
-        std::size_t d = deg1 - deg2;
-        
-        auto prem_res = pseudo_remainder_lrt(P1, P2, ctx);
-        if (prem_res.is_error()) return fail<std::vector<SubresultantStep>>(prem_res.error());
-        PolyExpr P3 = prem_res.value();
-        
-        if (is_zero_poly(P3)) break;
-
-        ExprPtr divisor;
-        {
-            auto h_pow = poly_simplify_expr(pow_expr_lrt(ctx.arena(), h, poly_make_integer(ctx.arena(), d)), ctx);
-            if (h_pow.is_error()) return fail<std::vector<SubresultantStep>>(h_pow.error());
-            auto div_res = poly_simplify_expr(mul_expr_lrt(ctx.arena(), g, h_pow.value()), ctx);
-            if (div_res.is_error()) return fail<std::vector<SubresultantStep>>(div_res.error());
-            divisor = div_res.value();
-        }
-        
-        auto p3_div = poly_divide_by_scalar(P3, divisor, ctx);
-        if (p3_div.is_error()) return fail<std::vector<SubresultantStep>>(p3_div.error());
-        P3 = p3_div.value();
-        
-        P1 = P2;
-        P2 = P3;
-        g = leading_coefficient(P1);
-        
-        if (d == 1) {
-            h = g;
-        } else if (d > 1) {
-            auto g_pow = poly_simplify_expr(pow_expr_lrt(ctx.arena(), g, poly_make_integer(ctx.arena(), d)), ctx);
-            auto h_pow_inv = poly_simplify_expr(pow_expr_lrt(ctx.arena(), h, poly_make_integer(ctx.arena(), d - 1)), ctx);
-            if (g_pow.is_error() || h_pow_inv.is_error()) return fail<std::vector<SubresultantStep>>(g_pow.is_error() ? g_pow.error() : h_pow_inv.error());
-            auto h_next = poly_simplify_expr(div_expr_lrt(ctx.arena(), g_pow.value(), h_pow_inv.value()), ctx);
-            if (h_next.is_error()) return fail<std::vector<SubresultantStep>>(h_next.error());
-            h = h_next.value();
-        } else {
-            h = g; 
-        }
-        
-        steps.push_back({P2, poly_degree(P2)});
-    }
-    
-    return ok(std::move(steps));
+    return ok(std::move(S_i));
 }
 
 [[nodiscard]] Result<ExprPtr> rioboo_conversion(ExprPtr R_i_z, PolyExpr G_z_x, const Symbol& var, const Symbol& z_var, symbolic::CASContext& ctx) {
@@ -305,69 +287,89 @@ Result<ExprPtr> integrate_rational_lrt(ExprPtr P_expr, ExprPtr Q_expr, const Sym
     if (Q_prime_res.is_error()) return fail<ExprPtr>(Q_prime_res.error());
     PolyExpr Q_prime = Q_prime_res.value();
     
-    Symbol z_var("__z");
+    // Divieto hardcode cat. 7: the parameter t of the Rothstein-Trager
+    // resultant must not collide with a user symbol, so it is minted fresh
+    // rather than being the literal "__z" this code used to hardcode.
+    Symbol z_var = ctx.make_fresh_symbol("lrt_t");
     ExprPtr z_sym = ctx.arena().make<Symbol>(z_var.name);
     PolyExpr z_poly_const = poly_make_monomial(z_sym, 0);
-    
+
     auto zQprime_res = poly_multiply(Q_prime, z_poly_const, ctx);
     if (zQprime_res.is_error()) return fail<ExprPtr>(zQprime_res.error());
-    
+
     auto target_poly_res = poly_subtract(P, zQprime_res.value(), ctx);
     if (target_poly_res.is_error()) return fail<ExprPtr>(target_poly_res.error());
     PolyExpr target_poly = target_poly_res.value();
-    
-    auto prs_res = subresultant_prs_lrt(Q, target_poly, ctx);
-    if (prs_res.is_error()) return fail<ExprPtr>(prs_res.error());
-    const auto& prs = prs_res.value();
-    
-    PolyExpr R_poly;
-    for (auto it = prs.rbegin(); it != prs.rend(); ++it) {
-        if (it->degree == 0) {
-            R_poly = it->P;
-            break;
-        }
-    }
-    
-    if (is_zero_poly(R_poly)) return ok(make_integer(ctx.arena(), 0));
-    
-    ExprPtr R_z = R_poly[0];
-    auto r_fact_res = factor_over_integers(R_z, z_var, ctx);
-    if (r_fact_res.is_error()) return fail<ExprPtr>(r_fact_res.error());
-    
+
+    // (R, (R_0, ..., R_k)) <- SubResultant_x(D, A - t·dD/dx)   [spec line 1823]
+    std::vector<std::vector<ExprPtr>> chain;
+    auto res_res = resultant_generic<ExprPtr>(
+        Q.coefficients(), target_poly.coefficients(), &ctx, std::nullopt, &chain);
+    if (res_res.is_error()) return fail<ExprPtr>(res_res.error());
+
+    auto R_z_res = poly_simplify_expr(res_res.value(), ctx);
+    if (R_z_res.is_error()) return fail<ExprPtr>(R_z_res.error());
+    ExprPtr R_z = R_z_res.value();
+    if (is_zero_poly(PolyExpr({R_z}))) return ok(make_integer(ctx.arena(), 0));
+
+    // (Q_1, ..., Q_n) <- SquareFree(R)                          [spec line 1824]
+    // The multiplicity i is what selects the subresultant below; a full
+    // irreducible factorization would throw that information away.
+    auto sf_res = square_free_factorization(R_z, z_var, ctx);
+    if (sf_res.is_error()) return fail<ExprPtr>(sf_res.error());
+
+    const std::size_t deg_Q = poly_degree(Q);
     std::vector<ExprPtr> integral_terms;
-    for (const auto& fact : r_fact_res.value().factors) {
-        PolyExpr Gd;
-        for (auto it = prs.rbegin(); it != prs.rend(); ++it) {
-            const auto& step = *it;
-            bool divides_all = true;
-            auto f_z_res = parse_polynomial(fact.factor, z_var, ctx);
-            if (f_z_res.is_error()) { divides_all = false; }
-            else {
-                for (const auto& coeff : step.P.coefficients()) {
-                    if (!coeff) continue;
-                    auto c_z_res = parse_polynomial(coeff, z_var, ctx);
-                    if (c_z_res.is_error()) { divides_all = false; break; }
-                    auto div = divide_poly_with_remainder(c_z_res.value(), f_z_res.value(), ctx);
-                    if (div.is_error() || !is_zero_poly(div.value().remainder)) {
-                        divides_all = false;
-                        break;
-                    }
+    for (const auto& sf_factor : sf_res.value().factors) {
+        // for i such that deg_t(Q_i) > 0                        [spec line 1825]
+        auto q_i_res = parse_polynomial(sf_factor.factor, z_var, ctx);
+        if (q_i_res.is_error() || poly_degree(q_i_res.value()) == 0U) continue;
+        auto q_i_rat = poly_to_rational_poly(q_i_res.value());
+
+        const std::size_t i = static_cast<std::size_t>(sf_factor.multiplicity);
+        PolyExpr S_i;
+        if (i == deg_Q) {
+            S_i = Q;                                          // [spec line 1826]
+        } else {
+            // S_i <- R_m where deg_x(R_m) = i                 [spec line 1828]
+            for (const auto& step : chain) {
+                PolyExpr candidate{step};
+                normalize_poly(candidate);
+                if (!is_zero_poly(candidate) && poly_degree(candidate) == i) {
+                    S_i = std::move(candidate);
+                    break;
                 }
             }
-            if (!divides_all) {
-                Gd = step.P;
-                break;
+        }
+        if (is_zero_poly(S_i)) continue;
+
+        if (q_i_rat.is_ok()) {
+            auto corrected = mulders_correction(std::move(S_i), q_i_rat.value(), z_var, ctx);
+            if (corrected.is_error()) return fail<ExprPtr>(corrected.error());
+            S_i = std::move(corrected.value());
+        }
+
+        // Presentation only: the roots of Q_i split over its irreducible
+        // factors, so summing per factor is the same formal sum as spec line
+        // 1831 — and it keeps the closed forms (log for linear, log+arctan for
+        // quadratic) that rioboo_conversion already emits, instead of
+        // collapsing everything into a RootSum. Explicitly allowed by the spec
+        // discussion at line 2378.
+        auto q_i_factored = factor_over_integers(sf_factor.factor, z_var, ctx);
+        std::vector<ExprPtr> root_polys;
+        if (q_i_factored.is_ok()) {
+            for (const auto& f : q_i_factored.value().factors) root_polys.push_back(f.factor);
+        }
+        if (root_polys.empty()) root_polys.push_back(sf_factor.factor);
+
+        for (const auto& root_poly : root_polys) {
+            auto conversion = rioboo_conversion(root_poly, S_i, var, z_var, ctx);
+            if (conversion.is_ok() && conversion.value()) {
+                integral_terms.push_back(conversion.value());
             }
         }
-
-        if (is_zero_poly(Gd)) continue;
-
-        auto conversion = rioboo_conversion(fact.factor, Gd, var, z_var, ctx);
-        if (conversion.is_ok() && conversion.value()) {
-            integral_terms.push_back(conversion.value());
-        }
     }
-    
+
     if (integral_terms.empty()) return ok(make_integer(ctx.arena(), 0));
     if (integral_terms.size() == 1U) return ok(integral_terms.front());
     
