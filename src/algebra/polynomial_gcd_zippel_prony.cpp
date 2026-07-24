@@ -23,6 +23,7 @@
 #include "cas/symbolic.hpp"
 #include "algebra_internal.hpp"
 #include "polynomial_internal.hpp"
+#include "polynomial_gcd_multivariate_helpers.hpp"
 #include "polynomial_gcd_zippel_internal.hpp"
 
 #include <algorithm>
@@ -125,76 +126,8 @@ static std::vector<BigInt> univariate_gcd_fp_dense(
 
 }  // namespace
 
-namespace zippel_detail {
 
-ZSparsePoly to_sparse_z(const MultivariatePolynomial& p,
-                         const std::vector<Symbol>& vars) {
-    ZSparsePoly sp;
-    for (const auto& term : p.terms()) {
-        ZMonomial mono(vars.size(), 0U);
-        for (const auto& [sym, exp] : term.factors)
-            for (std::size_t i = 0; i < vars.size(); ++i)
-                if (vars[i].name == sym.name) mono[i] = exp;
-        sp[mono] += term.coefficient;
-        if (sp[mono].is_zero()) sp.erase(mono);
-    }
-    return sp;
-}
-
-MultivariatePolynomial from_sparse_z(const ZSparsePoly& sp,
-                                      const std::vector<Symbol>& vars) {
-    std::vector<MultivariateTerm> terms;
-    for (const auto& [m, c] : sp) {
-        if (c.is_zero()) continue;
-        std::vector<std::pair<Symbol, unsigned int>> f;
-        for (std::size_t i = 0; i < vars.size(); ++i)
-            if (m[i] > 0U) f.emplace_back(vars[i], m[i]);
-        terms.push_back(MultivariateTerm{ .coefficient = c, .factors = std::move(f) });
-    }
-    return MultivariatePolynomial(std::move(terms));
-}
-
-// Exact certificate: does b divide a in Z[x_1..x_n]? (sparse leading-term division)
-bool certify_divides(const MultivariatePolynomial& a, const MultivariatePolynomial& b,
-                     const std::vector<Symbol>& vars) {
-    ZSparsePoly sa = to_sparse_z(a, vars);
-    ZSparsePoly sb = to_sparse_z(b, vars);
-    if (sb.empty()) return false;
-    if (sa.empty()) return true;
-    const std::size_t nv = vars.size();
-    ZSparsePoly rem = sa;
-    auto [dlm, dlc] = *std::prev(sb.end());
-    const std::size_t budget = (rem.size() + 1U) * (sb.size() + 1U) + 16U;
-    std::size_t steps = 0;
-    while (!rem.empty()) {
-        if (++steps > budget) return false;
-        auto [rlm, rlc] = *std::prev(rem.end());
-        for (std::size_t i = 0; i < nv; ++i) {
-            std::size_t ri = (i < rlm.size()) ? rlm[i] : 0U;
-            std::size_t di = (i < dlm.size()) ? dlm[i] : 0U;
-            if (ri < di) return false;
-        }
-        if ((rlc % dlc) != BigInt(0)) return false;
-        BigInt qc = rlc / dlc;
-        ZMonomial qm(nv, 0U);
-        for (std::size_t i = 0; i < nv; ++i) {
-            std::size_t ri = (i < rlm.size()) ? rlm[i] : 0U;
-            std::size_t di = (i < dlm.size()) ? dlm[i] : 0U;
-            qm[i] = static_cast<unsigned int>(ri - di);
-        }
-        for (const auto& [dm, dc] : sb) {
-            ZMonomial nm(nv, 0U);
-            for (std::size_t i = 0; i < nv; ++i)
-                nm[i] = qm[i] + ((i < dm.size()) ? dm[i] : 0U);
-            rem[nm] -= qc * dc;
-            if (rem[nm].is_zero()) rem.erase(nm);
-        }
-    }
-    return true;
-}
-
-}  // namespace zippel_detail
-
+using zippel_detail::finish_if_maximal;
 using zippel_detail::to_sparse_z;
 using zippel_detail::from_sparse_z;
 
@@ -252,23 +185,17 @@ using zippel_detail::from_sparse_z;
     // Certificate: exact division in Z[x_1..x_n]. When the true gcd's leading
     // coefficient is not a unit (so the monic mod-p coefficients are rationals),
     // the single-prime center-lift fails — hand off to multi-prime CRT + Farey.
-    if (!zippel_detail::certify_divides(P, g_cand, vars) ||
-        !zippel_detail::certify_divides(Q, g_cand, vars)) {
-        return zippel_detail::gcd_zippel_prony_crt(spP, spQ, vars, p, ctx, out_samples_used);
+    const bool divides_ok = zippel_detail::certify_divides(P, g_cand, vars) &&
+                             zippel_detail::certify_divides(Q, g_cand, vars);
+    if (!divides_ok) {
+        auto crt = zippel_detail::gcd_zippel_prony_crt(spP, spQ, vars, p, ctx, out_samples_used);
+        if (crt.is_error()) {
+            return crt;
+        }
+        return finish_if_maximal(P, Q, crt.value(), vars, ctx, out_samples_used, samples_used, "crt");
     }
 
-    // Normalize sign (lex-leading positive).
-    {
-        auto sp = to_sparse_z(g_cand, vars);
-        if (!sp.empty()) {
-            auto last = std::prev(sp.end());
-            if (last->second.is_negative())
-                for (auto& [_, c] : sp) c = -c;
-            g_cand = from_sparse_z(sp, vars);
-        }
-    }
-    if (out_samples_used) *out_samples_used = samples_used;
-    return ok(std::move(g_cand));
+    return finish_if_maximal(P, Q, g_cand, vars, ctx, out_samples_used, samples_used, "single-prime");
 }
 
 // Overload without probe pointer.

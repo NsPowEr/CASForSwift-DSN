@@ -74,6 +74,35 @@ TEST_F(PolynomialGCDMultivariateSmokeTest, IdenticalReturnsItself) {
     EXPECT_TRUE(lit != nullptr && lit->value.is_zero());
 }
 
+// A37: golden-runner triage (removing the runner's hardcoded multivariate-gcd
+// skip, test/golden/corpus_runner.hpp) surfaced 5 genuine motore fails where
+// gcd_zippel_prony's Fp-monic per-sample normalization silently discarded a
+// non-constant leading-coefficient factor and returned a proper divisor
+// instead of the true (maximal) GCD — see polynomial_gcd_zippel_prony.cpp
+// is_maximal_gcd_candidate for the root-cause writeup. These pin the fix
+// (cofactor-coprimality maximality certificate -> fallback to
+// gcd_brown_modular when Zippel's candidate is non-maximal).
+TEST_F(PolynomialGCDMultivariateSmokeTest, A37LinearTimesLinearFactorNotUndercounted) {
+    // gcd(x*y^2-x, x*y-x) = gcd(x(y-1)(y+1), x(y-1)) = x*(y-1) = x*y-x.
+    // (Zippel-Prony alone previously returned bare "x", dropping the (y-1).)
+    EXPECT_TRUE(gcd_equals("x*y^2 - x", "x*y - x", "x*y - x"));
+}
+
+TEST_F(PolynomialGCDMultivariateSmokeTest, A37LinearFactorWithParameter) {
+    // gcd(a*x^2-a, a*x+a) = gcd(a(x-1)(x+1), a(x+1)) = a*(x+1) = a*x+a.
+    EXPECT_TRUE(gcd_equals("a*x^2 - a", "a*x + a", "a*x + a"));
+}
+
+TEST_F(PolynomialGCDMultivariateSmokeTest, A37DiffSquaresVsLinearMultivar) {
+    // gcd(x^2-y^2, x-y) = x-y (up to sign/associate).
+    EXPECT_TRUE(gcd_equals("x^2 - y^2", "x - y", "x - y"));
+}
+
+TEST_F(PolynomialGCDMultivariateSmokeTest, A37CubeXyVsSquareXyDiff) {
+    // gcd(x^3*y-x*y^3, x^2*y-x*y^2) = gcd(xy(x-y)(x+y), xy(x-y)) = xy(x-y).
+    EXPECT_TRUE(gcd_equals("x^3*y - x*y^3", "x^2*y - x*y^2", "x^2*y - x*y^2"));
+}
+
 TEST_F(PolynomialGCDMultivariateSmokeTest, ScalarMultipleNormalization) {
     // gcd(2*x, 4*x) = 2*x (or x — engine normalizes scalar).
     auto P = parse("2 * x * y");

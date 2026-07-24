@@ -364,6 +364,7 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/polynomial_gcd_fp_recursive.cpp
     src/algebra/polynomial_gcd_fp_helpers.cpp
     src/algebra/polynomial_gcd_zippel_prony.cpp
+    src/algebra/polynomial_gcd_zippel_certify.cpp
     src/algebra/polynomial_gcd_zippel_crt.cpp
     src/algebra/polynomial_gcd_multivariate_helpers.cpp
     src/algebra/polynomial_gcd_multivariate_interp.cpp

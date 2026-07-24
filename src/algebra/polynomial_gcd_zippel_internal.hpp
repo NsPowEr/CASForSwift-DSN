@@ -29,6 +29,24 @@ using ZSparsePoly = std::map<ZMonomial, BigInt>;
     const MultivariatePolynomial& a, const MultivariatePolynomial& b,
     const std::vector<Symbol>& vars);
 
+// Maximality certificate (A37/A40): g_cand is the FULL gcd (not a proper
+// divisor) iff its cofactors are coprime, i.e. gcd(P/g, Q/g) = 1. Needed because
+// certify_divides above passes for any common divisor, while the per-sample
+// Fp-monic step of the Prony core can drop a non-constant LC_{x1}(gcd).
+[[nodiscard]] Result<bool> is_maximal_gcd_candidate(
+    const MultivariatePolynomial& P, const MultivariatePolynomial& Q,
+    const MultivariatePolynomial& g_cand, const std::vector<Symbol>& vars,
+    symbolic::CASContext& ctx);
+
+// Sign-normalizes g_cand and returns it only if maximality is certified;
+// otherwise Unimplemented (ZIPPEL_PRONY_NOT_MAXIMAL) so the dispatcher falls
+// back to gcd_brown_modular. `stage` names the producing path for diagnostics.
+[[nodiscard]] Result<MultivariatePolynomial> finish_if_maximal(
+    const MultivariatePolynomial& P, const MultivariatePolynomial& Q,
+    MultivariatePolynomial g_cand, const std::vector<Symbol>& vars,
+    symbolic::CASContext& ctx, std::size_t* out_samples_used,
+    std::size_t samples_used, const char* stage);
+
 // One prime of Zippel-Prony: returns the gcd made monic-in-x_1 over F_p, as a
 // sparse map with coefficients in [0, p). Errors on an unlucky prime (unstable
 // degree, singular Vandermonde, skeleton rejected) so the caller tries the next.
