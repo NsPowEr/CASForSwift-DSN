@@ -2,6 +2,7 @@
 name: hardcode-auditor
 description: Scansiona diff corrente (git) o file specifici contro le 10 categorie di hardcode vietati in CLAUDE.md. Riporta violazioni con file:riga, categoria, fix suggerito, e ledger entry proposto per HARDCODE_LEDGER.md. NON modifica codice. Usa Read/Bash/Grep.
 tools: Read, Bash, Grep
+model: sonnet
 ---
 
 You audit code changes for forbidden hardcode patterns per CAS Engine `CLAUDE.md` §DIVIETO HARDCODE.

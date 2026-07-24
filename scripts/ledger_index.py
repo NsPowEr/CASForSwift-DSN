@@ -48,6 +48,11 @@ SOURCE_SPECS: list[tuple[str, str]] = [
     ("tasks", "TASKLIST_MASTER.md"), ("tasks", "TASKLIST_*.md"),
     ("tasks", "CAS_TASKS.md"), ("tasks", "PLAN_*.md"), ("tasks", "TODO*.md"),
     ("tasks", "STATE.md"), ("tasks", "HANDOFF_*.md"), ("tasks", "*_SESSION_*.md"),
+    # Tracker superseded archiviati (2026-07-19): restano indicizzati per la
+    # tracciabilità Refs; il banner SUPERSEDED li classifica già come storici.
+    ("tasks", "docs/archive/CAS_TASKS.md"), ("tasks", "docs/archive/PLAN_*.md"),
+    ("tasks", "docs/archive/TODO*.md"), ("tasks", "docs/archive/STATE.md"),
+    ("tasks", "docs/archive/HANDOFF_*.md"), ("tasks", "docs/archive/*_SESSION_*.md"),
 ]
 # A tracker marks ITSELF historical with a top banner, e.g.
 #   `> # ⚠️ SUPERSEDED — file storico (non aggiornare)`

@@ -22,15 +22,17 @@ Confronto golden contro Maxima come **oracle indipendente**. Mai sorgente di imp
    ```
    Confronta SHA-256 di `maxima` + core `*.lisp` contro `scripts/maxima_5.49.0_manifest.sha256`. Fail → STOP, indagare contaminazione/aggiornamento non autorizzato.
 
-2. **Golden diff su espressione singola**:
+2. **Golden diff su espressione singola** (interfaccia REALE: corpus jsonl — i flag `--expr/--op` NON esistono):
    ```bash
-   bash scripts/run_golden_maxima.sh --expr "<EXPR>" --op <diff|integrate|simplify|factor|...>
+   TMP=$(mktemp -d); printf '%s\n' '{"input": "<EXPR>", "area": "<simplify|factor|integrate|diff|limit|solve|series|special_fn|matrix|bronstein|gcd>", "ref": "adhoc_1"}' > "$TMP/mini.jsonl"
+   bash scripts/run_golden_maxima.sh "$TMP/mini.jsonl" "$TMP/maxrefs"
+   build/cas_golden_runner "$TMP/mini.jsonl" "$TMP/maxrefs" --json "$TMP/report.json"
    ```
-   Confronta output CAS Engine vs Maxima (AST canonico). Mismatch → bug nel CAS, non nel test.
+   Runner stale? `ninja -C build cas_golden_runner` prima di misurare. Mismatch → bug nel CAS, non nel test.
 
-3. **Cross-check SymPy** (BSD, secondo oracle):
+3. **Cross-check SymPy** (BSD, secondo oracle di conferma):
    ```bash
-   python3 scripts/run_golden_sympy.py --expr "<EXPR>" --op <op>
+   python3 scripts/run_golden_sympy.py "$TMP/mini.jsonl" "$TMP/sympyrefs"
    ```
    Stessa policy: spunto, non copia sorgente.
 

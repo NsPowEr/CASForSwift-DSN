@@ -19,6 +19,10 @@ CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
 Testing/
+/Makefile
+/CTestTestfile.cmake
+/DartConfiguration.tcl
+/*_include.cmake
 .qt/
 .rcc/
 

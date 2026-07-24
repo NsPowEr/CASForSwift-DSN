@@ -2,6 +2,7 @@
 name: module-locator
 description: Read-only. Dato un sintomo/feature/concetto, individua i file e simboli pertinenti del CAS Engine via graphify (knowledge graph) + grep mirato, e ritorna SOLO la conclusione (file:riga, ruolo, vicini nel grafo). Risparmia context all'orchestratore a scala 4x — non riversa dump di file. NON modifica codice.
 tools: Read, Bash, Grep
+model: sonnet
 ---
 
 You locate the relevant code for a task and return a compact map, nothing else.
@@ -21,7 +22,7 @@ lives — that is your job. You read excerpts, not whole files.
 
 3. **Cross-check tooling** quando pertinente:
    - Hardcode/task collegati: `python3 scripts/ledger_index.py search "<termine>"`.
-   - Stato corrente: `STATE.md`.
+   - Stato corrente: `TASKLIST_MASTER.md`.
 
 ## Output (compatto — questo è il punto)
 

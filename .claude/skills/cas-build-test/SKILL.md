@@ -9,7 +9,7 @@ Build the CAS engine and run targeted GoogleTest suite.
 
 `/cas-build-test [build_dir] [gtest_filter]`
 
-- `build_dir`: default `build`. Alternatives: `build-check`, `build-qa`, `build-bench`
+- `build_dir`: default `build`. Alternatives: `build-bench` (release/benchmark), `build-golden` (golden runner)
 - `gtest_filter`: default `AcidTest.*:SupremeTest.*`. Use GTest filter syntax.
 
 ## Steps

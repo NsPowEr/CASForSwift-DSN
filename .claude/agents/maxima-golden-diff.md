@@ -2,6 +2,7 @@
 name: maxima-golden-diff
 description: Esegue golden diff su una o più espressioni contro Maxima 5.49.0 (oracle indipendente) ed eventualmente SymPy (secondo oracle). Riporta mismatch AST con expected vs got. NON modifica codice né test. Maxima usato fork/exec only — vietato copiare sorgenti Lisp nel motore (GPL-2.0-only, CLAUDE.md §6).
 tools: Read, Bash
+model: sonnet
 ---
 
 You verify mathematical correctness of the CAS engine against external oracles. You do NOT copy oracle source code.
@@ -25,15 +26,19 @@ You verify mathematical correctness of the CAS engine against external oracles. 
    - Lista espressioni + operazione (`diff`, `integrate`, `simplify`, `factor`, `limit`, `series`, ...).
    - Variabile target dove rilevante.
 
-3. **Esegui golden Maxima**:
+3. **Esegui golden Maxima** (interfaccia REALE: corpus jsonl, non esistono flag `--expr/--op`):
    ```bash
-   bash scripts/run_golden_maxima.sh --expr "<EXPR>" --op <op> [--var x]
+   # Mini-corpus temporaneo con lo schema standard {"input","area","ref"}:
+   TMP=$(mktemp -d); printf '%s\n' '{"input": "<EXPR>", "area": "<area>", "ref": "adhoc_1"}' > "$TMP/mini.jsonl"
+   bash scripts/run_golden_maxima.sh "$TMP/mini.jsonl" "$TMP/maxrefs"        # genera refs Maxima
+   build/cas_golden_runner "$TMP/mini.jsonl" "$TMP/maxrefs" --json "$TMP/report.json"
    ```
-   Cattura output Maxima + output CAS Engine + diff AST.
+   `<area>` ∈ {simplify, factor, gcd, integrate, diff, limit, solve, series, special_fn, matrix, bronstein} — determina la traduzione input→Maxima nel runner. Leggi `report.json` per expected/got AST.
+   Se `build/cas_golden_runner` manca o è stale: `ninja -C build cas_golden_runner` (memoria progetto: il runner NON viene ricompilato dagli script di misura).
 
-4. **Cross-check SymPy** (se Maxima passa, opzionale per conferma indipendente):
+4. **Cross-check SymPy** (se Maxima passa, opzionale per conferma indipendente — stessa interfaccia corpus):
    ```bash
-   python3 scripts/run_golden_sympy.py --expr "<EXPR>" --op <op>
+   python3 scripts/run_golden_sympy.py "$TMP/mini.jsonl" "$TMP/sympyrefs"
    ```
 
 5. **Report per espressione**:
