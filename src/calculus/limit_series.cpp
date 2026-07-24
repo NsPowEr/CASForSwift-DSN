@@ -310,20 +310,42 @@ Result<TaylorExpansion> taylor_series(
     std::vector<ExprPtr> terms;
     terms.reserve(order + 1U);
 
+    // A37: c_k = f^(k)(point)/k! evaluates f (and its derivatives) AT the
+    // point. For a quotient whose denominator vanishes there — (e^x-1)/x,
+    // log(1+x)/x, x/(e^x-1) at 0 — every coefficient is a 0/0 form and the
+    // arithmetic layer reports a division by zero, even though the singularity
+    // is removable and the series exists. In that case expand numerator and
+    // denominator separately and divide the truncated series instead.
+    const auto removable_fallback = [&](const CASError& err) -> Result<TaylorExpansion> {
+        auto viaseries = taylor_series_removable(
+            simplified_expr.value(), var, simplified_point.value(), order, ctx);
+        if (viaseries.is_ok()) return viaseries;
+        // A diagnosed non-removable singularity is the more informative answer
+        // ("this function has a pole of order k, use laurent_series") than the
+        // raw arithmetic failure of the direct path, so it wins. Anything else
+        // means the fallback did not apply (not a quotient, …), and the
+        // ORIGINAL failure must not be masked.
+        if (viaseries.error().kind == CASErrorKind::Unimplemented &&
+            viaseries.error().message.find("TAYLOR_POLE_NOT_REMOVABLE") != std::string::npos) {
+            return viaseries;
+        }
+        return fail<TaylorExpansion>(err);
+    };
+
     for (unsigned int degree = 0; degree <= order; ++degree) {
         Result<ExprPtr> derivative = degree == 0U ? ok(simplified_expr.value()) : diff(simplified_expr.value(), var, degree, ctx);
         if (derivative.is_error()) {
-            return fail<TaylorExpansion>(derivative.error());
+            return removable_fallback(derivative.error());
         }
 
         auto coefficient = ctx.substitute(derivative.value(), var, simplified_point.value());
         if (coefficient.is_error()) {
-            return fail<TaylorExpansion>(coefficient.error());
+            return removable_fallback(coefficient.error());
         }
 
         auto simplified_coefficient = ctx.simplify(coefficient.value());
         if (simplified_coefficient.is_error()) {
-            return fail<TaylorExpansion>(simplified_coefficient.error());
+            return removable_fallback(simplified_coefficient.error());
         }
 
         ExprPtr term = simplified_coefficient.value();

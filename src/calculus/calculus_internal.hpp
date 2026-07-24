@@ -366,6 +366,20 @@ limited_integration_q(
     unsigned int pole_budget,
     symbolic::CASContext& ctx);
 
+// A37: Taylor expansion of a quotient whose denominator vanishes at `center`.
+// Expands numerator and denominator separately and divides the truncated
+// series (via laurent_series_general) instead of evaluating derivatives at the
+// center, which is a 0/0 form there. Succeeds exactly when the singularity is
+// removable (val(N) >= val(D)); reports Unimplemented TAYLOR_POLE_NOT_REMOVABLE
+// on a genuine pole and TAYLOR_REMOVABLE_DEPTH when val(D) exceeds the search
+// bound. Never returns a silently truncated series.
+[[nodiscard]] Result<TaylorExpansion> taylor_series_removable(
+    ExprPtr expr,
+    const Symbol& var,
+    ExprPtr center,
+    unsigned int order,
+    symbolic::CASContext& ctx);
+
 [[nodiscard]] Result<ExprPtr> residue(
     ExprPtr expr,
     const Symbol& var,

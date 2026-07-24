@@ -251,6 +251,7 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/limit_infinite.cpp
     src/calculus/limit_polynomial.cpp
     src/calculus/limit_series.cpp
+    src/calculus/taylor_removable.cpp
     src/calculus/limit_mrv.cpp
     src/calculus/limit_mrv_compare.cpp
     src/calculus/limit_mrv_set.cpp
@@ -704,6 +705,7 @@ test/unit/symbolic/test_sqrt_fold.cpp
         test/unit/calculus/test_differential_field_probe.cpp
         test/unit/calculus/test_differentiate_smoke.cpp
         test/unit/calculus/test_limit_smoke.cpp
+        test/unit/calculus/test_series_removable_singularity.cpp
         test/unit/calculus/test_limit_gruntz_nested_log.cpp
         test/unit/calculus/test_integrate_interrupt.cpp
         test/unit/calculus/test_integrate_byparts.cpp

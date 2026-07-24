@@ -180,8 +180,25 @@ struct CASContextCalculusParams {
         return together_gcd_max_symbols_;
     }
 
+    // ── Taylor expansion across a removable singularity (A37) ───────────────
+    // f = N/D with D(center) = 0 has a Taylor expansion iff val(N) >= val(D).
+    // Computing it needs the numerator and denominator series carried
+    // val(D) terms deeper than the requested order; val(D) is not known up
+    // front, so the search doubles the extra depth (1, 2, 4, ...) until the
+    // denominator's leading term becomes visible. This bounds that search:
+    // beyond it the expansion is reported Unimplemented (never silently
+    // truncated). Default 16 = a denominator vanishing to order 16 at a point,
+    // far past anything the truncated-series ring is asked for in practice.
+    void set_max_removable_singularity_order(unsigned int n) noexcept {
+        max_removable_singularity_order_ = n;
+    }
+    [[nodiscard]] unsigned int max_removable_singularity_order() const noexcept {
+        return max_removable_singularity_order_;
+    }
+
 protected:
     std::size_t   max_integration_depth_{16U};
+    unsigned int  max_removable_singularity_order_{16U};
     bool          expand_bessel_recurrence_{false};
     unsigned int  max_bessel_half_integer_order_{64U};
     std::size_t   hypergeometric_1f1_max_terms_{4000U};
