@@ -78,6 +78,7 @@ echo "Aree:    ${AREAS[*]}"
 echo "Output:  $REPORT"
 echo ""
 
+STALE_AREAS=()
 total_pass=0
 total_fail=0
 total_skip=0
@@ -113,13 +114,43 @@ for area in "${AREAS[@]}"; do
         fi
     fi
 
-    # Step 2: golden_runner comparison
-    echo "  [2/2] golden_runner → ${area_json}"
-    if ! timeout 300 "$GOLDEN_BIN" "$corpus" "$area_maxima_dir" \
+    # Step 2: golden_runner comparison.
+    # The full per-entry stdout (PASS/FAIL/SKIP + skip reason) is kept in
+    # log_<area>.txt: the JSON only carries aggregates, so that log is the only
+    # source for per-entry skip triage (scripts/golden_skip_triage.py).
+    area_log="${OUT_DIR}/log_${area}.txt"
+    # A37: the area budget must dominate the worst case (every entry burning its
+    # own per-entry timeout), otherwise `timeout` kills the runner before it
+    # writes the JSON and the area silently keeps its PREVIOUS measurement — the
+    # merged report then mixes fresh and months-old numbers (that is exactly how
+    # bronstein carried a 35-day-old result into the ratchet). A fixed 300s cap
+    # was below the worst case of every area with >10 entries.
+    area_budget=$(( lines * PER_ENTRY_TIMEOUT + 120 ))
+    # Move the previous measurement aside: the run is fresh iff it recreates
+    # the file. (A timestamp comparison is not usable here — `-nt` has
+    # one-second granularity and reports a same-second rewrite as stale.)
+    prev_json="${area_json}.prev"
+    rm -f "$prev_json"
+    [[ -f "$area_json" ]] && mv "$area_json" "$prev_json"
+    echo "  [2/2] golden_runner → ${area_json}  (log: ${area_log}, budget ${area_budget}s)"
+    if ! timeout "$area_budget" "$GOLDEN_BIN" "$corpus" "$area_maxima_dir" \
          --json "$area_json" --per-entry-timeout "$PER_ENTRY_TIMEOUT" 2>&1 | \
-         grep -E '^=|^-|^TOTAL|Area|PASS%'; then
+         tee "$area_log" | grep -E '^=|^-|^TOTAL|Area|PASS%'; then
         echo "  WARN: golden_runner returned non-zero for $area"
     fi
+
+    # Staleness guard: no new JSON means the runner was killed or crashed.
+    # Reporting the previous numbers would be a measurement lie, so restore
+    # them for inspection but refuse to aggregate.
+    if [[ ! -f "$area_json" ]]; then
+        [[ -f "$prev_json" ]] && mv "$prev_json" "$area_json"
+        echo "  ERROR: $area_json non rigenerato (runner ucciso o crashato):" >&2
+        echo "         il dato precedente NON viene aggregato. Log: $area_log" >&2
+        STALE_AREAS+=("$area")
+        echo ""
+        continue
+    fi
+    rm -f "$prev_json"
 
     # Extract pass/fail from the per-area JSON
     if [[ -f "$area_json" ]]; then
@@ -138,6 +169,17 @@ print(p, f, s)
     fi
     echo ""
 done
+
+# Refuse to merge a mixed-freshness report: the merge globs every
+# golden_*.json, so a stale one would be aggregated as if it were current and
+# the ratchet would gate on numbers nobody measured (A37).
+if [[ ${#STALE_AREAS[@]} -gt 0 ]]; then
+    echo "────────────────────────────────────────────────────────────────" >&2
+    echo "ERRORE: aree non rigenerate: ${STALE_AREAS[*]}" >&2
+    echo "Il merge e il ratchet sono ABORTITI: report.json terrebbe dati stantii." >&2
+    echo "Rilancia le aree fallite (--area <a> --skip-maxima) e controlla il log." >&2
+    exit 3
+fi
 
 # Step 3: Merge per-area JSONs into one report.json
 echo "────────────────────────────────────────────────────────────────"
