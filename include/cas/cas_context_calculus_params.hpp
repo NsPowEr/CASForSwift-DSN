@@ -180,6 +180,20 @@ struct CASContextCalculusParams {
         return together_gcd_max_symbols_;
     }
 
+    // ── u-substitution residual fixpoint passes (A42) ────────────────────────
+    // integrate_by_substitution re-runs replace(g→u)+simplify on the
+    // residual while it still depends on the integration variable: algebraic
+    // reduction (e.g. x^3/(2x) -> x^2/2) can surface a literal occurrence of
+    // g only *after* simplify, invisible to the pass that produced it. The
+    // loop already self-terminates on a stable fixpoint (structural_equal
+    // unchanged); this only bounds a candidate that never stabilizes.
+    void set_max_substitution_fixpoint_passes(unsigned int n) noexcept {
+        max_substitution_fixpoint_passes_ = n;
+    }
+    [[nodiscard]] unsigned int max_substitution_fixpoint_passes() const noexcept {
+        return max_substitution_fixpoint_passes_;
+    }
+
     // ── Taylor expansion across a removable singularity (A37) ───────────────
     // f = N/D with D(center) = 0 has a Taylor expansion iff val(N) >= val(D).
     // Computing it needs the numerator and denominator series carried
@@ -209,6 +223,7 @@ protected:
     std::size_t   max_integrate_by_parts_depth_{8U};
     std::size_t   max_risch_rational_ansatz_degree_{32U};
     unsigned int  max_log_log_limit_depth_{3U};
+    unsigned int  max_substitution_fixpoint_passes_{4U};
     std::size_t   integration_singularity_scan_max_k_{1000U};
     std::size_t   kovacic_case2_max_pole_combinations_{1024U};
     std::size_t   kovacic_case2_max_poly_degree_{64U};

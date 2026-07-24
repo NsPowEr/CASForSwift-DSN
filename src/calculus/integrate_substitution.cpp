@@ -134,7 +134,25 @@ Result<std::optional<ExprPtr>> integrate_by_substitution(
         ExprPtr f_u_raw = replace_expr(ratio_raw, g, u_expr, ctx.arena());
         auto f_u = ctx.simplify(f_u_raw);
         if (f_u.is_error()) continue;
-        
+
+        // Fixpoint pass: algebraic simplification of the raw substitution
+        // can surface *new* literal occurrences of g that were not visible
+        // to the first replace_expr pass (e.g. for x^3*cos(x^2), g=x^2:
+        // ratio_raw = x^3*cos(x^2)/(2x) only reduces x^3/(2x) -> x^2/2
+        // *during* simplify, after replace_expr already ran, so the
+        // emergent x^2 factor is missed and the candidate looks like it
+        // still depends on x). Re-run replace+simplify while a candidate
+        // still depends on var and each pass keeps changing the result;
+        // bounded so a genuinely non-closing candidate cannot loop
+        // unboundedly (a converging fixpoint stabilizes in 1-2 passes).
+        for (unsigned int pass = 0; pass < ctx.max_substitution_fixpoint_passes()
+             && integrate_detail::depends_on(f_u.value(), var); ++pass) {
+            ExprPtr next_raw = replace_expr(f_u.value(), g, u_expr, ctx.arena());
+            auto next = ctx.simplify(next_raw);
+            if (next.is_error() || structural_equal(next.value(), f_u.value())) break;
+            f_u = next;
+        }
+
         // If f_u no longer depends on x, then integrand = f(g(x)) * g'(x).
         if (!integrate_detail::depends_on(f_u.value(), var)) {
             auto primitive_u = integrate(f_u.value(), u_sym, ctx);
@@ -142,15 +160,27 @@ Result<std::optional<ExprPtr>> integrate_by_substitution(
                 // Back-substitute u -> g(x) to get the result in terms of x.
                 auto result = replace_expr(primitive_u.value(), u_expr, g, ctx.arena());
                 
-                // Mandatory Verification: diff(∫f dx, x) == f
+                // Mandatory Verification: diff(∫f dx, x) == f. Compare via
+                // together(D(result) - integrand) simplifying to the zero
+                // literal, not raw structural_equal on two independently
+                // simplified forms: simplify is not confluent on reciprocal
+                // shapes (e.g. Pow(Product(x,log(x)),-1) vs
+                // Product(Pow(x,-1),Pow(log(x),-1)) for the same value), so a
+                // structurally-different-but-equal derivative would be
+                // rejected and the correct substitution discarded. Same
+                // zero-difference idiom as integrate_by_parts' verification.
                 auto verification = diff(result, var, 1U, ctx);
                 if (verification.is_ok()) {
-                     auto s_diff = ctx.simplify(verification.value());
-                     auto s_integrand = ctx.simplify(integrand);
-                     if (s_diff.is_ok() && s_integrand.is_ok() &&
-                         structural_equal(s_diff.value(), s_integrand.value())) {
-                         return ok(std::make_optional(result));
-                     }
+                    ExprPtr delta = ctx.arena().make<Binary>(BinaryOp::Sub, verification.value(), integrand);
+                    auto delta_tog = algebra::together(delta, ctx);
+                    ExprPtr delta_for_simp = delta_tog.is_ok() ? delta_tog.value() : delta;
+                    auto delta_simp = ctx.simplify(delta_for_simp);
+                    bool is_zero = delta_simp.is_ok()
+                        && expr_is<IntegerLit>(delta_simp.value())
+                        && expr_ref<IntegerLit>(delta_simp.value()).value.is_zero();
+                    if (is_zero) {
+                        return ok(std::make_optional(result));
+                    }
                 }
             }
         }

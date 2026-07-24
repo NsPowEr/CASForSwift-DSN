@@ -1284,5 +1284,26 @@ TEST(L0_14_DecimalToRational, DiffWithVariableCoeff) {
     ASSERT_TRUE(simp.is_ok()) << "diff(0.1*t^3, t) must not fail";
 }
 
+TEST(CalculusIntegrateTest, SubstitutionVerificationRobustToReciprocalShape) {
+    // A37/A42 triage: 1/(x*log(x)) = log(log(x)). The u=log(x) candidate
+    // was found correctly by integrate_by_substitution (f_u = 1/u), but the
+    // mandatory verification step rejected it: diff(log(log(x))) simplifies
+    // to Product([x^-1, log(x)^-1]) while the integrand simplifies to
+    // Pow(Product([x,log(x)]), -1) — the same value, different shape, so a
+    // raw structural_equal on the two independently-simplified sides was a
+    // false negative. Fixed by comparing via together(D(F)-f) == 0 instead
+    // (same zero-difference idiom integrate_by_parts already uses).
+    expect_integration_oracle("1/(x*log(x))", "x");
+}
+
+TEST(CalculusIntegrateTest, SubstitutionFixpointCatchesEmergentCandidate) {
+    // A42 triage: x^3*cos(x^2), candidate g=x^2. The residual x^3/(2x) only
+    // reduces to x^2/2 *during* simplify, which runs after the single
+    // replace_expr pass, so the emergent x^2 factor was invisible to the
+    // first pass and the candidate looked like it still depended on x.
+    // Fixed by re-running replace+simplify to a bounded fixpoint.
+    expect_integration_oracle("x^3*cos(x^2)", "x");
+}
+
 }  // namespace
 }  // namespace cas::calculus
