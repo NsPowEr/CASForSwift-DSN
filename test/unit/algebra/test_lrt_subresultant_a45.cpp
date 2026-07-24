@@ -21,6 +21,7 @@
 
 #include "algebra/polynomial_internal.hpp"
 
+#include <chrono>
 #include <iostream>
 #include <string>
 #include <utility>
@@ -246,6 +247,36 @@ TEST_F(LrtSubresultantA45Test, SubresultantOfDegreeMatchingMultiplicityExists) {
             EXPECT_TRUE(found) << "no PRS element of degree " << multiplicity << " for (" << p_src
                                << ")/(" << q_src << ")";
         }
+    }
+}
+
+
+// A45 fase 3 — regressione di performance. Il debito originale ("il resultant
+// di x^2/(x^4+1) impiega 8.3s e sfora l'ops-budget") era in realta' un effetto
+// del bug di correttezza: la ricorrenza sbagliata produceva divisioni non
+// esatte e quindi coefficienti razionali che gonfiavano a ogni passo. Con la
+// ricorrenza corretta il costo e' sceso di due ordini di grandezza e
+// l'aritmetica esatta RatPoly non serve. Il test fissa il risultato misurato
+// cosi' che una regressione futura sia visibile subito; il bound e' largo
+// (10x il misurato: 197/633/406 ms su M1 Pro) per non essere flaky sotto
+// carico — vedi memoria "quick-suite flaky load-dependent".
+TEST_F(LrtSubresultantA45Test, HigherDegreeDenominatorsStayFast) {
+    Symbol x("x");
+    const std::vector<std::pair<std::string, std::string>> cases = {
+        {"1", "x^6 + 1"},
+        {"1", "x^5 + x + 1"},
+        {"1", "x^8 + 1"},
+    };
+    for (const auto& [p_src, q_src] : cases) {
+        const auto started = std::chrono::steady_clock::now();
+        auto result = integrate_rational_lrt(parse(p_src), parse(q_src), x, ctx);
+        const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - started);
+        EXPECT_TRUE(result.is_ok()) << "LRT failed on (" << p_src << ")/(" << q_src
+                                    << "): " << result.error().message;
+        EXPECT_LT(elapsed.count(), 8000)
+            << "LRT on (" << p_src << ")/(" << q_src << ") took " << elapsed.count()
+            << " ms — the coefficient swell of A45 may be back";
     }
 }
 

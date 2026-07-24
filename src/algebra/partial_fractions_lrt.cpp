@@ -302,9 +302,21 @@ Result<ExprPtr> integrate_rational_lrt(ExprPtr P_expr, ExprPtr Q_expr, const Sym
     PolyExpr target_poly = target_poly_res.value();
 
     // (R, (R_0, ..., R_k)) <- SubResultant_x(D, A - t·dD/dx)   [spec line 1823]
+    //
+    // Divieto hardcode cat. 9: the chain honours a configured budget instead of
+    // only discovering it has overrun once finished. An explicit hard deadline
+    // wins; otherwise the per-operation ctx.timeout() applies. resultant_generic
+    // checks this between steps and reports Unimplemented with a diagnostic.
+    ResultantDeadline deadline = std::nullopt;
+    if (ctx.hard_deadline() != std::chrono::steady_clock::time_point::max()) {
+        deadline = ctx.hard_deadline();
+    } else if (ctx.timeout().count() > 0) {
+        deadline = std::chrono::steady_clock::now() + ctx.timeout();
+    }
+
     std::vector<std::vector<ExprPtr>> chain;
     auto res_res = resultant_generic<ExprPtr>(
-        Q.coefficients(), target_poly.coefficients(), &ctx, std::nullopt, &chain);
+        Q.coefficients(), target_poly.coefficients(), &ctx, deadline, &chain);
     if (res_res.is_error()) return fail<ExprPtr>(res_res.error());
 
     auto R_z_res = poly_simplify_expr(res_res.value(), ctx);

@@ -15,6 +15,41 @@
 
 namespace cas::calculus::integrate_detail {
 
+namespace {
+
+// A45: a RootSum anywhere in the antiderivative makes the whole expression
+// non-differentiable (diff has no RootSum rule), so the caller must be told
+// rather than handed a result it cannot use.
+[[nodiscard]] bool contains_root_sum(ExprPtr expr) {
+    if (!expr) return false;
+    if (const auto* call = expr_cast<FuncCall>(expr)) {
+        if (call->func_id == BuiltinOp::RootSum) return true;
+        for (auto arg : call->args) {
+            if (contains_root_sum(arg)) return true;
+        }
+        return false;
+    }
+    if (const auto* sum = expr_cast<Sum>(expr)) {
+        for (auto term : sum->terms) {
+            if (contains_root_sum(term)) return true;
+        }
+        return false;
+    }
+    if (const auto* prod = expr_cast<Product>(expr)) {
+        for (auto factor : prod->factors) {
+            if (contains_root_sum(factor)) return true;
+        }
+        return false;
+    }
+    if (const auto* bin = expr_cast<Binary>(expr)) {
+        return contains_root_sum(bin->left) || contains_root_sum(bin->right);
+    }
+    if (const auto* un = expr_cast<Unary>(expr)) return contains_root_sum(un->operand);
+    return false;
+}
+
+}  // namespace
+
 Result<ExprPtr> Integrator::integrate_rational(ExprPtr expr, const Symbol& var) {
     auto parts = algebra::apart_num_den(expr, context_);
     if (parts.is_error()) return fail<ExprPtr>(parts.error());
@@ -79,6 +114,25 @@ Result<ExprPtr> Integrator::integrate_rational(ExprPtr expr, const Symbol& var) 
     if (!lrt_value) {
         auto lrt_res = algebra::integrate_rational_lrt(hermite.value().remaining_P, hermite.value().remaining_Q, var, context_);
         if (lrt_res.is_error()) return fail<ExprPtr>(lrt_res.error());
+        // A45: LRT legitimately answers with the formal sum over the roots of
+        // the Rothstein-Trager resultant (Bronstein, Symbolic_Integration_I.md
+        // :1831) when that resultant is irreducible of degree > 2 — callers
+        // that want it ask integrate_rational_lrt directly. As an *antiderivative*
+        // it is not usable yet: `diff` does not differentiate RootSum, so the
+        // result can be neither verified nor composed downstream. Reporting it
+        // as a closed form would be silently wrong-shaped, so refuse explicitly
+        // (divieto hardcode cat. 4: esplicito, diagnostico, task aperto) rather
+        // than hand back something the rest of the engine cannot consume.
+        if (contains_root_sum(lrt_res.value())) {
+            return fail<ExprPtr>(CASError{
+                .kind = CASErrorKind::Unimplemented,
+                .message = "integrate: the logarithmic part reduces to a formal RootSum over an "
+                           "irreducible Rothstein-Trager resultant of degree > 2; rendering it in "
+                           "closed form needs LogToReal over a real quadratic extension "
+                           "(Bronstein §2.8), which rioboo_conversion only implements up to degree 2",
+                .hint = std::nullopt,
+            });
+        }
         lrt_value = lrt_res.value();
     }
     auto lrt_res = ok(lrt_value);
