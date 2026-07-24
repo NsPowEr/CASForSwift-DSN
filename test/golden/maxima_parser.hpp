@@ -155,9 +155,21 @@ inline std::string normalize_maxima_output(const std::string& raw) {
     if (s.find("gamma_incomplete") != std::string::npos)
         return "";
 
-    // Maxima sometimes outputs "bessel_j(...)" — SKIP (different arg order)
-    if (s.find("bessel_j(") != std::string::npos)
-        return "";
+    // Maxima's bessel_j(order, arg) has the SAME argument order as our
+    // BesselJ(order, arg), and `bessel_j` is already an accepted alias of the
+    // BesselJ builtin (builtin_functions.hpp). The skip that used to sit here
+    // (justified as "different arg order") was a false limit of the runner and
+    // hid three real comparisons — A37.
+
+    // Maxima writes the polygamma family with a subscript: psi[0](x) is the
+    // digamma function, psi[n](x) the n-th polygamma. Both are builtins on our
+    // side, so rewrite instead of skipping.
+    {
+        std::regex psi_zero_re(R"(psi\[0\]\()");
+        s = std::regex_replace(s, psi_zero_re, "digamma(");
+        std::regex psi_n_re(R"(psi\[(\d+)\]\(([^()]*)\))");
+        s = std::regex_replace(s, psi_n_re, "polygamma($1,$2)");
+    }
 
     // Maxima sometimes outputs "erf(%i*x)" — SKIP (complex erf)
     if (s.find("erf(i*") != std::string::npos || s.find("erf(-i") != std::string::npos)
@@ -227,11 +239,26 @@ inline std::string extract_maxima_result_line(const std::string& file_content) {
     //    x = -((sqrt(3)*%i+1)/2),x = -((sqrt(3)*%i-1)/2),x = 1]
     //
     // We need both lines as a single string.
+    // A37: Maxima also wraps a long SCALAR result across lines, marking the
+    // continuation by indenting it — the wrap happens before an operator:
+    //
+    //   integrate(1/(x^4+1),x)
+    //   log(x^2+sqrt(2)*x+1)/2^(5/2)-log(x^2-sqrt(2)*x+1)/2^(5/2)
+    //                               +atan((2*x+sqrt(2))/sqrt(2))/2^(3/2)
+    //
+    // Trimming the indentation before deciding what the answer is destroyed
+    // that signal, so only the LAST physical line survived (`+atan(...)`) — a
+    // syntactically valid fragment of the answer, reported as a parse failure
+    // (and, worse, a fragment that parses would have been compared as if it
+    // were the whole result). Indentation is therefore recorded first and used
+    // to glue each continuation onto the logical line it belongs to.
     std::vector<std::string> lines;
     {
         std::istringstream ss(file_content);
         std::string line;
         while (std::getline(ss, line)) {
+            const bool is_continuation =
+                !line.empty() && (line.front() == ' ' || line.front() == '\t');
             while (!line.empty() && (line.front() == ' ' || line.front() == '\t'))
                 line.erase(line.begin());
             while (!line.empty() && (line.back() == ' ' || line.back() == '\r'))
@@ -241,6 +268,10 @@ inline std::string extract_maxima_result_line(const std::string& file_content) {
             if (line == "display2d:false" || line == "display2d:false;" ||
                 line == "display2d:false$")
                 continue;
+            if (is_continuation && !lines.empty()) {
+                lines.back() += line;
+                continue;
+            }
             // Skip lines that are pure prompt labels like "(%i1)" without
             // body, but keep "(%o1) expr".
             lines.push_back(line);
