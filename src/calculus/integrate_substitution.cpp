@@ -60,13 +60,51 @@ void collect_substitution_candidates(
     }
 }
 
-// General expression substituter: replaces occurrences of 'pattern' with 'replacement'.
+// Recognizes `arg` as k*w for a nonzero integer k (any sign), or w itself
+// (k=1), via structural comparison against w (not name-based like the
+// Weierstrass multi-angle helper — w here is an arbitrary expression, not
+// necessarily a bare variable).
+[[nodiscard]] std::optional<BigInt> integer_multiple_of_expr(ExprPtr arg, ExprPtr w) {
+    if (!arg || !w) return std::nullopt;
+    if (structural_equal(arg, w)) return BigInt(1);
+    if (const auto* un = expr_cast<Unary>(arg)) {
+        if (un->op != UnaryOp::Neg) return std::nullopt;
+        auto inner = integer_multiple_of_expr(un->operand, w);
+        if (!inner.has_value()) return std::nullopt;
+        return -(*inner);
+    }
+    if (const auto* prod = expr_cast<Product>(arg)) {
+        if (prod->factors.size() != 2U) return std::nullopt;
+        const auto* int_a = expr_cast<IntegerLit>(prod->factors[0]);
+        const auto* int_b = expr_cast<IntegerLit>(prod->factors[1]);
+        if (int_a && structural_equal(prod->factors[1], w) && !int_a->value.is_zero()) return int_a->value;
+        if (int_b && structural_equal(prod->factors[0], w) && !int_b->value.is_zero()) return int_b->value;
+        return std::nullopt;
+    }
+    return std::nullopt;
+}
+
+// General expression substituter: replaces occurrences of 'pattern' with
+// 'replacement'. When pattern is exp(w), also recognizes exp(k*w) for any
+// nonzero integer k (including exp(-w)) as replacement^k — exp(-x) is
+// algebraically 1/exp(x), but the two are different ExprPtr shapes, so a
+// literal structural_equal match alone would miss it (e.g. candidate
+// g=exp(x) in 1/(exp(x)+exp(-x)): without this, exp(-x) never becomes 1/u
+// and the candidate looks like it still depends on x).
 ExprPtr replace_expr(ExprPtr expr, ExprPtr pattern, ExprPtr replacement, AstArena& arena) {
     if (structural_equal(expr, pattern)) {
         return replacement;
     }
 
     if (const auto* call = expr_cast<FuncCall>(expr)) {
+        if (call->func_id == BuiltinOp::Exp && call->args.size() == 1U) {
+            if (const auto* pattern_call = expr_cast<FuncCall>(pattern);
+                pattern_call && pattern_call->func_id == BuiltinOp::Exp && pattern_call->args.size() == 1U) {
+                if (auto k = integer_multiple_of_expr(call->args[0], pattern_call->args[0]); k.has_value()) {
+                    return arena.make<Binary>(BinaryOp::Pow, replacement, arena.make<IntegerLit>(*k));
+                }
+            }
+        }
         std::vector<ExprPtr> args;
         args.reserve(call->args.size());
         for (auto arg : call->args) args.push_back(replace_expr(arg, pattern, replacement, arena));

@@ -8,6 +8,7 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <string>
 
 namespace cas::calculus {
@@ -1282,6 +1283,17 @@ TEST(L0_14_DecimalToRational, DiffWithVariableCoeff) {
     ASSERT_TRUE(result.is_ok()) << result.error().message;
     auto simp = ctx.simplify(result.value());
     ASSERT_TRUE(simp.is_ok()) << "diff(0.1*t^3, t) must not fail";
+}
+
+TEST(CalculusIntegrateTest, SubstitutionRecognizesExpReciprocal) {
+    // A42 triage: 1/(exp(x)+exp(-x)) = 1/(2cosh(x)), classical antiderivative
+    // arctan(exp(x)). Candidate g=exp(x) is found, but exp(-x) is a
+    // *different* ExprPtr shape from exp(x) (not 1/exp(x) syntactically),
+    // so replace_expr's literal structural match alone never substitutes it
+    // and the candidate looks like it still depends on x. Fixed by having
+    // replace_expr recognize exp(k*w) for any nonzero integer k (including
+    // k=-1) when the pattern is exp(w), substituting u^k.
+    expect_integration_oracle("1/(exp(x) + exp(-x))", "x");
 }
 
 TEST(CalculusIntegrateTest, SubstitutionVerificationRobustToReciprocalShape) {
