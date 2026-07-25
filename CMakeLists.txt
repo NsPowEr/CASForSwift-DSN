@@ -707,6 +707,7 @@ test/unit/symbolic/test_sqrt_fold.cpp
         test/unit/calculus/test_risch_logarithmic_probe.cpp
         test/unit/calculus/test_differential_field_probe.cpp
         test/unit/calculus/test_differentiate_smoke.cpp
+    test/unit/symbolic/test_a39_canonical_nesting.cpp
         test/unit/calculus/test_limit_smoke.cpp
         test/unit/calculus/test_series_removable_singularity.cpp
         test/unit/calculus/test_limit_gruntz_nested_log.cpp

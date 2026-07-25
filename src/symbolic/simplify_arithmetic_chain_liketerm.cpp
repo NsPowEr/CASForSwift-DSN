@@ -244,7 +244,23 @@ bool try_merge_symbolic_like_terms(
             // Form (qi + qj) * shared_monomial.
             // Sort the coefficient sum canonically so the result is in the
             // same normal form on repeated simplify passes (idempotency).
-            std::vector<ExprPtr> coeff_terms{qi, qj};
+            // A39: a quotient can itself be a Sum — e.g. collecting
+            // (1-2x^2)*e - 1*e over the shared factor e gives qi = 1-2x^2.
+            // Nesting it whole would produce Sum([Sum([...]), -1]), which the
+            // strict-canonicity checker rejects and which no later pass
+            // flattens (the Sum flatten in simplify_sum_terms runs before this
+            // collection). Splice such terms in instead, before the sort, so
+            // the canonical order is computed on the flat term list.
+            std::vector<ExprPtr> coeff_terms;
+            coeff_terms.reserve(2U);
+            for (ExprPtr q : {qi, qj}) {
+                if (const auto* nested = expr_cast<Sum>(q)) {
+                    coeff_terms.insert(coeff_terms.end(),
+                        nested->terms.begin(), nested->terms.end());
+                } else {
+                    coeff_terms.push_back(q);
+                }
+            }
             std::sort(coeff_terms.begin(), coeff_terms.end(),
                 [](ExprPtr a, ExprPtr b) {
                     int d = polynomial_degree(a) - polynomial_degree(b);

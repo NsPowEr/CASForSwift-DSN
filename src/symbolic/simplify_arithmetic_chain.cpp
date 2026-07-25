@@ -119,8 +119,24 @@ Result<ExprPtr> Simplifier::simplify_product_factors(
 
     // Step 2: flatten nested Products and Div nodes.
     std::vector<ExprPtr> flat_factors;
+    // A39: sign accumulated while descending through Unary(Neg, ...) nodes.
+    // Emitted as a single -1 factor after the walk; the numeric-coefficient
+    // pass below absorbs it, so no separate sign bookkeeping is needed.
+    int flat_sign = 1;
     std::function<Result<void>(ExprPtr, bool)> flatten =
         [&](ExprPtr f, bool invert) -> Result<void> {
+        // A39: descend through negation. Without this, Neg(Product(...)) is
+        // neither a Product nor a Div, so it lands whole in flat_factors and
+        // the pass below unwraps it into a `core` that is itself a Product —
+        // one nobody flattens any more. That is exactly how
+        // `(-P)*pi` used to simplify to `-(pi*P)` with P left nested, which is
+        // what the strict-canonicity canary reports on the Mellin/MeijerG
+        // tests. Sign is invariant under inversion: (-g)^-1 = -(g^-1).
+        if (const auto* un = expr_cast<Unary>(f);
+            un != nullptr && un->op == UnaryOp::Neg) {
+            flat_sign = -flat_sign;
+            return flatten(un->operand, invert);
+        }
         if (const auto* prod = expr_cast<Product>(f)) {
             for (ExprPtr factor : prod->factors) {
                 auto res = flatten(factor, invert);
@@ -143,6 +159,7 @@ Result<ExprPtr> Simplifier::simplify_product_factors(
     for (ExprPtr f : initial_factors)
         if (auto res = flatten(f, false); res.is_error())
             return fail<ExprPtr>(res.error());
+    if (flat_sign < 0) flat_factors.push_back(make_integer(arena_, BigInt(-1)));
 
     // Step 3: separate numeric coefficient, imaginary unit accumulation,
     //         infinity tracking, and symbolic base/exponent pairs.
