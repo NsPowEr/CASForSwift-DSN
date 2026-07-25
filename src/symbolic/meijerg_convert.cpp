@@ -82,7 +82,11 @@ namespace {
 [[nodiscard]] ExprPtr with_prefactor(
     AstArena& arena, std::vector<ExprPtr> prefactor, ExprPtr g) {
     if (prefactor.empty()) return g;
-    prefactor.push_back(g);
+    if (const auto* prod = expr_cast<Product>(g)) {
+        prefactor.insert(prefactor.end(), prod->factors.begin(), prod->factors.end());
+    } else {
+        prefactor.push_back(g);
+    }
     return arena.make<Product>(std::move(prefactor));
 }
 

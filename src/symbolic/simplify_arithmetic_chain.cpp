@@ -133,7 +133,8 @@ Result<ExprPtr> Simplifier::simplify_product_factors(
         } else if (invert) {
             auto inv = simplify_power(f, make_integer(arena_, BigInt(-1)));
             if (inv.is_error()) return fail<void>(inv.error());
-            flat_factors.push_back(inv.value());
+            auto res = flatten(inv.value(), false);
+            if (res.is_error()) return res;
         } else {
             flat_factors.push_back(f);
         }

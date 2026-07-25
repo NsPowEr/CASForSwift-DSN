@@ -191,7 +191,11 @@ Result<ExprPtr> slater_expand(CASContext& ctx, const FuncCall& g) {
         }
         auto pfq = build_pfq_term(ctx, upper, lower, w);
         if (pfq.is_error()) return pfq;
-        factors.push_back(pfq.value());
+        if (const auto* prod = expr_cast<Product>(pfq.value())) {
+            factors.insert(factors.end(), prod->factors.begin(), prod->factors.end());
+        } else {
+            factors.push_back(pfq.value());
+        }
 
         summands.push_back(factors.size() == 1U
             ? factors.front()
