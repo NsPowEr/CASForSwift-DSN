@@ -349,6 +349,8 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/solve_inequality.cpp
     src/algebra/partial_fractions.cpp
     src/algebra/partial_fractions_lrt.cpp
+    src/algebra/partial_fractions_logtoreal.cpp
+    src/algebra/partial_fractions_quartic_split.cpp
     src/algebra/solve_polynomial.cpp
     src/algebra/solve_polynomial_cubic_quartic.cpp
     src/algebra/polynomial_internal.cpp
@@ -717,6 +719,7 @@ test/unit/symbolic/test_sqrt_fold.cpp
         test/unit/calculus/test_integrate_substitution.cpp
         test/unit/algebra/test_polynomial_sparse_interpolation.cpp
         test/unit/algebra/test_lrt_subresultant_a45.cpp
+        test/unit/algebra/test_logtoreal_a46.cpp
         test/unit/algebra/test_algebraic_number_rootof.cpp
 test/unit/algebra/test_cyclotomic_rootof_d2.cpp
         test/unit/algebra/test_csolve_linear.cpp

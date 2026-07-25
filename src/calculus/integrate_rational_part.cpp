@@ -126,10 +126,12 @@ Result<ExprPtr> Integrator::integrate_rational(ExprPtr expr, const Symbol& var) 
         if (contains_root_sum(lrt_res.value())) {
             return fail<ExprPtr>(CASError{
                 .kind = CASErrorKind::Unimplemented,
-                .message = "integrate: the logarithmic part reduces to a formal RootSum over an "
-                           "irreducible Rothstein-Trager resultant of degree > 2; rendering it in "
-                           "closed form needs LogToReal over a real quadratic extension "
-                           "(Bronstein §2.8), which rioboo_conversion only implements up to degree 2",
+                .message = "integrate: the logarithmic part reduces to a formal RootSum over a "
+                           "Rothstein-Trager resultant whose residues are not expressible by real "
+                           "radicals; A46 renders the closed form (LogToReal/LogToAtan, Bronstein "
+                           "§2.8) for quadratic resultants and for quartics whose residues lie in a "
+                           "quadratic extension of Q, i.e. whose resolvent cubic has a rational "
+                           "root — outside that class the formal sum is kept and refused here",
                 .hint = std::nullopt,
             });
         }

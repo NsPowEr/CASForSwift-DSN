@@ -203,6 +203,21 @@ Result<ExprPtr> Integrator::integrate_product(const Product& product, const Symb
                             q_int.value(), r_int.value()}));
                     }
                 }
+            } else if (dn.is_ok() && dd.is_ok()) {
+                // A46: frazione propria in forma Product (N · D^{-1}). Il commento
+                // sopra rimanda "al pipeline razionale standard", ma per questa
+                // forma nessuno lo raggiungeva: solo il ramo Binary(Div) arriva a
+                // integrate_rational, e da un Product non si passa mai da li'.
+                // Risultato misurato: la seconda frazione parziale di 1/(x⁶+1),
+                // cioe' (−x²/3 + …)·(x⁴−x²+1)^{-1}, girava 157s nelle strategie
+                // generiche (IBP, sostituzione) e poi FALLIVA, mentre la stessa
+                // integranda scritta come Div si chiude in ~0.4s. Qui si entra
+                // direttamente in Hermite+LRT — il pipeline razionale, non la PFD
+                // che il commento sopra segnala come preemption dannosa.
+                if (auto rational_integral = integrate_rational(div, var);
+                    rational_integral.is_ok()) {
+                    return rational_integral;
+                }
             }
         }
     }

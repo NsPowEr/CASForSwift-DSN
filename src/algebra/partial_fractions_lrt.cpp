@@ -4,6 +4,7 @@
 #include "cas/ast_debug.hpp"
 #include "algebra_internal.hpp"
 #include "polynomial_internal.hpp"
+#include "partial_fractions_rioboo.hpp"
 
 #include <algorithm>
 #include <vector>
@@ -20,23 +21,13 @@ namespace {
     };
 }
 
-// A45: this used to read `if (!a || is_zero(a)) return b;`, i.e. it treated a
-// *zero* operand as the multiplicative identity — 0·b returned b. That is how a
-// spurious log term entered every Rioboo conversion whose R(z) has no linear
-// coefficient (a = 0, e.g. R = 4z²+1 for ∫dx/(x²+1)): the intended-to-vanish
-// `(-a/2)·log(norm)` came back as `log(norm)`. A null ExprPtr means "absent"
-// and is still skipped; a literal zero now correctly absorbs the product.
+// A45: the multiplication helper used to read `if (!a || is_zero(a)) return b;`,
+// i.e. it treated a *zero* operand as the multiplicative identity — 0·b returned
+// b, which injected a spurious log term into every Rioboo conversion whose R(z)
+// has no linear coefficient. A46 moved it to partial_fractions_logtoreal.cpp so
+// both Rioboo paths share one definition; `rioboo_mul` is that function.
 [[nodiscard]] ExprPtr mul_expr_lrt(AstArena& arena, ExprPtr a, ExprPtr b) {
-    if (!a) return b;
-    if (!b) return a;
-    if (is_zero_poly(PolyExpr({a})) || is_zero_poly(PolyExpr({b}))) {
-        return poly_make_integer(arena, 0);
-    }
-    return arena.make<Binary>(BinaryOp::Mul, a, b);
-}
-
-[[nodiscard]] ExprPtr div_expr_lrt(AstArena& arena, ExprPtr a, ExprPtr b) {
-    return arena.make<Binary>(BinaryOp::Div, a, b);
+    return rioboo_mul(arena, a, b);
 }
 
 [[nodiscard]] Result<PolyExpr> poly_derivative_lrt(const PolyExpr& poly, symbolic::CASContext& ctx) {
@@ -168,72 +159,34 @@ namespace {
         auto r_coeffs_res = poly_to_rational_poly(r_poly);
         if (r_coeffs_res.is_error()) return fail<ExprPtr>(r_coeffs_res.error());
         auto r_coeffs = r_coeffs_res.value();
-        
+
         Rational lc = r_coeffs.leading_coeff();
-        Rational a = r_coeffs[1] / lc;
-        Rational b = r_coeffs[0] / lc;
-        
-        PolyExpr Q1, Q0;
-        Q1.resize(G_z_x.size(), poly_make_integer(ctx.arena(), 0));
-        Q0.resize(G_z_x.size(), poly_make_integer(ctx.arena(), 0));
-        
-        for (std::size_t i = 0; i < G_z_x.size(); ++i) {
-            if (!G_z_x[i]) continue;
-            auto g_i_z_res = parse_polynomial(G_z_x[i], z_var, ctx);
-            if (g_i_z_res.is_error()) continue;
-            auto g_i_z = poly_to_rational_poly(g_i_z_res.value());
-            if (g_i_z.is_error()) continue;
-            
-            RatPoly monic_r({b, a, Rational(1)});
-            auto [quot, rem] = div_rem_rational_poly(g_i_z.value(), monic_r);
-            if (rem.size() > 0) Q0[i] = make_rational_expr(ctx.arena(), rem[0]);
-            else Q0[i] = make_integer(ctx.arena(), 0);
-            
-            if (rem.size() > 1) Q1[i] = make_rational_expr(ctx.arena(), rem[1]);
-            else Q1[i] = make_integer(ctx.arena(), 0);
-        }
-        normalize_poly(Q1);
-        normalize_poly(Q0);
-        
-        auto Q1_res = polynomial_to_expr(Q1, var, ctx);
-        ExprPtr Q1_x = Q1_res.is_ok() ? Q1_res.value() : make_integer(ctx.arena(), 0);
-        auto Q0_res = polynomial_to_expr(Q0, var, ctx);
-        ExprPtr Q0_x = Q0_res.is_ok() ? Q0_res.value() : make_integer(ctx.arena(), 0);
-        
-        ExprPtr a_expr = make_rational_expr(ctx.arena(), a);
-        ExprPtr b_expr = make_rational_expr(ctx.arena(), b);
-        
-        auto disc_res = ctx.simplify(ctx.arena().make<Binary>(BinaryOp::Sub,
-            mul_expr_lrt(ctx.arena(), make_integer(ctx.arena(), 4), b_expr),
-            mul_expr_lrt(ctx.arena(), a_expr, a_expr)));
-        if (disc_res.is_error()) return fail<ExprPtr>(disc_res.error());
-        ExprPtr disc_expr = disc_res.value();
-        
-        ExprPtr sqrt_disc = ctx.arena().make<FuncCall>(BuiltinOp::Sqrt, std::vector<ExprPtr>{disc_expr});
-        
-        auto norm_res = ctx.simplify(ctx.arena().make<Sum>(std::vector<ExprPtr>{
-            mul_expr_lrt(ctx.arena(), Q0_x, Q0_x),
-            mul_expr_lrt(ctx.arena(), ctx.arena().make<Unary>(UnaryOp::Neg, a_expr), mul_expr_lrt(ctx.arena(), Q1_x, Q0_x)),
-            mul_expr_lrt(ctx.arena(), b_expr, mul_expr_lrt(ctx.arena(), Q1_x, Q1_x))
-        }));
-        if (norm_res.is_error()) return fail<ExprPtr>(norm_res.error());
-        ExprPtr norm = norm_res.value();
-        
-        ExprPtr ln_term = mul_expr_lrt(ctx.arena(), make_rational_expr(ctx.arena(), -a/Rational(2)),
-            ctx.arena().make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{norm}));
-            
-        ExprPtr atan_arg = div_expr_lrt(ctx.arena(),
-            mul_expr_lrt(ctx.arena(), sqrt_disc, Q1_x),
-            ctx.arena().make<Binary>(BinaryOp::Sub, 
-                mul_expr_lrt(ctx.arena(), make_integer(ctx.arena(), 2), Q0_x),
-                mul_expr_lrt(ctx.arena(), a_expr, Q1_x)));
-        
-        ExprPtr atan_term = mul_expr_lrt(ctx.arena(), ctx.arena().make<Unary>(UnaryOp::Neg, sqrt_disc),
-            ctx.arena().make<FuncCall>(BuiltinOp::Atan, std::vector<ExprPtr>{atan_arg}));
-            
-        return ok(ctx.arena().make<Sum>(std::vector<ExprPtr>{ln_term, atan_term}));
+        ExprPtr a_expr = make_rational_expr(ctx.arena(), r_coeffs[1] / lc);
+        ExprPtr b_expr = make_rational_expr(ctx.arena(), r_coeffs[0] / lc);
+        return rioboo_quadratic_real_form(a_expr, b_expr, G_z_x, var, z_var, ctx);
     }
-    
+
+    // A46: un quartico irriducibile su Q i cui residui vivono in un'estensione
+    // quadratica di Q si spezza in due quadratici REALI, e ognuno passa per la
+    // stessa forma chiusa di Rioboo del caso razionale (spec §2.8). Fuori da
+    // quella classe si cade sulla somma formale `RootSum` qui sotto.
+    if (poly_degree(r_poly) == 4) {
+        auto quadratics = real_quadratic_factors_of_quartic(r_poly, z_var, ctx);
+        if (quadratics.is_ok() && quadratics.value().size() == 2U) {
+            std::vector<ExprPtr> terms;
+            bool complete = true;
+            for (const auto& [a_expr, b_expr] : quadratics.value()) {
+                auto part = rioboo_quadratic_real_form(a_expr, b_expr, G_z_x, var, z_var, ctx);
+                if (part.is_error() || !part.value()) { complete = false; break; }
+                terms.push_back(part.value());
+            }
+            if (complete && terms.size() == 2U) {
+                return ctx.simplify(ctx.arena().make<Sum>(std::move(terms)));
+            }
+        }
+    }
+
+
     auto G_expr_res = polynomial_to_expr(G_z_x, var, ctx);
     if (G_expr_res.is_ok()) {
         ExprPtr G_expr = G_expr_res.value();

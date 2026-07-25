@@ -129,19 +129,19 @@ TEST_F(LrtSubresultantA45Test, RegularSequenceIntegralsStayCorrect) {
     }
 }
 
-// Quando il resultant e' irriducibile di grado > 2 su Q (256z^4+1 per
-// ∫dx/(x^4+1), verificato irriducibile), la spec riga 1831 prescrive la somma
-// formale sulle radici e il motore emette RootSum. E' matematicamente corretto,
-// ma resta un gap dichiarato: (a) `diff` non deriva RootSum, quindi il
-// risultato non e' verificabile ne' riusabile a valle; (b) Maxima risponde in
-// forma chiusa su Q(sqrt 2) via LogToReal/LogToAtan (Bronstein §2.8, spec riga
-// 2381), che rioboo_conversion implementa solo fino al grado 2. Il test fissa
-// il comportamento attuale perche' la regressione sia visibile.
-TEST_F(LrtSubresultantA45Test, IrreducibleHighDegreeResultantYieldsFormalRootSum) {
+// Quando il resultant e' irriducibile di grado > 2 su Q, la spec riga 1831
+// prescrive la somma formale sulle radici e il motore emette RootSum.
+//
+// A46 ha spostato il confine: i quartici i cui residui vivono in un'estensione
+// QUADRATICA di Q (cubico risolvente con radice razionale) ora escono in forma
+// chiusa reale — 256z^4+1 di ∫dx/(x^4+1) e' uno di quelli, e il suo caso vive in
+// test_logtoreal_a46.cpp. Resta RootSum quando i residui non sono esprimibili
+// per radicali reali: qui il resultant di ∫dx/(x^8+1) (grado 8, Phi_16
+// irriducibile). Il test fissa il confine, non un valore.
+TEST_F(LrtSubresultantA45Test, ResidueOutsideRadicalsStillYieldsFormalRootSum) {
     Symbol x("x");
     const std::vector<std::pair<std::string, std::string>> cases = {
-        {"1", "x^4 + 1"},
-        {"x^2", "x^4 + 1"},
+        {"1", "x^8 + 1"},
     };
     for (const auto& [p_src, q_src] : cases) {
         auto result = integrate_rational_lrt(parse(p_src), parse(q_src), x, ctx);

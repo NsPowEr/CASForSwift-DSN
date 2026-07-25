@@ -64,6 +64,27 @@ Result<ExprPtr> Integrator::integrate_power(const Binary& power, const Symbol& v
     if (const auto* ie = expr_cast<IntegerLit>(power.right); ie && ie->value.is_negative())
         if (auto r = integrate_inverse_quadratic_power(power.left, ie->value, var); r.is_ok()) return r;
 
+    // A46: una potenza NEGATIVA di un polinomio e' una funzione razionale, e la
+    // via generale per le razionali e' Hermite + Lazard-Rioboo-Trager. Senza
+    // questo passo la stessa integranda scritta `Pow(Q,−1)` (la forma che
+    // producono partial_fractions e il simplifier) saltava la via razionale —
+    // che il ramo `Div` imbocca subito — e finiva nelle strategie generiche a
+    // valle. Misurato su 1/(x⁴+1): 40s come `Pow` contro 105ms come `Div`, e la
+    // seconda frazione parziale di 1/(x⁶+1) sbagliava per 81s prima di cedere.
+    // La forma sintattica non deve decidere ne' il costo ne' l'esito.
+    if (const auto* ie = expr_cast<IntegerLit>(power.right); ie && ie->value.is_negative()) {
+        if (auto base_degree = algebra::polynomial_degree(power.left, var, context_);
+            base_degree.is_ok() && base_degree.value() > 0U) {
+            ExprPtr positive_power = make_binary(arena_, BinaryOp::Pow, power.left,
+                arena_.make<IntegerLit>(-ie->value));
+            if (auto r = integrate_rational(
+                    make_binary(arena_, BinaryOp::Div, make_integer(arena_, 1), positive_power), var);
+                r.is_ok()) {
+                return r;
+            }
+        }
+    }
+
     if (is_rational_value(power.right, -1, 2)) {
         if (matches_one_minus_square(power.left, var)) {
             return ok(make_function(arena_, "arcsin", {arena_.make<Symbol>(var)}));
