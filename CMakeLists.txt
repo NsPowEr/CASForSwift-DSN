@@ -196,6 +196,7 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/differentiate.cpp
     src/calculus/differentiate_visitor.cpp
     src/calculus/differentiate_rules.cpp
+    src/calculus/differentiate_rules_multiarg.cpp
     src/calculus/integrate.cpp
     src/calculus/integrate_definite_patterns.cpp
     src/calculus/bessel_orthogonality.cpp

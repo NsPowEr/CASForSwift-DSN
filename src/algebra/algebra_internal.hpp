@@ -158,6 +158,11 @@ struct MultivariateSquareFreeFactor {
 // Spec: .APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Sech_Csch_Identity.md.
 [[nodiscard]] ExprPtr hyperbolic_normalize(ExprPtr expr, AstArena& arena);
 
+// A44: rewrites u! / factorial(u) to gamma(u+1) (exact identity) so the two
+// interchangeable spellings become structurally comparable. Applied to both
+// sides of mathematically_equal, like hyperbolic_normalize above.
+[[nodiscard]] ExprPtr factorial_gamma_normalize(ExprPtr expr, AstArena& arena);
+
 // F7.5.A1 — Geometric / cyclotomic RootOf expansion (closes
 // HC-F75-CYCLOTOMIC-ROOTOF). See src/algebra/algebraic_equal_cyclotomic.cpp.
 [[nodiscard]] std::optional<std::vector<ExprPtr>>

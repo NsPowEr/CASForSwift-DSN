@@ -92,6 +92,11 @@ private:
     [[nodiscard]] Result<ExprPtr> differentiate_product(const Product& product, const Symbol& var);
     [[nodiscard]] Result<ExprPtr> differentiate_power(const Binary& power, const Symbol& var);
     [[nodiscard]] Result<ExprPtr> differentiate_function(const FuncCall& call, const Symbol& var);
+
+    // Arity > 1 rules (Bessel, incomplete gamma, hypergeometric, Meijer G).
+    // Lives in differentiate_rules_multiarg.cpp — anti-monolith split of
+    // differentiate_function, which tail-calls it for call.args.size() != 1.
+    [[nodiscard]] Result<ExprPtr> differentiate_function_multiarg(const FuncCall& call, const Symbol& var);
     [[nodiscard]] Result<ExprPtr> differentiate_integral(const Integral& integral, const Symbol& var);
 
     symbolic::CASContext& context_;

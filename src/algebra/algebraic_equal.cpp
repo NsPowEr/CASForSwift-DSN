@@ -35,6 +35,20 @@ Result<bool> mathematically_equal(ExprPtr lhs, ExprPtr rhs, CASContext& context)
     auto rhs_s = context.simplify(rhs);
     if (rhs_s.is_error()) { finalize(); return fail<bool>(rhs_s.error()); }
 
+    // A44: unify the two spellings of the factorial (u! and factorial(u)) to
+    // gamma(u+1) before comparing — exact identity, same motivation as the
+    // hyperbolic rewrite below (CAS emits Γ(x+1), Maxima emits x!).
+    {
+        auto lhs_f = algebra::factorial_gamma_normalize(lhs_s.value(), context.arena());
+        auto rhs_f = algebra::factorial_gamma_normalize(rhs_s.value(), context.arena());
+        if (lhs_f.get() != lhs_s.value().get() || rhs_f.get() != rhs_s.value().get()) {
+            auto lhs_f_s = context.simplify(lhs_f);
+            auto rhs_f_s = context.simplify(rhs_f);
+            if (lhs_f_s.is_ok()) lhs_s = lhs_f_s;
+            if (rhs_f_s.is_ok()) rhs_s = rhs_f_s;
+        }
+    }
+
     // F7.5.A4: rewrite sech/csch/coth/tanh to canonical cosh/sinh quotients
     // BEFORE structural / algebraic comparison so notational mismatches
     // (CAS cosh(x)^-2 vs Maxima sech(x)^2 etc.) collapse.
