@@ -280,6 +280,45 @@ Result<ExprPtr> Differentiator::differentiate_function(const FuncCall& call, con
                 make_function(arena_, std::string(builtin_op_name(BuiltinOp::Gamma)), {argument}),
                 make_function(arena_, "polygamma", {make_integer(arena_, 0), argument})
             });
+        } else if (func_id == BuiltinOp::ExpIntegralEi) {
+            // A43 §3 (verificata mpmath): d/du Ei(u) = e^u/u.
+            outer = make_binary(arena_, BinaryOp::Div,
+                make_function(arena_, "exp", {argument}), argument);
+        } else if (func_id == BuiltinOp::SinIntegral) {
+            // d/du Si(u) = sin(u)/u
+            outer = make_binary(arena_, BinaryOp::Div,
+                make_function(arena_, "sin", {argument}), argument);
+        } else if (func_id == BuiltinOp::CosIntegral) {
+            // d/du Ci(u) = cos(u)/u
+            outer = make_binary(arena_, BinaryOp::Div,
+                make_function(arena_, "cos", {argument}), argument);
+        } else if (func_id == BuiltinOp::SinhIntegral) {
+            // d/du Shi(u) = sinh(u)/u
+            outer = make_binary(arena_, BinaryOp::Div,
+                make_function(arena_, "sinh", {argument}), argument);
+        } else if (func_id == BuiltinOp::CoshIntegral) {
+            // d/du Chi(u) = cosh(u)/u
+            outer = make_binary(arena_, BinaryOp::Div,
+                make_function(arena_, "cosh", {argument}), argument);
+        } else if (func_id == BuiltinOp::LogIntegral) {
+            // d/du li(u) = 1/ln(u)
+            outer = make_binary(arena_, BinaryOp::Div, make_integer(arena_, 1),
+                make_function(arena_, "ln", {argument}));
+        } else if (func_id == BuiltinOp::Dilog) {
+            // d/du Li2(u) = -ln(1-u)/u
+            outer = make_unary(arena_, UnaryOp::Neg,
+                make_binary(arena_, BinaryOp::Div,
+                    make_function(arena_, "ln", {make_sum(arena_, {
+                        make_integer(arena_, 1),
+                        make_unary(arena_, UnaryOp::Neg, argument)})}),
+                    argument));
+        } else if (func_id == BuiltinOp::Erfi) {
+            // d/du erfi(u) = (2/sqrt(pi))*e^{u^2}
+            outer = make_product(arena_, {
+                make_binary(arena_, BinaryOp::Div, make_integer(arena_, 2),
+                    make_function(arena_, "sqrt", {arena_.make<Constant>(MathConstant::Pi)})),
+                make_function(arena_, "exp",
+                    {make_power(arena_, argument, make_integer(arena_, 2))})});
         } else if (func_id == BuiltinOp::Factorial) {
             // A44: d/du u! = Γ(u+1)·ψ(u+1). Same identity as Γ shifted by one
             // (u! = Γ(u+1)), so it reuses the canonical `gamma`/`polygamma`

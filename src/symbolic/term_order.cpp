@@ -67,6 +67,23 @@ int compare_string_precedence(const std::string& lhs, const std::string& rhs) no
 
 int get_builtin_precedence(BuiltinOp op) noexcept {
     switch (op) {
+    // A43 — antiderivate non elementari, sopra il tier esponenziale.
+    // Collocazione LPO, non arbitraria: in un ordine per precedenza f > g
+    // significa che f puo' essere riscritta usando g ma non viceversa, e
+    // queste funzioni non si riducono a elementari mentre le loro derivate
+    // sono elementari (d/dx Ei(x) = e^x/x). Ei e' il generatore della
+    // famiglia — li, Shi, Chi si esprimono tramite Ei (spec §4) — quindi
+    // domina; erfi chiude, riducendosi a erf.
+    // Spec: MISSING_FEATURES_SPECS/Nonelementary_Antiderivatives.md.
+    case BuiltinOp::ExpIntegralEi: return 108;
+    case BuiltinOp::LogIntegral:   return 107;
+    case BuiltinOp::CoshIntegral:  return 106;
+    case BuiltinOp::SinhIntegral:  return 105;
+    case BuiltinOp::CosIntegral:   return 104;
+    case BuiltinOp::SinIntegral:   return 103;
+    case BuiltinOp::Dilog:         return 102;
+    case BuiltinOp::Erfi:          return 101;
+
     // Top tier: exponential/log core.
     case BuiltinOp::Exp:        return 100;
     case BuiltinOp::Log10:      return 96;
