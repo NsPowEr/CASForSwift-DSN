@@ -61,6 +61,17 @@ bool decompose_term(
         return true;
     }
 
+    // NOTA (A48): questo ramo NON ricorre di proposito. `-(2·x)` resta
+    // coeff=-1 / fattori=[Product(2,x)] invece di coeff=-2 / fattori=[x].
+    // L'asimmetria e' voluta: far ricorrere il ramo qui cambia le DECISIONI DI
+    // MERGE di `try_merge_symbolic_like_terms`, che comincerebbe a fondere
+    // coppie prima ignorate. Misurato: `-pi - pi*x` veniva fattorizzato in
+    // `pi*(-1-x)` e la riduzione trigonometrica — che cerca la forma
+    // distribuita — smetteva di vedere l'argomento, rompendo la riflessione
+    // di Gamma (`gamma(x+2)*gamma(-1-x)` non arrivava piu' a `pi/sin(pi*x)`).
+    // Il fabbisogno di A48 e' un'altra cosa — raccogliere COEFFICIENTI opposti
+    // — ed e' risolto localmente in `collect_coefficient_terms`, che scarta il
+    // segno prima di decomporre senza toccare questa euristica.
     if (const auto* u = expr_cast<Unary>(expr); u && u->op == UnaryOp::Neg) {
         coeff_out = Rational(BigInt(-1));
         expr = u->operand;
@@ -142,6 +153,92 @@ ExprPtr build_coeff_monomial(
     }
     return neg ? arena.make<Unary>(UnaryOp::Neg, result) : result;
 }
+
+namespace {
+
+// A48 — raccoglie i termini simili DENTRO il Sum dei coefficienti.
+//
+// Il sito chiamante (simplify_arithmetic_chain_sum.cpp, Step 5) vieta — a
+// ragione — di ri-simplificare il PRODOTTO fuso: rientrerebbe in
+// `simplify_product_factors` e riaprirebbe il ciclo distribuzione/
+// fattorizzazione. Quel divieto pero' NON riguarda il Sum dei coefficienti,
+// che invece deve essere in forma raccolta come qualunque altro Sum.
+//
+// Senza questa raccolta il coefficiente veniva costruito grezzo (splice +
+// sort, nessuna cancellazione) e `A - A` non si annullava: con
+// A = (2x-2)·e^{2x} il risultato era `(-2 - 2x + 2x + 2)·e^{2x}` invece di 0,
+// per QUALUNQUE A = polinomio·trascendente (repro misurato in A48).
+//
+// L'algoritmo e' quello dello Step 4 — chiave = lista di fattori canonica,
+// valore = coefficiente razionale accumulato — applicato qui in locale. Non
+// costruisce alcun Product, quindi non puo' innescare il ciclo che il divieto
+// del chiamante protegge. `decompose_term` restituisce i fattori gia' ordinati
+// canonicamente, quindi il confronto elemento per elemento e' lecito.
+//
+// Ritorna i termini superstiti: vuoto significa che il coefficiente si annulla
+// per intero, cioe' che il termine fuso e' 0.
+[[nodiscard]] std::vector<ExprPtr> collect_coefficient_terms(
+    const std::vector<ExprPtr>& coeff_terms, AstArena& arena)
+{
+    struct Bucket {
+        std::vector<std::pair<ExprPtr, BigInt>> factors;
+        Rational coeff;
+    };
+    std::vector<Bucket> buckets;
+    buckets.reserve(coeff_terms.size());
+
+    for (ExprPtr term : coeff_terms) {
+        // Scarta i `Neg` PRIMA di decomporre. `decompose_term` si ferma al
+        // primo livello per non alterare le decisioni di merge (vedi la nota
+        // sul suo ramo Neg), ma qui serve la chiave profonda: senza,
+        // `-(2·x)` darebbe fattori=[Product(2,x)] e `2·x` fattori=[x], due
+        // chiavi diverse per termini opposti, e `-(2x) + 2x` non cancellerebbe.
+        // Lo scarto e' locale a questa raccolta, quindi non ha effetti
+        // sull'euristica F1.4.
+        Rational sign(BigInt(1));
+        ExprPtr stripped = term;
+        while (const auto* neg = expr_cast<Unary>(stripped)) {
+            if (neg->op != UnaryOp::Neg) break;
+            sign = -sign;
+            stripped = neg->operand;
+        }
+        Rational c;
+        std::vector<std::pair<ExprPtr, BigInt>> f;
+        if (!decompose_term(stripped, c, f)) {
+            buckets.push_back(Bucket{{{term, BigInt(1)}}, Rational(BigInt(1))});
+            continue;
+        }
+        c *= sign;
+        bool merged = false;
+        for (Bucket& b : buckets) {
+            if (b.factors.size() != f.size()) continue;
+            bool same = true;
+            for (std::size_t k = 0; k < f.size(); ++k) {
+                if (!structural_equal(b.factors[k].first, f[k].first)
+                    || b.factors[k].second != f[k].second) {
+                    same = false;
+                    break;
+                }
+            }
+            if (same) {
+                b.coeff += c;
+                merged = true;
+                break;
+            }
+        }
+        if (!merged) buckets.push_back(Bucket{std::move(f), c});
+    }
+
+    std::vector<ExprPtr> collected;
+    collected.reserve(buckets.size());
+    for (const Bucket& b : buckets) {
+        if (b.coeff.numerator().is_zero()) continue;
+        collected.push_back(build_coeff_monomial(nullptr, b.coeff, b.factors, arena));
+    }
+    return collected;
+}
+
+}  // namespace
 
 bool try_merge_symbolic_like_terms(
     std::vector<ExprPtr>& terms,
@@ -261,12 +358,27 @@ bool try_merge_symbolic_like_terms(
                     coeff_terms.push_back(q);
                 }
             }
+            // A48: raccogli PRIMA di ordinare — altrimenti il coefficiente
+            // resta grezzo e `A - A` non si annulla (vedi
+            // collect_coefficient_terms).
+            coeff_terms = collect_coefficient_terms(coeff_terms, arena);
+            if (coeff_terms.empty()) {
+                // Il coefficiente si annulla per intero: il termine fuso e' 0,
+                // quindi i due addendi spariscono entrambi. Lasciare uno zero
+                // letterale in lista lo porterebbe fino al Sum finale, perche'
+                // dopo lo Step 5 non c'e' un'altra raccolta.
+                terms.erase(terms.begin() + static_cast<std::ptrdiff_t>(j));
+                terms.erase(terms.begin() + static_cast<std::ptrdiff_t>(i));
+                return true;
+            }
             std::sort(coeff_terms.begin(), coeff_terms.end(),
                 [](ExprPtr a, ExprPtr b) {
                     int d = polynomial_degree(a) - polynomial_degree(b);
                     return d != 0 ? d > 0 : canonical_compare(a, b) < 0;
                 });
-            ExprPtr coeff_sum = arena.make<Sum>(std::move(coeff_terms));
+            ExprPtr coeff_sum = coeff_terms.size() == 1U
+                ? coeff_terms.front()
+                : arena.make<Sum>(std::move(coeff_terms));
 
             // Build the list of factor expressions for the merged product.
             // Each entry is (base_for_sort, full_factor_expr).
@@ -282,7 +394,36 @@ bool try_merge_symbolic_like_terms(
                 ExprPtr factor_expr;
             };
             std::vector<FactorEntry> factor_entries;
-            factor_entries.push_back({coeff_sum, coeff_sum});
+            // A48 — prima della raccolta `coeff_sum` era SEMPRE un Sum (>= 2
+            // termini spliciati), quindi poteva entrare nel Product come unico
+            // fattore senza problemi. Ora puo' collassare a un singolo termine,
+            // e quel termine puo' essere:
+            //   * il letterale 1        -> non va aggiunto affatto (un fattore
+            //                              `1` non e' canonico);
+            //   * un Product (es. 2·a)  -> va SPLICIATO, non annidato: un
+            //                              Product dentro un Product viola la
+            //                              canonicita' e rompe l'idempotenza
+            //                              (misurato su (a+b)·sin x + (a−b)·sin x,
+            //                              che produceva Product{Product{2,a}, sin x}
+            //                              e faceva scattare il canary A34).
+            auto push_factor_entry = [&](ExprPtr f) {
+                ExprPtr key = f;
+                if (const auto* pw = expr_cast<Binary>(f);
+                    pw != nullptr && pw->op == BinaryOp::Pow) {
+                    key = pw->left;
+                }
+                factor_entries.push_back({key, f});
+            };
+            const auto* coeff_literal = expr_cast<IntegerLit>(coeff_sum);
+            const bool coeff_is_one =
+                coeff_literal != nullptr && coeff_literal->value == BigInt(1);
+            if (!coeff_is_one) {
+                if (const auto* coeff_product = expr_cast<Product>(coeff_sum)) {
+                    for (ExprPtr f : coeff_product->factors) push_factor_entry(f);
+                } else {
+                    push_factor_entry(coeff_sum);
+                }
+            }
             for (const auto& [base, exp] : shared) {
                 ExprPtr full = (exp == BigInt(1))
                     ? base

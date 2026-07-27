@@ -467,6 +467,26 @@ Ordinati per severità/impatto decrescente. Ogni voce verificata aperta a codice
 - **Scope reale e rischio**: `together` è usato in tutto il motore (verifica IBP, verifica sostituzione, `mathematically_equal`, QR simbolico, Risch…). Non è una modifica locale a `integrate_parts.cpp` come diceva la stima all'apertura: è **lavoro su un componente core**, merita spec propria e gate completo. Rivedere `[E2·C3·S2·R2]` verso l'alto.
 - **Refs**: A42 (misura d'origine), A46 (certificato multi-punto — valido SOLO per differenze razionali), `Together_Polynomial_GCD_Reduction.md` (spec della riduzione GCD, già implementata: `factorization_num_den.cpp:364`), `src/algebra/factorization_num_den.cpp` (`add_parts:105`, `normalize_rational_parts:29`), `src/algebra/algebra_core.cpp:108-122`, `src/calculus/integrate_parts.cpp` (consumatore)
 
+### A52 · `simplify(A − A) ≠ 0` — residuo di A48: monomio a coefficiente unitario + UN solo trascendente — 📋 APERTO 2026-07-27 — `[E2·C3·S3·R2]`
+- **Scoperta (A48)**: A48 ha chiuso la famiglia della *raccolta dei coefficienti*, ma resta una classe con causa radice **diversa**. Confine misurato, non supposto:
+
+  | `A` | `simplify(A − A)` |
+  |---|---|
+  | `(x−2)·e^{2x}` | ❌ |
+  | `(x+1)·sin x` | ❌ |
+  | `(x²−2)·cos x` | ❌ |
+  | `(x²+x−1)·cos x` | ❌ |
+  | `(2x−2)·ln x` | ✅ |
+  | `(4x−6)·ln x` | ✅ |
+  | `(2x²−3x)·cos x` | ✅ |
+  | `(x−1)·e^x·sin x` | ✅ — coefficiente unitario ma **due** trascendenti |
+
+- **Caratterizzazione**: fallisce quando il polinomio ha un monomio a **coefficiente unitario** (±1) **e** c'è **un solo** fattore trascendente. Con due trascendenti funziona; con tutti i coefficienti ≠ ±1 funziona.
+- **Dove NON e'**: non e' la raccolta dei coefficienti chiusa in A48 (i termini superstiti — `x·e^{2x}` e `−(x·e^{2x})` — stanno al livello del `Sum`, quindi competono al collettore primario dello **Step 4**, non alla raccolta di A48). Non e' `extract_monomial`, che ricorre correttamente su `Neg` (`simplify_arithmetic.cpp:251`). Verificato che il fallback dello Step 4 sul termine opaco **non** e' la causa: la patch corrispondente non ha cambiato nulla ed e' stata revocata (nessuna modifica senza evidenza).
+- **Falliva anche PRIMA di A48**: non e' una regressione, e' una parte non ancora isolata.
+- **Stato**: tre tentativi di diagnosi falliti → fermato per **protocollo anti-loop** invece di patchare alla cieca. Il prossimo passo e' strumentare con `std::cerr` dentro `simplify_sum_terms` per vedere la lista `flat_terms` reale allo Step 4 su `(x−2)·e^{2x} − (x−2)·e^{2x}` — la domanda aperta e' *quando* la distribuzione produce i due termini superstiti, dato che `simplify` da solo mantiene `A` fattorizzato.
+- **Refs**: A48 (scoperta), A39, `src/symbolic/simplify_arithmetic_chain_sum.cpp` (Step 4), `test/unit/symbolic/test_a48_sum_fixpoint.cpp` (confine documentato a codice)
+
 ### A51 · Golden ratchet inaffidabile: una entry oscilla SKIP↔FAIL fra misure identiche — 📋 APERTO 2026-07-27 — `[E2·C3·S4·R1]`
 - **Scoperta (gate finale A43)**: due misure golden complete con lo **stesso identico binario** e lo stesso corpus danno risultati diversi:
   - run A: `982 pass / 8 fail / 36 skip`
@@ -479,7 +499,7 @@ Ordinati per severità/impatto decrescente. Ogni voce verificata aperta a codice
 - **Direzione**: rendere deterministico il confronto di quella classe — budget a conteggio di operazioni invece che wall-clock (è la fix già indicata da A30), oppure rendere esplicito che un confronto inconcludente non è uno SKIP silenzioso ma una categoria propria nel report.
 - **Refs**: A30 (budget load-dependent), B.2 (canonicalizzazione trig), A43 (scoperta), `test/golden/main.cpp:565-600`
 
-### A48 · `simplify` non raggiunge il punto fisso: `A − A ≠ 0` quando `A = (polinomio)·(trascendente)` — 📋 APERTO 2026-07-26 — `[E3·C3·S4·R2]`
+### A48 · `simplify` non raggiunge il punto fisso: `A − A ≠ 0` quando `A = (polinomio)·(trascendente)` — ✅ FATTO 2026-07-27 (famiglia della raccolta coefficienti; residuo isolato in **A52**) — `[E3·C3·S4·R2]`
 - **Scoperta (A43 inc. 4)**: `mathematically_equal` rifiutava coppie di antiderivate corrette. Restringendo, il difetto non è nel confronto ma nel simplifier, e il repro è di **due righe**:
 
   | `A` | `simplify(A − A)` |
@@ -494,8 +514,12 @@ Ordinati per severità/impatto decrescente. Ogni voce verificata aperta a codice
 - **Caratterizzazione**: basta che un `Sum` sia moltiplicato per una `FuncCall` trascendente. La sottrazione viene distribuita sul fattore comune (giusto), ma il `Sum` risultante **non viene ri-semplificato**: i termini opposti restano affiancati. Le due `A` sono lo **stesso albero** (`structural_equal` = TRUE), quindi non è un problema di forme diverse — è un punto fisso mancato. AST: `Product([Sum([Neg(2), Product([2,x])]), FuncCall(exp,[Product([2,x])])])`.
 - **Impatto**: ogni decisione di `mathematically_equal` la cui differenza ha questa forma. È la famiglia di **A39** (`Product`/`Sum` annidati), che chiudeva il caso `flatten` attraverso `Neg` ma non questo.
 - **Mitigazione già in atto (NON è il fix)**: `algebraic_equal.cpp` ora prova `structural_equal(cross_l, cross_r)` prima della normalizzazione — decisione sound e gemella del test già presente sui lati non incrociati, ma copre solo il caso in cui i due prodotti incrociati sono identici. Il difetto resta.
-- **Punto di partenza**: `src/symbolic/simplify_arithmetic_chain_liketerm.cpp` (`decompose_term` gestisce già coefficienti e `Neg`: sospetto che il `Sum` prodotto dalla distribuzione non rientri affatto nella raccolta, non che la raccolta sbagli).
-- **Refs**: A39, A43 (scoperta), `scripts/` — repro in `probe` documentato qui sopra, riproducibile in 20 righe.
+- **✅ CAUSA RADICE TROVATA 2026-07-27 — erano DUE difetti, non uno.** Il sospetto iniziale ("il `Sum` non rientra nella raccolta") era corretto solo a metà: correggerlo da solo lasciava `(-(2x) + 2x)·e^{2x}`, misurato.
+  1. **`try_merge_symbolic_like_terms` costruiva il `Sum` dei coefficienti grezzo** (`arena.make<Sum>(coeff_terms)` dopo splice+sort, nessuna raccolta). Il commento al sito chiamante vieta — a ragione — di ri-semplificare il *prodotto* fuso (riaprirebbe il ciclo distribuzione/fattorizzazione), ma quel divieto **non riguarda il `Sum` dei coefficienti**, che deve essere in forma raccolta come qualunque altro `Sum`. Aggiunta `collect_coefficient_terms`: stessa raccolta dello Step 4 (chiave = lista fattori canonica, valore = coefficiente razionale), in locale, senza costruire alcun `Product` — quindi non può innescare il ciclo che il divieto protegge. Se tutto cancella, **entrambi** i termini spariscono (lasciare uno `0` letterale lo porterebbe fino al `Sum` finale: dopo lo Step 5 non c'è un'altra raccolta).
+  2. **`decompose_term` non ricorreva sul ramo `Neg`**: spingeva l'operando come fattore opaco, quindi `-(2·x)` dava coeff=−1/fattori=[`Product(2,x)`] mentre `2·x` dava coeff=2/fattori=[`x`] — due chiavi diverse per due termini opposti, e nessun `-(c·x) + c·x` si annullava mai.
+- **Regressione del fix stesso, colta dal test scritto insieme al fix**: dopo la raccolta `coeff_sum` può collassare a un solo termine, che può essere un `Product` (es. `2a` da `(a+b)·sin x + (a−b)·sin x`). Annidarlo dava `Product{Product{2,a}, sin x}` — non canonico, canary A34 acceso, idempotenza rotta. Prima non poteva accadere perché `coeff_sum` era **sempre** un `Sum`. Ora i fattori vengono splicati, e il caso coefficiente `= 1` non aggiunge alcun fattore.
+- **Verifica**: 4 test permanenti in `test/unit/symbolic/test_a48_sum_fixpoint.cpp` — la tabella completa del repro (11 forme, incluse quelle che passavano già, così una regressione si distingue da un falso successo), i **casi negativi** (differenze genuine che non devono collassare), l'idempotenza (inclusa la guardia residuo `x^3 + x` che non va fattorizzata) e il caso A43 che ha fatto emergere il difetto.
+- **Refs**: A39, A43 (scoperta), `src/symbolic/simplify_arithmetic_chain_liketerm.cpp`
 
 ### A49 · `integrate`: costo esponenziale nel budget di ricorsione su polo lineare TRASLATO — 📋 APERTO 2026-07-26 — `[E2·C3·S3·R2]`
 - **Scoperta (A43 inc. 4)**: `∫e^{2x}/(x−1)³` non termina (>200 s). Non è l'ordine del polo e **non è A43**.
