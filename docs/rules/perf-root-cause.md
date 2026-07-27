@@ -90,6 +90,16 @@ alcun limite complessivo**, perché ogni passo riparte da zero. Misurato su
   (`--ops-report` nel golden runner): un gate ops che non viene mai raggiunto
   prima del wall-clock non è deterministico, è decorativo.
 
+**Stringere un budget ESPONE difetti latenti a valle.** Non è un effetto
+collaterale raro, è la norma: il codice a valle è stato scritto assumendo che
+`simplify` riesca sempre. Chiudendo il budget di `integrate` (A51/A53) sono
+emersi in un colpo solo una ricorsione non terminante (`poly_extended_gcd`
+contava sulla riduzione dei coefficienti per far calare il grado → stack
+overflow) e un cambio di semantica delle side-conditions (le condizioni dei
+rami scartati sopravvivevano nel risultato). Perciò: dopo un cambio di budget
+si esegue la suite **completa**, mai i soli test mirati — e ogni difetto
+esposto va giudicato per sé, non assorbito allargando di nuovo il budget.
+
 ---
 
 ## Ordine di preferenza dei fix

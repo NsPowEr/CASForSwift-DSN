@@ -60,6 +60,20 @@ che non significa niente e un rosso che non si riproduce.
    wall-clock scattava a ~400k ops contro un tetto di 2M. Verificare sempre
    *quale* dei due limiti taglia per primo, sul lavoro reale.
 
+## Il gate vale solo per il codice su cui è girato
+
+Una suite verde **non si eredita** attraverso modifiche successive. Nel caso
+A51 la quick suite era verde, poi sono arrivate altre modifiche al motore, e il
+commit è partito sulla fiducia in quel verde: la suite rieseguita dopo ha
+trovato uno stack overflow. Regola operativa: l'ultima esecuzione della suite
+completa deve essere **posteriore all'ultima modifica** a `src/` o `include/`;
+se una modifica arriva dopo, il gate va rifatto, anche se "tocca solo commenti"
+(nel caso reale erano commenti *e* uno split di header).
+
+Corollario: i test mirati (`--gtest_filter`) servono a iterare, non a chiudere.
+Un fix può essere verde sui test della sua area e rompere un'altra area — e
+succede soprattutto quando si stringe un budget condiviso.
+
 ## Trappole note (repo-specifiche)
 
 - `polynomial_normal_form` NON è idempotente sotto `operation_active_`:
