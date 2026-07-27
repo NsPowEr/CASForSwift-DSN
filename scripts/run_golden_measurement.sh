@@ -49,6 +49,23 @@ if [[ ! -x "$GOLDEN_BIN" ]]; then
     exit 1
 fi
 
+# Guard di freschezza del BINARIO (memoria golden-runner-rebuild-gotcha):
+# questo script NON ricompila il runner, quindi un binario più vecchio dei
+# sorgenti produce misure stale spacciate per correnti — stessa classe di
+# trappola del report misto (vedi sotto), ma a monte. Stesso rimedio: rifiuto
+# diagnostico, mai silenzio.
+STALE_SRC=$(find src include test/golden -type f \
+    \( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' \) \
+    -newer "$GOLDEN_BIN" -print -quit 2>/dev/null || true)
+if [[ -n "$STALE_SRC" ]]; then
+    echo "ERROR: $GOLDEN_BIN è più VECCHIO di almeno un sorgente:" >&2
+    echo "  $STALE_SRC" >&2
+    echo "Misurare ora produrrebbe dati stale attribuiti al codice corrente." >&2
+    echo "Rebuilda prima:" >&2
+    echo "  cmake --build build --target cas_golden_runner" >&2
+    exit 1
+fi
+
 AREAS=()
 if [[ -n "$SINGLE_AREA" ]]; then
     AREAS=("$SINGLE_AREA")

@@ -21,22 +21,75 @@ set -euo pipefail
 CMD=$(python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('tool_input',{}).get('command',''))" 2>/dev/null || echo "")
 [[ -z "$CMD" ]] && exit 0
 
-# Read-only inspection commands are never gated, even when they MENTION a
-# heavy binary (pgrep/ps/grep on process names, tail on logs, ...): the guard
-# must not deny the very commands used to check whether a gate is running.
-FIRST_TOKEN=$(echo "$CMD" | sed -E 's/^[[:space:]]*//' | awk '{print $1}' | xargs -I{} basename {} 2>/dev/null || echo "")
-case "$FIRST_TOKEN" in
-    pgrep|pkill|ps|grep|rg|cat|tail|head|wc|ls|echo|find|stat|file) exit 0 ;;
-esac
+# A command is heavy only if a heavy program is the COMMAND WORD of one of its
+# segments — never because a heavy name appears as text (grep/sed/echo that
+# merely mention a gate script must pass: 2026-07-27 a read-only multi-line
+# inspection was denied because the old first-token allowlist read only line 1
+# and the fallback regex matched script names cited as arguments).
+HEAVY=$(CMD="$CMD" python3 - <<'PYEOF' 2>/dev/null || echo "OK"
+import os, re, shlex
+cmd = os.environ.get("CMD", "")
 
-# Only heavy commands are gated.
-if ! echo "$CMD" | grep -qE '(ninja|cmake --build|ctest|cas_foundation_tests|test_quick\.sh|benchmark\.sh|benchmark_tests|run_golden_measurement\.sh)'; then
-    exit 0
-fi
+def split_segments(text):
+    # Quote-aware split on unquoted ; | & ( ) and newline — a naive regex split
+    # would break quoted strings (e.g. the | alternation inside a pgrep
+    # pattern) and turn their pieces into phantom command words.
+    segs, cur, state, i, n = [], [], None, 0, len(text)
+    while i < n:
+        c = text[i]
+        if state == "'":
+            cur.append(c)
+            if c == "'":
+                state = None
+        elif state == '"':
+            cur.append(c)
+            if c == "\\" and i + 1 < n:
+                cur.append(text[i + 1]); i += 1
+            elif c == '"':
+                state = None
+        elif c == "\\" and i + 1 < n:
+            cur.append(c); cur.append(text[i + 1]); i += 1
+        elif c in ("'", '"'):
+            cur.append(c); state = c
+        elif c in ";|&()\n":
+            segs.append("".join(cur)); cur = []
+        else:
+            cur.append(c)
+        i += 1
+    segs.append("".join(cur))
+    return [s for s in segs if s.strip()]
+
+segments = split_segments(cmd)
+heavy_base = re.compile(
+    r'^(ninja|ctest)$'
+    r'|^(cas_foundation_tests|benchmark_tests)$'
+    r'|^(test_quick|benchmark|run_golden_measurement|check_golden_ratchet|debt_gate)\.sh$')
+wrappers = {"env", "nice", "time", "caffeinate", "stdbuf", "xvfb-run"}
+def is_heavy(seg):
+    try:
+        toks = shlex.split(seg.strip())
+    except ValueError:
+        toks = seg.strip().split()
+    while toks and (re.match(r'^[A-Za-z_][A-Za-z0-9_]*=', toks[0]) or toks[0] in wrappers):
+        toks = toks[1:]
+    if toks and toks[0] == "timeout":
+        toks = toks[2:]
+    if toks and toks[0] in ("bash", "sh", "zsh"):
+        toks = toks[1:]
+    if not toks:
+        return False
+    base = toks[0].rsplit("/", 1)[-1]
+    if base == "cmake":
+        return "--build" in toks
+    return bool(heavy_base.match(base))
+print("HEAVY" if any(is_heavy(s) for s in segments) else "OK")
+PYEOF
+)
+[[ "$HEAVY" != "HEAVY" ]] && exit 0
 
 # Gate/suite processes that must not run concurrently with new heavy work.
 # pgrep -f matches full command lines of live processes.
-GATE_PATTERN='test_quick\.sh|debt_gate\.sh|run_golden_measurement\.sh|benchmark\.sh|cas_foundation_tests'
+GATE_PATTERN='test_quick\.sh|debt_gate\.sh|run_golden_measurement\.sh|check_golden_ratchet\.sh|benchmark\.sh|cas_foundation_tests'
 
 RUNNING=$(pgrep -lf "$GATE_PATTERN" 2>/dev/null | grep -v "pgrep" || true)
 [[ -z "$RUNNING" ]] && exit 0
