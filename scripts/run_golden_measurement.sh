@@ -51,6 +51,7 @@ SKIP_MAXIMA=0
 UPDATE_BASELINE=0
 SINGLE_AREA=""
 OPS_REPORT=""
+MAX_OPS=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -61,6 +62,12 @@ while [[ $# -gt 0 ]]; do
         # A51: emette ops+ms per entry nel log d'area. E' il dato che dice se
         # una entry decide per merito o sta sul confine del budget.
         --ops-report)       OPS_REPORT="--ops-report"; shift ;;
+        # A53: gate ops del run (0 = spento, contratto A30). Serve per i run di
+        # sola CALIBRAZIONE: con OperationScope aperto su calculus::integrate il
+        # budget vale per l'intera integrazione, quindi misurarne il costo reale
+        # richiede di non farlo tagliare dal gate che si sta tarando. NON usarlo
+        # nei run di gate: la baseline si misura al budget di default.
+        --max-ops)          MAX_OPS="$2"; shift 2 ;;
         -h|--help)
             sed -n '1,14p' "$0"
             exit 0
@@ -179,7 +186,7 @@ for area in "${AREAS[@]}"; do
     echo "  [2/2] golden_runner → ${area_json}  (log: ${area_log}, budget ${area_budget}s)"
     if ! timeout "$area_budget" "$GOLDEN_BIN" "$corpus" "$area_maxima_dir" \
          --json "$area_json" --per-entry-timeout "$PER_ENTRY_TIMEOUT" \
-         ${OPS_REPORT:+$OPS_REPORT} 2>&1 | \
+         ${OPS_REPORT:+$OPS_REPORT} ${MAX_OPS:+--max-ops $MAX_OPS} 2>&1 | \
          tee "$area_log" | grep -E '^=|^-|^TOTAL|Area|PASS%'; then
         echo "  WARN: golden_runner returned non-zero for $area"
     fi

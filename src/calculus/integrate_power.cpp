@@ -9,7 +9,7 @@ namespace cas::calculus::integrate_detail {
 // integrate_power — extracted from integrate_product_power.cpp (anti-monolith, 2026-06-20).
 // Handles ∫ base^exponent: power rule, reciprocal-quadratic-radical (arcsin/ln),
 // 1/(quadratic)^n, ln^n recurrence, trig-square shortcuts. Shared helpers via integrate_engine.hpp.
-Result<ExprPtr> Integrator::integrate_power(const Binary& power, const Symbol& var) {
+Result<ExprPtr> Integrator::integrate_power_impl(const Binary& power, const Symbol& var) {
     if (is_same_symbol(power.right, var) && !depends_on(power.left, var)) {
         if (expr_is<DecimalLit>(power.left)) {
             return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Decimal literals are not supported in symbolic integration"));

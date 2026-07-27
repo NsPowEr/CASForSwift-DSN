@@ -100,6 +100,24 @@ rami scartati sopravvivevano nel risultato). Perciò: dopo un cambio di budget
 si esegue la suite **completa**, mai i soli test mirati — e ogni difetto
 esposto va giudicato per sé, non assorbito allargando di nuovo il budget.
 
+**Una soglia si calibra sul VUOTO della distribuzione, non su un multiplo.**
+Misurare il costo reale con il gate spento (`--ops-report --max-ops 0`),
+separare le esecuzioni **decise** da quelle troncate, e cercare l'intervallo
+dove non cade nulla. Per il budget di `integrate` (A53): legittime fino a
+310'184 ops, prima patologica a 700'911, nessuna entry decisa in mezzo →
+soglia 500'000 (1.61× sopra il massimo legittimo, 1.40× sotto il primo caso
+patologico). È lo stesso criterio con cui A51 scelse il cap per-entry di 60 s.
+Un multiplo scelto a intuito sul solo massimo osservato non dice **niente** su
+dove comincia la patologia.
+
+**Un budget morde solo dove la grandezza si conta.** Le ops si incrementano in
+`Simplifier` e `Substituter`: un'integranda il cui costo sta in Risch o
+nell'algebra dei polinomi resta limitata dal solo wall-clock, per quanto si
+stringa il tetto (misurato in A53: `sin(log x)·cos(log x)/x³` gira per minuti
+con un tetto di 20'000 ops, perché quelle ops non le spende mai). Prima di
+concludere che "il budget non funziona", verificare con `ops_high_water()`
+**se il contatore avanza affatto** su quell'input.
+
 ---
 
 ## Ordine di preferenza dei fix

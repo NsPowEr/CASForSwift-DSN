@@ -71,7 +71,7 @@ bool has_exp_rational_non_poly_factor(const std::vector<ExprPtr>& factors, const
 
 }  // namespace
 
-Result<ExprPtr> Integrator::integrate_product(const Product& product, const Symbol& var) {
+Result<ExprPtr> Integrator::integrate_product_impl(const Product& product, const Symbol& var) {
     {  // F7.5: ∫e^{ax}·sin/cos(bx) — Laplace-style closed form.
         ExprPtr exp_arg = nullptr;
         bool exp_seen = false;
@@ -354,7 +354,13 @@ Result<ExprPtr> Integrator::integrate_product(const Product& product, const Symb
                 "integrate_product: IBP skipped for exp(non-poly) factor; defer to Risch DE"));
         }
 
-        auto ibp_res = integrate_by_parts(arena_.make<Product>(variable_factors), var, context_);
+        // A53 — tentativo: se la catena IBP si arrende, le side-conditions delle
+        // sotto-integrazioni che ha provato non appartengono al risultato che
+        // un'altra strategia produrra' (misurato: `x>0` dal fallback Mellin
+        // annidato qui sotto finiva su `∫e^{-x²}`).
+        auto ibp_res = attempt_with_condition_rollback(context_, [&] {
+            return integrate_by_parts(arena_.make<Product>(variable_factors), var, context_);
+        });
         if (ibp_res.is_ok()) {
             if (constant_factors.empty()) {
                 return ibp_res;
@@ -368,7 +374,10 @@ Result<ExprPtr> Integrator::integrate_product(const Product& product, const Symb
     if (variable_factors.size() == 1U) {
         auto inner = integrate_once(variable_factors.front(), var);
         if (inner.is_error()) {
-            auto ibp_res = integrate_by_parts(make_product(arena_, {make_integer(arena_, 1), variable_factors.front()}), var, context_);
+            auto ibp_res = attempt_with_condition_rollback(context_, [&] {
+                return integrate_by_parts(
+                    make_product(arena_, {make_integer(arena_, 1), variable_factors.front()}), var, context_);
+            });
             if (ibp_res.is_ok()) {
                 if (constant_factors.empty()) {
                     return ibp_res;

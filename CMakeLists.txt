@@ -208,6 +208,8 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/summation_abramov_quadratic.cpp
     src/calculus/summation_zeilberger_driver.cpp
     src/calculus/integrate_core.cpp
+    src/calculus/integrate_definite_guards.cpp
+    src/calculus/integrate_condition_guard.cpp
     src/calculus/integrate_elementary.cpp
     src/calculus/integrate_helpers.cpp
     src/calculus/integrate_quadratic_rational.cpp
@@ -714,6 +716,8 @@ test/unit/symbolic/test_sqrt_fold.cpp
     test/unit/symbolic/test_a39_canonical_nesting.cpp
     test/unit/symbolic/test_a48_sum_fixpoint.cpp
     test/unit/symbolic/test_a51_operation_budget.cpp
+    test/unit/symbolic/test_a53_condition_rollback.cpp
+    test/unit/calculus/test_a53_integration_budget.cpp
     test/unit/calculus/test_a43_nonelementary_builtins.cpp
     test/unit/calculus/test_a43_nonelementary_integrate.cpp
         test/unit/calculus/test_limit_smoke.cpp

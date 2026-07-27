@@ -1,5 +1,6 @@
 #pragma once
 
+#include "cas/assumptions.hpp"
 #include "cas/ast.hpp"
 #include "cas/cas_cache_keys.hpp"
 #include "cas/cas_context_params.hpp"
@@ -64,96 +65,6 @@ public:
         AstArena& arena,
         const Assumptions* assumptions,
         CASContext* context = nullptr) const = 0;
-};
-
-struct RangeAssumption {
-    ExprPtr lower;
-    ExprPtr upper;
-};
-
-enum class RelType : std::uint8_t {
-    Less,          // <
-    LessEqual      // <=
-};
-
-struct Relation {
-    ExprPtr target;
-    RelType type;
-};
-
-enum class Domain : std::uint8_t {
-    Complex,
-    Real,
-    Integer,
-    Rational,
-    Natural,     // >= 0
-    Positive,    // > 0
-    Negative,    // < 0
-    NonZero,
-};
-
-class Assumptions {
-public:
-    void assume_real(const Symbol& symbol);
-    void assume_positive(const Symbol& symbol);
-    void assume_integer(const Symbol& symbol);
-    void assume_nonzero(const Symbol& symbol);
-    void assume_in_range(const Symbol& symbol, ExprPtr lower, ExprPtr upper);
-    void assume_domain(const Symbol& symbol, Domain domain);
-
-    // Advanced Assumptions (F9-A4)
-    void assume_greater(ExprPtr lhs, ExprPtr rhs);
-    void assume_greater_equal(ExprPtr lhs, ExprPtr rhs);
-    void assume(ExprPtr condition);
-
-    [[nodiscard]] bool is_real(const Symbol& symbol) const;
-    [[nodiscard]] bool is_real(ExprPtr expr) const;
-    [[nodiscard]] bool is_positive(const Symbol& symbol) const;
-    [[nodiscard]] bool is_positive(ExprPtr expr) const;
-    [[nodiscard]] bool is_nonnegative(ExprPtr expr) const;
-    [[nodiscard]] bool is_negative(ExprPtr expr) const;
-    [[nodiscard]] bool is_greater(ExprPtr lhs, ExprPtr rhs) const;
-    [[nodiscard]] bool is_greater_equal(ExprPtr lhs, ExprPtr rhs) const;
-    [[nodiscard]] bool is_nonzero(const Symbol& symbol) const;
-    [[nodiscard]] bool is_nonzero(ExprPtr expr) const;
-    [[nodiscard]] bool could_be_zero(const Symbol& symbol) const;
-    [[nodiscard]] bool could_be_zero(ExprPtr expr) const;
-    [[nodiscard]] bool is_integer(const Symbol& symbol) const;
-    [[nodiscard]] bool is_integer(ExprPtr expr) const;
-    [[nodiscard]] Domain get_domain(const Symbol& symbol) const;
-    [[nodiscard]] std::optional<RangeAssumption> get_range(const Symbol& symbol) const;
-    [[nodiscard]] Result<void> check_consistency() const;
-
-    void update_roots(AstArena& target, std::unordered_map<ExprPtr, ExprPtr>& cache);
-
-    // F7.0-A4.1: monotonically increasing revision counter, incremented by
-    // every mutator (assume_*, assume()). Used by CASContext::simplify() to
-    // detect assumption changes since the last cache fill, and invalidate
-    // simplify_cache_ / integrate_cache_ on mismatch.
-    //
-    // Mathematical correctness: simplify(abs(x)) returns x when x is known
-    // positive, but -x when x is known negative — without cache invalidation
-    // on assumption change, a stale entry would corrupt the session.
-    [[nodiscard]] std::uint64_t revision() const noexcept { return revision_; }
-
-private:
-    // F7.0-A4.1: bump in every mutator above (assume_*, assume).
-    std::uint64_t revision_{0};
-
-    [[nodiscard]] bool prove_relation(ExprPtr start, ExprPtr end, bool strict, std::unordered_set<const ExprNode*>& visited) const;
-    [[nodiscard]] bool prove_positive_linear(ExprPtr expr) const;
-    [[nodiscard]] bool prove_positive_product(const Product& prod) const;
-
-    std::unordered_set<std::string> real_symbols_;
-    std::unordered_set<std::string> positive_symbols_;
-    std::unordered_set<std::string> negative_symbols_;
-    std::unordered_set<std::string> integer_symbols_;
-    std::unordered_set<std::string> nonzero_symbols_;
-    std::unordered_map<std::string, RangeAssumption> range_symbols_;
-    std::unordered_map<std::string, Domain> symbol_domains_;
-
-    // Relation graph for deduction chains
-    std::unordered_map<ExprPtr, std::vector<Relation>, ExprHash, ExprEqual> relations_;
 };
 
 class Substituter;
@@ -236,6 +147,7 @@ public:
     [[nodiscard]] const RewriteProvider* rewrite_provider() const noexcept;
 
     void enable_trace(bool enabled) noexcept;
+    [[nodiscard]] bool is_trace_enabled() const noexcept { return trace_enabled_; }
     [[nodiscard]] const ComputationTrace& get_trace() const noexcept;
     void set_timeout(std::chrono::milliseconds timeout) noexcept;
     // Read-only access to the per-operation timeout budget.  Used by long-running
@@ -354,9 +266,18 @@ public:
     // non fa nulla (`owns()` false), quindi annidare motori e' sicuro e il
     // costo dei rami interni resta addebitato al chiamante piu' esterno.
     // Motivazione misurata: context_core.cpp, alla definizione.
+    // A53 — `ops_cap` (opzionale) impone all'operazione un tetto PROPRIO, piu'
+    // stretto di quello del contesto: il budget effettivo e' il `min` dei due.
+    // Serve a calculus::integrate, il cui costo legittimo massimo misurato sta
+    // un ordine di grandezza sotto il default per-simplify (derivazione:
+    // cas_context_simplifier_params.hpp, max_integration_ops). Se il gate ops
+    // del contesto e' spento (0), il tetto NON viene imposto: il chiamante
+    // possiede il budget (contratto A30) e un motore interno non glielo toglie.
+    // Il valore precedente e' ripristinato alla chiusura dello scope.
     class OperationScope {
     public:
         OperationScope(CASContext& ctx, bool capture_trace) noexcept;
+        OperationScope(CASContext& ctx, bool capture_trace, std::uint64_t ops_cap) noexcept;
         ~OperationScope() noexcept;
         OperationScope(const OperationScope&) = delete;
         OperationScope& operator=(const OperationScope&) = delete;
@@ -367,6 +288,42 @@ public:
     private:
         CASContext& ctx_;
         bool owns_;
+        // Stato del gate ops da ripristinare quando lo scope ha imposto un
+        // tetto proprio (costruttore con `ops_cap`).
+        std::uint64_t restore_max_ops_{0};
+        bool restore_max_ops_explicit_{false};
+        bool capped_{false};
+    };
+
+    // A53 — annulla le side-conditions (A31) emesse da un tentativo ABBANDONATO.
+    // L'accumulatore `side_conditions_` e' azzerato solo dalla simplify
+    // TOP-LEVEL: dentro un'operazione aperta (OperationScope) cresce in modo
+    // monotono, quindi le condizioni di un ramo scartato sopravvivrebbero nel
+    // risultato di un ramo diverso — misurato: `∫e^{-x²}` usciva con `x>0`,
+    // emessa dal fallback Meijer/Mellin dentro una sotto-integrazione di
+    // by-parts poi scartata, mentre il risultato viene dal completamento del
+    // quadrato, esatto su tutto R (REGOLA ZERO: una condizione non necessaria
+    // e' una restrizione di dominio inventata, non un'assunzione presa).
+    //
+    // Semantica: il costruttore marca lo stato corrente; `commit()` conferma le
+    // condizioni emesse nello scope; il distruttore SENZA commit le annulla,
+    // ripristinando esattamente il mark. Il ripristino non tocca la cache di
+    // simplify: la' le condizioni restano attribuite alla loro entry e vengono
+    // ri-emesse a ogni hit (spec A31 §4.2), come dev'essere.
+    class SideConditionRollback {
+    public:
+        explicit SideConditionRollback(CASContext& ctx);
+        ~SideConditionRollback() noexcept;
+        SideConditionRollback(const SideConditionRollback&) = delete;
+        SideConditionRollback& operator=(const SideConditionRollback&) = delete;
+        SideConditionRollback(SideConditionRollback&&) = delete;
+        SideConditionRollback& operator=(SideConditionRollback&&) = delete;
+        void commit() noexcept { committed_ = true; }
+
+    private:
+        CASContext& ctx_;
+        SideConditionSet mark_;
+        bool committed_{false};
     };
 
     private:

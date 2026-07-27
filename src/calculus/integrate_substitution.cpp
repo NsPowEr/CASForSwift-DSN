@@ -229,7 +229,7 @@ Result<std::optional<ExprPtr>> integrate_by_substitution(
 
 namespace integrate_detail {
 
-Result<ExprPtr> Integrator::try_u_substitution_for_product(const Product& product, const Symbol& var) {
+Result<ExprPtr> Integrator::try_u_substitution_for_product_impl(const Product& product, const Symbol& var) {
     // Attempt general u-substitution for products.
     auto res = integrate_by_substitution(context_.arena().make<Product>(product), var, context_);
     if (res.is_ok() && res.value().has_value()) {
@@ -239,7 +239,7 @@ Result<ExprPtr> Integrator::try_u_substitution_for_product(const Product& produc
     return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "No supported u-substitution pattern found"));
 }
 
-Result<ExprPtr> Integrator::integrate_via_partial_fractions(ExprPtr expr, const Symbol& var) {
+Result<ExprPtr> Integrator::integrate_via_partial_fractions_impl(ExprPtr expr, const Symbol& var) {
     auto terms = algebra::partial_fractions(expr, var, context_);
     if (terms.is_error()) {
         return fail<ExprPtr>(terms.error());

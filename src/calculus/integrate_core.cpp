@@ -14,7 +14,7 @@ thread_local std::size_t Integrator::depth_ = 0U;
 
 Integrator::Integrator(symbolic::CASContext& context) noexcept : context_(context), arena_(context.arena()) {}
 
-Result<ExprPtr> Integrator::integrate(ExprPtr expr, const Symbol& var) {
+Result<ExprPtr> Integrator::integrate_impl(ExprPtr expr, const Symbol& var) {
     // HC-F75-A3-HARD-TIMEOUT: poll the interrupt flag at every recursive
     // entry into the integrator. The check is a single atomic load + branch
     // (CASContext::check_interrupt is inline noexcept), so the cost per
@@ -51,8 +51,13 @@ Result<ExprPtr> Integrator::integrate(ExprPtr expr, const Symbol& var) {
     //    Detect early per evitare che integrate_once tratti δ come integrand
     //    elementare e fallisca.  La routine restituisce Unimplemented se
     //    l'integranda non contiene δ riconoscibile, fall-through naturale.
+    // A53 — ogni strategia libera qui sotto e' un tentativo come i metodi di
+    // Integrator, ma non passa dai loro wrapper: va avvolta al call-site, o le
+    // side-conditions che emette prima di arrendersi restano addosso al
+    // risultato prodotto da una strategia successiva.
     {
-        auto sifting = try_integrate_dirac_sifting(expr, var, context_);
+        auto sifting = attempt_with_condition_rollback(
+            context_, [&] { return try_integrate_dirac_sifting(expr, var, context_); });
         if (sifting.is_ok()) {
             return context_.simplify(sifting.value());
         }
@@ -68,24 +73,40 @@ Result<ExprPtr> Integrator::integrate(ExprPtr expr, const Symbol& var) {
 
     // NEW: Try general u-substitution recognition (CAS-L2-16)
     {
-        auto sub_res = integrate_by_substitution(expr, var, context_);
+        auto sub_res = attempt_with_condition_rollback(
+            context_, [&] { return integrate_by_substitution(expr, var, context_); },
+            accept_if_matched);
         if (sub_res.is_ok() && sub_res.value().has_value()) {
             return ok(sub_res.value().value());
         }
     }
 
     // 2. Simplify then retry elementary patterns
-    auto simplified = context_.simplify(expr);
-    if (simplified.is_ok() && !structural_equal(simplified.value(), expr)) {
-        auto direct = integrate_once(simplified.value(), var);
-        if (direct.is_ok()) {
-            return direct;
+    // La simplify di questo passo e' parte del tentativo: se il retry fallisce,
+    // l'integrando semplificato non entra nel risultato (i passi 3+ ripartono da
+    // `expr`), quindi nemmeno le sue condizioni.
+    {
+        auto step2 = attempt_with_condition_rollback(context_, [&]() -> Result<ExprPtr> {
+            auto simplified = context_.simplify(expr);
+            if (simplified.is_error() || structural_equal(simplified.value(), expr)) {
+                return make_unimplemented<ExprPtr>(
+                    "calculus", "Integrator::integrate",
+                    "simplify produced no new form to retry",
+                    cas::error::reason_codes::INTEGRATE_NO_STRATEGY,
+                    "internal: step 2 declines, the caller falls through to step 3",
+                    "A53");
+            }
+            return integrate_once(simplified.value(), var);
+        });
+        if (step2.is_ok()) {
+            return step2;
         }
     }
 
     // 3. Risch Algorithm (handles transcendental extensions, rational functions)
     {
-        auto risch_result = integrate_risch(expr, var, context_);
+        auto risch_result = attempt_with_condition_rollback(
+            context_, [&] { return integrate_risch(expr, var, context_); });
         if (risch_result.is_ok()) {
             return context_.simplify(risch_result.value());
         }
@@ -96,7 +117,8 @@ Result<ExprPtr> Integrator::integrate(ExprPtr expr, const Symbol& var) {
     //    not a pattern table — driven by structural detection of sin/cos
     //    of var only.
     {
-        auto weier_result = integrate_weierstrass(expr, var, context_);
+        auto weier_result = attempt_with_condition_rollback(
+            context_, [&] { return integrate_weierstrass(expr, var, context_); });
         if (weier_result.is_ok()) {
             return context_.simplify(weier_result.value());
         }
@@ -119,7 +141,8 @@ Result<ExprPtr> Integrator::integrate(ExprPtr expr, const Symbol& var) {
     //    to the outermost frame leaves Risch's precedence untouched (it still
     //    runs first here) and keeps the canonical shape the oracles emit.
     if (depth_ == 1U) {
-        auto special_result = integrate_nonelementary_fallback(expr, var, context_);
+        auto special_result = attempt_with_condition_rollback(
+            context_, [&] { return integrate_nonelementary_fallback(expr, var, context_); });
         if (special_result.is_ok()) {
             return special_result;
         }
@@ -130,7 +153,8 @@ Result<ExprPtr> Integrator::integrate(ExprPtr expr, const Symbol& var) {
     //    Weierstrass. May legitimately return a Meijer G / pFq closed form
     //    (first-class antiderivative node, §9.4).
     {
-        auto meijerg_result = integrate_meijerg_fallback(expr, var, context_);
+        auto meijerg_result = attempt_with_condition_rollback(
+            context_, [&] { return integrate_meijerg_fallback(expr, var, context_); });
         if (meijerg_result.is_ok()) {
             return meijerg_result;
         }
@@ -145,7 +169,7 @@ Result<ExprPtr> Integrator::integrate(ExprPtr expr, const Symbol& var) {
         "F0.8");
 }
 
-Result<bool> Integrator::expressions_match_after_simplify(ExprPtr lhs, ExprPtr rhs) {
+Result<bool> Integrator::expressions_match_after_simplify_impl(ExprPtr lhs, ExprPtr rhs) {
     auto simplified_lhs = context_.simplify(lhs);
     if (simplified_lhs.is_error()) {
         return fail<bool>(simplified_lhs.error());
@@ -160,7 +184,7 @@ Result<bool> Integrator::expressions_match_after_simplify(ExprPtr lhs, ExprPtr r
 // Integrator::integrate_rational lives in integrate_rational_part.cpp
 // (anti-monolith split).
 
-Result<ExprPtr> Integrator::integrate_once(ExprPtr expr, const Symbol& var) {
+Result<ExprPtr> Integrator::integrate_once_impl(ExprPtr expr, const Symbol& var) {
     // HC-F75-A3-HARD-TIMEOUT: see comment in integrate() above. integrate_once
     // is the per-node recursive entry, so polling here guarantees that any
     // sub-integrand a strategy (by-parts, substitution, Hermite, …) hands
@@ -243,7 +267,7 @@ Result<ExprPtr> Integrator::integrate_once(ExprPtr expr, const Symbol& var) {
         "F0.8");
 }
 
-Result<ExprPtr> Integrator::integrate_binary(const Binary& binary, const Symbol& var) {
+Result<ExprPtr> Integrator::integrate_binary_impl(const Binary& binary, const Symbol& var) {
     switch (binary.op) {
     case BinaryOp::Add: {
         auto lhs = integrate_once(binary.left, var);

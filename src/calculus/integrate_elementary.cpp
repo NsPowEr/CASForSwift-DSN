@@ -6,7 +6,7 @@
 
 namespace cas::calculus::integrate_detail {
 
-Result<ExprPtr> Integrator::integrate_function_direct(const std::string& name, ExprPtr argument) {
+Result<ExprPtr> Integrator::integrate_function_direct_impl(const std::string& name, ExprPtr argument) {
     BuiltinOp func_id = get_builtin_op(name);
     if (func_id == BuiltinOp::Sin) {
         return ok(make_product(arena_, {make_integer(arena_, -1), make_function(arena_, "cos", {argument})}));
@@ -157,7 +157,7 @@ Result<ExprPtr> Integrator::integrate_function_direct(const std::string& name, E
     return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "This elementary function integral is not implemented"));
 }
 
-Result<ExprPtr> Integrator::integrate_power_direct(ExprPtr base, ExprPtr exponent, const Symbol& var) {
+Result<ExprPtr> Integrator::integrate_power_direct_impl(ExprPtr base, ExprPtr exponent, const Symbol& var) {
     if (depends_on(exponent, var)) {
         return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Only powers with constant exponent support direct substitution"));
     }
@@ -353,7 +353,7 @@ namespace {
 
 }  // namespace
 
-Result<ExprPtr> Integrator::integrate_function(const FuncCall& call, const Symbol& var) {
+Result<ExprPtr> Integrator::integrate_function_impl(const FuncCall& call, const Symbol& var) {
     if (call.args.size() != 1U) {
         return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "Only unary function integration is implemented"));
     }

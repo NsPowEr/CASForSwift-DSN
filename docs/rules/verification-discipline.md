@@ -87,3 +87,14 @@ succede soprattutto quando si stringe un budget condiviso.
   confronto strutturale o equivalenza matematica.
 - Nessuna verifica (build/test/benchmark propri) mentre un gate gira in
   background: timeout falsi-positivi e risultati non attendibili.
+- **Il NOME di un test può escluderlo dal gate.** `test_quick.sh` filtra via
+  `*Stress*`, `*Fuzz*` e `*Disabled*` (convenzione gtest): un test chiamato
+  `...DisabledOpsGate...` non sarebbe mai girato, restando verde per non
+  esistere (A53, intercettato contando i `[ RUN ]`). Dopo aver aggiunto test:
+  contarli nel log del gate, non fidarsi del totale — `2894` invece di `2895`
+  è l'unico segnale che ne manca uno.
+- **Il benchmark è un gate solo a macchina scarica.** Eseguito nella coda di
+  una misura golden (load 30 su 10 CPU) produce numeri gonfiati; lo script
+  avvisa, ma l'avviso si perde nel log di build. Attendere `load < 4`, e usare
+  `--check --baseline <file>`: senza `--check` lo script stampa le misure e
+  NON confronta nulla (A53).

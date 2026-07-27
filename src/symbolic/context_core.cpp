@@ -116,10 +116,49 @@ CASContext::OperationScope::OperationScope(CASContext& ctx, bool capture_trace) 
     }
 }
 
+// A53 — variante con tetto proprio. Il budget effettivo e' il `min` fra quello
+// del contesto e `ops_cap`: un motore interno puo' essere piu' parsimonioso del
+// contesto, mai piu' generoso (sarebbe un aggiramento del gate del chiamante).
+// Gate spento (0) = il chiamante possiede il budget per contratto A30, e nessun
+// tetto interno glielo toglie: e' cio' che rende possibile un run di sola
+// misura, dove imporre il tetto falserebbe proprio il dato da raccogliere.
+CASContext::OperationScope::OperationScope(CASContext& ctx, bool capture_trace,
+                                           std::uint64_t ops_cap) noexcept
+    : ctx_(ctx), owns_(!ctx.operation_active_) {
+    if (!owns_) return;
+    const std::uint64_t current = ctx_.max_operation_ops_;
+    if (current != 0U && ops_cap != 0U && ops_cap < current) {
+        restore_max_ops_ = current;
+        restore_max_ops_explicit_ = ctx_.max_operation_ops_explicit_;
+        capped_ = true;
+        ctx_.max_operation_ops_ = ops_cap;
+        ctx_.max_operation_ops_explicit_ = true;
+    }
+    ctx_.operation_active_ = true;
+    ctx_.begin_operation_budget(capture_trace);
+}
+
 CASContext::OperationScope::~OperationScope() noexcept {
     if (owns_) {
         ctx_.operation_active_ = false;
         ctx_.end_operation_budget();
+        if (capped_) {
+            ctx_.max_operation_ops_ = restore_max_ops_;
+            ctx_.max_operation_ops_explicit_ = restore_max_ops_explicit_;
+        }
+    }
+}
+
+// A53 — vedi symbolic.hpp per la semantica. Il mark e' una COPIA del set, non
+// la sua dimensione: `SideConditionSet::add` puo' RIMUOVERE una condizione piu'
+// debole quando ne entra una che la subsume (Positive subsume NonZero, §3.4),
+// quindi troncare alla dimensione di partenza non ricostruirebbe lo stato.
+CASContext::SideConditionRollback::SideConditionRollback(CASContext& ctx)
+    : ctx_(ctx), mark_(ctx.side_conditions_) {}
+
+CASContext::SideConditionRollback::~SideConditionRollback() noexcept {
+    if (!committed_) {
+        ctx_.side_conditions_ = mark_;
     }
 }
 

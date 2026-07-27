@@ -50,7 +50,7 @@ namespace {
 
 }  // namespace
 
-Result<ExprPtr> Integrator::integrate_rational(ExprPtr expr, const Symbol& var) {
+Result<ExprPtr> Integrator::integrate_rational_impl(ExprPtr expr, const Symbol& var) {
     auto parts = algebra::apart_num_den(expr, context_);
     if (parts.is_error()) return fail<ExprPtr>(parts.error());
 

@@ -182,7 +182,7 @@ struct VariableSquareAndConstantSquare {
 
 }  // namespace
 
-Result<ExprPtr> Integrator::integrate_sqrt_quadratic(ExprPtr radicand, const Symbol& var) {
+Result<ExprPtr> Integrator::integrate_sqrt_quadratic_impl(ExprPtr radicand, const Symbol& var) {
     ExprPtr x = arena_.make<Symbol>(var);
     ExprPtr sqrt_radicand = make_function(arena_, "sqrt", {radicand});
     ExprPtr x_sqrt = make_product(arena_, {x, sqrt_radicand});
@@ -233,7 +233,7 @@ Result<ExprPtr> Integrator::integrate_sqrt_quadratic(ExprPtr radicand, const Sym
 //   √(a² − x²) → (a²/2)·arcsin(x/a) − (x/2)·√(a² − x²)
 //   √(a² + x²) → (x/2)·√(a² + x²) − (a²/2)·arcsinh(x/a)
 //   √(x² − a²) → (x/2)·√(x² − a²) − (a²/2)·arccosh(x/a)
-Result<ExprPtr> Integrator::integrate_xsq_over_sqrt_quadratic(
+Result<ExprPtr> Integrator::integrate_xsq_over_sqrt_quadratic_impl(
     ExprPtr radicand, const Symbol& var) {
     ExprPtr x = arena_.make<Symbol>(var);
     ExprPtr sqrt_r = make_function(arena_, "sqrt", {radicand});
@@ -285,7 +285,7 @@ Result<ExprPtr> Integrator::integrate_xsq_over_sqrt_quadratic(
 //   • A < 0 (needs k > 0, else no real domain):
 //             ∫ = (1/√|A|)·arcsin( √|A|·(x+h) / √k )
 //   √A, √|A|, √k are built via sqrt() and stay exact for any rational argument.
-Result<ExprPtr> Integrator::integrate_inverse_sqrt_quadratic(ExprPtr radicand, const Symbol& var) {
+Result<ExprPtr> Integrator::integrate_inverse_sqrt_quadratic_impl(ExprPtr radicand, const Symbol& var) {
     auto coeffs_res = algebra::univariate_coefficients(radicand, var, context_);
     if (coeffs_res.is_error())
         return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
@@ -342,7 +342,7 @@ Result<ExprPtr> Integrator::integrate_inverse_sqrt_quadratic(ExprPtr radicand, c
 //   I₁ = ∫ x dx/√(c−dx²) = −(1/d)·√(c−dx²).
 // The descent steps by 2, so only the single base of matching parity is needed.
 // No closed pattern table; k is the actual integer power, not a hardcoded set.
-Result<ExprPtr> Integrator::integrate_monomial_over_sqrt_quadratic(
+Result<ExprPtr> Integrator::integrate_monomial_over_sqrt_quadratic_impl(
     long long k, ExprPtr radicand, const Symbol& var) {
     if (k < 0)
         return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,

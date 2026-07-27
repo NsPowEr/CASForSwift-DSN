@@ -61,7 +61,7 @@ namespace {
 
 }  // namespace
 
-Result<ExprPtr> Integrator::integrate_inverse_quadratic_power(
+Result<ExprPtr> Integrator::integrate_inverse_quadratic_power_impl(
     ExprPtr radicand, const BigInt& negative_exponent, const Symbol& var) {
     if (!negative_exponent.is_negative()) {
         return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,

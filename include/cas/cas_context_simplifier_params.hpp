@@ -81,6 +81,45 @@ struct CASContextSimplifierParams {
         return max_operation_ops_;
     }
 
+    // A53: budget d'operazione della SINGOLA integrazione (calculus::integrate).
+    //
+    // Serve un valore proprio perche' `max_operation_ops` e' tarato sulla
+    // simplify: fino ad A53 ogni `ctx.simplify()` interna all'integratore era
+    // top-level e ne azzerava il contatore, quindi NESSUN budget limitava il
+    // totale e il risultato dipendeva dal tempo concesso invece che
+    // dall'integranda (misurato: la stessa entry consuma per intero qualunque
+    // cap, 30 s con cap 30 s e oltre 300 s con cap 300 s).
+    //
+    // 500'000 e' DERIVATO dalla distribuzione misurata sul corpus golden
+    // (aree integrate + bronstein, `--ops-report --max-ops 0`, 2026-07-28):
+    //   * integrazione legittima piu' cara: 310'184 ops (`bronstein[23]`,
+    //     14.4 s), seconda 308'940 (`integrate[26]`, 24.3 s), poi si scende
+    //     subito a 132'806;
+    //   * integrazione patologica piu' economica: 700'911 ops (`bronstein[73]`),
+    //     fino a 1'764'313 (`integrate[109]`) — tutte troncate dal cap
+    //     per-entry, cioe' mai decise;
+    //   * fra 310k e 700k non cade NESSUNA entry decisa: la soglia sta nel
+    //     vuoto (media geometrica degli estremi ~466k), con margine 1.61x
+    //     sopra il costo legittimo massimo e 1.40x sotto il primo caso
+    //     patologico.
+    // E' lo stesso criterio con cui A51 scelse il cap per-entry di 60 s.
+    //
+    // Perche' non basta il default globale di 2'000'000: a 13-29k ops/s
+    // misurati, 2M ops valgono 70-150 s, cioe' PIU' del cap wall-clock del
+    // runner — il taglio arriverebbe sempre dal SIGALRM (dipendente dal carico)
+    // invece che dal gate deterministico, che e' il difetto che A51 ha chiuso
+    // altrove e che qui si riaprirebbe.
+    //
+    // Semantica: tetto PROPRIO dell'integrazione, combinato in `min` col budget
+    // dell'operazione corrente; se quello e' 0 (gate spento: il chiamante
+    // possiede il budget, contratto A30) l'integrazione non se ne impone uno.
+    [[nodiscard]] std::uint64_t max_integration_ops() const noexcept {
+        return max_integration_ops_;
+    }
+    void set_max_integration_ops(std::uint64_t n) noexcept {
+        max_integration_ops_ = n;
+    }
+
     // HPP-016: number of interning shards (0 = derive from hardware concurrency)
     [[nodiscard]] std::size_t intern_shards() const noexcept {
         return intern_shards_;
@@ -154,6 +193,8 @@ protected:
     int           max_simplification_depth_{300};
     std::size_t   max_recursion_depth_{256U};
     std::uint64_t max_operation_ops_{2'000'000ULL};
+    // A53 — derivazione della soglia al getter max_integration_ops().
+    std::uint64_t max_integration_ops_{500'000ULL};
     std::size_t   intern_shards_{0U};
     bool          max_operation_ops_explicit_{false};
     bool          strict_branch_cuts_{false};

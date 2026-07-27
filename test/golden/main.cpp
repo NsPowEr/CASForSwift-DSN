@@ -35,11 +35,13 @@
 #include "cas/symbolic.hpp"
 
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -234,6 +236,7 @@ int main(int argc, char* argv[]) {
     std::string json_output_path;
     unsigned int per_entry_timeout_sec = 30;
     bool ops_report = false;
+    std::optional<std::uint64_t> max_operation_ops_override;
 
     for (int i = 3; i < argc; ++i) {
         std::string a(argv[i]);
@@ -244,6 +247,14 @@ int main(int argc, char* argv[]) {
         } else if (a == "--ops-report") {
             // A51: emette per ogni entry il budget deterministico consumato.
             ops_report = true;
+        } else if (a == "--max-ops" && i + 1 < argc) {
+            // A53: il gate ops del runner e' l'oggetto stesso della misura di
+            // calibrazione — con OperationScope aperto su calculus::integrate
+            // il budget vale ora per l'INTERA integrazione, non per singola
+            // simplify. Misurare il costo reale richiede quindi di poter
+            // allargare (o spegnere, con 0 — contratto A30) il gate per un run
+            // di sola misura, senza toccare il default nel codice.
+            max_operation_ops_override = std::stoull(argv[++i]);
         }
     }
 
@@ -292,7 +303,7 @@ int main(int argc, char* argv[]) {
     //   2. il wall-clock interno pari al budget per-entry gia' dichiarato
     //      dallo script — nessun numero nuovo inventato, e la protezione
     //      anti-hang vera resta il SIGALRM per-entry installato sotto.
-    ctx.set_max_operation_ops(ctx.max_operation_ops());
+    ctx.set_max_operation_ops(max_operation_ops_override.value_or(ctx.max_operation_ops()));
     ctx.set_timeout(std::chrono::seconds(per_entry_timeout_sec));
 
     // F7.5.A3: install SIGALRM handler + register ctx as interrupt target.
