@@ -450,16 +450,12 @@ Result<ExprPtr> CASContext::substitute(ExprPtr expr, const Symbol& variable, Exp
     const bool owns_operation = !operation_active_;
     if (owns_operation) {
         operation_active_ = true;
-        trace_capture_active_ = trace_enabled_;
-        trace_.clear();
-        ops_count_ = 0;
-        operation_started_at_ = std::chrono::steady_clock::now();
+        begin_operation_budget(trace_enabled_);
     }
     auto result = symbolic::substitute(expr, variable, value, *this);
     if (owns_operation) {
         operation_active_ = false;
-        trace_capture_active_ = false;
-        ops_count_ = 0;
+        end_operation_budget();
     }
     return result;
 }

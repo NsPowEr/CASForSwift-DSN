@@ -16,10 +16,7 @@ Result<ExprPtr> polynomial_gcd(ExprPtr p, ExprPtr q, const Symbol& var, symbolic
     const bool owns_operation = !ctx.operation_active_;
     if (owns_operation) {
         ctx.operation_active_ = true;
-        ctx.trace_capture_active_ = ctx.trace_enabled_;
-        ctx.trace_.clear();
-        ctx.ops_count_ = 0;
-        ctx.operation_started_at_ = std::chrono::steady_clock::now();
+        ctx.begin_operation_budget(ctx.trace_enabled_);
     }
 
     auto record_trace = [&](symbolic::RuleId rule_id, ExprPtr result) {

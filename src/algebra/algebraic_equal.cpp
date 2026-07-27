@@ -21,12 +21,20 @@ Result<bool> mathematically_equal(ExprPtr lhs, ExprPtr rhs, CASContext& context)
     const bool owns_operation = !context.operation_active_;
     if (owns_operation) {
         context.operation_active_ = true;
-        context.trace_capture_active_ = false;
-        context.trace_.clear();
+        // A51: inizializza il budget dell'operazione che stiamo aprendo. Senza,
+        // le simplify interne vedono l'operazione gia' attiva e non lo fanno
+        // loro, quindi il gate wall-clock misura dall'ultima operazione del
+        // contesto — o dall'epoch, se questa e' la prima, e allora scatta
+        // subito. Il confronto diventava non deterministico: dipendeva dalla
+        // storia del contesto invece che dai suoi operandi.
+        context.begin_operation_budget(/*capture_trace=*/false);
     }
 
     auto finalize = [&]() {
-        if (owns_operation) context.operation_active_ = false;
+        if (owns_operation) {
+            context.operation_active_ = false;
+            context.end_operation_budget();
+        }
     };
 
     auto lhs_s = context.simplify(lhs);

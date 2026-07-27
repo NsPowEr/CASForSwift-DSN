@@ -426,6 +426,11 @@ Result<ExprPtr> integrate(ExprPtr expr, const Symbol& var, symbolic::CASContext&
         }
     }
 
+    // A51 — budget PROPRIO per l'integrazione (rientrante). Senza, ogni
+    // `ctx.simplify` interna era top-level e azzerava timer e contatore: il
+    // risultato dipendeva dal budget concesso, non dall'integranda.
+    symbolic::CASContext::OperationScope op_scope(ctx, /*capture_trace=*/false);
+
     auto primitive = integrate_detail::integrate_indefinite_impl(expr, var, ctx);
     if (primitive.is_error()) {
         return primitive;

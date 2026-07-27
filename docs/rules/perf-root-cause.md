@@ -70,6 +70,26 @@ col pattern atteso dal dispatch. Gli helper di estrazione basati su
   costante ricompilata; commit con classe di input, misura, e perché
   l'algoritmo è già ottimale.
 
+## Passo 5 — Chi possiede il budget? (A51)
+
+Un budget vincola solo l'operazione che lo **apre**. Nel progetto le ops si
+contano in due soli punti (`Simplifier` e `Substituter`), e ogni operazione
+top-level azzera contatore e timer: un motore che chiama `ctx.simplify()`
+migliaia di volte senza aprire un'operazione propria resta quindi **senza
+alcun limite complessivo**, perché ogni passo riparte da zero. Misurato su
+`calculus::integrate`: consumava per intero qualunque cap gli si desse (30 s,
+60 s, 300 s), e il risultato cambiava col budget invece che con l'integranda.
+
+- Domanda obbligatoria prima di attribuire un costo a "l'algoritmo è lento":
+  *questo motore apre un'operazione con budget proprio, o eredita quella del
+  chiamante?* Se nessuno la apre, il budget che credi attivo non esiste.
+- Fix strutturale: `CASContext::OperationScope` (RAII rientrante) all'ingresso
+  pubblico del motore. Rientrante è essenziale — una chiamata annidata non
+  deve riaprire il budget, o il costo dei rami interni non viene addebitato.
+- Verifica quale dei due limiti taglia per primo sul lavoro reale
+  (`--ops-report` nel golden runner): un gate ops che non viene mai raggiunto
+  prima del wall-clock non è deterministico, è decorativo.
+
 ---
 
 ## Ordine di preferenza dei fix

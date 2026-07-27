@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <functional>
 #include <utility>
 #include <vector>
@@ -69,6 +70,57 @@ void CASContext::enable_trace(bool enabled) noexcept {
 
 const ComputationTrace& CASContext::get_trace() const noexcept {
     return trace_enabled_ ? trace_ : empty_trace();
+}
+
+// A51 — invariante: CHIUNQUE apra un'operazione top-level (cioe' porti
+// `operation_active_` da false a true) DEVE inizializzarne il budget qui, e
+// azzerarlo alla chiusura con `end_operation_budget`.
+//
+// Senza l'inizializzazione, `Simplifier::check_timeout` misura `elapsed` a
+// partire dall'ULTIMA operazione top-level del contesto — o dall'epoch se non
+// ce n'e' mai stata una, e allora `elapsed` vale l'uptime della macchina e il
+// timeout scatta al primo controllo wall-clock. L'esito di un confronto finiva
+// cosi' per dipendere dalla storia del contesto e dal carico invece che dai
+// suoi operandi: e' esattamente il non-determinismo misurato in A51, dove una
+// entry golden oscillava SKIP<->FAIL fra misure con lo STESSO binario.
+//
+// Il pattern era duplicato in quattro punti (CASContext::simplify,
+// CASContext::substitute, algebra::polynomial_gcd, mathematically_equal) e uno
+// solo — `mathematically_equal` — lo sbagliava. Incapsularlo rende
+// l'invariante impossibile da violare per omissione.
+void CASContext::begin_operation_budget(bool capture_trace) noexcept {
+    trace_capture_active_ = capture_trace;
+    trace_.clear();
+    ops_count_ = 0;
+    operation_started_at_ = std::chrono::steady_clock::now();
+}
+
+void CASContext::end_operation_budget() noexcept {
+    trace_capture_active_ = false;
+    // A51 — high-water mark del budget effettivamente consumato. Serve a
+    // tarare il gate ops su MISURA invece che a intuito: senza questo dato
+    // l'unico modo di sapere se il gate deterministico morde prima del
+    // wall-clock e' dedurlo, e la deduzione era sbagliata (il commento di A30
+    // dava 2'000'000 ops come "coperti da 10 s"; la misura dice ~150 s).
+    if (ops_count_ > ops_high_water_) ops_high_water_ = ops_count_;
+    ops_count_ = 0;
+}
+
+void CASContext::reset_ops_high_water() noexcept { ops_high_water_ = 0; }
+
+CASContext::OperationScope::OperationScope(CASContext& ctx, bool capture_trace) noexcept
+    : ctx_(ctx), owns_(!ctx.operation_active_) {
+    if (owns_) {
+        ctx_.operation_active_ = true;
+        ctx_.begin_operation_budget(capture_trace);
+    }
+}
+
+CASContext::OperationScope::~OperationScope() noexcept {
+    if (owns_) {
+        ctx_.operation_active_ = false;
+        ctx_.end_operation_budget();
+    }
 }
 
 void CASContext::set_timeout(std::chrono::milliseconds timeout) noexcept {
@@ -159,11 +211,8 @@ Result<ExprPtr> CASContext::simplify(ExprPtr expr) {
     const bool owns_operation = !operation_active_;
     if (owns_operation) {
         operation_active_ = true;
-        trace_capture_active_ = trace_enabled_;
-        trace_.clear();
-        ops_count_ = 0;
+        begin_operation_budget(trace_enabled_);
         side_conditions_.clear();
-        operation_started_at_ = std::chrono::steady_clock::now();
     }
     // A31 fase 1: snapshot before processing `expr` so the PUT below can
     // store exactly the conditions this specific call contributed, not the
@@ -172,8 +221,7 @@ Result<ExprPtr> CASContext::simplify(ExprPtr expr) {
     auto result = symbolic::simplify(expr, *this);
     if (owns_operation) {
         operation_active_ = false;
-        trace_capture_active_ = false;
-        ops_count_ = 0;
+        end_operation_budget();
 
         if (result.is_ok() && post_simplify_hook_) {
             auto hook_res = post_simplify_hook_(result.value(), *this);

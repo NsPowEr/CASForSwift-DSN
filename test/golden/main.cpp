@@ -210,6 +210,12 @@ struct AreaStats {
     int pass{0};
     int fail{0};
     int skip{0};
+    // A51 — entry troncate dal budget per-entry. Sono una categoria a se':
+    // il loro verdetto non dice nulla sulla matematica, dice solo che il
+    // motore non ha finito nel tempo concesso. Contarle come PASS o FAIL
+    // lega gli aggregati del ratchet alla velocita' della macchina — e' il
+    // difetto che A51 chiude.
+    int over_budget{0};
     std::vector<std::string> fail_examples; // up to 5 examples
 };
 
@@ -227,6 +233,7 @@ int main(int argc, char* argv[]) {
     const std::string maxima_dir  = argv[2];
     std::string json_output_path;
     unsigned int per_entry_timeout_sec = 30;
+    bool ops_report = false;
 
     for (int i = 3; i < argc; ++i) {
         std::string a(argv[i]);
@@ -234,6 +241,9 @@ int main(int argc, char* argv[]) {
             json_output_path = argv[++i];
         } else if (a == "--per-entry-timeout" && i + 1 < argc) {
             per_entry_timeout_sec = static_cast<unsigned int>(std::stoul(argv[++i]));
+        } else if (a == "--ops-report") {
+            // A51: emette per ogni entry il budget deterministico consumato.
+            ops_report = true;
         }
     }
 
@@ -254,6 +264,36 @@ int main(int argc, char* argv[]) {
     auto* ctx_ptr = new symbolic::CASContext();
     symbolic::CASContext& ctx = *ctx_ptr;
     ctx.set_caching_enabled(false);
+
+    // A51 — il verdetto di una entry deve dipendere SOLO dal suo input.
+    //
+    // Il contesto e' condiviso da tutte le entry dell'area, quindi ogni budget
+    // ereditato implicitamente lega il verdetto alla storia del run. Due
+    // conseguenze misurate prima di questa dichiarazione esplicita:
+    //   * il wall-clock interno (10s di default) era a 1.4x dal costo reale
+    //     del confronto piu' caro dell'area (7.1s, misurato): sotto carico
+    //     sforava, l'esito passava da FALSE a errore, e il runner lo contava
+    //     SKIP invece che FAIL — la stessa entry oscillava fra due misure con
+    //     lo STESSO binario;
+    //   * `set_timeout` senza `set_max_operation_ops` DISATTIVA il gate
+    //     deterministico (contratto A30), e il ramo gcd di corpus_runner.hpp
+    //     lo faceva, spegnendolo per tutto il resto del run.
+    //
+    // Qui si dichiara l'opposto, e l'ORDINE delle due righe e' parte del
+    // contratto — invertirlo le rende una disattivazione silenziosa:
+    //   1. il gate ops reso ESPLICITO al suo stesso valore di default (quello
+    //      calibrato da A30), cosi' nessun `set_timeout` successivo puo' piu'
+    //      spegnerlo. Deve venire PRIMA perche' `set_timeout` azzera il
+    //      budget ops finche' e' implicito (context_core.cpp, contratto A30):
+    //      leggere il getter dopo restituirebbe 0, e la riga renderebbe
+    //      esplicito proprio lo ZERO — gate spento con un commento che
+    //      dichiara il contrario. Misurato: e' cosi' che il gate e' rimasto
+    //      spento per l'intero run della prima stesura di A51.
+    //   2. il wall-clock interno pari al budget per-entry gia' dichiarato
+    //      dallo script — nessun numero nuovo inventato, e la protezione
+    //      anti-hang vera resta il SIGALRM per-entry installato sotto.
+    ctx.set_max_operation_ops(ctx.max_operation_ops());
+    ctx.set_timeout(std::chrono::seconds(per_entry_timeout_sec));
 
     // F7.5.A3: install SIGALRM handler + register ctx as interrupt target.
     cas::golden::install_alarm_handler();
@@ -305,6 +345,67 @@ int main(int argc, char* argv[]) {
 
         // F7.5.A3: arm per-entry timer. Handler will set interrupt flag.
         cas::golden::start_entry_timer(per_entry_timeout_sec);
+
+        // A51 — con `--ops-report` ogni entry dichiara quanto budget
+        // deterministico ha consumato la sua operazione piu' cara. E' il dato
+        // che permette di tarare `max_operation_ops` sul lavoro reale del
+        // corpus invece che a intuito. Emesso da un distruttore perche' il
+        // corpo del loop esce da decine di punti diversi (un `continue` per
+        // ogni classe di SKIP): un'unica riga a valle e' l'unico modo di
+        // coprirli tutti senza toccarli tutti.
+        // A51 — riclassificazione delle entry troncate.
+        //
+        // Il SIGALRM per-entry interrompe il motore a meta' lavoro: cio' che
+        // il runner registra dopo quel punto (un `false` da un confronto
+        // rimasto a meta', un NO_STRATEGY da una strategia interrotta) NON e'
+        // un verdetto sulla matematica, ma su quanto tempo aveva a
+        // disposizione la macchina. Misurato sul corpus: 16 entry su 1026
+        // toccano il cap, e fra queste tre FAIL (`bronstein[69][70][73]`) e un
+        // PASS (`integrate[94]`) con margine 1.0x — cioe' il loro esito si
+        // decide esattamente sul confine.
+        //
+        // Qui l'entry troncata perde il verdetto e finisce in una categoria
+        // propria. Il conteggio pass/fail torna cosi' a dipendere solo dalle
+        // entry che il motore ha effettivamente deciso.
+        struct OverBudgetGuard {
+            AreaStats& stats;
+            int entry_idx;
+            const std::string& input;
+            int pass0, fail0, skip0;
+            ~OverBudgetGuard() {
+                if (!cas::golden::entry_timed_out()) return;
+                if (stats.pass > pass0)       --stats.pass;
+                else if (stats.fail > fail0)  --stats.fail;
+                else if (stats.skip > skip0)  --stats.skip;
+                ++stats.over_budget;
+                std::cout << "  OVER [" << std::setw(3) << entry_idx << "] "
+                          << input
+                          << " => troncata dal budget per-entry"
+                             " (verdetto non attendibile)\n";
+            }
+        } over_budget_guard{stats, idx, input_str, stats.pass, stats.fail, stats.skip};
+
+        ctx.reset_ops_high_water();
+        struct OpsReportGuard {
+            const symbolic::CASContext& ctx;
+            bool enabled;
+            int entry_idx;
+            std::chrono::steady_clock::time_point start{
+                std::chrono::steady_clock::now()};
+            ~OpsReportGuard() {
+                if (enabled) {
+                    const auto ms = std::chrono::duration_cast<
+                        std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now() - start).count();
+                    // Il TEMPO accanto alle ops non e' ridondante: dice quanto
+                    // margine ha l'entry rispetto al cap per-entry, cioe' se il
+                    // suo verdetto e' al riparo dal carico della macchina o
+                    // sta sul confine (il difetto che A51 deve chiudere).
+                    std::cout << "       ops[" << entry_idx << "]="
+                              << ctx.ops_high_water() << " ms=" << ms << "\n";
+                }
+            }
+        } ops_guard{ctx, ops_report, idx};
 
         // --- Matrix area: dispatch det/trace/transpose/rank/inverse/eigenvalues (F7.5.A2) ---
         if (area == "matrix") {
@@ -636,14 +737,15 @@ int main(int argc, char* argv[]) {
               << std::setw(6)  << "PASS"
               << std::setw(6)  << "FAIL"
               << std::setw(6)  << "SKIP"
+              << std::setw(6)  << "OVER"
               << std::setw(8)  << "TOTAL"
               << std::setw(10) << "PASS%"
               << "\n";
     std::cout << "-------------------------------------------------------------\n";
 
-    int grand_pass = 0, grand_fail = 0, grand_skip = 0;
+    int grand_pass = 0, grand_fail = 0, grand_skip = 0, grand_over = 0;
     for (auto& [area, st] : area_stats) {
-        int tot = st.pass + st.fail + st.skip;
+        int tot = st.pass + st.fail + st.skip + st.over_budget;
         double pct = (tot > 0) ? (100.0 * st.pass / (st.pass + st.fail)) : 0.0;
         if (st.pass + st.fail == 0) pct = 0.0;
         std::cout << std::left
@@ -651,15 +753,17 @@ int main(int argc, char* argv[]) {
                   << std::setw(6)  << st.pass
                   << std::setw(6)  << st.fail
                   << std::setw(6)  << st.skip
+                  << std::setw(6)  << st.over_budget
                   << std::setw(8)  << tot
                   << std::fixed << std::setprecision(1) << pct << "%\n";
         grand_pass += st.pass;
         grand_fail += st.fail;
         grand_skip += st.skip;
+        grand_over += st.over_budget;
     }
 
     std::cout << "-------------------------------------------------------------\n";
-    int grand_tot = grand_pass + grand_fail + grand_skip;
+    int grand_tot = grand_pass + grand_fail + grand_skip + grand_over;
     double grand_pct = (grand_pass + grand_fail > 0)
                        ? (100.0 * grand_pass / (grand_pass + grand_fail))
                        : 0.0;
@@ -668,6 +772,7 @@ int main(int argc, char* argv[]) {
               << std::setw(6)  << grand_pass
               << std::setw(6)  << grand_fail
               << std::setw(6)  << grand_skip
+              << std::setw(6)  << grand_over
               << std::setw(8)  << grand_tot
               << std::fixed << std::setprecision(1) << grand_pct << "%\n";
     std::cout << "=============================================================\n";
@@ -686,6 +791,7 @@ int main(int argc, char* argv[]) {
             jf << "    \"pass\": " << st.pass << ",\n";
             jf << "    \"fail\": " << st.fail << ",\n";
             jf << "    \"skip\": " << st.skip << ",\n";
+            jf << "    \"over_budget\": " << st.over_budget << ",\n";
             jf << "    \"examples_fail\": [";
             for (std::size_t i = 0; i < st.fail_examples.size(); ++i) {
                 if (i > 0) jf << ", ";

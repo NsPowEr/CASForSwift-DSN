@@ -33,6 +33,33 @@ performance o un comportamento che nessun test copre.
    ricompila da solo, va rebuildato dopo modifiche al codice o si misura
    stale; ratchet solo in foreground; guard di freschezza attivo.
 
+## Un gate deve misurare il codice, non la macchina (A51)
+
+Un gate il cui esito dipende dal carico è peggio di nessun gate: dà un verde
+che non significa niente e un rosso che non si riproduce.
+
+1. **Ripetere la misura non basta come prova di determinismo.** Due run
+   consecutive identiche sulla stessa macchina scarica non escludono che il
+   verdetto sia deciso dal tempo. La prova forte è l'**invarianza rispetto al
+   budget**: stessa misura con cap diversi (30 s vs 60 s vs 300 s) deve dare
+   gli stessi verdetti. In A51 non li dava — e a cap diversi cambiavano entry
+   *diverse*, cosa che due run identiche non avrebbero mai rivelato.
+2. **Un esito troncato non è un verdetto.** Se il motore viene interrotto a
+   metà, ciò che il runner registra (`false` da un confronto incompleto,
+   `NO_STRATEGY` da una strategia interrotta) parla della macchina, non della
+   matematica. Va classificato in una categoria propria (`over_budget`) e
+   tenuto fuori da pass/fail — con un suo tetto nel ratchet, o si "passa" il
+   gate lasciando scadere le entry scomode.
+3. **La soglia si sceglie nel vuoto della distribuzione, misurandola.** Cap
+   utile = margine ≥3× fra l'entry decisa più lenta e la soglia, con nessuna
+   entry nella fascia intermedia. Serve strumentazione (`--ops-report`:
+   ops + ms per entry): senza dati la soglia è un numero preso a intuito e le
+   entry al confine restano invisibili finché non oscillano.
+4. **Un budget che non morde mai non è un gate.** Il gate deterministico di
+   A30 (`max_operation_ops`) non ha mai deciso nulla nel golden runner: il
+   wall-clock scattava a ~400k ops contro un tetto di 2M. Verificare sempre
+   *quale* dei due limiti taglia per primo, sul lavoro reale.
+
 ## Trappole note (repo-specifiche)
 
 - `polynomial_normal_form` NON è idempotente sotto `operation_active_`:

@@ -304,10 +304,16 @@ inline Result<ExprPtr> evaluate_cas(const std::string& input_str,
         if (!p.is_ok()) return p;
         auto q = parse_expr(cmd.arg_strs[1], ctx);
         if (!q.is_ok()) return q;
-        ctx.set_timeout(std::chrono::milliseconds(5000));
-        auto result = algebra::polynomial_gcd_multivariate(p.value(), q.value(), ctx);
-        ctx.set_timeout(std::chrono::milliseconds(1000)); // restore default
-        return result;
+        // A51: nessun `set_timeout` locale. Ne faceva due danni:
+        //   * spegneva il gate ops deterministico per TUTTO il resto del run
+        //     (contratto A30: un wall-clock esplicito senza un budget ops
+        //     esplicito cede il controllo al chiamante), e il contesto e'
+        //     condiviso da tutte le entry dell'area;
+        //   * il "restore default" rimetteva 1000 ms, che non e' il default
+        //     (10000 ms dopo A30) — stringeva il budget di ogni entry
+        //     successiva di 10x.
+        // Il budget per-entry e' ora dichiarato una volta sola in main.cpp.
+        return algebra::polynomial_gcd_multivariate(p.value(), q.value(), ctx);
     }
 
     // --- bare expression or simplify(e) ---

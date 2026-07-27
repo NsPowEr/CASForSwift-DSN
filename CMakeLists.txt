@@ -712,6 +712,7 @@ test/unit/symbolic/test_sqrt_fold.cpp
         test/unit/calculus/test_differentiate_smoke.cpp
     test/unit/symbolic/test_a39_canonical_nesting.cpp
     test/unit/symbolic/test_a48_sum_fixpoint.cpp
+    test/unit/symbolic/test_a51_operation_budget.cpp
     test/unit/calculus/test_a43_nonelementary_builtins.cpp
     test/unit/calculus/test_a43_nonelementary_integrate.cpp
         test/unit/calculus/test_limit_smoke.cpp

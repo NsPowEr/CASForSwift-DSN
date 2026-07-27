@@ -342,7 +342,39 @@ public:
     [[nodiscard]] CacheMetrics get_diff_metrics() const noexcept;
     [[nodiscard]] CacheMetrics get_integrate_metrics() const noexcept;
 
+    // A51 — massimo budget ops consumato da una singola operazione top-level
+    // dall'ultimo azzeramento. Rende osservabile il gate di A30: senza,
+    // `max_operation_ops` resta una costante presa a intuito.
+    [[nodiscard]] std::uint64_t ops_high_water() const noexcept { return ops_high_water_; }
+    void reset_ops_high_water() noexcept;
+
+    // A51 — apertura RAII di un'operazione top-level con budget proprio, per
+    // chi consuma budget senza passare da `simplify`/`substitute` (i due soli
+    // punti che contano le ops). Rientrante: se un'operazione e' gia' aperta
+    // non fa nulla (`owns()` false), quindi annidare motori e' sicuro e il
+    // costo dei rami interni resta addebitato al chiamante piu' esterno.
+    // Motivazione misurata: context_core.cpp, alla definizione.
+    class OperationScope {
+    public:
+        OperationScope(CASContext& ctx, bool capture_trace) noexcept;
+        ~OperationScope() noexcept;
+        OperationScope(const OperationScope&) = delete;
+        OperationScope& operator=(const OperationScope&) = delete;
+        OperationScope(OperationScope&&) = delete;
+        OperationScope& operator=(OperationScope&&) = delete;
+        [[nodiscard]] bool owns() const noexcept { return owns_; }
+
     private:
+        CASContext& ctx_;
+        bool owns_;
+    };
+
+    private:
+    // A51 — chi apre un'operazione top-level DEVE inizializzarne il budget con
+    // questi due. Motivazione e conseguenze: context_core.cpp, alla definizione.
+    void begin_operation_budget(bool capture_trace) noexcept;
+    void end_operation_budget() noexcept;
+
     friend class Substituter;
     friend Result<ExprPtr> simplify(ExprPtr expr, CASContext& context);
     friend Result<ExprPtr> substitute(ExprPtr expr, const Symbol& variable, ExprPtr value, CASContext& context);
@@ -367,6 +399,7 @@ public:
     std::chrono::steady_clock::time_point operation_started_at_{};
     std::chrono::steady_clock::time_point hard_deadline_{std::chrono::steady_clock::time_point::max()};
     std::uint64_t ops_count_{0};
+    std::uint64_t ops_high_water_{0};
     std::uint64_t fresh_symbol_counter_{0U};
     PostSimplifyHook post_simplify_hook_{nullptr};
     std::atomic_bool interrupted_{false};
@@ -450,44 +483,9 @@ inline ScopedSimplifyHint CASContext::with_hint(SimplifyHints hints) noexcept {
     return ScopedSimplifyHint(*this, hints);
 }
 
-[[nodiscard]] int canonical_compare(ExprPtr lhs, ExprPtr rhs) noexcept;
-
-// F7.0-A4.2: post-simplify canonical-form invariant check.
-// Returns true if `expr` and every reachable sub-expression respect the
-// invariants that simplify() is supposed to maintain:
-//   - Sum::terms sorted by polynomial degree descending then canonical_compare,
-//     no nested Sum, no exact-zero IntegerLit / RationalLit summand.
-//   - Product::factors sorted by canonical_compare, no nested Product, no
-//     exact-one IntegerLit / RationalLit factor.
-//   - All Sum/Product nodes have ≥ 2 operands (singletons collapsed).
-//
-// Used in DEBUG builds via an assert at the end of CASContext::simplify()
-// to catch invariant violations close to their source. In release builds
-// the function is still available for explicit verification but the assert
-// is compiled out.
-[[nodiscard]] bool is_strictly_canonical(ExprPtr expr) noexcept;
-[[nodiscard]] TermOrderRelation compare_rewrite_terms(ExprPtr lhs, ExprPtr rhs);
-[[nodiscard]] bool rewrite_rule_is_oriented(const RewriteRule& rule);
-[[nodiscard]] bool is_strongly_normalizing(const std::vector<RewriteRule>& rules);
-[[nodiscard]] bool match_pattern(ExprPtr expr, ExprPtr pattern, MatchMap& out_matches);
-[[nodiscard]] bool match_ac_pattern(ExprPtr expr, ExprPtr pattern, MatchMap& out_matches);
-[[nodiscard]] Result<ExprPtr> apply_rule(ExprPtr expr, const RewriteRule& rule, TraversalStrategy strategy, AstArena& arena);
-[[nodiscard]] Result<ExprPtr> apply_rule_set(ExprPtr expr, const std::vector<RewriteRule>& rules, AstArena& arena);
-[[nodiscard]] Result<ExprPtr> materialize_expr(ExprPtr expr, AstArena& arena);
-[[nodiscard]] const RewriteProvider& default_rewrite_provider();
-[[nodiscard]] Result<ExprPtr> simplify(ExprPtr expr, AstArena& arena);
-[[nodiscard]] Result<ExprPtr> simplify(ExprPtr expr, CASContext& context);
-[[nodiscard]] Result<ExprPtr> substitute(ExprPtr expr, const Symbol& variable, ExprPtr value, CASContext& context);
-[[nodiscard]] Result<bool> mathematically_equal(ExprPtr lhs, ExprPtr rhs, CASContext& context);
-
-// L2-19: decidable subset of transcendental equivalence via Risch-style
-// log/exp/trig normalisation.  Applies opt-in expansion rules to lhs/rhs
-// (log(x*y) -> log(x)+log(y) under x>0, y>0; exp(x+y) -> exp(x)*exp(y);
-// exp(n*ln(x)) -> x^n under x>0; sin^2+cos^2 collapse) before delegating
-// to mathematically_equal.  Returns false (not Unimplemented) for cases
-// outside the decidable subset — Richardson's theorem precludes a total
-// decision procedure.
-[[nodiscard]] Result<bool> mathematically_equal_subset_risch(
-    ExprPtr lhs, ExprPtr rhs, CASContext& context);
 
 }  // namespace cas::symbolic
+
+// Funzioni libere del namespace: estratte per il limite anti-monolito.
+// Vanno DOPO le definizioni di CASContext/RewriteRule/MatchMap.
+#include "cas/symbolic_api.hpp"
