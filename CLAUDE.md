@@ -45,7 +45,7 @@ Un valore hardcoded in un algoritmo matematico è un bug latente. Eccezioni: cos
 | 9 | Intervalli polling fissi | Check timeout adattivo al costo reale, configurabile |
 | 10 | Rank di crescita statici | Rank dinamico via confronto asintotico (Gruntz) + coefficiente leader |
 
-**Self-check prima di ogni costante `N`**: (1) input 10× più grande → fallisce? = hardcode. (2) Ha un nome in letteratura? No → arbitraria. (3) Cambiabile senza ricompilare? No → campo `CASContext`. (4) Causa risultato sbagliato silenzioso? Vietato; `Unimplemented` diagnostico ok.
+**Self-check prima di ogni costante `N`**: (1) input 10× più grande → fallisce? = hardcode. (2) Ha un nome in letteratura? No → arbitraria. (3) Cambiabile senza ricompilare? No → campo `CASContext`. (4) Causa risultato sbagliato silenzioso? Vietato; `Unimplemented` diagnostico ok. (5) Stai **alzando** un budget/depth/timeout esistente? → PRIMA il protocollo [`docs/rules/perf-root-cause.md`](docs/rules/perf-root-cause.md) (il budget raggiunto è un sintomo, non una causa).
 
 ---
 
@@ -114,8 +114,9 @@ Enforcement meccanico: `.claude/hooks/guard_git_safety.sh` + `.claude/hooks/guar
 
 ## WORKFLOW — prima di dichiarare un task completato
 
+0. **Prova della chiusura**: il SINTOMO originale rimisurato prima/dopo — suite verde è necessaria, mai sufficiente. Protocollo + trappole note → [`docs/rules/verification-discipline.md`](docs/rules/verification-discipline.md).
 1. **Integrità matematica**: tutti i test unit + integrazione passano al 100%.
-2. **Benchmark gate** (OBBLIGATORIO): `bash scripts/benchmark.sh`; regressione vs `baseline_release.txt` → ottimizza prima del merge.
+2. **Benchmark gate** (OBBLIGATORIO): `bash scripts/benchmark.sh`; regressione vs `baseline_release.txt` → diagnosi root-cause ([`docs/rules/perf-root-cause.md`](docs/rules/perf-root-cause.md)), poi ottimizza prima del merge. Mai assorbire la regressione alzando budget o baseline.
 3. **Sanitizers**: zero errori ASan + UBSan.
 4. **Zero warning**: `-Wall -Wextra -Wpedantic -Werror` pulito.
 5. **Trace validation**: se tocchi il `Simplifier`, verifica `ComputationTrace` accurato e non ridondante.
@@ -155,5 +156,12 @@ Enforcement meccanico: `.claude/hooks/guard_git_safety.sh` + `.claude/hooks/guar
 ---
 
 ## AUTO-EVOLUZIONE (Self-Update)
-L'IA propone aggiornamenti a questo file: (1) a ogni transizione di Fase (aggiorna link + vincoli di dominio), (2) post-mortem di bug sistemico (aggiungi divieto esplicito del pattern), (3) nuovo script di automazione (aggiorna WORKFLOW).
+L'IA propone aggiornamenti a questo file: (1) a ogni transizione di Fase (aggiorna link + vincoli di dominio), (2) post-mortem di bug sistemico (aggiungi divieto esplicito del pattern), (3) nuovo script di automazione (aggiorna WORKFLOW), (4) **promozione lezioni** (vedi sotto).
 **Vincoli**: MAI rimuovere o indebolire le Regole 1/2/3 (BigInt, Structural Sharing, Arena) — fondamenta immutabili. Ogni modifica a `CLAUDE.md` comunicata con *"Aggiornamento Costituzione Tecnica: [MOTIVAZIONE]"*.
+
+### Promozione lezioni (memoria privata → patrimonio del repo)
+La memoria dell'agente è privata e per-sessione: i subagent non la vedono, le sessioni nuove possono perderla. Ogni lezione **generalizzabile** (diagnosi smentita, trappola di verifica, pattern di bug ricorrente, metodo che ha funzionato) DEVE essere promossa a fine task nel file `docs/rules/` pertinente:
+- diagnosi/costi/performance → `perf-root-cause.md` · prove di chiusura/trappole di test → `verification-discipline.md` · hardcode → `hardcode-catalog.md` · routing → `model-routing.md` · nuova classe di lezione → nuovo file + riga di indice qui.
+- Formato: 2-5 righe nella sezione pertinente, con riferimento al caso reale (`A<N>` o commit) — mai dump di narrativa; il dettaglio storico resta in ledger/memoria.
+- La memoria privata conserva solo il contesto personale/contingente (stato multi-sessione, preferenze); la regola operativa vive nel repo.
+- Check di fine task (skill `next-task` §6): *"c'è una lezione generalizzabile in questa iterazione? Se sì, promossa dove?"*

@@ -44,6 +44,9 @@ Dichiarare SEMPRE nel log dell'iterazione: task scelta + perché.
 ## 3. Piano minimo
 
 - `module-locator` per la mappa file:riga (non esplorare a mano a scala 4x).
+- Task perf-class (sintomo lento/timeout/budget raggiunto) → carica
+  `docs/rules/perf-root-cause.md` PRIMA del piano: protocollo 4 passi
+  obbligatorio, "alza il budget" è ultima risorsa con giustificazione.
 - Definire: file da toccare, test nuovi, criterio di verifica matematica
   (equivalenza strutturale o certificato numerico — skill `numeric-certify`).
 
@@ -55,6 +58,8 @@ Dichiarare SEMPRE nel log dell'iterazione: task scelta + perché.
 
 ## 5. Verifica (prima di dichiarare qualsiasi cosa)
 
+Chiusura = SINTOMO originale rimisurato prima/dopo, non suite verde —
+protocollo e trappole note in `docs/rules/verification-discipline.md`.
 In parallelo dove possibile:
 - `cas-regression-guard` (AcidTest+SupremeTest).
 - `hardcode-auditor` sul diff.
@@ -74,6 +79,11 @@ In parallelo dove possibile:
 - Aggiorna `TASKLIST_MASTER.md`: stato task (✅ FATTO / 🚧 checkpoint / ⛔
   BLOCCATA + causa). NESSUN altro file di stato: TASKLIST_MASTER.md è l'unico
   tracker.
+- **Promozione lezioni** (CLAUDE.md §AUTO-EVOLUZIONE): c'è una lezione
+  generalizzabile in questa iterazione (diagnosi smentita, trappola, pattern
+  ricorrente)? → 2-5 righe nel file `docs/rules/` pertinente, con riferimento
+  al caso (`A<N>`/commit). La memoria privata NON basta: i subagent e le
+  sessioni future non la vedono.
 - **Raccomandazione routing (OBBLIGATORIA, ultima riga dell'iterazione)** —
   `docs/rules/model-routing.md`:
   `PROSSIMA SESSIONE → task: A<N> · modello: <Sonnet|Opus|Fable> · effort: <low|medium|high|max> · motivo: <classe C + modificatori>`
