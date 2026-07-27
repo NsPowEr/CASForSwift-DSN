@@ -163,6 +163,13 @@ struct MultivariateSquareFreeFactor {
 // sides of mathematically_equal, like hyperbolic_normalize above.
 [[nodiscard]] ExprPtr factorial_gamma_normalize(ExprPtr expr, AstArena& arena);
 
+// A43 §4: riduce li/Shi/Chi a Ei ed erfi a erf (identità esatte), così che le
+// ortografie interscambiabili della famiglia non elementare diventino
+// confrontabili strutturalmente. Applicato ai due lati di mathematically_equal,
+// come i due normalizzatori sopra. Si/Ci NON vengono toccati (le loro identità
+// verso Ei introdurrebbero un i spurio in un risultato reale — spec §4).
+[[nodiscard]] ExprPtr nonelementary_normalize(ExprPtr expr, AstArena& arena);
+
 // F7.5.A1 — Geometric / cyclotomic RootOf expansion (closes
 // HC-F75-CYCLOTOMIC-ROOTOF). See src/algebra/algebraic_equal_cyclotomic.cpp.
 [[nodiscard]] std::optional<std::vector<ExprPtr>>

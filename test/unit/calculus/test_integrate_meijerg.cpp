@@ -7,6 +7,7 @@
 #include "cas/calculus.hpp"
 #include "cas/lexer.hpp"
 #include "cas/meijerg.hpp"
+#include "calculus/calculus_internal.hpp"
 #include "cas/parser.hpp"
 #include "cas/symbolic.hpp"
 
@@ -189,9 +190,16 @@ TEST(Hyper1F1ClosedFormTest, ErfForm_FoldsToErf) {
 
 TEST(IntegrateMeijerGTest, GaussianIntegral_ErfClosedForm_DiffVerified) {
     // int e^{-x^2} dx = (sqrt(pi)/2) erf(x) + C — Risch (correctly) proves
-    // no elementary antiderivative; the Meijer fallback + the DLMF 7.6.2
-    // fold produce the erf closed form. The Mellin pipeline works on the
-    // half-line (spec §4): the fallback declares Positive(x) via A31.
+    // no elementary antiderivative.
+    //
+    // Since A43 this integrand is settled one step EARLIER than the Meijer
+    // fallback, by the non-elementary family (integrate_core step 5): same
+    // erf closed form, but obtained by completing the square, which is exact
+    // on ALL of R. So — unlike the Mellin route, which lives on the half-line
+    // — no Positive(x) side condition is warranted here, and asserting its
+    // ABSENCE is the stronger statement. The Mellin route keeps its own A31
+    // coverage in MeijerFallbackGaussian_DeclaresPositiveSideCondition below.
+    //
     // Verified by differentiation: D[(sqrt(pi)/2) erf(x)] = e^{-x^2}.
     CASContext ctx;
     Symbol x{"x"};
@@ -200,10 +208,11 @@ TEST(IntegrateMeijerGTest, GaussianIntegral_ErfClosedForm_DiffVerified) {
     ASSERT_TRUE(F.is_ok()) << (F.is_error() ? F.error().message : "");
     EXPECT_FALSE(contains_meijerg(F.value()));  // folded to elementary/erf
     // Snapshot the side conditions BEFORE any further simplify resets them
-    // (A31 discipline): the t = x^2 substitution is conditional on x > 0.
+    // (A31 discipline).
     ExprPtr xs = parse_expr("x", ctx);
-    EXPECT_TRUE(ctx.last_side_conditions().contains(
-        DomainCondition{DomainConditionKind::Positive, xs}));
+    EXPECT_FALSE(ctx.last_side_conditions().contains(
+        DomainCondition{DomainConditionKind::Positive, xs}))
+        << "completing the square is exact on all of R: no domain restriction";
     auto Fp = calculus::diff(F.value(), x, 1U, ctx);
     ASSERT_TRUE(Fp.is_ok());
     ExprPtr resid = ctx.arena().make<Binary>(BinaryOp::Sub,
@@ -213,6 +222,29 @@ TEST(IntegrateMeijerGTest, GaussianIntegral_ErfClosedForm_DiffVerified) {
     const auto* lit = expr_cast<IntegerLit>(zero.value());
     EXPECT_TRUE(lit != nullptr && lit->value.is_zero())
         << "residual not zero";
+}
+
+// A31 coverage of the Mellin route, called DIRECTLY.
+//
+// Going through integrate() would no longer reach it for this integrand (A43
+// settles the Gaussian one step earlier), and e^{-x^2} was the only case in
+// the suite that exercised the conditional Slater fold — routing the assertion
+// through the dispatcher would have left that branch silently untested.
+// Calling the fallback by name also makes the test independent of dispatch
+// order, which is what it actually means to assert.
+TEST(IntegrateMeijerGTest, MeijerFallbackGaussian_DeclaresPositiveSideCondition) {
+    // The Mellin pipeline works on the half-line (spec §4): a Slater fold that
+    // is not unconditionally exact (here s = 1/2, a non-integer power) must
+    // declare Positive(x) via A31 — never apply it silently.
+    CASContext ctx;
+    Symbol x{"x"};
+    ExprPtr integrand = parse_expr("exp(-(x^2))", ctx);
+    auto F = calculus::integrate_meijerg_fallback(integrand, x, ctx);
+    ASSERT_TRUE(F.is_ok()) << (F.is_error() ? F.error().message : "");
+    EXPECT_FALSE(contains_meijerg(F.value()));  // folded to erf
+    ExprPtr xs = parse_expr("x", ctx);
+    EXPECT_TRUE(ctx.last_side_conditions().contains(
+        DomainCondition{DomainConditionKind::Positive, xs}));
 }
 
 TEST(IntegrateMeijerGTest, BesselJIntegral_StaysClosedFormG) {

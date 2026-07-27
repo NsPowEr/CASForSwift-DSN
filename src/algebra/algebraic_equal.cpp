@@ -49,6 +49,22 @@ Result<bool> mathematically_equal(ExprPtr lhs, ExprPtr rhs, CASContext& context)
         }
     }
 
+    // A43 §4: collapse the interchangeable spellings of the non-elementary
+    // family (li→Ei(ln), Shi/Chi→Ei combinations, erfi→erf of an imaginary
+    // argument) before comparing. Exact identities, same motivation as the two
+    // normalisations around it: our integrator emits `(√π/2)·erfi(x)` where
+    // Maxima emits `−i·√π·erf(i·x)/2` — equal, not structurally comparable.
+    {
+        auto lhs_n = algebra::nonelementary_normalize(lhs_s.value(), context.arena());
+        auto rhs_n = algebra::nonelementary_normalize(rhs_s.value(), context.arena());
+        if (lhs_n.get() != lhs_s.value().get() || rhs_n.get() != rhs_s.value().get()) {
+            auto lhs_n_s = context.simplify(lhs_n);
+            auto rhs_n_s = context.simplify(rhs_n);
+            if (lhs_n_s.is_ok()) lhs_s = lhs_n_s;
+            if (rhs_n_s.is_ok()) rhs_s = rhs_n_s;
+        }
+    }
+
     // F7.5.A4: rewrite sech/csch/coth/tanh to canonical cosh/sinh quotients
     // BEFORE structural / algebraic comparison so notational mismatches
     // (CAS cosh(x)^-2 vs Maxima sech(x)^2 etc.) collapse.
@@ -174,6 +190,24 @@ Result<bool> mathematically_equal(ExprPtr lhs, ExprPtr rhs, CASContext& context)
         auto cross_l = algebra::multiply_exprs(lhs_parts.value().numerator, rhs_parts.value().denominator, context);
         auto cross_r = algebra::multiply_exprs(rhs_parts.value().numerator, lhs_parts.value().denominator, context);
         if (cross_l.is_ok() && cross_r.is_ok()) {
+            // Sibling of the `structural_equal(lhs_s, rhs_s)` test above, on the
+            // cleared-denominator form: if num_l·den_r and num_r·den_l are the
+            // SAME tree then the two fractions are equal, under the same
+            // non-vanishing-denominator assumption this whole path already
+            // makes. Cheap, and it decides before the normalisation below.
+            //
+            // Not redundant: A48 (simplify does not reach a fixpoint on a Sum
+            // that a distribution step nested under a Product — `A − A` with
+            // structurally identical `A = (2x−2)·exp(2x)` normalises to
+            // `(−2 − 2x + 2x + 2)·exp(2x)`, not to 0) makes the normalisation
+            // below fail on exactly the shape this test settles. Measured on
+            // the A43 antiderivatives: `2·(2x−2)⁻¹·exp(2x)` vs
+            // `(x−1)⁻¹·exp(2x)` — equal, and the cross products are identical
+            // trees, yet their difference did not collapse.
+            if (structural_equal(cross_l.value(), cross_r.value())) {
+                finalize();
+                return ok(true);
+            }
             auto cross_diff_expr = context.arena().make<Binary>(BinaryOp::Sub, cross_l.value(), cross_r.value());
             auto cross_diff = polynomial_normal_form(cross_diff_expr, context);
             if (cross_diff.is_ok() && expr_is<IntegerLit>(cross_diff.value()) && expr_cast<IntegerLit>(cross_diff.value())->value.is_zero()) {

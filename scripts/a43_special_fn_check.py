@@ -84,6 +84,75 @@ H = lambda t: -exp(-t) * log(t) + ei(-t)
 check("int_1^3 e^-t ln t = [-e^-t ln t + Ei(-t)]",
       quad(lambda t: exp(-t) * log(t), [1, 3]), H(3) - H(1))
 
+print("== generalizzazioni EMESSE DAL MOTORE (§5, oltre le righe di tabella) ==")
+# Queste sono le forme che `integrate_nonelementary_fallback` restituisce per gli
+# argomenti generali. Sono verificate QUI perche' il motore, pur derivandole
+# correttamente, non riesce a PROVARE simbolicamente che D(F) = f: mancano
+# rispettivamente la riduzione dei radicali sotto sqrt (gaussiana con |A| non
+# quadrato perfetto), le formule di addizione (trig con fase non nulla) e
+# ln(x^n) = n·ln x (integrale logaritmico con potenza). Gap nominati come task
+# separate; le formule, come si vede sotto, sono esatte.
+
+
+def check_primitive(label, f, F, a, b):
+    """int_a^b f = F(b) - F(a), con F la forma chiusa emessa dal motore."""
+    return check(label, quad(f, [a, b]), F(b) - F(a))
+
+
+# Gaussiana generale: int e^{A x^2 + B x + C} dx, completamento del quadrato.
+#   A > 0 -> e^{C - B^2/4A} * (1/2) sqrt(pi/A) * erfi(sqrt(A) (x + B/2A))
+#   A < 0 -> stessa forma con erf e |A|
+check_primitive("int_0^0.6 e^{2t^2} = 1/2 sqrt(pi/2) erfi(sqrt(2) t)",
+                lambda t: exp(2 * t**2),
+                lambda t: mpf("0.5") * sqrt(pi / 2) * erfi(sqrt(2) * t), 0, mpf("0.6"))
+check_primitive("int_0^0.6 e^{t^2+t} = 1/2 sqrt(pi) e^{-1/4} erfi(t+1/2)",
+                lambda t: exp(t**2 + t),
+                lambda t: mpf("0.5") * sqrt(pi) * exp(mpf("-0.25")) * erfi(t + mpf("0.5")),
+                0, mpf("0.6"))
+check_primitive("int_0^1 e^{-2t^2+t} = 1/2 sqrt(pi/2) e^{1/8} erf(sqrt(2)(t-1/4))",
+                lambda t: exp(-2 * t**2 + t),
+                lambda t: mpf("0.5") * sqrt(pi / 2) * exp(mpf("0.125"))
+                * erf(sqrt(2) * (t - mpf("0.25"))), 0, 1)
+
+# Trigonometrica con fase: int trig(a t + phi)/t dt via formule di addizione.
+check_primitive("int_1^3 sin(t+1)/t = cos1 Si(t) + sin1 Ci(t)",
+                lambda t: sin(t + 1) / t,
+                lambda t: cos(1) * si(t) + sin(1) * ci(t), 1, 3)
+check_primitive("int_1^3 cos(t+1)/t = cos1 Ci(t) - sin1 Si(t)",
+                lambda t: cos(t + 1) / t,
+                lambda t: cos(1) * ci(t) - sin(1) * si(t), 1, 3)
+# Polo traslato: t -> t - r porta la fase a a*r + b.
+check_primitive("int_3^5 sin(t)/(t-2) = cos2 Si(t-2) + sin2 Ci(t-2)",
+                lambda t: sin(t) / (t - 2),
+                lambda t: cos(2) * si(t - 2) + sin(2) * ci(t - 2), 3, 5)
+check_primitive("int_1^3 sinh(t+1)/t = cosh1 Shi(t) + sinh1 Chi(t)",
+                lambda t: mp.sinh(t + 1) / t,
+                lambda t: mp.cosh(1) * shi(t) + mp.sinh(1) * chi(t), 1, 3)
+check_primitive("int_1^3 cosh(t+1)/t = cosh1 Chi(t) + sinh1 Shi(t)",
+                lambda t: mp.cosh(t + 1) / t,
+                lambda t: mp.cosh(1) * chi(t) + mp.sinh(1) * shi(t), 1, 3)
+
+# Integrale logaritmico: int t^s/ln t dt = li(t^{s+1}), s != -1.
+check_primitive("int_2^4 t/ln t = li(t^2)",
+                lambda t: t / log(t), lambda t: li(t**2), 2, 4)
+check_primitive("int_2^4 t^2/ln t = li(t^3)",
+                lambda t: t**2 / log(t), lambda t: li(t**3), 2, 4)
+check_primitive("int_2^4 1/ln(2t) = li(2t)/2",
+                lambda t: 1 / log(2 * t), lambda t: li(2 * t) / 2, 2, 4)
+
+# Dilogaritmo con argomento affine generale e polo traslato:
+#   int ln(alpha t + beta)/(t - r) dt,  c = alpha r + beta != 0
+#   = ln(c) ln(t-r) - Li2(-(alpha/c)(t-r))
+check_primitive("int_0.2^0.6 ln(1+2t)/t = -Li2(-2t)",
+                lambda t: log(1 + 2 * t) / t,
+                lambda t: -polylog(2, -2 * t), mpf("0.2"), mpf("0.6"))
+check_primitive("int_0.2^0.6 ln(2+t)/t = ln2 ln t - Li2(-t/2)",
+                lambda t: log(2 + t) / t,
+                lambda t: log(2) * log(t) - polylog(2, -t / 2), mpf("0.2"), mpf("0.6"))
+check_primitive("int_4^6 ln(1+t)/(t-3) = ln4 ln(t-3) - Li2(-(t-3)/4)",
+                lambda t: log(1 + t) / (t - 3),
+                lambda t: log(4) * log(t - 3) - polylog(2, -(t - 3) / 4), 4, 6)
+
 if FAILURES:
     print(f"\n{len(FAILURES)} VERIFICHE FALLITE:")
     for f in FAILURES:

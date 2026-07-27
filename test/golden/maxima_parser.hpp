@@ -171,9 +171,49 @@ inline std::string normalize_maxima_output(const std::string& raw) {
         s = std::regex_replace(s, psi_n_re, "polygamma($1,$2)");
     }
 
-    // Maxima sometimes outputs "erf(%i*x)" — SKIP (complex erf)
-    if (s.find("erf(i*") != std::string::npos || s.find("erf(-i") != std::string::npos)
-        return "";
+    // Maxima writes the exponential integral of the Ei family through the
+    // GENERALISED exponential integral E_n. For n = 1 the two are the same
+    // function up to a branch constant:
+    //
+    //     E_1(-y) = -Ei(y) - i*pi        (y > 0, A&S 5.1.7 / DLMF 6.2.7)
+    //
+    // Verified numerically (mpmath, 30 cifre): `-e1(-y)` and `Ei(y)` have
+    // IDENTICAL real parts and differ by exactly `+i*pi` — the naive identity
+    // `E_1(z) = -Ei(-z)`, without that constant, is FALSE, and the measurement
+    // is what showed it.
+    //
+    // Dropping the constant is nevertheless sound HERE, and only here: the
+    // integrate area is compared with `antiderivative_equivalent`, which
+    // differentiates both sides (integrate_equiv.hpp). Two antiderivatives
+    // that differ by a constant — imaginary or not — are the same
+    // antiderivative for that comparison. The bridge is confined to n = 1;
+    // any other order stays unmapped and the entry keeps skipping, which is
+    // the honest outcome rather than a wrong mapping.
+    {
+        std::regex e1_re(R"(expintegral_e\(1,\s*([^()]*)\))");
+        s = std::regex_replace(s, e1_re, "(-Ei(-($1)))");
+    }
+
+    // Maxima writes the imaginary-error function as an `erf` of an imaginary
+    // argument. Both spellings are now parseable on our side (A43 introduced
+    // the `erfi` builtin and the exact identity erf(i·u) = i·erfi(u) lives in
+    // `nonelementary_normalize`), so keep the text as-is instead of skipping:
+    // the skip that used to sit here was the residual A44 bridge, and it hid
+    // every ∫e^{x²}-family comparison. `i` is already the normalised spelling
+    // of Maxima's `%i` at this point.
+    //
+    // The guard below survives only for shapes the parser genuinely cannot
+    // take (an `erf` whose imaginary argument is not a plain product, e.g.
+    // nested inside another unparsed construct) — those still skip rather than
+    // producing a bogus mismatch.
+    if (s.find("erf(i") != std::string::npos || s.find("erf(-i") != std::string::npos) {
+        std::regex erf_imag_re(R"(erf\((-?)i\*([^()]*)\))");
+        // Parenthesised: the rewrite can land inside a quotient or a power,
+        // where a bare leading `-` would re-associate (`a/erf(-i*x)`).
+        s = std::regex_replace(s, erf_imag_re, "($1i*erfi($2))");
+        if (s.find("erf(i") != std::string::npos || s.find("erf(-i") != std::string::npos)
+            return "";
+    }
 
     // Maxima sometimes outputs "sec(x)^2" — our parser accepts sec, keep as-is.
 

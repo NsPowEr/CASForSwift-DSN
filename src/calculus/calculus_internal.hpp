@@ -51,6 +51,11 @@ struct QuotientView {
     const Symbol& var,
     symbolic::CASContext& ctx);
 
+// A43 §5 — `integrate_nonelementary_fallback` (Ei, Si, Ci, Shi, Chi, li, Li₂,
+// erfi) è dichiarata nell'header del proprio modulo,
+// `integrate_nonelementary.hpp`, non qui: questo header è condiviso da tutto
+// `cas_calculus` ed è già al limite anti-monolito.
+
 /// @brief A7 step 5 — Meijer G fallback for ∫ K·x^μ·f(c·x^r) dx, wired as
 /// the LAST resort after Risch and Weierstrass (Meijer_G_Slater.md §8-§9).
 /// May return a Meijer G / pFq closed form (first-class result, §9.4).

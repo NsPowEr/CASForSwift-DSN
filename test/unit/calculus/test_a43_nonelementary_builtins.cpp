@@ -4,10 +4,8 @@
 // Ogni derivata verificata numericamente con mpmath a 30 cifre prima di essere
 // scritta a codice — banco riproducibile: scripts/a43_special_fn_check.py.
 //
-// Questo incremento copre SOLO nome + round-trip + derivata. L'integrazione
-// (spec §5) e le identita' di riduzione (spec §4) sono incrementi separati:
-// finche' non ci sono, integrate() continua a rispondere Unimplemented su
-// questi integrandi, che e' corretto e non silent-wrong.
+// Incrementi 1+2: nome + round-trip + derivata. Incremento 3: le identita' di
+// riduzione della spec §4, riconosciute dentro mathematically_equal.
 
 #include <gtest/gtest.h>
 
@@ -124,6 +122,47 @@ TEST_F(A43NonelementaryBuiltinsTest, OrderingIsStableAndIdempotent) {
         ASSERT_TRUE(twice.is_ok()) << src;
         EXPECT_TRUE(structural_equal(once.value(), twice.value()))
             << src << ": simplify must be idempotent";
+    }
+}
+
+// Spec §4 — the reduction identities must be recognised by mathematically_equal
+// (li → Ei(ln), Shi/Chi → Ei combinations, erfi → erf of an imaginary argument).
+// Without a single representative the structural comparison forks exactly as in
+// A44 (x! vs Γ(x+1)).
+TEST_F(A43NonelementaryBuiltinsTest, ReductionIdentitiesAreRecognised) {
+    const std::vector<std::pair<std::string, std::string>> identities{
+        {"li(x)", "Ei(ln(x))"},
+        {"Shi(x)", "(Ei(x) - Ei(-x))/2"},
+        {"Chi(x)", "(Ei(x) + Ei(-x))/2"},
+        {"erfi(x)", "-i*erf(i*x)"},
+        // The identities must survive inside a larger expression, not only at
+        // the root: the normaliser is applied bottom-up.
+        {"sqrt(pi)/2 * erfi(x)", "-i*sqrt(pi)*erf(i*x)/2"},
+        {"li(x^2) + 1", "Ei(ln(x^2)) + 1"},
+    };
+    for (const auto& [lhs, rhs] : identities) {
+        auto eq = symbolic::mathematically_equal(parse(lhs), parse(rhs), ctx);
+        ASSERT_TRUE(eq.is_ok()) << lhs << " vs " << rhs;
+        EXPECT_TRUE(eq.value()) << lhs << " != " << rhs;
+    }
+}
+
+// The normaliser must not turn the comparison into a rubber stamp: pairs that
+// are genuinely different must still come back false. Si/Ci are deliberately
+// left alone (their identities toward Ei carry a spurious `i` on the reals),
+// so a Si/Ci pair must not be collapsed either.
+TEST_F(A43NonelementaryBuiltinsTest, ReductionIdentitiesDoNotOverreach) {
+    const std::vector<std::pair<std::string, std::string>> non_identities{
+        {"li(x)", "Ei(x)"},
+        {"Shi(x)", "Chi(x)"},
+        {"erfi(x)", "erf(x)"},
+        {"Si(x)", "Ci(x)"},
+        {"Si(x)", "Ei(x)"},
+    };
+    for (const auto& [lhs, rhs] : non_identities) {
+        auto eq = symbolic::mathematically_equal(parse(lhs), parse(rhs), ctx);
+        ASSERT_TRUE(eq.is_ok()) << lhs << " vs " << rhs;
+        EXPECT_FALSE(eq.value()) << lhs << " must not compare equal to " << rhs;
     }
 }
 

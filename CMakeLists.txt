@@ -218,6 +218,8 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/integrate_trig_substitution.cpp
     src/calculus/integrate_weierstrass.cpp
     src/calculus/integrate_meijerg.cpp
+    src/calculus/integrate_nonelementary.cpp
+    src/calculus/integrate_nonelementary_special.cpp
     src/calculus/integrate_mellin_convolution.cpp
     src/calculus/integrate_rational_part.cpp
     src/calculus/integrate_hermite.cpp
@@ -382,6 +384,7 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/algebraic_equal_subset_risch.cpp
     src/algebra/algebraic_equal_radical.cpp
     src/algebra/hyperbolic_normalize.cpp
+    src/algebra/nonelementary_normalize.cpp
     src/algebra/polynomial_integer.cpp
     src/algebra/polynomial_conversions.cpp
     src/algebra/polynomial_gcd_core.cpp
@@ -709,6 +712,7 @@ test/unit/symbolic/test_sqrt_fold.cpp
         test/unit/calculus/test_differentiate_smoke.cpp
     test/unit/symbolic/test_a39_canonical_nesting.cpp
     test/unit/calculus/test_a43_nonelementary_builtins.cpp
+    test/unit/calculus/test_a43_nonelementary_integrate.cpp
         test/unit/calculus/test_limit_smoke.cpp
         test/unit/calculus/test_series_removable_singularity.cpp
         test/unit/calculus/test_limit_gruntz_nested_log.cpp
@@ -1001,6 +1005,52 @@ test/unit/algebra/test_half_gcd.cpp
         PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0" TIMEOUT 60)
     gtest_discover_tests(assumptions_stability_test DISCOVERY_TIMEOUT 60
         PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0" TIMEOUT 60)
+
+    # A43 — certificato numerico mpmath delle antiderivate non elementari.
+    #
+    # Perche' e' un test a se' e non un'asserzione C++: per una parte della
+    # famiglia (gaussiana con |A| non quadrato perfetto, trigonometrica con
+    # fase, ∫x^s/ln x) il motore NON riesce a chiudere `D(F) = f`
+    # simbolicamente (task A50), quindi i test C++ possono solo fissare la
+    # forma chiusa attesa — confrontandola con una stringa scritta a mano.
+    # Da soli non proverebbero nulla sulla CORRETTEZZA della formula: se la
+    # formula fosse sbagliata, implementazione e attesa lo sarebbero insieme e
+    # il test passerebbe. Il banco mpmath a 30 cifre e' l'oracolo indipendente,
+    # e registrarlo qui lo mette dentro `ctest`, che la CI esegue e non e'
+    # bypassabile. I builtin non sono ancora valutabili numericamente dal
+    # motore (spec §6), quindi mpmath e' l'unico strumento disponibile.
+    # L'interprete che CMake trova per primo non e' necessariamente quello che
+    # ha mpmath (misurato: find_package sceglieva un Python 3.14 senza mpmath
+    # mentre due interpreti sul PATH ce l'avevano). Si sondano i candidati e si
+    # usa il primo che importa mpmath; se nessuno lo fa il test NON viene
+    # registrato silenziosamente, ma con un warning esplicito a configure-time —
+    # un certificato assente deve essere visibile, non passare per verde.
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    find_program(A43_PYTHON_ON_PATH python3)
+    set(A43_NUMERIC_PY "")
+    foreach(_cand IN LISTS Python3_EXECUTABLE A43_PYTHON_ON_PATH)
+        if(_cand AND NOT A43_NUMERIC_PY)
+            execute_process(COMMAND "${_cand}" -c "import mpmath"
+                            RESULT_VARIABLE _a43_mpmath_rc
+                            OUTPUT_QUIET ERROR_QUIET)
+            if(_a43_mpmath_rc EQUAL 0)
+                set(A43_NUMERIC_PY "${_cand}")
+            endif()
+        endif()
+    endforeach()
+    if(A43_NUMERIC_PY)
+        add_test(NAME a43_nonelementary_numeric_certificate
+            COMMAND "${A43_NUMERIC_PY}"
+                    ${CMAKE_CURRENT_SOURCE_DIR}/scripts/a43_special_fn_check.py)
+        set_tests_properties(a43_nonelementary_numeric_certificate
+            PROPERTIES TIMEOUT 120)
+    else()
+        message(WARNING
+            "mpmath non disponibile in nessun interprete Python trovato: il "
+            "certificato numerico A43 (scripts/a43_special_fn_check.py) NON "
+            "verra' eseguito da ctest. Installare mpmath per avere la verifica "
+            "indipendente delle antiderivate non elementari.")
+    endif()
 endif()
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     include(CheckCXXCompilerFlag)

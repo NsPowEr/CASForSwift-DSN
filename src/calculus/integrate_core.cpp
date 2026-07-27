@@ -1,4 +1,5 @@
 #include "integrate_engine.hpp"
+#include "integrate_nonelementary.hpp"
 
 #include "cas/algebra.hpp"
 #include "cas/error_helpers.hpp"
@@ -101,7 +102,30 @@ Result<ExprPtr> Integrator::integrate(ExprPtr expr, const Symbol& var) {
         }
     }
 
-    // 5. A7 step 5 — Meijer G fallback (Meijer_G_Slater.md §8-§9): LAST
+    // 5. A43 §5 — non-elementary antiderivatives (Ei, Si, Ci, Shi, Chi, li,
+    //    Li₂, erfi). Strictly after Risch, which is the decision procedure:
+    //    only once Risch has answered "not elementary" does looking for a
+    //    closed form in the extended family make sense (spec §5). Before the
+    //    Meijer G fallback, because on this class Ei/Si/erfi is the canonical
+    //    shape both oracles emit, while the Meijer route yields an equivalent
+    //    but less readable ₁F₁ (measured: ∫e^{x²} came out as x·₁F₁(½,3⁄2,x²)).
+    //
+    //    Only on the OUTERMOST frame (depth_ == 1). Steps 1-2 above are
+    //    heuristic strategies, not decision procedures, and the by-parts chain
+    //    among them recurses into integrate(): letting it consume this fallback
+    //    at depth ≥ 2 makes ∫e^x/x "succeed" through seven levels of by-parts
+    //    that raise the pole to x⁻⁸ and then wrap the Ei form back up —
+    //    measured, and mathematically equal to Ei(x) but unusable. Restricting
+    //    to the outermost frame leaves Risch's precedence untouched (it still
+    //    runs first here) and keeps the canonical shape the oracles emit.
+    if (depth_ == 1U) {
+        auto special_result = integrate_nonelementary_fallback(expr, var, context_);
+        if (special_result.is_ok()) {
+            return special_result;
+        }
+    }
+
+    // 6. A7 step 5 — Meijer G fallback (Meijer_G_Slater.md §8-§9): LAST
     //    resort, strictly after Risch (spec §8 wiring constraint) and after
     //    Weierstrass. May legitimately return a Meijer G / pFq closed form
     //    (first-class antiderivative node, §9.4).
