@@ -426,11 +426,11 @@ Result<ExprPtr> integrate(ExprPtr expr, const Symbol& var, symbolic::CASContext&
         }
     }
 
-    // A51 — budget PROPRIO per l'integrazione (rientrante). Senza, ogni
-    // `ctx.simplify` interna era top-level e azzerava timer e contatore: il
-    // risultato dipendeva dal budget concesso, non dall'integranda.
-    symbolic::CASContext::OperationScope op_scope(ctx, /*capture_trace=*/false);
-
+    // A53 — qui MANCA il budget dell'operazione (misurato): ogni `ctx.simplify`
+    // interna e' top-level e azzera timer e contatore, quindi nulla limita il
+    // TOTALE. `CASContext::OperationScope` lo risolve, ma aprire l'operazione
+    // cambia anche la semantica A31 delle side-conditions — quelle dei rami
+    // SCARTATI sopravvivono nel risultato. Serve prima quel rollback.
     auto primitive = integrate_detail::integrate_indefinite_impl(expr, var, ctx);
     if (primitive.is_error()) {
         return primitive;

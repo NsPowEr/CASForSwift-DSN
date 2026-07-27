@@ -419,46 +419,6 @@ void normalize_rational_coefficients(RatPoly& coefficients) {
     return PolyExpr(expr_coeffs);
 }
 
-[[nodiscard]] Result<PolyXGCDResult> poly_extended_gcd(const PolyExpr& a, const PolyExpr& b, symbolic::CASContext& ctx) {
-    if (a.is_zero()) {
-        std::vector<ExprPtr> s_coeffs = {poly_make_integer(ctx.arena(), 0)};
-        std::vector<ExprPtr> t_coeffs = {poly_make_integer(ctx.arena(), 1)};
-        return ok(PolyXGCDResult{b, PolyExpr{s_coeffs}, PolyExpr{t_coeffs}});
-    }
-    if (b.is_zero()) {
-        std::vector<ExprPtr> s_coeffs = {poly_make_integer(ctx.arena(), 1)};
-        std::vector<ExprPtr> t_coeffs = {poly_make_integer(ctx.arena(), 0)};
-        return ok(PolyXGCDResult{a, PolyExpr{s_coeffs}, PolyExpr{t_coeffs}});
-    }
-
-    auto div_res = divide_poly_with_remainder(a, b, ctx);
-    if (div_res.is_error()) return fail<PolyXGCDResult>(div_res.error());
-    
-    auto q = div_res.value().quotient;
-    auto r = div_res.value().remainder;
-
-    if (r.is_zero()) {
-        std::vector<ExprPtr> s_coeffs = {poly_make_integer(ctx.arena(), 0)};
-        std::vector<ExprPtr> t_coeffs = {poly_make_integer(ctx.arena(), 1)};
-        return ok(PolyXGCDResult{b, PolyExpr{s_coeffs}, PolyExpr{t_coeffs}});
-    }
-
-    auto ext_res = poly_extended_gcd(b, r, ctx);
-    if (ext_res.is_error()) return fail<PolyXGCDResult>(ext_res.error());
-    
-    auto g = ext_res.value().gcd;
-    auto s1 = ext_res.value().s;
-    auto t1 = ext_res.value().t;
-
-    auto q_t1_res = poly_multiply(q, t1, ctx);
-    if (q_t1_res.is_error()) return fail<PolyXGCDResult>(q_t1_res.error());
-    
-    auto s_res = poly_subtract(s1, q_t1_res.value(), ctx);
-    if (s_res.is_error()) return fail<PolyXGCDResult>(s_res.error());
-
-    return ok(PolyXGCDResult{g, t1, s_res.value()});
-}
-
 [[nodiscard]] Result<PolyExpr> normalize_poly_monic(const PolyExpr& poly, symbolic::CASContext& ctx) {
     if (poly.is_zero()) return ok(poly);
     return poly_divide_by_scalar(poly, poly.leading_coeff(), ctx);

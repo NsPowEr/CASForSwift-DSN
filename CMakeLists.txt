@@ -357,6 +357,7 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/solve_polynomial.cpp
     src/algebra/solve_polynomial_cubic_quartic.cpp
     src/algebra/polynomial_internal.cpp
+    src/algebra/polynomial_internal_xgcd.cpp
     src/algebra/polynomial_hensel.cpp
     src/algebra/lattice_lll.cpp
     src/algebra/polynomial_modular.cpp

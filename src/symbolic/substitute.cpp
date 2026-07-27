@@ -447,17 +447,10 @@ private:
 };
 
 Result<ExprPtr> CASContext::substitute(ExprPtr expr, const Symbol& variable, ExprPtr value) {
-    const bool owns_operation = !operation_active_;
-    if (owns_operation) {
-        operation_active_ = true;
-        begin_operation_budget(trace_enabled_);
-    }
-    auto result = symbolic::substitute(expr, variable, value, *this);
-    if (owns_operation) {
-        operation_active_ = false;
-        end_operation_budget();
-    }
-    return result;
+    // A51: apertura/chiusura del budget via RAII — l'invariante non e' piu'
+    // violabile per omissione (era violato in `mathematically_equal`).
+    OperationScope op_scope(*this, trace_enabled_);
+    return symbolic::substitute(expr, variable, value, *this);
 }
 
 Result<ExprPtr> substitute(ExprPtr expr, const Symbol& variable, ExprPtr value, CASContext& context) {
