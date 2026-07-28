@@ -189,6 +189,20 @@ struct CASContextSimplifierParams {
         meijerg_strict_convergence_ = strict;
     }
 
+    // A54 — raccolta simbolica dei like-term (F1.4, `a·u + b·u → (a+b)·u`).
+    // È l'INVERSA della distribuzione, quindi chi ha per post-condizione la
+    // forma espansa (`algebra::expand`) la disattiva per la durata della
+    // propria costruzione: altrimenti il Sum appena distribuito viene
+    // ri-fattorizzato dal simplify che lo costruisce e `expand` restituisce un
+    // Product contenente un Sum.  Default true = comportamento storico; la
+    // regola resta attiva per ogni altro chiamante.
+    [[nodiscard]] bool symbolic_like_term_factoring() const noexcept {
+        return symbolic_like_term_factoring_;
+    }
+    void set_symbolic_like_term_factoring(bool on) noexcept {
+        symbolic_like_term_factoring_ = on;
+    }
+
 protected:
     int           max_simplification_depth_{300};
     std::size_t   max_recursion_depth_{256U};
@@ -208,6 +222,7 @@ protected:
     std::size_t   meijerg_max_param_count_{20U};
     std::size_t   meijerg_max_conversion_depth_{8U};
     bool          meijerg_strict_convergence_{true};
+    bool          symbolic_like_term_factoring_{true};
 };
 
 }  // namespace cas::symbolic

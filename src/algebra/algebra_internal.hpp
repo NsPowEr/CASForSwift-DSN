@@ -188,4 +188,28 @@ enumerate_cyclotomic_rootof(const RootOf& node, symbolic::CASContext& ctx);
 [[nodiscard]] std::optional<bool> try_rootof_decision(
     ExprPtr lhs, ExprPtr rhs, symbolic::CASContext& ctx);
 
+// A54 — sospende la raccolta simbolica dei like-term (F1.4) per la durata di
+// una costruzione la cui post-condizione è la forma ESPANSA.  F1.4 è l'inversa
+// della distribuzione: senza questa sospensione il `simplify` che costruisce i
+// Sum di `expand` ri-fattorizza ciò che expand ha appena distribuito, e la
+// post-condizione viene violata dalla FORMA dei fattori (basta una base
+// condivisa non-Symbol).  Rientrante: ripristina il valore precedente, quindi
+// chiamate annidate e chiamanti che l'hanno già sospesa non si disturbano.
+class ExpandedFormScope {
+public:
+    explicit ExpandedFormScope(symbolic::CASContext& ctx)
+        : ctx_(ctx), previous_(ctx.symbolic_like_term_factoring()) {
+        ctx_.set_symbolic_like_term_factoring(false);
+    }
+    ~ExpandedFormScope() { ctx_.set_symbolic_like_term_factoring(previous_); }
+    ExpandedFormScope(const ExpandedFormScope&) = delete;
+    ExpandedFormScope& operator=(const ExpandedFormScope&) = delete;
+    ExpandedFormScope(ExpandedFormScope&&) = delete;
+    ExpandedFormScope& operator=(ExpandedFormScope&&) = delete;
+
+private:
+    symbolic::CASContext& ctx_;
+    bool previous_;
+};
+
 } // namespace cas::algebra

@@ -175,7 +175,14 @@ for (ExprPtr term : flat_terms) {
     // which would expand (a+b)*x back to a*x + b*x, creating an infinite
     // factor/distribute cycle.  Idempotency is instead ensured by sorting
     // the coefficient Sum's terms canonically inside try_merge_symbolic_like_terms.
-    {
+    //
+    // A54: la raccolta è l'INVERSA della distribuzione, quindi un chiamante la
+    // cui post-condizione è la forma espansa (`algebra::expand`) la disattiva
+    // via ctx.set_symbolic_like_term_factoring(false) mentre costruisce.  Senza
+    // di che `expand(x·(ln x+1)·ln(ln x))` tornava fattorizzato — e una
+    // differenza identicamente nulla non si cancellava più in Step 4, perché il
+    // termine con il Sum dentro ha chiave-monomio opaca.
+    if (context_ == nullptr || context_->symbolic_like_term_factoring()) {
         bool merged = true;
         int pass_limit = static_cast<int>(normalized.size()) + 1;
         while (merged && pass_limit-- > 0) {

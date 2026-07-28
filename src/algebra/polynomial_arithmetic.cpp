@@ -468,6 +468,15 @@ void append_product_factors(std::vector<ExprPtr>& out, ExprPtr expr) {
 }
 
 Result<ExprPtr> expand(ExprPtr expr, symbolic::CASContext& ctx) {
+    // A54 — `expand` costruisce ogni Sum tramite `simplify_expr`
+    // (make_sum_expr), e il simplify contiene la raccolta simbolica F1.4, che è
+    // l'inversa esatta della distribuzione: bastava una base condivisa
+    // non-Symbol perché `x·(ln x + 1)·ln(ln x)` tornasse fattorizzato, cioè
+    // perché la post-condizione di expand — nessun Sum sotto un Product —
+    // dipendesse dalla FORMA dei fattori.  Lo scope la sospende per la durata
+    // della costruzione; il resto del simplify, raccolta monomiale di Step 4
+    // compresa (ciò che annulla le differenze nulle), resta attivo.
+    ExpandedFormScope expanded_form(ctx);
     return expand_expr_impl(expr, ctx);
 }
 

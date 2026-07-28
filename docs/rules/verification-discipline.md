@@ -93,6 +93,20 @@ succede soprattutto quando si stringe un budget condiviso.
   esistere (A53, intercettato contando i `[ RUN ]`). Dopo aver aggiunto test:
   contarli nel log del gate, non fidarsi del totale — `2894` invece di `2895`
   è l'unico segnale che ne manca uno.
+- **Un "risultato sbagliato" può essere il VERIFICATORE che sbaglia** (A54).
+  `D(F) ≠ f` accusa il produttore (Risch), ma l'antiderivata era corretta —
+  certificata mpmath a 40 cifre in 7 punti — e a fallire era `is_zero_expr`,
+  perché `expand` non garantiva la propria post-condizione (nessun `Sum` sotto
+  un `Product`) e una differenza identicamente nulla non si cancellava.
+  **Prima di aprire il codice del produttore, certificare numericamente il suo
+  output**: se il valore è giusto, il difetto è a valle. Corollario: quando un
+  verdetto dipende dalla FORMA dell'input, sospettare per primo chi normalizza,
+  non chi decide.
+- **Un flag che cambia il risultato di `simplify` deve entrare nella chiave di
+  cache, o bypassarla** (A54). `simplify_cache_` è indicizzata sul solo
+  `ExprPtr`: un parametro nuovo che altera l'output rende gli hit precedenti
+  risposte sbagliate — e il difetto si ripresenta *solo* quando la cache è
+  calda, cioè nei test end-to-end e mai nei microtest a contesto fresco.
 - **Il benchmark è un gate solo a macchina scarica.** Eseguito nella coda di
   una misura golden (load 30 su 10 CPU) produce numeri gonfiati; lo script
   avvisa, ma l'avviso si perde nel log di build. Attendere `load < 4`, e usare

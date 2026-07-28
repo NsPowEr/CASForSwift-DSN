@@ -230,7 +230,16 @@ Result<ExprPtr> CASContext::simplify(ExprPtr expr) {
         }
     }
 
-    if (caching_enabled_ && !trace_enabled_) {
+    // A54: la chiave di cache è il solo ExprPtr, quindi una entry calcolata con
+    // la raccolta simbolica ATTIVA non vale quando è stata sospesa (expand) —
+    // sarebbe la forma fattorizzata restituita a chi ha chiesto quella
+    // espansa, e il difetto tornerebbe per via della cache invece che della
+    // regola.  In quella modalità la cache si salta in lettura e in scrittura;
+    // il default (true) lascia il path normale intatto.
+    const bool cache_usable =
+        caching_enabled_ && !trace_enabled_ && symbolic_like_term_factoring();
+
+    if (cache_usable) {
         if (auto cached = simplify_cache_.get(expr)) {
             // A31 fase 1 (spec §4.2): a cache hit must re-emit the
             // conditions that were recorded when this entry was first
@@ -271,7 +280,7 @@ Result<ExprPtr> CASContext::simplify(ExprPtr expr) {
         }
     }
 
-    if (caching_enabled_ && !trace_enabled_ && result.is_ok()) {
+    if (cache_usable && result.is_ok()) {
         simplify_cache_.put(expr, SimplifyCacheEntry{
             result.value(), side_conditions_.since(conditions_mark)});
     }

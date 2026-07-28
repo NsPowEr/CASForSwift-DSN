@@ -751,6 +751,7 @@ test/unit/algebra/test_cyclotomic_rootof_d2.cpp
         test/unit/calculus/test_risch_parametric.cpp
         test/unit/calculus/test_risch_parametric_tower.cpp
         test/unit/calculus/test_risch_limited_integrate.cpp
+        test/unit/calculus/test_a54_form_dependence.cpp
         test/unit/calculus/test_risch_de_extensions.cpp
         test/unit/calculus/test_risch_exp_expand.cpp
         test/unit/calculus/test_risch_nested_transcendental.cpp
