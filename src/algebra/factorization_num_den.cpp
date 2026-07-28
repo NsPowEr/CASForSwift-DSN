@@ -24,6 +24,33 @@
 
 namespace cas::algebra {
 
+// A47 — combinazione STRUTTURALE dei due lati di una frazione.
+//
+// `multiply_exprs`/`add_exprs`/`subtract_exprs` (algebra_core.cpp) semplificano
+// ognuna il proprio risultato, ma qui l'espressione costruita finisce SEMPRE in
+// `normalize_rational_parts`, che semplifica numeratore e denominatore prima di
+// qualunque test di forma (`is_zero_expr`). Quelle semplificazioni intermedie
+// sono quindi lavoro ripetuto sull'accumulato che cresce: sei `simplify` per
+// combinazione invece di due, con l'aggregazione a coppie che le paga a ogni
+// passo. Misurato su `∫dx/cos²`: `apart_num_den` = 16.5 s su 17.3 s totali di
+// test, 42 sole `add_parts` (≈394 ms l'una).
+//
+// L'invariante resta quello di prima — i predicati di forma girano sull'output
+// di `normalize_rational_parts`, che non cambia. Un tentativo precedente (A47)
+// aveva provato a togliere anche QUELLE, e li' la logica si rompe davvero:
+// `is_zero_expr`/`is_one_expr` si appoggiano alla forma semplificata.
+[[nodiscard]] static ExprPtr combine_mul_raw(ExprPtr lhs, ExprPtr rhs, symbolic::CASContext& ctx) {
+    return ctx.arena().make<Product>(std::vector<ExprPtr>{lhs, rhs});
+}
+
+[[nodiscard]] static ExprPtr combine_add_raw(ExprPtr lhs, ExprPtr rhs, symbolic::CASContext& ctx) {
+    return ctx.arena().make<Sum>(std::vector<ExprPtr>{lhs, rhs});
+}
+
+[[nodiscard]] static ExprPtr combine_sub_raw(ExprPtr lhs, ExprPtr rhs, symbolic::CASContext& ctx) {
+    return ctx.arena().make<Binary>(BinaryOp::Sub, lhs, rhs);
+}
+
 [[nodiscard]] static Result<RationalParts> normalize_rational_parts(RationalParts parts, symbolic::CASContext& ctx) {
     auto numerator = simplify_expr(parts.numerator, ctx);
     if (numerator.is_error()) {
@@ -65,18 +92,10 @@ namespace cas::algebra {
 }
 
 [[nodiscard]] static Result<RationalParts> multiply_parts(const RationalParts& lhs, const RationalParts& rhs, symbolic::CASContext& ctx) {
-    auto numerator = multiply_exprs(lhs.numerator, rhs.numerator, ctx);
-    if (numerator.is_error()) {
-        return fail<RationalParts>(numerator.error());
-    }
-    auto denominator = multiply_exprs(lhs.denominator, rhs.denominator, ctx);
-    if (denominator.is_error()) {
-        return fail<RationalParts>(denominator.error());
-    }
     return normalize_rational_parts(
         RationalParts{
-            .numerator = numerator.value(),
-            .denominator = denominator.value(),
+            .numerator = combine_mul_raw(lhs.numerator, rhs.numerator, ctx),
+            .denominator = combine_mul_raw(lhs.denominator, rhs.denominator, ctx),
         },
         ctx);
 }
@@ -103,51 +122,31 @@ namespace cas::algebra {
 }
 
 [[nodiscard]] static Result<RationalParts> add_parts(const RationalParts& lhs, const RationalParts& rhs, symbolic::CASContext& ctx) {
-    auto lhs_scaled = multiply_exprs(lhs.numerator, rhs.denominator, ctx);
-    if (lhs_scaled.is_error()) {
-        return fail<RationalParts>(lhs_scaled.error());
-    }
-    auto rhs_scaled = multiply_exprs(rhs.numerator, lhs.denominator, ctx);
-    if (rhs_scaled.is_error()) {
-        return fail<RationalParts>(rhs_scaled.error());
-    }
-    auto numerator = add_exprs(lhs_scaled.value(), rhs_scaled.value(), ctx);
-    if (numerator.is_error()) {
-        return fail<RationalParts>(numerator.error());
-    }
-    auto denominator = multiply_exprs(lhs.denominator, rhs.denominator, ctx);
-    if (denominator.is_error()) {
-        return fail<RationalParts>(denominator.error());
-    }
+    // A47 — NB: la scorciatoia `N₁/D + N₂/D = (N₁+N₂)/D` per denominatori
+    // strutturalmente uguali e' matematicamente esatta e qui varrebbe un altro
+    // 25% di costo, ma NON e' applicabile finche' vive il difetto A54: cambiando
+    // la forma che arriva a Risch, `∫(1/x + 1/(x·ln x))·ln(ln x)` smette di
+    // rispondere `Unimplemented` e restituisce un'antiderivata SBAGLIATA
+    // (`RischLimitedIntegrate.EndToEnd_NestedLogTower_Solved`). Un guadagno di
+    // costo non si paga con un silent-wrong: la scorciatoia rientra quando A54
+    // chiude.
+    ExprPtr lhs_scaled = combine_mul_raw(lhs.numerator, rhs.denominator, ctx);
+    ExprPtr rhs_scaled = combine_mul_raw(rhs.numerator, lhs.denominator, ctx);
     return normalize_rational_parts(
         RationalParts{
-            .numerator = numerator.value(),
-            .denominator = denominator.value(),
+            .numerator = combine_add_raw(lhs_scaled, rhs_scaled, ctx),
+            .denominator = combine_mul_raw(lhs.denominator, rhs.denominator, ctx),
         },
         ctx);
 }
 
 [[nodiscard]] static Result<RationalParts> subtract_parts(const RationalParts& lhs, const RationalParts& rhs, symbolic::CASContext& ctx) {
-    auto lhs_scaled = multiply_exprs(lhs.numerator, rhs.denominator, ctx);
-    if (lhs_scaled.is_error()) {
-        return fail<RationalParts>(lhs_scaled.error());
-    }
-    auto rhs_scaled = multiply_exprs(rhs.numerator, lhs.denominator, ctx);
-    if (rhs_scaled.is_error()) {
-        return fail<RationalParts>(rhs_scaled.error());
-    }
-    auto numerator = subtract_exprs(lhs_scaled.value(), rhs_scaled.value(), ctx);
-    if (numerator.is_error()) {
-        return fail<RationalParts>(numerator.error());
-    }
-    auto denominator = multiply_exprs(lhs.denominator, rhs.denominator, ctx);
-    if (denominator.is_error()) {
-        return fail<RationalParts>(denominator.error());
-    }
+    ExprPtr lhs_scaled = combine_mul_raw(lhs.numerator, rhs.denominator, ctx);
+    ExprPtr rhs_scaled = combine_mul_raw(rhs.numerator, lhs.denominator, ctx);
     return normalize_rational_parts(
         RationalParts{
-            .numerator = numerator.value(),
-            .denominator = denominator.value(),
+            .numerator = combine_sub_raw(lhs_scaled, rhs_scaled, ctx),
+            .denominator = combine_mul_raw(lhs.denominator, rhs.denominator, ctx),
         },
         ctx);
 }

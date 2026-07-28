@@ -110,6 +110,21 @@ patologico). È lo stesso criterio con cui A51 scelse il cap per-entry di 60 s.
 Un multiplo scelto a intuito sul solo massimo osservato non dice **niente** su
 dove comincia la patologia.
 
+**Rimisura il sintomo prima di aprire il codice: la task può descrivere uno
+stato non più vero.** A47 era nata su `verify:simplify` a 60 s (cap) e
+`verify:together` a 46 s; alla rimisura, tre giorni e due task dopo, erano 70 ms
+e 2.9 s — il difetto d'origine era già stato chiuso da A53. Senza quella misura
+il lavoro sarebbe stato attribuito alla task sbagliata e diretto al punto
+sbagliato. Vale anche il contrario: il costo residuo era reale, ma altrove
+(`apart_num_den`, 96% del test).
+
+**Un'ottimizzazione che cambia il RISULTATO non è un'ottimizzazione.** In A47
+l'identità esatta `N₁/D + N₂/D = (N₁+N₂)/D` valeva un altro 25%, ma cambiando la
+forma passata a valle faceva produrre a Risch un'antiderivata sbagliata. La
+regola non è "l'identità era sbagliata" (era esatta): è che un guadagno di costo
+non si paga con un silent-wrong. Si rimuove, si apre il difetto esposto come
+task propria (A54), e la si riattiva quando quella chiude.
+
 **Costo per livello ≠ numero di livelli.** In una ricorsione, prima di attaccare
 la profondità misura il costo del SINGOLO livello: in A49 le tre ipotesi naturali
 sono state tutte smentite dai contatori — passi di ricorsione identici (18 contro
