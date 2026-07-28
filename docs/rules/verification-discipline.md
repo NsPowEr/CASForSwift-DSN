@@ -121,3 +121,35 @@ succede soprattutto quando si stringe un budget condiviso.
   interna (`apart_num_den`) PRIMA della fase che maschera la differenza — e
   verificarlo col canary (rosso su HEAD pre-fix, verde col fix), non fidarsi
   che "il test passa" basti.
+- **Una diagnosi d'apertura sbagliata su ENTRAMBI i punti può comunque
+  puntare all'area giusta** (A55). La scoperta citava "GCD non collassa
+  potenze" e "binomi espansi": nessuno dei due riproduce isolatamente (la GCD
+  collassa correttamente le potenze condivise; i binomi non si espandono mai
+  nel repro originale). La causa vera — lo Step 8 del simplifier che
+  ridistribuisce `Product(Sum(N), Pow(D,-1))` non appena `together()` lo
+  assembla — non emerge finché non si rimisura il repro DOPO che un fix
+  correlato (A56) ha eliminato il rumore che mascherava il vero sintomo.
+  **Corollario**: quando riapri un task "quasi chiuso da un fix vicino",
+  rimisura il repro letterale prima di fidarti della diagnosi scritta
+  all'apertura — può essere obsoleta pur restando nell'area giusta.
+- **Una regola di canonicalizzazione del simplifier che è l'inversa della
+  post-condizione di una funzione va sospesa via RAII scope, non aggirata
+  altrove** (A54/A55, pattern gemello). `expand()` sospende la raccolta
+  (F1.4) perché la sua post-condizione è la forma espansa; `together()`
+  sospende la distribuzione (Step 8) perché la sua post-condizione è la
+  forma combinata. Stesso meccanismo in entrambi i sensi: flag su
+  `CASContext` (default = comportamento storico, attivo per ogni altro
+  chiamante), RAII scope rientrante che lo sospende per la durata della
+  propria costruzione, bypass della cache di `simplify()` quando sospeso
+  (la chiave è il solo `ExprPtr`, non il flag).
+- **Un test che confronta contro `ctx.simplify(expected)` può passare per
+  coincidenza se ENTRAMBI i lati subiscono la stessa trasformazione
+  indesiderata** (A55, `AlgebraTogetherTest.RebuildsSingleRationalExpression`).
+  Il test dichiarava di verificare "una sola frazione combinata", ma
+  `together()` restituiva una `Sum` distribuita E `ctx.simplify(expected)`
+  la distribuiva allo stesso modo — structural_equal passava confrontando
+  due forme ugualmente sbagliate. Il fix ha rivelato il falso positivo.
+  Quando il nome del test dichiara una proprietà strutturale, asserirla
+  esplicitamente (es. `!expr_is<Sum>(risultato)`), non solo l'uguaglianza
+  con un "expected" costruito con lo stesso path che potrebbe condividere il
+  bug.

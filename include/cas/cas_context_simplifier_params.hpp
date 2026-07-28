@@ -203,6 +203,24 @@ struct CASContextSimplifierParams {
         symbolic_like_term_factoring_ = on;
     }
 
+    // A55 — distribuzione di un fattore su un `Sum` dentro un `Product`
+    // (Step 8 di `simplify_product_factors`, `k·(a+b) → k·a+k·b`). È l'INVERSA
+    // della combinazione a frazione unica, quindi chi ha per post-condizione
+    // `N/D` combinato (`algebra::together`) la disattiva per la durata della
+    // propria costruzione finale: altrimenti il `Product(Sum(N), Pow(D,-1))`
+    // appena assemblato viene ridistribuito dal simplify che lo costruisce, e
+    // `together` restituisce una somma di frazioni invece di una sola — esatto
+    // complementare del difetto di A54 (lì l'inversa era la raccolta, qui è la
+    // distribuzione). Default true = comportamento storico; la regola resta
+    // attiva per ogni altro chiamante (es. Gamma reflection si aspetta la
+    // distribuzione di default, vedi commento in simplify_arithmetic_chain.cpp).
+    [[nodiscard]] bool symbolic_sum_distribution() const noexcept {
+        return symbolic_sum_distribution_;
+    }
+    void set_symbolic_sum_distribution(bool on) noexcept {
+        symbolic_sum_distribution_ = on;
+    }
+
 protected:
     int           max_simplification_depth_{300};
     std::size_t   max_recursion_depth_{256U};
@@ -223,6 +241,7 @@ protected:
     std::size_t   meijerg_max_conversion_depth_{8U};
     bool          meijerg_strict_convergence_{true};
     bool          symbolic_like_term_factoring_{true};
+    bool          symbolic_sum_distribution_{true};
 };
 
 }  // namespace cas::symbolic

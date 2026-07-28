@@ -411,9 +411,21 @@ TEST(AlgebraTogetherTest, RebuildsSingleRationalExpression) {
     auto merged = algebra::together(expr.value(), ctx);
     ASSERT_TRUE(merged.is_ok()) << merged.error().message;
 
-    auto simplified_expected = ctx.simplify(expected.value());
-    ASSERT_TRUE(simplified_expected.is_ok()) << simplified_expected.error().message;
-    EXPECT_TRUE(structural_equal(merged.value(), simplified_expected.value()));
+    // A55 — `ctx.simplify()` diretto ridistribuisce (Step 8 è attivo lì,
+    // sospeso solo dentro `together`): confrontare contro `together(expected)`
+    // mette entrambi i lati sotto la STESSA sospensione, la sola forma
+    // corretta per verificare "una sola frazione combinata".
+    auto together_expected = algebra::together(expected.value(), ctx);
+    ASSERT_TRUE(together_expected.is_ok()) << together_expected.error().message;
+    EXPECT_TRUE(structural_equal(merged.value(), together_expected.value()));
+
+    // Il valore non deve cambiare, e il risultato deve restare una singola
+    // frazione (non una Sum di termini distribuiti sul denominatore comune).
+    auto eq = symbolic::mathematically_equal(merged.value(), expr.value(), ctx);
+    ASSERT_TRUE(eq.is_ok());
+    EXPECT_TRUE(eq.value());
+    EXPECT_FALSE(expr_is<Sum>(merged.value()))
+        << "together ha lasciato il risultato distribuito sul denominatore comune";
 }
 
 TEST(AlgebraExpandTest, ExpandsBinomialSquare) {

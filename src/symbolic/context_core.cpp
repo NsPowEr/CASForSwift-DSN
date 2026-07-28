@@ -236,8 +236,12 @@ Result<ExprPtr> CASContext::simplify(ExprPtr expr) {
     // espansa, e il difetto tornerebbe per via della cache invece che della
     // regola.  In quella modalità la cache si salta in lettura e in scrittura;
     // il default (true) lascia il path normale intatto.
+    // A55: stesso argomento per la distribuzione simbolica sospesa da
+    // `algebra::together` (CombinedFormScope) — una entry calcolata a
+    // distribuzione ATTIVA non vale quando è sospesa, e viceversa.
     const bool cache_usable =
-        caching_enabled_ && !trace_enabled_ && symbolic_like_term_factoring();
+        caching_enabled_ && !trace_enabled_
+        && symbolic_like_term_factoring() && symbolic_sum_distribution();
 
     if (cache_usable) {
         if (auto cached = simplify_cache_.get(expr)) {

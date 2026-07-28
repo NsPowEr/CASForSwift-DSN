@@ -736,6 +736,7 @@ test/unit/symbolic/test_sqrt_fold.cpp
         test/unit/algebra/test_lrt_subresultant_a45.cpp
         test/unit/algebra/test_a47_together_cost.cpp
         test/unit/algebra/test_a56_together_shortcut.cpp
+        test/unit/algebra/test_a55_together_combine.cpp
         test/unit/algebra/test_logtoreal_a46.cpp
         test/unit/algebra/test_algebraic_number_rootof.cpp
 test/unit/algebra/test_cyclotomic_rootof_d2.cpp

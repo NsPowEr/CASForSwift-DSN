@@ -385,7 +385,13 @@ Result<ExprPtr> Simplifier::simplify_product_factors(
     }
 
     // Step 8: distribute coefficient over a Sum factor (if present).
-    {
+    //
+    // A55 — `algebra::together` sospende questo step (via `CombinedFormScope`,
+    // `set_symbolic_sum_distribution(false)`) durante l'assemblaggio finale
+    // `N/D`: senza la sospensione, il `Product(Sum(N), Pow(D,-1))` appena
+    // costruito viene ridistribuito qui in una somma di frazioni — esatto
+    // complementare del difetto di A54 (raccolta invece di distribuzione).
+    if (context_ == nullptr || context_->symbolic_sum_distribution()) {
         ExprPtr sum_factor = nullptr;
         std::size_t sum_idx = 0;
         bool found_sum = false;

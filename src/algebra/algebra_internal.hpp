@@ -212,4 +212,32 @@ private:
     bool previous_;
 };
 
+// A55 — sospende la distribuzione simbolica di un fattore su un `Sum` (Step 8
+// di `simplify_product_factors`, `k·(a+b) → k·a+k·b`) per la durata di una
+// costruzione la cui post-condizione è la forma COMBINATA `N/D`.  È l'esatto
+// complementare di `ExpandedFormScope`: lì si sospendeva la raccolta (inversa
+// della distribuzione) perché la post-condizione era la forma espansa; qui si
+// sospende la distribuzione (inversa della combinazione) perché la
+// post-condizione è una frazione unica.  Senza questa sospensione,
+// `divide_exprs(N, D)` in `algebra::together` costruisce `Product(Sum(N),
+// Pow(D,-1))`, che Step 8 ridistribuisce immediatamente in una somma di
+// frazioni — `together` non "mette insieme" nulla.  Rientrante: ripristina il
+// valore precedente.
+class CombinedFormScope {
+public:
+    explicit CombinedFormScope(symbolic::CASContext& ctx)
+        : ctx_(ctx), previous_(ctx.symbolic_sum_distribution()) {
+        ctx_.set_symbolic_sum_distribution(false);
+    }
+    ~CombinedFormScope() { ctx_.set_symbolic_sum_distribution(previous_); }
+    CombinedFormScope(const CombinedFormScope&) = delete;
+    CombinedFormScope& operator=(const CombinedFormScope&) = delete;
+    CombinedFormScope(CombinedFormScope&&) = delete;
+    CombinedFormScope& operator=(CombinedFormScope&&) = delete;
+
+private:
+    symbolic::CASContext& ctx_;
+    bool previous_;
+};
+
 } // namespace cas::algebra

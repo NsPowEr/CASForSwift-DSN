@@ -448,6 +448,12 @@ Result<ExprPtr> together(ExprPtr expr, symbolic::CASContext& ctx) {
     if (is_one_expr(D)) {
         return ok(N);
     }
+
+    // A55 — senza sospendere Step 8 (distribuzione, simplify_arithmetic_chain.cpp),
+    // il `Product(N, Pow(D,-1))` appena costruito da `divide_exprs` viene
+    // ridistribuito in una somma di frazioni non appena N è un `Sum` con più
+    // di un termine — `together` non combinerebbe nulla.
+    CombinedFormScope combined_scope(ctx);
     return divide_exprs(N, D, ctx);
 }
 
