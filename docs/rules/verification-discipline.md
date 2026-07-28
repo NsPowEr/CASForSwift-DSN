@@ -153,3 +153,38 @@ succede soprattutto quando si stringe un budget condiviso.
   esplicitamente (es. `!expr_is<Sum>(risultato)`), non solo l'uguaglianza
   con un "expected" costruito con lo stesso path che potrebbe condividere il
   bug.
+- **Generalizzare una regola del simplifier può scontrarsi con una regola
+  OPPOSTA già esistente altrove nel motore** (A50, `collapse_sqrt_pairs`
+  Phase 2 vs `builtin_rewrite_algebraic.cpp`). Estendere `sqrt(a)*sqrt(b) →
+  sqrt(a·b)` oltre i letterali razionali ha silenziosamente disfatto la
+  regola opposta e deliberata che espande `sqrt(prodotto non-negativo)` in
+  fattori separati (serve a valle per cancellazioni QR) — le due direzioni
+  oscillavano sullo stesso input. I test mirati (stessa area, stesso file)
+  non lo vedono: il conflitto emerge solo su un `CASContext` con le
+  assumption giuste, in un test scritto per la regola OPPOSTA. **Solo la
+  quick suite intera l'ha preso.** Corollario: dopo aver toccato un
+  primitivo di simplify condiviso (Product/Sum/Pow chain), la quick suite
+  completa non è opzionale — un filtro mirato, per quanto ampio, campiona
+  l'area sbagliata. Fix sound: restringere la generalizzazione a quando
+  produce una VERA riduzione (coefficiente non banale o base condivisa), non
+  la semplice concatenazione che l'altra regola già possiede.
+- **Un letterale negativo (`IntegerLit(-2)`) non è mai `Unary(Neg, ...)`** —
+  sono due forme AST diverse per lo stesso valore. Le regole di parità che
+  pattern-matchano sulla forma sintattica `Neg` (es. `sin(-x)=-sin(x)`)
+  quindi NON riconoscono `sin(IntegerLit(-2))`: `cos(-2)` e `cos(2)` restano
+  atomi strutturalmente distinti che nessuna regola confronta (A50, bloccava
+  `∫sin(x)/(x-c)`). Quando si costruisce un rewrite che sa GIÀ di maneggiare
+  una fase/costante isolata (qui: l'identità di addizione trig), canonicizzare
+  il segno di quella costante localmente nel proprio codice è lo scope
+  corretto — non serve (e sarebbe rischioso) estendere le regole di parità
+  globali a riconoscere anche i letterali negativi.
+- **Prima di scrivere una regola nuova, verificare se ne esiste già una
+  spenta da un flag mai acceso fuori dal suo primo consumer** (A50, identità
+  3). La regola `ln(b^e)→e·ln(b)` condizionata al dominio era già
+  implementata e testata da A31 fase 2, dietro `conditional_domain_rules`
+  (default `false`, acceso solo dal golden runner per le entry con
+  `assume`). La verifica bloccata non serviva NESSUN codice motore nuovo:
+  serviva solo accendere il flag, localmente, per la durata del confronto —
+  stesso pattern del golden runner. Accenderlo GLOBALMENTE dentro
+  `mathematically_equal` sarebbe stato un errore diverso: relaxerebbe la
+  soundness di ogni confronto nel motore, non solo di questo.

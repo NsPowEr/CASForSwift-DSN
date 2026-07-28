@@ -87,6 +87,22 @@ Result<bool> mathematically_equal(ExprPtr lhs, ExprPtr rhs, CASContext& context)
         }
     }
 
+    // A50 (identità 2): espande sin/cos/sinh/cosh di un argomento Sum con
+    // fase costante + parte simbolica via la formula di addizione esatta,
+    // prima del confronto strutturale — stessa motivazione dei tre
+    // normalizzatori sopra (spelling interscambiabili, non canonicalizzazione
+    // globale). Chiude D(F)=f sulla famiglia trigonometrica traslata.
+    {
+        auto lhs_t = algebra::trig_addition_normalize(lhs_s.value(), context.arena());
+        auto rhs_t = algebra::trig_addition_normalize(rhs_s.value(), context.arena());
+        if (lhs_t.get() != lhs_s.value().get() || rhs_t.get() != rhs_s.value().get()) {
+            auto lhs_t_s = context.simplify(lhs_t);
+            auto rhs_t_s = context.simplify(rhs_t);
+            if (lhs_t_s.is_ok()) lhs_s = lhs_t_s;
+            if (rhs_t_s.is_ok()) rhs_s = rhs_t_s;
+        }
+    }
+
     if (structural_equal(lhs_s.value(), rhs_s.value())) {
         finalize();
         return ok(true);

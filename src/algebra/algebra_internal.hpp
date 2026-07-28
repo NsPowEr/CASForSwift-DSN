@@ -170,6 +170,19 @@ struct MultivariateSquareFreeFactor {
 // verso Ei introdurrebbero un i spurio in un risultato reale — spec §4).
 [[nodiscard]] ExprPtr nonelementary_normalize(ExprPtr expr, AstArena& arena);
 
+// A50 (identità 2): espande sin/cos/sinh/cosh di un argomento `Sum` che
+// mescola una parte SENZA simboli liberi (fase/traslazione costante) e una
+// parte CON simboli, via la formula di addizione esatta —
+// sin(P+C)=sin(P)cos(C)+cos(P)sin(C) e le tre analoghe. Non è una
+// canonicalizzazione globale (stessa cautela di A43/A44): un argomento
+// interamente costante o interamente simbolico non viene toccato. Applicato
+// ai due lati di mathematically_equal, come i normalizzatori sopra — chiude
+// D(F)=f su ∫sin(x+c)/x = cos(c)·Si(x)+sin(c)·Ci(x) e sulla famiglia
+// traslata ∫sin(x)/(x-c) (le funzioni speciali shiftate si ricombinano
+// nell'argomento originale via la stessa identità applicata in senso
+// inverso su D(F)).
+[[nodiscard]] ExprPtr trig_addition_normalize(ExprPtr expr, AstArena& arena);
+
 // F7.5.A1 — Geometric / cyclotomic RootOf expansion (closes
 // HC-F75-CYCLOTOMIC-ROOTOF). See src/algebra/algebraic_equal_cyclotomic.cpp.
 [[nodiscard]] std::optional<std::vector<ExprPtr>>

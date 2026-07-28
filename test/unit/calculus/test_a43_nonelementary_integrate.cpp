@@ -50,6 +50,29 @@ protected:
         EXPECT_TRUE(eq.value()) << "D(F) != f for " << integrand;
     }
 
+    // A50 (identità 3): come `expect_antiderivative_of`, ma dichiara
+    // esplicitamente il dominio x>0 attivando `conditional_domain_rules`
+    // (A31 fase 2, §10.3.R2a: `ln(b^e) -> e*ln(b)`) solo per la durata di
+    // QUESTO confronto — stesso pattern del golden runner (§10.5: il flag si
+    // accende SOLO per le entry con dominio dichiarato, mai globalmente in
+    // `mathematically_equal`, per non rilassare la soundness di ogni altro
+    // confronto nel motore). Il dominio non è arbitrario: `ln(x)` nell'
+    // integranda stessa richiede già x>0 perché f sia reale — la condizione
+    // emessa da R2a è quella che il problema impone, non una relaxation.
+    void expect_antiderivative_of_for_positive_x(const std::string& integrand) {
+        ctx.set_conditional_domain_rules(true);
+        auto F = calculus::integrate(parse(integrand), x, ctx);
+        ctx.set_conditional_domain_rules(false);
+        ASSERT_TRUE(F.is_ok()) << integrand << ": " << F.error().message;
+        auto D = calculus::diff(F.value(), x, 1U, ctx);
+        ASSERT_TRUE(D.is_ok()) << integrand << " (diff): " << D.error().message;
+        ctx.set_conditional_domain_rules(true);
+        auto eq = symbolic::mathematically_equal(D.value(), parse(integrand), ctx);
+        ctx.set_conditional_domain_rules(false);
+        ASSERT_TRUE(eq.is_ok()) << integrand;
+        EXPECT_TRUE(eq.value()) << "D(F) != f for " << integrand << " (x>0)";
+    }
+
     void expect_closed_form(const std::string& integrand, const std::string& expected) {
         auto F = calculus::integrate(parse(integrand), x, ctx);
         ASSERT_TRUE(F.is_ok()) << integrand << ": " << F.error().message;
@@ -125,12 +148,16 @@ TEST_F(A43NonelementaryIntegrateTest, HigherOrderPolesReduceToEi) {
 // resta un fallimento e non un silenzio.
 
 // Gaussiana generale: completamento del quadrato, entrambi i segni del
-// coefficiente direttore (erfi per A > 0, erf per A < 0).
+// coefficiente direttore (erfi per A > 0, erf per A < 0). A50 — con la
+// generalizzazione di `sqrt(a)*sqrt(b) -> sqrt(a*b)` (A50, non piu' limitata
+// a razionali letterali: prova la non-negativita' componendo `extract_monomial`
+// con `known_nonneg`) `sqrt(pi/A)*sqrt(A) -> sqrt(pi)` collassa, e la verifica
+// simbolica chiude anche per √A ≠ 1 — non serve piu' la sola forma chiusa.
 TEST_F(A43NonelementaryIntegrateTest, GeneralGaussianCompletesTheSquare) {
-    // √A = 1: la verifica simbolica chiude.
     expect_antiderivative_of("exp(x^2+x)");
     expect_antiderivative_of("exp(x^2+3*x+1)");
-    // √A ≠ 1: forma chiusa pretesa, D(F)=f bloccato da A50.
+    expect_antiderivative_of("exp(2*x^2)");
+    expect_antiderivative_of("exp(-2*x^2+x)");
     expect_closed_form("exp(2*x^2)", "sqrt(pi/2)/2*erfi(sqrt(2)*x)");
     expect_closed_form("exp(-2*x^2+x)",
                        "sqrt(pi/2)/2*exp(1/8)*erf(sqrt(2)*(x-1/4))");
@@ -143,6 +170,11 @@ TEST_F(A43NonelementaryIntegrateTest, ShiftedTrigUsesAdditionFormulas) {
     expect_antiderivative_of("sin(2*x)/x");
     expect_antiderivative_of("cos(3*x)/x");
     // Fase non nulla: forma chiusa pretesa, D(F)=f bloccato da A50.
+    expect_antiderivative_of("sin(x+1)/x");
+    expect_antiderivative_of("cos(x+1)/x");
+    expect_antiderivative_of("sin(x)/(x-2)");
+    expect_antiderivative_of("sinh(x+1)/x");
+    expect_antiderivative_of("cosh(x+1)/x");
     expect_closed_form("sin(x+1)/x", "cos(1)*Si(x) + sin(1)*Ci(x)");
     expect_closed_form("cos(x+1)/x", "cos(1)*Ci(x) - sin(1)*Si(x)");
     expect_closed_form("sin(x)/(x-2)", "cos(2)*Si(x-2) + sin(2)*Ci(x-2)");
@@ -154,6 +186,11 @@ TEST_F(A43NonelementaryIntegrateTest, ShiftedTrigUsesAdditionFormulas) {
 // (potenza al numeratore e argomento affine nel logaritmo).
 TEST_F(A43NonelementaryIntegrateTest, LogIntegralGeneralForms) {
     expect_antiderivative_of("1/ln(x)");
+    // ln(2*x) = ln(2)+ln(x) (R2b) chiude già senza dominio dichiarato — solo
+    // ln(x^(s+1))=(s+1)*ln(x) (R2a) era davvero bloccata (A50 identità 3).
+    expect_antiderivative_of("1/ln(2*x)");
+    expect_antiderivative_of_for_positive_x("x/ln(x)");
+    expect_antiderivative_of_for_positive_x("x^2/ln(x)");
     expect_closed_form("x/ln(x)", "li(x^2)");
     expect_closed_form("x^2/ln(x)", "li(x^3)");
     expect_closed_form("1/ln(2*x)", "li(2*x)/2");

@@ -388,6 +388,7 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/algebraic_equal_radical.cpp
     src/algebra/hyperbolic_normalize.cpp
     src/algebra/nonelementary_normalize.cpp
+    src/algebra/trig_addition_normalize.cpp
     src/algebra/polynomial_integer.cpp
     src/algebra/polynomial_conversions.cpp
     src/algebra/polynomial_gcd_core.cpp
@@ -699,6 +700,8 @@ if(CAS_ENABLE_TESTING)
         test/unit/symbolic/test_calculus.cpp
 test/unit/symbolic/test_unwinding_number.cpp
 test/unit/symbolic/test_sqrt_fold.cpp
+        test/unit/symbolic/test_a50_sqrt_product_general.cpp
+        test/unit/symbolic/test_a50_trig_addition_normalize.cpp
         test/unit/symbolic/test_strict_canonical.cpp
         test/unit/symbolic/test_complex_simplification.cpp
         test/unit/symbolic/test_extended_real.cpp
