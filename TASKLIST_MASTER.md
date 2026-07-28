@@ -574,14 +574,25 @@ Ordinati per severità/impatto decrescente. Ogni voce verificata aperta a codice
 - **Verifica**: 4 test permanenti in `test/unit/symbolic/test_a48_sum_fixpoint.cpp` — la tabella completa del repro (11 forme, incluse quelle che passavano già, così una regressione si distingue da un falso successo), i **casi negativi** (differenze genuine che non devono collassare), l'idempotenza (inclusa la guardia residuo `x^3 + x` che non va fattorizzata) e il caso A43 che ha fatto emergere il difetto.
 - **Refs**: A39, A43 (scoperta), `src/symbolic/simplify_arithmetic_chain_liketerm.cpp`
 
-### A49 · `integrate`: costo esponenziale nel budget di ricorsione su polo lineare TRASLATO — 📋 APERTO 2026-07-26 — `[E2·C3·S3·R2]`
+### A49 · `integrate`: costo esponenziale nel budget di ricorsione su polo lineare TRASLATO — ✅ FATTO 2026-07-28 — `[E2·C3·S3·R2]`
 - **Scoperta (A43 inc. 4)**: `∫e^{2x}/(x−1)³` non termina (>200 s). Non è l'ordine del polo e **non è A43**.
 - **Misure**:
   - `∫e^x/x³` 0.52 s · `∫e^x/x⁴` 0.58 s (polo in 0, qualunque ordine) — ma `∫e^x/(x−1)²` **3.3 s** contro `∫e^x/x²` **0.58 s**: il costo esplode con la **traslazione**, non con l'ordine.
   - Sweep su `max_integration_depth` per `∫e^{2x}/(x−1)³`: depth 2 → 0.56 s (`NO_STRATEGY`), depth 3 → **1.99 s con la risposta corretta e completa**, depth 4 → 4.42 s, depth 16 (default) → non termina. Il tempo cresce col budget mentre la risposta è già completa a 3: è esplorazione **sprecata**.
   - **Controllo decisivo**: con il fallback A43 disattivato l'integranda non termina lo stesso (>200 s). Il costo è tutto nella catena ricorsiva **pre-Risch** (passi 1-2 di `Integrator::integrate`), che esplora a fondo prima di fallire.
-- **Conseguenza pratica**: il caso è escluso da `test_a43_nonelementary_integrate.cpp` (`HigherOrderPolesReduceToEi`) con la motivazione a codice; il polo traslato resta coperto a ordine 2. Rientra quando A49 chiude.
-- **Refs**: A43 (scoperta), A2 (hard-timeout), A30 (budget ops-count)
+- **Conseguenza pratica**: il caso era escluso da `test_a43_nonelementary_integrate.cpp` (`HigherOrderPolesReduceToEi`); **rientra con questa chiusura**, insieme a `exp(x)/(x+5)^2`.
+
+#### ✅ CHIUSA 2026-07-28 — la causa non era nessuna delle tre ipotesi misurate per prime
+- **Rimisura post-A53 (il quadro era cambiato)**: il budget d'integrazione ha convertito l'hang in un rifiuto deterministico, quindi il difetto aveva finalmente un numero. `e^x/x²` 56'167 ops · 1.8 s · risolta; `e^x/(x−1)²` **316'681 ops · 15.0 s** risolta; `e^{2x}/(x−1)³` e `e^x/(x−1)³` al tetto 500'000 · 35 s → `NO_STRATEGY`. La sola traslazione del polo costava **5.6×**, a parità di ordine.
+- **Tre ipotesi formulate e SMENTITE dai contatori** (nessuna patch scritta su di esse):
+  1. *esplosione dei passi IBP* — misurato: 18 chiamate in entrambi i casi, e il caso peggiore (`(x−1)³`) ne fa **9**, cioè meno;
+  2. *crescita delle espressioni* — misurato con conteggio nodi per passo: 6 nodi contro 8, costanti su tutti i livelli;
+  3. *espansione ripetuta del binomio* — misurato: `expand` 1278→1406, `parse_polynomial` 1261→1389, cioè **+10%** contro 5.6× di costo.
+- **Causa radice (profilo a campionamento)**: il costo non è nel numero di livelli ma **nel costo di ciascun livello**. Ogni passo IBP rilancia l'INTERA pipeline sul sotto-integrale — `integrate_risch` compreso: **56% dei campioni**, con ricorsione profonda 13. Con costante di traslazione più grande (`x+5`) il caso non terminava affatto, e **né il tetto ops né il SIGALRM per-entry lo fermavano**: il lavoro sta in codice che non incrementa il contatore né attraversa un punto di interruzione (è il confine dichiarato in A53).
+- **Fix — un teorema, non una forma riconosciuta a occhio**: per **Liouville**, `∫e^{P(x)}·R(x)` con `R` dotato di polo genuino **non ha primitiva elementare**; la catena IBP non può quindi chiuderla ed è lavoro garantito sprecato. Il guard in `integrate_product_impl` (accanto al gemello BUG-HANG-001 già presente) rifiuta quel dispatch e delega alla famiglia non-elementare A43, che quella forma chiusa la produce (`Ei`). Riconosce solo i poli VERI (`Pow(Q,−k)`, `Div(·,Q)`): un `Sum` che *contiene* un polo (`x + 1/x`) non è un fattore-polo e resta intatto, come `∫x²e^x` e `∫x·ln x`.
+- **Effetto misurato**: `e^x/x²` 56'167 → **2'097 ops** (1.8 s → 0.08 s); `e^x/(x−1)²` 316'681 → **6'235** (15.0 s → 0.29 s); `e^x/(x+5)²` non terminante (>300 s) → **6'297** (0.27 s); `e^{2x}/(x−1)³` 500'094 al tetto → **12'627** (35 s → 0.57 s). Controllo senza polo `x²·e^x` invariato (1'121 ops).
+- **Verifica**: 3 test permanenti (`test/unit/calculus/test_a49_exp_pole_no_ibp.cpp`) — la soglia è sulle **ops**, non sul tempo, perché un test a wall-clock misurerebbe la macchina (lezione A51); più i due casi riabilitati in A43, che pretendono forma chiusa **e** `D(F)=f`. Quick suite 2898/2898; golden **979/4/43** invariato; benchmark senza regressioni.
+- **Refs**: A43 (scoperta), A53 (il budget che ha reso il difetto misurabile), A2 (hard-timeout), A30 (budget ops-count), `src/calculus/integrate_product_power.cpp`
 
 ### A50 · Verifica simbolica `D(F)=f` bloccata su tre identità mancanti — 📋 APERTO 2026-07-26 — `[E2·C3·S2·R1]`
 - **Scoperta (A43 inc. 4)**: tre famiglie di antiderivate **esatte** (certificate mpmath a 30 cifre, errore relativo < 1e-20, `scripts/a43_special_fn_check.py` §"generalizzazioni emesse dal motore") che il motore deriva correttamente ma non riesce a **provare** uguali all'integranda:

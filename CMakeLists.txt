@@ -718,6 +718,7 @@ test/unit/symbolic/test_sqrt_fold.cpp
     test/unit/symbolic/test_a51_operation_budget.cpp
     test/unit/symbolic/test_a53_condition_rollback.cpp
     test/unit/calculus/test_a53_integration_budget.cpp
+    test/unit/calculus/test_a49_exp_pole_no_ibp.cpp
     test/unit/calculus/test_a43_nonelementary_builtins.cpp
     test/unit/calculus/test_a43_nonelementary_integrate.cpp
         test/unit/calculus/test_limit_smoke.cpp

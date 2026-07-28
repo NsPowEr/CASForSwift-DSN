@@ -110,6 +110,23 @@ patologico). È lo stesso criterio con cui A51 scelse il cap per-entry di 60 s.
 Un multiplo scelto a intuito sul solo massimo osservato non dice **niente** su
 dove comincia la patologia.
 
+**Costo per livello ≠ numero di livelli.** In una ricorsione, prima di attaccare
+la profondità misura il costo del SINGOLO livello: in A49 le tre ipotesi naturali
+sono state tutte smentite dai contatori — passi di ricorsione identici (18 contro
+18, e il caso peggiore ne faceva 9), espressioni di dimensione costante (6 contro
+8 nodi), `expand`/`parse_polynomial` a +10% — mentre il costo reale era che ogni
+livello **rilanciava l'intera pipeline** sul sotto-problema (56% dei campioni in
+`integrate_risch`). Il campionamento (`sample <pid>`) dice dove si sta, i
+contatori dicono quante volte: servono entrambi, e vanno confrontati a parità di
+unità (contare le RIGHE di un albero di `sample` non è contare i campioni).
+
+**Il fix migliore è spesso un teorema, non un'ottimizzazione.** Se una strategia
+non può avere successo per ragioni matematiche, non ottimizzarla: non chiamarla.
+`∫e^{P(x)}·R(x)` con un polo genuino non ha primitiva elementare (Liouville) →
+l'intera catena per parti era lavoro garantito sprecato, e il guard che la
+esclude vale 27-50× (A49). Prima di ottimizzare un ramo caro, chiedersi se quel
+ramo poteva concludere qualcosa.
+
 **Un budget morde solo dove la grandezza si conta.** Le ops si incrementano in
 `Simplifier` e `Substituter`: un'integranda il cui costo sta in Risch o
 nell'algebra dei polinomi resta limitata dal solo wall-clock, per quanto si

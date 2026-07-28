@@ -69,6 +69,36 @@ bool has_exp_rational_non_poly_factor(const std::vector<ExprPtr>& factors, const
     return false;
 }
 
+// A49 — vero sse un fattore e' una POTENZA NEGATIVA di un'espressione non
+// costante in `var`, cioe' l'integranda ha un polo genuino in `var`.
+// Riconosce sia `Pow(Q, -k)` sia `Div(a, Q)`; un `Sum` che *contiene* un polo
+// (`x + 1/x`) NON e' un polo dell'integranda e non viene toccato.
+[[nodiscard]] bool has_pole_factor(const std::vector<ExprPtr>& factors, const Symbol& var) {
+    for (ExprPtr f : factors) {
+        if (const auto* bin = expr_cast<Binary>(f)) {
+            if (bin->op == BinaryOp::Div && depends_on(bin->right, var)) return true;
+            if (bin->op == BinaryOp::Pow && depends_on(bin->left, var)) {
+                if (const auto* el = expr_cast<IntegerLit>(bin->right)) {
+                    if (el->value.is_negative()) return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+// A49 — vero sse un fattore e' `exp(P)` con P NON costante in `var`.
+[[nodiscard]] bool has_exp_of_var_factor(const std::vector<ExprPtr>& factors, const Symbol& var) {
+    for (ExprPtr f : factors) {
+        const auto* call = expr_cast<FuncCall>(f);
+        if (call && call->func_id == BuiltinOp::Exp && call->args.size() == 1U
+            && depends_on(call->args[0], var)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 }  // namespace
 
 Result<ExprPtr> Integrator::integrate_product_impl(const Product& product, const Symbol& var) {
@@ -352,6 +382,27 @@ Result<ExprPtr> Integrator::integrate_product_impl(const Product& product, const
             return fail<ExprPtr>(make_error(
                 CASErrorKind::Unimplemented,
                 "integrate_product: IBP skipped for exp(non-poly) factor; defer to Risch DE"));
+        }
+
+        // A49 — `∫e^{P(x)}·R(x)` con R che ha un polo genuino NON ha primitiva
+        // elementare (Liouville): la sua forma chiusa vive nella famiglia Ei,
+        // che e' il fallback non-elementare di A43. Avviare qui la catena IBP e'
+        // quindi lavoro garantito sprecato — e non poco: ogni livello della
+        // ricorsione rilancia l'INTERA pipeline sul sotto-integrale, Risch
+        // compreso (misurato: 56% dei campioni in `integrate_risch`, ricorsione
+        // profonda 13). E' il costo che rendeva `∫e^{2x}/(x−1)³` non terminante
+        // mentre la risposta corretta era gia' raggiungibile.
+        //
+        // Il criterio e' un teorema, non una forma riconosciuta a occhio: per
+        // questo esclude solo i poli VERI (`Pow(Q,-k)`, `Div(·,Q)`), lasciando
+        // intatto tutto cio' che IBP chiude davvero (`∫x²·e^x`, `∫x·ln x`).
+        if (has_exp_of_var_factor(variable_factors, var)
+            && has_pole_factor(variable_factors, var)) {
+            return fail<ExprPtr>(make_error(
+                CASErrorKind::Unimplemented,
+                "integrate_product: e^P(x) per un fattore con polo non ha primitiva "
+                "elementare (Liouville); IBP non puo' chiudere, si delega alla "
+                "famiglia non-elementare (Ei)"));
         }
 
         // A53 — tentativo: se la catena IBP si arrende, le side-conditions delle

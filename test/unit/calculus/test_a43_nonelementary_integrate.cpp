@@ -95,15 +95,14 @@ TEST_F(A43NonelementaryIntegrateTest, SpecTableDerivativesRoundTrip) {
 // Spec §5: "implementare la riduzione, non le righe". Un polo di ordine k > 2
 // non e' una riga di tabella — deve uscire dalla stessa ricorsione per parti.
 //
-// Il polo TRASLATO e' coperto a ordine 2 (`exp(x)/(x-1)^2`), non a ordine 3:
-// `exp(2*x)/(x-1)^3` non termina, e la causa NON e' questa riduzione. Misurato
-// col fallback A43 disattivato: >200 s comunque, cioe' il costo e' tutto nella
-// catena ricorsiva pre-Risch. Conferma dal budget: a `max_integration_depth=3`
-// la risposta esce corretta in 1.99 s, a 4 in 4.42 s, a 16 non esce — il tempo
-// cresce col budget di ricorsione, non con l'ordine del polo. Aperta come A49;
-// il caso rientra qui quando A49 chiude.
+// Il polo TRASLATO era escluso a ordine 3 (`exp(2*x)/(x-1)^3` non terminava) e
+// RIENTRA con A49: la causa non era questa riduzione ma la catena IBP avviata a
+// monte, che per Liouville non poteva chiudere nulla e ad ogni livello
+// rilanciava l'intera pipeline (Risch compreso). Misurato dopo il fix:
+// 12'627 ops / 0.57 s contro le 500'094 ops / 35 s con cui toccava il tetto.
 TEST_F(A43NonelementaryIntegrateTest, HigherOrderPolesReduceToEi) {
-    for (const char* integrand : {"exp(x)/x^3", "exp(x)/x^4", "exp(x)/(x-1)^2"}) {
+    for (const char* integrand : {"exp(x)/x^3", "exp(x)/x^4", "exp(x)/(x-1)^2",
+                                  "exp(2*x)/(x-1)^3", "exp(x)/(x+5)^2"}) {
         expect_antiderivative_of(integrand);
     }
 }
