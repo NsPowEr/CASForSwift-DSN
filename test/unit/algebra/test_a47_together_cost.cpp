@@ -45,10 +45,13 @@ protected:
     }
 };
 
-// Denominatori uguali: `N₁/D + N₂/D = (N₁+N₂)/D`. Il denominatore NON deve
-// essere quadrato dalla cross-moltiplicazione — è il lavoro che veniva creato e
-// subito disfatto dalla riduzione GCD. Verifica strutturale sul risultato, non
-// sul tempo: il tempo misura la macchina (lezione A51).
+// Denominatori uguali: `N₁/D + N₂/D = (N₁+N₂)/D`. NB: `together()` applica
+// SEMPRE la riduzione GCD dopo `apart_num_den`, quindi questo test da solo non
+// distingue se il denominatore e' arrivato gia' ridotto (scorciatoia A56 in
+// `add_parts`) o cross-moltiplicato e ridotto dopo — verifica solo il
+// contratto di valore. La verifica strutturale vera (denominatore NON quadrato
+// PRIMA della riduzione GCD) e' in test_a56_together_shortcut.cpp, che chiama
+// `apart_num_den` direttamente.
 TEST_F(A47TogetherCostTest, EqualDenominatorsAreNotCrossMultiplied) {
     auto res = algebra::together(parse("a/(y+1) + b/(y+1)"), ctx);
     ASSERT_TRUE(res.is_ok()) << res.error().message;

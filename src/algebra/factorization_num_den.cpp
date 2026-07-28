@@ -39,6 +39,12 @@ namespace cas::algebra {
 // di `normalize_rational_parts`, che non cambia. Un tentativo precedente (A47)
 // aveva provato a togliere anche QUELLE, e li' la logica si rompe davvero:
 // `is_zero_expr`/`is_one_expr` si appoggiano alla forma semplificata.
+//
+// A56 — `add_parts`/`subtract_parts` applicano inoltre la scorciatoia esatta
+// `N₁/D + N₂/D = (N₁+N₂)/D` quando i due denominatori sono strutturalmente
+// uguali, evitando il cross-moltiplica su D² per il caso più comune (denominatori
+// condivisi). Era stata rimossa in A47 per un falso negativo del verificatore
+// IBP, chiuso da A54 (vedi commento al sito di `add_parts`).
 [[nodiscard]] static ExprPtr combine_mul_raw(ExprPtr lhs, ExprPtr rhs, symbolic::CASContext& ctx) {
     return ctx.arena().make<Product>(std::vector<ExprPtr>{lhs, rhs});
 }
@@ -122,14 +128,19 @@ namespace cas::algebra {
 }
 
 [[nodiscard]] static Result<RationalParts> add_parts(const RationalParts& lhs, const RationalParts& rhs, symbolic::CASContext& ctx) {
-    // A47 — NB: la scorciatoia `N₁/D + N₂/D = (N₁+N₂)/D` per denominatori
-    // strutturalmente uguali e' matematicamente esatta e qui varrebbe un altro
-    // 25% di costo, ma NON e' applicabile finche' vive il difetto A54: cambiando
-    // la forma che arriva a Risch, `∫(1/x + 1/(x·ln x))·ln(ln x)` smette di
-    // rispondere `Unimplemented` e restituisce un'antiderivata SBAGLIATA
-    // (`RischLimitedIntegrate.EndToEnd_NestedLogTower_Solved`). Un guadagno di
-    // costo non si paga con un silent-wrong: la scorciatoia rientra quando A54
-    // chiude.
+    // A56 — denominatori strutturalmente uguali (già in forma normalizzata da
+    // normalize_rational_parts): N₁/D + N₂/D = (N₁+N₂)/D evita il cross-moltiplica
+    // su D² e la GCD-reduction a valle che lo disfa. Rientrata dopo A54 (che ha
+    // chiuso il falso negativo del verificatore IBP che l'aveva fatta rimuovere
+    // in A47): ~23% su together per la famiglia trigonometrica (∫dx/cos²).
+    if (structural_equal(lhs.denominator, rhs.denominator)) {
+        return normalize_rational_parts(
+            RationalParts{
+                .numerator = combine_add_raw(lhs.numerator, rhs.numerator, ctx),
+                .denominator = lhs.denominator,
+            },
+            ctx);
+    }
     ExprPtr lhs_scaled = combine_mul_raw(lhs.numerator, rhs.denominator, ctx);
     ExprPtr rhs_scaled = combine_mul_raw(rhs.numerator, lhs.denominator, ctx);
     return normalize_rational_parts(
@@ -141,6 +152,16 @@ namespace cas::algebra {
 }
 
 [[nodiscard]] static Result<RationalParts> subtract_parts(const RationalParts& lhs, const RationalParts& rhs, symbolic::CASContext& ctx) {
+    // A56 — stesso argomento di add_parts; qui il trigger empirico della
+    // famiglia (misurato in A56: il grosso del guadagno arriva da subtract, non da add).
+    if (structural_equal(lhs.denominator, rhs.denominator)) {
+        return normalize_rational_parts(
+            RationalParts{
+                .numerator = combine_sub_raw(lhs.numerator, rhs.numerator, ctx),
+                .denominator = lhs.denominator,
+            },
+            ctx);
+    }
     ExprPtr lhs_scaled = combine_mul_raw(lhs.numerator, rhs.denominator, ctx);
     ExprPtr rhs_scaled = combine_mul_raw(rhs.numerator, lhs.denominator, ctx);
     return normalize_rational_parts(
