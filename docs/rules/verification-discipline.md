@@ -112,3 +112,12 @@ succede soprattutto quando si stringe un budget condiviso.
   avvisa, ma l'avviso si perde nel log di build. Attendere `load < 4`, e usare
   `--check --baseline <file>`: senza `--check` lo script stampa le misure e
   NON confronta nulla (A53).
+- **Una fase successiva può nascondere il difetto che il test cerca nella fase
+  precedente** (A56). Testare la scorciatoia di `add_parts`/`subtract_parts`
+  chiamando `together()` (pubblica, comoda) non distingue nulla: `together()`
+  applica SEMPRE la riduzione GCD dopo `apart_num_den`, quindi un denominatore
+  cross-moltiplicato viene comunque ridotto a valle e il test strutturale
+  passa identico con o senza la scorciatoia. Bisogna chiamare la funzione
+  interna (`apart_num_den`) PRIMA della fase che maschera la differenza — e
+  verificarlo col canary (rosso su HEAD pre-fix, verde col fix), non fidarsi
+  che "il test passa" basti.
