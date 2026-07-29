@@ -226,6 +226,12 @@ jobs:
             build_cov/diff_coverage.html
 
   # ── F0.6 Benchmark regression gate ─────────────────────────────────────────
+  # `baseline_release.txt` è misurato sul Mac dello sviluppatore: confrontarlo
+  # contro un runner condiviso diverso, su metriche sotto il millisecondo, è
+  # rumore hardware (misurato: poly_gcd_subresultant_ms +67.9%, nessun codice
+  # toccato). Il gate REALE (stessa macchina della baseline) resta il pre-push
+  # locale — qui il job gira e riporta i numeri, ma non blocca la run: una
+  # baseline CI-specifica è un lavoro a parte, non un fix a due righe.
   bench:
     runs-on: macos-latest
     steps:
@@ -241,7 +247,8 @@ jobs:
             --output build-bench-gate/current.txt \
             --report-json build-bench-gate/report.json
 
-      - name: Regression gate (max 10% regression)
+      - name: Regression report (informational — baseline is dev-machine, not CI-runner)
+        continue-on-error: true
         run: |
           bash scripts/check_bench_regression.sh \
             --current build-bench-gate/current.txt \
