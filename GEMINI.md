@@ -32,11 +32,9 @@ Recommended generator is Ninja with Clang/GCC for sanitizer support.
 # Configure and build the core engine
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
 cmake --build build
-
-# Build with GUI enabled (optional lab)
-cmake -S . -B build-gui -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCAS_ENABLE_GUI=ON
-cmake --build build-gui --target cas_gui
 ```
+
+This is an engine-only repository: no UI (Qt/QML, ImGui, Swift, or otherwise) belongs here — it was removed 2026-07-29.
 
 ### Testing
 Testing is mandatory for every change.

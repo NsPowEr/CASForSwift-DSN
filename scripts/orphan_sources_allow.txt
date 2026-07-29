@@ -26,6 +26,3 @@ src/algebra/polynomial_roots.cpp
 # (cas_capi.cpp lives there); these two carry the legacy names and need triage.
 src/capi/cas_api.cpp
 src/cas_c_api.cpp
-
-# CLI/UI entry — wired conditionally for the cas_ui executable.
-src/ui/main.cpp

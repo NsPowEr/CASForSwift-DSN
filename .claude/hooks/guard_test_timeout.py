@@ -23,7 +23,7 @@ if "scripts/test_quick.sh" in cmd:
 
 GTEST_BINS = {
     "cas_foundation_tests", "assumptions_stability_test", "cas_property_tests",
-    "cas_gui_vm_tests", "cas_gui_qml_smoke_tests", "cas_tests",
+    "cas_tests",
 }
 BENCH_BINS = {"benchmark_tests", "cas_benchmarks"}
 

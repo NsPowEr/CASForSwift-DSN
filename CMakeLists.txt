@@ -19,7 +19,6 @@ if(APPLE AND NOT CMAKE_OSX_ARCHITECTURES)
 endif()
 option(CAS_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer in debug-oriented builds." ON)
 option(CAS_ENABLE_TESTING "Enable unit tests and CTest integration." ON)
-option(CAS_ENABLE_GUI "Build the optional detachable manual GUI lab." OFF)
 option(CAS_USE_SYSTEM_GTEST "Use an installed GoogleTest package instead of FetchContent." OFF)
 option(ENABLE_SANITIZERS "Compatibility alias for milestone scripts and legacy docs." ${CAS_ENABLE_SANITIZERS})
 option(ENABLE_COVERAGE "Enable gcov/lcov line coverage instrumentation (gcc/clang only). Disables optimizations." OFF)
@@ -578,14 +577,6 @@ target_include_directories(cas_c_api PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(cas_c_api PRIVATE cas_core)
 target_compile_features(cas_c_api PUBLIC cxx_std_20)
 
-add_library(cas_gui_bridge STATIC GUI/src/CasGuiSession.cpp)
-target_include_directories(cas_gui_bridge
-    PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/GUI/src
-)
-target_link_libraries(cas_gui_bridge PUBLIC cas_core)
-target_compile_features(cas_gui_bridge PUBLIC cxx_std_20)
-
 if(CAS_ENABLE_TESTING)
     add_executable(cas_c_api_test test/c_api/test_c_api.c)
     target_link_libraries(cas_c_api_test PRIVATE cas_c_api)
@@ -630,22 +621,6 @@ add_executable(cas_golden_runner
 target_link_libraries(cas_golden_runner PRIVATE cas_core)
 target_include_directories(cas_golden_runner PRIVATE test/golden)
 target_compile_features(cas_golden_runner PRIVATE cxx_std_20)
-
-# ─── TOOLS SEPARATI (Standalone UI) ───
-add_subdirectory(tools/cas_ui)
-
-# ─── GUI OPZIONALE E STACCABILE ───
-if(CAS_ENABLE_GUI)
-    find_package(Qt6 6.7 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 Concurrent Widgets)
-    set(CMAKE_AUTOMOC ON)
-    qt_standard_project_setup()
-    if(COMMAND qt_policy)
-        qt_policy(SET QTP0001 NEW)
-        qt_policy(SET QTP0004 NEW)
-    endif()
-
-    add_subdirectory(GUI)
-endif()
 
 # ─── TESTING ───
 if(CAS_ENABLE_TESTING)
@@ -862,7 +837,6 @@ test/unit/algebra/test_half_gcd.cpp
         test/unit/statistics/test_discrete.cpp
         test/unit/statistics/test_continuous.cpp
         test/unit/formatter/test_formatter.cpp
-        test/unit/gui/test_cas_gui_session.cpp
         test/unit/algebra/test_resultant.cpp
         test/unit/algebra/test_resultant_generic.cpp
         test/unit/algebra/test_algebra.cpp
@@ -950,62 +924,11 @@ test/unit/algebra/test_half_gcd.cpp
         test/unit/symbolic/test_coverage_symbolic_v2.cpp
         test/unit/symbolic/test_coverage_symbolic_v3.cpp
     )
-    target_link_libraries(cas_foundation_tests PRIVATE cas_core cas_gui_bridge GTest::gtest_main)
+    target_link_libraries(cas_foundation_tests PRIVATE cas_core GTest::gtest_main)
     target_include_directories(cas_foundation_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${CMAKE_CURRENT_SOURCE_DIR}/GUI/src
         ${CMAKE_CURRENT_SOURCE_DIR}/test/golden
     )
-
-    if(CAS_ENABLE_GUI)
-        qt_add_executable(cas_gui_vm_tests
-            GUI/test/test_appcore_undo_redo.cpp
-            GUI/test/test_workspace_recovery.cpp
-            GUI/test/test_workspace_layout_state.cpp
-            GUI/test/test_autocomplete_vm.cpp
-            GUI/test/test_variables_actions.cpp
-            GUI/test/test_notebook_interaction_state.cpp
-            GUI/test/test_command_availability.cpp
-            GUI/test/test_command_palette_behavior.cpp
-            GUI/test/test_session_sidebar_model.cpp
-        )
-        target_link_libraries(cas_gui_vm_tests
-            PRIVATE
-                cas_gui_vm
-                GTest::gtest
-        )
-        target_include_directories(cas_gui_vm_tests PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}/GUI/macos-cpp/src
-            ${CMAKE_CURRENT_SOURCE_DIR}/GUI/macos-cpp/src/viewmodels
-            ${CMAKE_CURRENT_SOURCE_DIR}/GUI/macos-cpp/src/core
-            ${CMAKE_CURRENT_SOURCE_DIR}/GUI/src
-        )
-        add_test(NAME cas_gui_vm_tests COMMAND cas_gui_vm_tests)
-
-        add_executable(cas_gui_qml_smoke_tests
-            GUI/test/test_qml_smoke.cpp
-        )
-        target_link_libraries(cas_gui_qml_smoke_tests
-            PRIVATE
-                cas_gui_vmplugin
-                cas_gui_vmplugin_init
-                Qt6::Quick
-                Qt6::Gui
-                Qt6::Qml
-                Qt6::Concurrent
-                Qt6::Widgets
-                GTest::gtest
-        )
-        target_include_directories(cas_gui_qml_smoke_tests PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}/GUI/macos-cpp/src
-            ${CMAKE_CURRENT_SOURCE_DIR}/GUI/macos-cpp/src/viewmodels
-            ${CMAKE_CURRENT_SOURCE_DIR}/GUI/macos-cpp/src/qml-items
-            ${CMAKE_CURRENT_SOURCE_DIR}/GUI/macos-cpp/src/core
-            ${CMAKE_CURRENT_SOURCE_DIR}/include
-            ${CMAKE_CURRENT_SOURCE_DIR}/GUI/src
-        )
-        add_test(NAME cas_gui_qml_smoke_tests COMMAND cas_gui_qml_smoke_tests)
-    endif()
 
     add_executable(assumptions_stability_test
         test/unit/symbolic/test_assumptions_stability.cpp
@@ -1139,7 +1062,7 @@ if(ENABLE_COVERAGE)
                     --output-file ${CMAKE_BINARY_DIR}/coverage.info
                     --ignore-errors mismatch
             COMMAND ${LCOV_PATH} --remove ${CMAKE_BINARY_DIR}/coverage.info
-                    '/usr/*' '*/test/*' '*/_deps/*' '*/tools/*' '*/GUI/*'
+                    '/usr/*' '*/test/*' '*/_deps/*' '*/tools/*'
                     --output-file ${CMAKE_BINARY_DIR}/coverage_filtered.info
                     --ignore-errors unused
             COMMAND ${GENHTML_PATH} ${CMAKE_BINARY_DIR}/coverage_filtered.info

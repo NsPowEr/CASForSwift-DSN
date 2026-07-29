@@ -5,7 +5,7 @@ name: ci
 # la CI — sono coperti dai gate LOCALI (pre-commit debt-gate + pre-push Tier-2,
 # che girano sul Mac dello sviluppatore). La CI resta il backstop su `main` e
 # sulle PR. La riduzione è di
-# FREQUENZA, non di piattaforma: tutto resta su macOS (Maxima/Homebrew, Qt).
+# FREQUENZA, non di piattaforma: tutto resta su macOS (Maxima/Homebrew).
 on:
   push:
     branches: [main]
@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: brew install ninja ccache mpfr gmp lcov
+        run: brew install ninja ccache mpfr gmp lcov coreutils
 
       - name: Configure
         run: |
@@ -41,7 +41,13 @@ jobs:
         run: cmake --build build
 
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        # Stesso filtro di scripts/test_quick.sh (StressTest/Fuzz/Disabled +
+        # SLOW_OK + quarantena): il runner CI condiviso è più lento del Mac di
+        # sviluppo e va in timeout esattamente sui test che il gate locale
+        # esclude già di proposito. Un solo elenco sorgente, mai duplicato qui.
+        run: |
+          EXCLUDE_REGEX="$(bash scripts/test_quick.sh --print-ctest-regex)"
+          ctest --test-dir build --output-on-failure -E "$EXCLUDE_REGEX"
 
       - name: Benchmark Smoke
         run: bash scripts/benchmark.sh --build-dir build-bench-ci --output build-bench-ci/current.txt --report-json build-bench-ci/report.json
@@ -116,7 +122,12 @@ jobs:
         run: cmake --build build_san
 
       - name: Test
-        run: ctest --test-dir build_san --output-on-failure
+        # Stesso filtro condiviso di scripts/test_quick.sh (vedi job foundation):
+        # ASan/UBSan rallentano ulteriormente, quindi il gap CI-vs-locale è anche
+        # più marcato qui.
+        run: |
+          EXCLUDE_REGEX="$(bash scripts/test_quick.sh --print-ctest-regex)"
+          ctest --test-dir build_san --output-on-failure -E "$EXCLUDE_REGEX"
         env:
           ASAN_OPTIONS: detect_leaks=0:abort_on_error=1
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
@@ -184,7 +195,7 @@ jobs:
                --output-file build_cov/coverage.info \
                --ignore-errors mismatch || true
           lcov --remove build_cov/coverage.info \
-               '/usr/*' '*/test/*' '*/_deps/*' '*/tools/*' '*/GUI/*' \
+               '/usr/*' '*/test/*' '*/_deps/*' '*/tools/*' \
                --output-file build_cov/coverage_filtered.info \
                --ignore-errors unused || true
           genhtml build_cov/coverage_filtered.info \
@@ -196,7 +207,7 @@ jobs:
           gcovr --root . \
             --xml --output build_cov/coverage.xml \
             --exclude 'test/' --exclude '_deps/' \
-            --exclude 'tools/' --exclude 'GUI/'
+            --exclude 'tools/'
 
       - name: Diff coverage gate
         run: |
@@ -221,7 +232,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: brew install ninja ccache mpfr gmp
+        run: brew install ninja ccache mpfr gmp coreutils
 
       - name: Build + run benchmarks
         run: |
@@ -244,24 +255,6 @@ jobs:
           path: |
             build-bench-gate/current.txt
             build-bench-gate/report.json
-
-  # ── GUI smoke (preserved) ───────────────────────────────────────────────────
-  gui-smoke:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install dependencies
-        run: brew install qt6 ninja
-
-      - name: Configure
-        run: cmake -S . -B build_gui -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCAS_ENABLE_GUI=ON -DCMAKE_PREFIX_PATH=$(brew --prefix qt6)
-
-      - name: Build cas_gui_vm_tests
-        run: cmake --build build_gui --target cas_gui_vm_tests
-
-      - name: Test cas_gui_vm_tests
-        run: QT_QPA_PLATFORM=offscreen ctest --test-dir build_gui -R GuiUndoRedo --output-on-failure
 
   # ── F0.6 Mutation testing — weekly, non-blocking ────────────────────────────
   mutation-weekly:

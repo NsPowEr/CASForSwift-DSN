@@ -26,6 +26,18 @@ resolve_path() {
   fi
 }
 
+# GNU coreutils 'timeout' non è builtin su macOS: Homebrew lo installa come
+# 'gtimeout' per non collidere con eventuali tool di sistema. Rileva quale
+# esiste invece di assumerne uno (portabilità Linux CI / macOS dev+CI).
+if command -v timeout >/dev/null 2>&1; then
+  timeout_bin=timeout
+elif command -v gtimeout >/dev/null 2>&1; then
+  timeout_bin=gtimeout
+else
+  echo "benchmark.sh: serve GNU 'timeout' (Linux) o 'gtimeout' (macOS: brew install coreutils)." >&2
+  exit 1
+fi
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --build-dir)
@@ -113,7 +125,7 @@ fi
 
 for ((i = 1; i <= runs; i++)); do
   echo "── run $i/$runs ──" >&2
-  timeout 300 "$build_dir/cas_benchmarks" | tee -a "$tmp_runs" >&2
+  "$timeout_bin" 300 "$build_dir/cas_benchmarks" | tee -a "$tmp_runs" >&2
 done
 
 # Mediana per metrica sui run raccolti (robusta agli outlier di scheduling).

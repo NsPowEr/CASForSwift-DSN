@@ -25,6 +25,11 @@
 #                                              #   uno con timeout stretto: l'hang
 #                                              #   diventa un FAIL veloce e visibile
 #   bash scripts/test_quick.sh --print-filter  # dry-run: stampa filtro+banner, no run
+#   bash scripts/test_quick.sh --print-ctest-regex  # stessa esclusione, sintassi
+#                                              #   regex per `ctest -E` (CI: la CI
+#                                              #   gira via ctest, non via binario
+#                                              #   diretto — un solo elenco condiviso,
+#                                              #   niente lista duplicata in ci.yml)
 #
 # Se introduci una regressione di complessità che porta un test sopra il cap, NON
 # aggiungerlo qui: indaga la causa (probabile O(2^n) accidentale) e fixa il codice.
@@ -104,6 +109,7 @@ while [[ $# -gt 0 ]]; do
         --slow)          SUITE='slow'; CAP=1800; shift ;;
         --quarantine)    ACTION='quarantine'; shift ;;
         --print-filter|--dry-run) ACTION='print'; shift ;;
+        --print-ctest-regex) ACTION='print-ctest-regex'; shift ;;
         --cap)           CAP="$2"; shift 2 ;;
         --qcap)          QCAP="$2"; shift 2 ;;
         -h|--help)       sed -n '1,45p' "$0"; exit 0 ;;
@@ -161,6 +167,22 @@ if [[ "$ACTION" == "print" ]]; then
     print_quarantine_banner
     echo "[test_quick] suite=${SUITE} action=print cap=${CAP}s"
     echo "[test_quick] filter='${FILTER}'"
+    exit 0
+fi
+
+# gtest_discover_tests registra ogni case come test ctest a sé (nome
+# "Suite.Case"): stessa NEG-list del filtro binario, tradotta in ERE per
+# `ctest -E`. Un solo elenco sorgente — CI (che gira ctest, non il binario
+# diretto) ed esecuzione locale non possono divergere.
+if [[ "$ACTION" == "print-ctest-regex" ]]; then
+    parts=()
+    for pat in "${NEG[@]}"; do
+        escaped="${pat//./\\.}"
+        escaped="${escaped//\*/.*}"
+        parts+=("^${escaped}\$")
+    done
+    IFS='|'
+    echo "${parts[*]}"
     exit 0
 fi
 

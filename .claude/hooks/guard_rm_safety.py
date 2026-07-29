@@ -39,8 +39,8 @@ REPO = os.path.dirname(os.path.dirname(HOOK_DIR))
 # First path component (repo-relative) → protected. Everything an agent could
 # not regenerate: sources, tests, docs, rules, references, agent config, git.
 PROTECTED_ROOTS = {
-    "src", "include", "test", "docs", "scripts", "GUI", "tools", "Swift",
-    "macos-cpp", ".APROJECT_REFERENCES", ".claude", ".git",
+    "src", "include", "test", "docs", "scripts", "tools",
+    ".APROJECT_REFERENCES", ".claude", ".git",
     "!_VECCHI DOCUMENTI",
 }
 # Absolute prefixes where deletion is fine (temp, scratchpads, attic).

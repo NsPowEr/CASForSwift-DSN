@@ -131,7 +131,7 @@ Enforcement meccanico: `.claude/hooks/guard_git_safety.sh` + `.claude/hooks/guar
 - **Memoria**: solo `AstArena`. Vietati `shared_ptr`/`unique_ptr` per nodi AST. Vietato passare `ExprPtr` tra arene diverse senza re-interning; nei test usa l'arena del `CASContext`.
 - **Integrità**: ogni regola di rewrite orientata via **LPO** (no cicli). Niente "cerotti" if-else hardcoded: usa il rewrite universale.
 - **Testing**: solo confronto strutturale o equivalenza matematica. **Mai** `toString()` per validare la logica.
-- **UI**: `cas_ui` è visualizzatore ImGui (campionamento adattivo, plot 2D/3D, Fase 10).
+- **Nessuna UI**: questo repository è solo motore CAS (`src/`, `include/`) + test/tooling non grafico. Qualunque GUI (Qt/QML, ImGui, Swift...) è stata rimossa definitivamente 2026-07-29 (era una fase intermedia, mai allineata al motore reale): appartiene a un consumer esterno, mai a questo codebase.
 
 ---
 

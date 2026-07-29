@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-`.APROJECT_REFERENCES/` is the source of truth for architecture, module boundaries, and testing rules. Read it before changing code. Core engine code belongs in `src/` and public headers in `include/`; both directories are planned by the project contract even if they are still sparse. Keep manual diagnostics isolated in `tools/cas_ui/`. Do not add Swift, iOS, or bridge code here.
+`.APROJECT_REFERENCES/` is the source of truth for architecture, module boundaries, and testing rules. Read it before changing code. Core engine code belongs in `src/` and public headers in `include/`; both directories are planned by the project contract even if they are still sparse. This is an engine repository only: no UI of any kind (no Swift, iOS, Qt/QML, ImGui, or bridge code) belongs here — all manual verification goes through `test/` and non-UI `tools/` (benchmark, audit, stress) via CTest.
 
 Key references:
 - `CLAUDE.md`: project-wide operating rules for agents and contributors
@@ -15,7 +15,6 @@ Use CMake only.
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build
-./build/tools/cas_ui/cas_ui
 ctest --test-dir build --output-on-failure
 ```
 
@@ -30,7 +29,7 @@ Name files and types by domain responsibility, for example `lexer.cpp`, `parser.
 GoogleTest is the intended framework; the `test/` subtree is reserved for it. Tests must validate AST structure or mathematical equivalence, never `toString()` output. Add regression coverage for every bug fix and run sanitizer-enabled builds locally before closing a task.
 
 ## Commit & Pull Request Guidelines
-Git history is not available in this checkout, so use short imperative commit messages such as `Add parser error propagation`. Keep each commit focused on one module or behavior. PRs should include: purpose, affected module, references consulted in `.APROJECT_REFERENCES`, test evidence (`ctest`, sanitizer runs, manual `cas_ui` checks), and screenshots only if `tools/cas_ui` UI behavior changes.
+Git history is not available in this checkout, so use short imperative commit messages such as `Add parser error propagation`. Keep each commit focused on one module or behavior. PRs should include: purpose, affected module, references consulted in `.APROJECT_REFERENCES`, and test evidence (`ctest`, sanitizer runs).
 
 **Git Safety Rule**: Mai dare agente accesso a `git reset --hard` o `git restore` without explicit safe pattern. NO `git reset --hard`, NO `git restore --source`, solo backup via `git stash push`.
 ## Mandato di Guardia Architetturale
