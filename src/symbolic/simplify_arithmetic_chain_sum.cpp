@@ -175,11 +175,33 @@ for (ExprPtr term : flat_terms) {
     // which would expand (a+b)*x back to a*x + b*x, creating an infinite
     // factor/distribute cycle.  Idempotency is instead ensured by sorting
     // the coefficient Sum's terms canonically inside try_merge_symbolic_like_terms.
-    {
+    //
+    // A54: la raccolta è l'INVERSA della distribuzione, quindi un chiamante la
+    // cui post-condizione è la forma espansa (`algebra::expand`) la disattiva
+    // via ctx.set_symbolic_like_term_factoring(false) mentre costruisce.  Senza
+    // di che `expand(x·(ln x+1)·ln(ln x))` tornava fattorizzato — e una
+    // differenza identicamente nulla non si cancellava più in Step 4, perché il
+    // termine con il Sum dentro ha chiave-monomio opaca.
+    if (context_ == nullptr || context_->symbolic_like_term_factoring()) {
         bool merged = true;
         int pass_limit = static_cast<int>(normalized.size()) + 1;
         while (merged && pass_limit-- > 0) {
             merged = try_merge_symbolic_like_terms(normalized, arena_);
+        }
+    }
+
+    // Step 6 (T-054b): combine over a common denominator and cancel. Cheap and
+    // non-recursive; commits only on full cancellation, so non-cancelling sums are
+    // untouched. A commit yields polynomial/√-free terms — re-collect them.
+    {
+        int pass_limit = static_cast<int>(normalized.size()) + 1;
+        while (pass_limit-- > 0 && try_combine_common_denominator(normalized)) {
+            auto recollected = simplify_sum_terms(normalized, ExprPtr{}, true);
+            if (recollected.is_error()) return recollected;
+            if (const auto* s = expr_cast<Sum>(recollected.value()))
+                normalized.assign(s->terms.begin(), s->terms.end());
+            else
+                normalized = {recollected.value()};
         }
     }
 

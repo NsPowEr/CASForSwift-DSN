@@ -119,8 +119,24 @@ Result<ExprPtr> Simplifier::simplify_product_factors(
 
     // Step 2: flatten nested Products and Div nodes.
     std::vector<ExprPtr> flat_factors;
+    // A39: sign accumulated while descending through Unary(Neg, ...) nodes.
+    // Emitted as a single -1 factor after the walk; the numeric-coefficient
+    // pass below absorbs it, so no separate sign bookkeeping is needed.
+    int flat_sign = 1;
     std::function<Result<void>(ExprPtr, bool)> flatten =
         [&](ExprPtr f, bool invert) -> Result<void> {
+        // A39: descend through negation. Without this, Neg(Product(...)) is
+        // neither a Product nor a Div, so it lands whole in flat_factors and
+        // the pass below unwraps it into a `core` that is itself a Product —
+        // one nobody flattens any more. That is exactly how
+        // `(-P)*pi` used to simplify to `-(pi*P)` with P left nested, which is
+        // what the strict-canonicity canary reports on the Mellin/MeijerG
+        // tests. Sign is invariant under inversion: (-g)^-1 = -(g^-1).
+        if (const auto* un = expr_cast<Unary>(f);
+            un != nullptr && un->op == UnaryOp::Neg) {
+            flat_sign = -flat_sign;
+            return flatten(un->operand, invert);
+        }
         if (const auto* prod = expr_cast<Product>(f)) {
             for (ExprPtr factor : prod->factors) {
                 auto res = flatten(factor, invert);
@@ -133,7 +149,8 @@ Result<ExprPtr> Simplifier::simplify_product_factors(
         } else if (invert) {
             auto inv = simplify_power(f, make_integer(arena_, BigInt(-1)));
             if (inv.is_error()) return fail<void>(inv.error());
-            flat_factors.push_back(inv.value());
+            auto res = flatten(inv.value(), false);
+            if (res.is_error()) return res;
         } else {
             flat_factors.push_back(f);
         }
@@ -142,6 +159,7 @@ Result<ExprPtr> Simplifier::simplify_product_factors(
     for (ExprPtr f : initial_factors)
         if (auto res = flatten(f, false); res.is_error())
             return fail<ExprPtr>(res.error());
+    if (flat_sign < 0) flat_factors.push_back(make_integer(arena_, BigInt(-1)));
 
     // Step 3: separate numeric coefficient, imaginary unit accumulation,
     //         infinity tracking, and symbolic base/exponent pairs.
@@ -316,8 +334,8 @@ Result<ExprPtr> Simplifier::simplify_product_factors(
         }
     }
 
-    // Step 5.5: Risch IBP exp-fold via SimplifyHints flag.
-    if (context_ != nullptr && context_->hints().fold_exp_products) {
+    // Step 5.5: Exp-fold.
+    {
         auto exp_res = fold_exponential_products(symbolic, coefficient);
         if (exp_res.is_error()) return fail<ExprPtr>(exp_res.error());
     }
@@ -367,7 +385,13 @@ Result<ExprPtr> Simplifier::simplify_product_factors(
     }
 
     // Step 8: distribute coefficient over a Sum factor (if present).
-    {
+    //
+    // A55 — `algebra::together` sospende questo step (via `CombinedFormScope`,
+    // `set_symbolic_sum_distribution(false)`) durante l'assemblaggio finale
+    // `N/D`: senza la sospensione, il `Product(Sum(N), Pow(D,-1))` appena
+    // costruito viene ridistribuito qui in una somma di frazioni — esatto
+    // complementare del difetto di A54 (raccolta invece di distribuzione).
+    if (context_ == nullptr || context_->symbolic_sum_distribution()) {
         ExprPtr sum_factor = nullptr;
         std::size_t sum_idx = 0;
         bool found_sum = false;
@@ -430,7 +454,19 @@ Result<ExprPtr> Simplifier::simplify_product_factors(
     if (!is_neg && (!(coefficient == ComplexRational::one()) || symbolic.empty()))
         normalized.push_back(make_complex(arena_, coefficient));
     for (const auto& [base, exp] : symbolic) {
-        if (exp.is_zero()) continue;
+        if (exp.is_zero()) {
+            // A31 fase 1 (Domain_Conditions_Propagation.md §4.3.1): dropping
+            // base^0 (the real site of x/x -> 1 and x*x^-1 -> 1 for
+            // Product-syntax input, which bypasses the rewrite_provider Div
+            // path in builtin_rewrite_algebraic.cpp) presupposes base != 0
+            // -- 0^0 is not universally 1. Registered unless already proven.
+            if (context_ != nullptr) {
+                auto cond = context_->emit_side_condition(
+                    DomainConditionKind::NonZero, base);
+                if (cond.is_error()) return fail<ExprPtr>(cond.error());
+            }
+            continue;
+        }
         normalized.push_back(exp == BigInt(1)
             ? base
             : arena_.make<Binary>(BinaryOp::Pow, base, make_integer(arena_, exp)));

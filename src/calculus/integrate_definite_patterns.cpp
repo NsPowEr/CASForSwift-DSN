@@ -118,6 +118,7 @@ const std::vector<DefinitePatternFn>& definite_patterns() {
         &pattern_hermite_he_orthogonality,
         &pattern_chebyshev_t_orthogonality,
         &pattern_chebyshev_u_orthogonality,
+        &pattern_mellin_g_convolution,
     };
     return registry;
 }

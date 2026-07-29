@@ -111,7 +111,7 @@ struct PruneProbe {
     std::vector<PolyF4> input = to_f4(gens, vars, ctx);
     PruneProbe pp;
     BuchbergerCountResult base = buchberger_with_zero_count(input, order);
-    F5Result f5 = f5c_groebner(input, order);
+    F5Result f5 = f5c_groebner(input, order).value();
     pp.baseline_zero_reductions = base.zero_reductions;
     pp.f5_zero_reductions       = f5.zero_reductions_f5;
     pp.basis_baseline           = std::move(base.basis);

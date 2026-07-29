@@ -36,9 +36,9 @@ TEST(DiagnosticFramework, MakeUnimplementedErrorPopulatesPayload) {
     EXPECT_EQ(p.module,      "calculus");
     EXPECT_EQ(p.function,    "integrate_once");
     EXPECT_EQ(p.input_shape, "DecimalLit");
-    EXPECT_EQ(p.reason_code, error::reason_codes::INTEGRATE_DECIMAL_INPUT);
+    EXPECT_EQ(p.reason,      error::reason_codes::INTEGRATE_DECIMAL_INPUT);
     EXPECT_FALSE(p.suggestion.empty());
-    EXPECT_EQ(p.ticket_id,   "F0.8");
+    EXPECT_EQ(p.ticket,      "F0.8");
 }
 
 // ─── 2. format_user_message contains all expected fields ──────────────────
@@ -128,7 +128,7 @@ TEST(DiagnosticFramework, PayloadPreservedThroughResultPropagation) {
     const auto& p = result.error().payload.value();
     EXPECT_EQ(p.module,   "calculus");
     EXPECT_EQ(p.function, "inner_fn");
-    EXPECT_EQ(p.reason_code, error::reason_codes::INTEGRATE_DECIMAL_INPUT);
+    EXPECT_EQ(p.reason, error::reason_codes::INTEGRATE_DECIMAL_INPUT);
 
     const std::string msg = result.error().format_user_message();
     EXPECT_TRUE(contains(msg, "[Unimplemented]")) << msg;

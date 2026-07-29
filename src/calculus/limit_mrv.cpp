@@ -28,10 +28,13 @@ Result<ExprPtr> compute_limit_mrv(
     ExprPtr point,
     symbolic::CASContext& ctx) {
     if (!limit_is_infinity(point)) {
-        return fail<ExprPtr>(CASError{
-            .kind    = CASErrorKind::Unimplemented,
-            .message = "MRV is currently defined only for infinite limits",
-            .hint    = std::nullopt
+        return make_unimplemented<ExprPtr>(UnimplementedInfo{
+            .module      = "calculus",
+            .function    = "compute_limit_mrv",
+            .input_shape = "finite limit point",
+            .reason      = cas::error::reason_codes::SERIES_GENERAL,
+            .suggestion  = "MRV is defined only for infinite limits",
+            .ticket      = "F4-MRV"
         });
     }
 
@@ -40,18 +43,24 @@ Result<ExprPtr> compute_limit_mrv(
         ExprPtr neg_var = arena.make<Unary>(UnaryOp::Neg, arena.make<Symbol>(var.name));
         auto transformed = ctx.substitute(expr, var, neg_var);
         if (transformed.is_error()) {
-            return fail<ExprPtr>(CASError{
-                .kind    = CASErrorKind::Unimplemented,
-                .message = "MRV normalization for -infinity failed",
-                .hint    = std::nullopt
+            return make_unimplemented<ExprPtr>(UnimplementedInfo{
+                .module      = "calculus",
+                .function    = "compute_limit_mrv",
+                .input_shape = "MRV normalization for -infinity",
+                .reason      = cas::error::reason_codes::SERIES_GENERAL,
+                .suggestion  = "Check variable substitution",
+                .ticket      = "F4-MRV"
             });
         }
         auto transformed_simplified = ctx.simplify(transformed.value());
         if (transformed_simplified.is_error()) {
-            return fail<ExprPtr>(CASError{
-                .kind    = CASErrorKind::Unimplemented,
-                .message = "MRV normalization simplify failed",
-                .hint    = std::nullopt
+            return make_unimplemented<ExprPtr>(UnimplementedInfo{
+                .module      = "calculus",
+                .function    = "compute_limit_mrv",
+                .input_shape = "MRV normalization simplify for -infinity",
+                .reason      = cas::error::reason_codes::SERIES_GENERAL,
+                .suggestion  = "Check expression simplification",
+                .ticket      = "F4-MRV"
             });
         }
         return compute_limit_mrv(
@@ -87,19 +96,25 @@ Result<ExprPtr> compute_limit_mrv(
     auto rewritten = rewrite_mrv(expr, mrv, replacement, var, ctx);
     if (rewritten.is_error()) {
         std::cerr << "rewrite_mrv error\n";
-        return fail<ExprPtr>(CASError{
-            .kind    = CASErrorKind::Unimplemented,
-            .message = "MRV rewrite failed",
-            .hint    = std::nullopt
+        return make_unimplemented<ExprPtr>(UnimplementedInfo{
+            .module      = "calculus",
+            .function    = "compute_limit_mrv",
+            .input_shape = "MRV rewrite expression",
+            .reason      = cas::error::reason_codes::SERIES_GENERAL,
+            .suggestion  = "Check MRV substitution logic",
+            .ticket      = "F4-MRV"
         });
     }
 
     auto simplified = ctx.simplify(rewritten.value());
     if (simplified.is_error()) {
-        return fail<ExprPtr>(CASError{
-            .kind    = CASErrorKind::Unimplemented,
-            .message = "MRV simplified form unavailable",
-            .hint    = std::nullopt
+        return make_unimplemented<ExprPtr>(UnimplementedInfo{
+            .module      = "calculus",
+            .function    = "compute_limit_mrv",
+            .input_shape = "MRV simplified form",
+            .reason      = cas::error::reason_codes::SERIES_GENERAL,
+            .suggestion  = "MRV simplified form unavailable",
+            .ticket      = "F4-MRV"
         });
     }
 
@@ -135,10 +150,13 @@ Result<ExprPtr> compute_limit_mrv(
 
     auto leading = mrv_leading_power_w(final_rewritten, w_var, ctx);
     if (!leading.has_value()) {
-        return fail<ExprPtr>(CASError{
-            .kind    = CASErrorKind::Unimplemented,
-            .message = "MRV leading power is not decidable",
-            .hint    = std::nullopt
+        return make_unimplemented<ExprPtr>(UnimplementedInfo{
+            .module      = "calculus",
+            .function    = "compute_limit_mrv",
+            .input_shape = "MRV leading power extraction",
+            .reason      = cas::error::reason_codes::SERIES_GENERAL,
+            .suggestion  = "MRV leading power is not decidable",
+            .ticket      = "F4-MRV"
         });
     }
     if (leading->power > 0) {
@@ -149,27 +167,36 @@ Result<ExprPtr> compute_limit_mrv(
         if (coeff.is_ok() && !depends_on(coeff.value(), w_var)) {
             return coeff;
         }
-        return fail<ExprPtr>(CASError{
-            .kind    = CASErrorKind::Unimplemented,
-            .message = "MRV leading coefficient is not decidable at w -> 0+",
-            .hint    = std::nullopt
+        return make_unimplemented<ExprPtr>(UnimplementedInfo{
+            .module      = "calculus",
+            .function    = "compute_limit_mrv",
+            .input_shape = "MRV leading coefficient at w -> 0+",
+            .reason      = cas::error::reason_codes::SERIES_GENERAL,
+            .suggestion  = "MRV leading coefficient is not decidable at w -> 0+",
+            .ticket      = "F4-MRV"
         });
     }
 
     auto coeff = ctx.simplify(leading->coefficient);
     if (coeff.is_error()) {
-        return fail<ExprPtr>(CASError{
-            .kind    = CASErrorKind::Unimplemented,
-            .message = "MRV leading coefficient simplify failed",
-            .hint    = std::nullopt
+        return make_unimplemented<ExprPtr>(UnimplementedInfo{
+            .module      = "calculus",
+            .function    = "compute_limit_mrv",
+            .input_shape = "MRV leading coefficient simplify",
+            .reason      = cas::error::reason_codes::SERIES_GENERAL,
+            .suggestion  = "MRV leading coefficient simplify failed",
+            .ticket      = "F4-MRV"
         });
     }
     auto sign = exact_sign(coeff.value());
     if (!sign.has_value() || *sign == 0) {
-        return fail<ExprPtr>(CASError{
-            .kind    = CASErrorKind::Unimplemented,
-            .message = "MRV pole sign is not exactly decidable",
-            .hint    = std::nullopt
+        return make_unimplemented<ExprPtr>(UnimplementedInfo{
+            .module      = "calculus",
+            .function    = "compute_limit_mrv",
+            .input_shape = "MRV pole sign determination",
+            .reason      = cas::error::reason_codes::SERIES_GENERAL,
+            .suggestion  = "MRV pole sign is not exactly decidable",
+            .ticket      = "F4-MRV"
         });
     }
     if (*sign > 0) {

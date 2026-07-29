@@ -220,7 +220,7 @@ std::optional<QuadraticArgument> extract_quadratic_argument(ExprPtr expr, const 
     };
 }
 
-Result<ExprPtr> Integrator::integrate_linear_over_quadratic(const Binary& quotient, const Symbol& var) {
+Result<ExprPtr> Integrator::integrate_linear_over_quadratic_impl(const Binary& quotient, const Symbol& var) {
     auto numerator = extract_affine_argument(quotient.left, var);
     auto denominator = extract_quadratic_argument(quotient.right, var);
     if (!numerator.has_value() || !denominator.has_value() || denominator->quadratic.numerator().is_zero()) {

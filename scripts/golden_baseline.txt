@@ -1,0 +1,40 @@
+# golden_baseline.txt — Ratchet floor per il corpus golden (motore CAS vs Maxima 5.49.0).
+#
+# È il guardiano della VERITÀ MATEMATICA: impedisce che la correttezza del motore
+# regredisca in silenzio mentre i gate strutturali restano verdi. Per un CAS fatto
+# evolvere in autonomia è il segnale più importante, ed era l'unico lasciato a
+# giudizio umano (DEFINITION_OF_DONE G6).
+#
+# Metrica (dal runner cas_golden_runner, pass-rate = pass/(pass+fail)):
+#   - PASS_FLOOR       : i PASS aggregati non possono scendere sotto questo (− TOLERANCE).
+#   - FAIL_CEILING     : i FAIL aggregati non possono salire sopra questo (+ TOLERANCE).
+#   - UNDECIDED_CEILING: skip + over_budget, cioè le entry su cui il motore NON
+#     produce un verdetto confrontabile. Non possono crescere (+ TOLERANCE).
+#   Tracciare tutti e tre impedisce il "gaming": trasformare un PASS in SKIP
+#   abbassa i PASS → colto dal pavimento; far scadere le entry scomode alza le
+#   non decise → colto dal soffitto.
+#
+# A51 — perché skip e over_budget stanno INSIEME. Una entry troncata dal budget
+# per-entry non ha un verdetto: ciò che il runner registrerebbe (un `false` da
+# un confronto interrotto, un NO_STRATEGY da una strategia troncata) dipende da
+# dove è caduto il taglio, non dalla matematica. Il runner la classifica quindi
+# `over_budget` invece di contarla fra i PASS/FAIL. La RIPARTIZIONE fra skip e
+# over dipende dal cap per-entry (misurato: due entry da ~72 s passano da OVER a
+# SKIP fra cap 60 s e 90 s), la SOMMA no — è invariante, e solo su una grandezza
+# invariante un gate può poggiare senza tornare a misurare la macchina.
+#
+# STATUS=UNSET → il gate è in SOLA LETTURA (non blocca): non si applica un baseline
+# che non è stato MISURATO. Per attivarlo, esegui una misura reale e fissa il floor:
+#   1) bash scripts/run_golden_maxima.sh <corpus.jsonl> <maxdir>        (genera refs)
+#   2) build/cas_golden_runner <corpus.jsonl> <maxdir> --json report.json
+#   3) bash scripts/check_golden_ratchet.sh --report report.json --update-baseline
+#
+STATUS: SET
+PASS_FLOOR: 980
+FAIL_CEILING: 4
+UNDECIDED_CEILING: 42
+TOLERANCE: 0
+#
+# Riferimento storico (STATE.md, 2026-06-10): aggregato ~83.9% = 753 pass / 145 fail
+# (su 898 pass+fail). Target dichiarati: aggregato ≥86%, bronstein ≥70%, special_fn ≥82%.
+# Questi NON sono ancora il baseline attivo: vanno confermati da una misura fresca.

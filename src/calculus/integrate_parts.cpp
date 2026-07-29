@@ -59,7 +59,13 @@ namespace {
     }
     if (const auto* bin = expr_cast<Binary>(expr)) {
         if (bin->op == BinaryOp::Pow) {
-            return 3;
+            // A power inherits the ILATE class of its base: (log x)^n is still
+            // Logarithmic, (asin x)^n Inverse, (sin x)^n Trig, etc., while a
+            // purely algebraic base (x^n, (x+1)^n → Symbol/Sum/Product) resolves
+            // to Algebraic (3). Without this, log(x)^2 was blanket-classified
+            // Algebraic, so ∫ x·(log x)^n dx picked the wrong u and dead-ended
+            // (INTEGRATE_NO_STRATEGY) even though it reduces to ∫ x·log x dx.
+            return get_ilate_priority(bin->left);
         }
     }
     if (expr_is<Sum>(expr) || expr_is<Product>(expr)) {
@@ -107,6 +113,10 @@ public:
 
     IntegrationByPartsGuard(const IntegrationByPartsGuard&) = delete;
     IntegrationByPartsGuard& operator=(const IntegrationByPartsGuard&) = delete;
+
+    // True iff at least one integrate_by_parts is already active on this thread,
+    // i.e. the current call is a *nested* recursive IBP rather than the entry.
+    [[nodiscard]] static bool nested_active() { return !active_stack().empty(); }
 
 private:
     [[nodiscard]] static std::vector<ExprPtr>& active_stack() {
@@ -175,6 +185,69 @@ private:
     return false;
 }
 
+// True if `e` contains a square root (or fractional power) of a var-dependent
+// base — i.e. a genuine radical in `var`.
+[[nodiscard]] static bool expr_contains_var_radical(ExprPtr e, const Symbol& var) {
+    if (!e) return false;
+    if (const auto* fc = expr_cast<FuncCall>(e)) {
+        if (fc->func_id == BuiltinOp::Sqrt)
+            for (ExprPtr a : fc->args) if (depends_on(a, var)) return true;
+        for (ExprPtr a : fc->args) if (expr_contains_var_radical(a, var)) return true;
+        return false;
+    }
+    if (const auto* b = expr_cast<Binary>(e)) {
+        if (b->op == BinaryOp::Pow && depends_on(b->left, var)
+            && expr_is<RationalLit>(b->right)) return true;  // fractional power of var
+        return expr_contains_var_radical(b->left, var) || expr_contains_var_radical(b->right, var);
+    }
+    if (const auto* u = expr_cast<Unary>(e)) return expr_contains_var_radical(u->operand, var);
+    if (const auto* s = expr_cast<Sum>(e))
+        { for (ExprPtr t : s->terms) if (expr_contains_var_radical(t, var)) return true; return false; }
+    if (const auto* p = expr_cast<Product>(e))
+        { for (ExprPtr f : p->factors) if (expr_contains_var_radical(f, var)) return true; return false; }
+    return false;
+}
+
+// True if `base` is a Sum that contains a var-radical, e.g. (x + √(x²+1)).
+// Such a denominator needs *conjugate rationalisation* — a bare radical like
+// √(1-x²) (FuncCall, not a Sum) does not and is excluded.
+[[nodiscard]] static bool is_radical_sum(ExprPtr base, const Symbol& var) {
+    return expr_is<Sum>(base) && expr_contains_var_radical(base, var);
+}
+
+// True if `e` has a *radical-sum in a denominator* w.r.t. var: a factor
+// Pow(base, k<0) (or Div by such) where `base` is a Sum containing a square
+// root of var, e.g. (x+√(x²+1))^{-1}.
+//
+// Anti-hang: IBP cannot reduce these — differentiating the negative power only
+// deepens it, so by-parts recursion diverges with a growing negative exponent
+// (∫log(x+√(x²+1)) dx degenerates this way once the log factor is consumed).
+// They need radical-denominator rationalisation, not IBP.  The clean bare-
+// radical case √(1-x²)^{-1} (from ∫asin(x), ∫x·asin(x), …) is NOT matched —
+// its base is a FuncCall, not a Sum — and stays on the working sqrt path.
+[[nodiscard]] static bool ibp_has_radical_sum_denominator(ExprPtr e, const Symbol& var) {
+    if (!e) return false;
+    if (const auto* b = expr_cast<Binary>(e)) {
+        if (b->op == BinaryOp::Pow) {
+            bool neg = false;
+            if (const auto* il = expr_cast<IntegerLit>(b->right)) neg = il->value.is_negative();
+            else if (const auto* rl = expr_cast<RationalLit>(b->right)) neg = rl->numerator.is_negative();
+            if (neg && is_radical_sum(b->left, var)) return true;
+        }
+        if (b->op == BinaryOp::Div && is_radical_sum(b->right, var)) return true;
+        return ibp_has_radical_sum_denominator(b->left, var)
+            || ibp_has_radical_sum_denominator(b->right, var);
+    }
+    if (const auto* u = expr_cast<Unary>(e)) return ibp_has_radical_sum_denominator(u->operand, var);
+    if (const auto* s = expr_cast<Sum>(e))
+        { for (ExprPtr t : s->terms) if (ibp_has_radical_sum_denominator(t, var)) return true; return false; }
+    if (const auto* p = expr_cast<Product>(e))
+        { for (ExprPtr f : p->factors) if (ibp_has_radical_sum_denominator(f, var)) return true; return false; }
+    if (const auto* fc = expr_cast<FuncCall>(e))
+        { for (ExprPtr a : fc->args) if (ibp_has_radical_sum_denominator(a, var)) return true; return false; }
+    return false;
+}
+
 Result<ExprPtr> integrate_by_parts(
     ExprPtr expr,
     const Symbol& var,
@@ -186,6 +259,25 @@ Result<ExprPtr> integrate_by_parts(
             .kind = CASErrorKind::Unimplemented,
             .message = "integrate_by_parts: exp(non-polynomial) factor detected; defer to Risch DE (BUG-HANG-001)",
             .hint = "integrate_risch with Risch DE rational solver",
+        });
+    }
+
+    // HARDCODE-OF-PASSAGE: HC-IBP-RADSUM-RATIONALIZE
+    // Anti-hang: a *nested* IBP whose integrand has a radical-SUM in a
+    // denominator (e.g. (x+√(x²+1))^{-1}) cannot terminate — each by-parts step
+    // deepens the negative power, so the recursion diverges. This is exactly the
+    // ∫log(x+√(x²+1)) dx divergence once the log factor is consumed. Defer (the
+    // sub-integrand needs conjugate rationalisation, not IBP). Only nested calls
+    // are gated (top-level IBP is exempt, nested_active() false) so the legit
+    // first by-parts step that *produces* such a sub-integrand still runs; and a
+    // bare radical √(x²+1)^{-1} (FuncCall base, not a Sum) is NOT matched, so the
+    // working ∫asin / quadratic-radical path is untouched.
+    if (IntegrationByPartsGuard::nested_active()
+        && ibp_has_radical_sum_denominator(expr, var)) {
+        return fail<ExprPtr>(CASError{
+            .kind = CASErrorKind::Unimplemented,
+            .message = "integrate_by_parts: nested IBP on radical-sum-denominator integrand diverges; needs rationalisation (anti-hang)",
+            .hint = std::nullopt,
         });
     }
 

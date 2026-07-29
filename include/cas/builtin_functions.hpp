@@ -28,8 +28,25 @@ enum class BuiltinOp : std::uint16_t {
     Abs,
     Sign,
     Gamma,
+    // A7 §5.9 — incomplete gamma (2-arg). Upper Γ(a,z) and lower γ(a,z).
+    // args = [a, z]. Spec: Meijer_G_Slater.md §5.9 (verified mpmath):
+    //   Γ(a,z) = G^{2,0}_{1,2}(z | 1 ; 0,a),  γ(a,z) = G^{1,1}_{1,2}(z | 1 ; a,0).
+    GammaIncomplete,
+    GammaIncompleteLower,
     Zeta,
     Erf,
+    // A43 — antiderivate non elementari. Spec:
+    // MISSING_FEATURES_SPECS/Nonelementary_Antiderivatives.md (ogni formula
+    // verificata con mpmath, banco scripts/a43_special_fn_check.py).
+    // Tutte a un argomento. Derivate in differentiate_rules.cpp §3 della spec.
+    Erfi,             // erfi(x) = -i*erf(i*x)
+    ExpIntegralEi,    // Ei(x)   = v.p. int_{-inf}^{x} e^t/t dt
+    SinIntegral,      // Si(x)   = int_0^x sin(t)/t dt
+    CosIntegral,      // Ci(x)   = gamma + ln x + int_0^x (cos t - 1)/t dt
+    SinhIntegral,     // Shi(x)  = int_0^x sinh(t)/t dt
+    CoshIntegral,     // Chi(x)  = gamma + ln x + int_0^x (cosh t - 1)/t dt
+    LogIntegral,      // li(x)   = v.p. int_0^x dt/ln t
+    Dilog,            // Li2(z)  = -int_0^z ln(1-t)/t dt
     Floor,
     Ceil,
     Round,
@@ -80,6 +97,13 @@ enum class BuiltinOp : std::uint16_t {
     // F8.0-6.1: Unwinding number  K(z) = ⌈(Im(z) − π) / (2π)⌉.
     // Encodes branch-cut information so that  ln(exp(z)) = z + 2πi·K(z).
     UnwindingNumber,
+    // A7 Brick 1 — Meijer G-function G^{m,n}_{p,q}(z | a_1..a_p; b_1..b_q).
+    // FuncCall::args layout: [m, n, p, q, a_1..a_p, b_1..b_q, z] (flat, size
+    // = 4 + p + q + 1). m,n,p,q are IntegerLit; construction/validation goes
+    // through the make_meijerg factory (A7 Brick 2), not here — this enum
+    // entry only gives the node a name for parse/print round-trip.
+    // Spec: MISSING_FEATURES_SPECS/Meijer_G_Slater.md §7.
+    MeijerG,
 };
 
 [[nodiscard]] constexpr BuiltinOp get_builtin_op(std::string_view name) noexcept {
@@ -105,9 +129,23 @@ enum class BuiltinOp : std::uint16_t {
     if (name == "abs") return BuiltinOp::Abs;
     if (name == "sign") return BuiltinOp::Sign;
     if (name == "gamma") return BuiltinOp::Gamma;
+    if (name == "gamma_incomplete" || name == "GammaUpper" || name == "Gamma_inc")
+        return BuiltinOp::GammaIncomplete;
+    if (name == "gamma_incomplete_lower" || name == "GammaLower")
+        return BuiltinOp::GammaIncompleteLower;
     if (name == "zeta") return BuiltinOp::Zeta;
     if (name == "erf") return BuiltinOp::Erf;
     if (name == "erfc") return BuiltinOp::Erfc;
+    // A43: nome canonico + alias emessi da Maxima/giac.
+    if (name == "erfi") return BuiltinOp::Erfi;
+    if (name == "Ei" || name == "ei" || name == "expintegral_ei")
+        return BuiltinOp::ExpIntegralEi;
+    if (name == "Si" || name == "expintegral_si") return BuiltinOp::SinIntegral;
+    if (name == "Ci" || name == "expintegral_ci") return BuiltinOp::CosIntegral;
+    if (name == "Shi" || name == "expintegral_shi") return BuiltinOp::SinhIntegral;
+    if (name == "Chi" || name == "expintegral_chi") return BuiltinOp::CoshIntegral;
+    if (name == "li" || name == "logarithmic_integral") return BuiltinOp::LogIntegral;
+    if (name == "dilog" || name == "Li2") return BuiltinOp::Dilog;
     if (name == "factorial") return BuiltinOp::Factorial;
     if (name == "floor") return BuiltinOp::Floor;
     if (name == "ceil") return BuiltinOp::Ceil;
@@ -155,6 +193,7 @@ enum class BuiltinOp : std::uint16_t {
     if (name == "EllipticPi" || name == "ellipticPi") return BuiltinOp::EllipticPi;
     if (name == "EllipticF" || name == "ellipticF") return BuiltinOp::EllipticF;
     if (name == "UnwindingNumber" || name == "K") return BuiltinOp::UnwindingNumber;
+    if (name == "MeijerG") return BuiltinOp::MeijerG;
     return BuiltinOp::Unknown;
 }
 
@@ -181,8 +220,18 @@ enum class BuiltinOp : std::uint16_t {
         case BuiltinOp::Abs: return "abs";
         case BuiltinOp::Sign: return "sign";
         case BuiltinOp::Gamma: return "gamma";
+        case BuiltinOp::GammaIncomplete: return "gamma_incomplete";
+        case BuiltinOp::GammaIncompleteLower: return "gamma_incomplete_lower";
         case BuiltinOp::Zeta: return "zeta";
         case BuiltinOp::Erf: return "erf";
+        case BuiltinOp::Erfi: return "erfi";
+        case BuiltinOp::ExpIntegralEi: return "Ei";
+        case BuiltinOp::SinIntegral: return "Si";
+        case BuiltinOp::CosIntegral: return "Ci";
+        case BuiltinOp::SinhIntegral: return "Shi";
+        case BuiltinOp::CoshIntegral: return "Chi";
+        case BuiltinOp::LogIntegral: return "li";
+        case BuiltinOp::Dilog: return "dilog";
         case BuiltinOp::Floor: return "floor";
         case BuiltinOp::Ceil: return "ceil";
         case BuiltinOp::Round: return "round";
@@ -231,6 +280,7 @@ enum class BuiltinOp : std::uint16_t {
         case BuiltinOp::Factorial: return "factorial";
         case BuiltinOp::Erfc: return "erfc";
         case BuiltinOp::UnwindingNumber: return "UnwindingNumber";
+        case BuiltinOp::MeijerG: return "MeijerG";
         case BuiltinOp::Unknown: return "unknown";
     }
     return "unknown";

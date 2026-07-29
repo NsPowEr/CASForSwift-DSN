@@ -183,4 +183,98 @@ ExprPtr hyperbolic_normalize(ExprPtr expr, AstArena& arena) {
     }
 }
 
+// A44 — factorial/Γ notational unification, same role as the rewrite above.
+//
+//   u!  →  gamma(u+1)          (postfix, UnaryOp::Factorial)
+//   factorial(u) → gamma(u+1)  (FuncCall spelling)
+//
+// The identity u! = Γ(u+1) is exact on the whole common domain, so this is a
+// change of notation, not of value. Γ is the chosen representative because it
+// is the function with the wider domain and the one carrying the derivative /
+// reflection rules in the engine.
+//
+// Needed because the two spellings are genuinely interchangeable in output:
+// `diff(factorial(x), x)` yields `(1/x + ψ(x))·Γ(x+1)` here and
+// `(1/x + ψ(x))·x!` in Maxima — equal, but not structurally comparable.
+// Applied to both sides of `mathematically_equal`, like hyperbolic_normalize.
+//
+// Numeric literals are NOT special-cased: `factorial(5)` normalizes to
+// `gamma(6)` and the existing constant folding reduces it, so no separate
+// integer path is introduced here.
+ExprPtr factorial_gamma_normalize(ExprPtr expr, AstArena& arena) {
+    if (!expr) return expr;
+    auto to_gamma = [&](ExprPtr u) {
+        ExprPtr shifted = arena.make<Sum>(std::vector<ExprPtr>{
+            u, arena.make<IntegerLit>(BigInt(1))});
+        std::vector<ExprPtr> args;
+        args.push_back(shifted);
+        return arena.make<FuncCall>(BuiltinOp::Gamma, std::move(args));
+    };
+    switch (expr->kind) {
+        case ExprKind::FuncCall: {
+            const auto* fc = expr_cast<FuncCall>(expr);
+            if (fc == nullptr) return expr;
+            std::vector<ExprPtr> new_args;
+            new_args.reserve(fc->args.size());
+            bool changed = false;
+            for (auto& a : fc->args) {
+                auto na = factorial_gamma_normalize(a, arena);
+                if (na.get() != a.get()) changed = true;
+                new_args.push_back(na);
+            }
+            if (fc->func_id == BuiltinOp::Factorial && new_args.size() == 1U) {
+                return to_gamma(new_args[0]);
+            }
+            if (!changed) return expr;
+            return arena.make<FuncCall>(fc->name, std::move(new_args));
+        }
+        case ExprKind::Unary: {
+            const auto* un = expr_cast<Unary>(expr);
+            if (un == nullptr) return expr;
+            ExprPtr inner = factorial_gamma_normalize(un->operand, arena);
+            if (un->op == UnaryOp::Factorial) return to_gamma(inner);
+            if (inner.get() == un->operand.get()) return expr;
+            return arena.make<Unary>(un->op, inner);
+        }
+        case ExprKind::Binary: {
+            const auto* bin = expr_cast<Binary>(expr);
+            if (bin == nullptr) return expr;
+            ExprPtr l = factorial_gamma_normalize(bin->left, arena);
+            ExprPtr r = factorial_gamma_normalize(bin->right, arena);
+            if (l.get() == bin->left.get() && r.get() == bin->right.get()) return expr;
+            return arena.make<Binary>(bin->op, l, r);
+        }
+        case ExprKind::Sum: {
+            const auto* sm = expr_cast<Sum>(expr);
+            if (sm == nullptr) return expr;
+            std::vector<ExprPtr> nt;
+            nt.reserve(sm->terms.size());
+            bool changed = false;
+            for (auto& t : sm->terms) {
+                auto nx = factorial_gamma_normalize(t, arena);
+                if (nx.get() != t.get()) changed = true;
+                nt.push_back(nx);
+            }
+            if (!changed) return expr;
+            return arena.make<Sum>(std::move(nt));
+        }
+        case ExprKind::Product: {
+            const auto* pr = expr_cast<Product>(expr);
+            if (pr == nullptr) return expr;
+            std::vector<ExprPtr> nf;
+            nf.reserve(pr->factors.size());
+            bool changed = false;
+            for (auto& f : pr->factors) {
+                auto nx = factorial_gamma_normalize(f, arena);
+                if (nx.get() != f.get()) changed = true;
+                nf.push_back(nx);
+            }
+            if (!changed) return expr;
+            return arena.make<Product>(std::move(nf));
+        }
+        default:
+            return expr;
+    }
+}
+
 }  // namespace cas::algebra

@@ -1,0 +1,31 @@
+# orphan_sources_allow.txt — paths under src/ allowed to be unwired from CMakeLists.txt.
+# Every entry MUST cite a tracking task or a justification.
+# Goal: list ↓ over time. New entries require a corresponding ticket.
+#
+# Format: one path per line, '#' for comments.
+
+# Legacy monolith — split into bigint_arithmetic/conversions/logic/mul_toom3/div_*/gcd_lehmer.
+# Tracked as: F1.1-cleanup-bigint-old-monolith — delete after verifying no symbol drift.
+src/foundation/bigint.cpp
+
+# Empty stub kept to signal that DepthGuard moved to simplify_utils.cpp.
+# Tracked as: F1.4-cleanup-simplify_depth_guard-stub — delete on next pass.
+src/symbolic/simplify_depth_guard.cpp
+
+# Hensel lifting stub — content present but never wired; partial implementation
+# pending HC-F8-PENDING-12. Either wire or archive when HC-F8-PENDING-12 closes.
+src/algebra/hensel.cpp
+
+# Polynomial helpers carried from earlier refactor — content overlaps with
+# polynomial_arithmetic.cpp / polynomial_factor_*.cpp; tracked for triage.
+src/algebra/polynomial_arithmetic_dense.cpp
+src/algebra/polynomial_parser.cpp
+src/algebra/polynomial_roots.cpp
+
+# Public C API entry points — wired through CMakeLists.txt under target cas_c_api
+# (cas_capi.cpp lives there); these two carry the legacy names and need triage.
+src/capi/cas_api.cpp
+src/cas_c_api.cpp
+
+# CLI/UI entry — wired conditionally for the cas_ui executable.
+src/ui/main.cpp

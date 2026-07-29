@@ -19,17 +19,29 @@ namespace {
 
 [[nodiscard]] bool is_logarithmic_in_var(ExprPtr expr, const Symbol& var) {
     const auto* call = expr_cast<FuncCall>(expr);
+    // Ln and Log share one growth class: log_b(x) = ln(x)/ln(b) differs only by a
+    // constant factor, so both are logarithmic for asymptotic comparison.
     return call != nullptr &&
-        call->func_id == BuiltinOp::Ln &&
+        (call->func_id == BuiltinOp::Ln || call->func_id == BuiltinOp::Log) &&
         call->args.size() == 1U &&
         depends_on(call->args.front(), var);
 }
 
+// A factor that grows like x^p with p > 0 (rational) as x → +∞. The asymptotic
+// growth class depends only on the *sign* of the exponent, not its integrality:
+// x^(1/2) dominates every logarithm exactly as x^1 does. `sqrt(u)` is the
+// canonical form of u^(1/2), so it is a positive power of u^(1/2)'s base.
 [[nodiscard]] bool is_positive_power_growth(ExprPtr expr, const Symbol& var) {
     if (is_same_symbol(expr, var)) return true;
-    if (const auto* power = expr_cast<Binary>(expr); power != nullptr && power->op == BinaryOp::Pow && is_same_symbol(power->left, var)) {
+    if (const auto* power = expr_cast<Binary>(expr); power != nullptr && power->op == BinaryOp::Pow) {
         auto exponent = rational_from_expr(power->right);
-        return exponent.has_value() && exponent->is_integer() && !exponent->numerator().is_negative() && !exponent->numerator().is_zero();
+        return exponent.has_value()
+            && !exponent->numerator().is_negative() && !exponent->numerator().is_zero()
+            && is_positive_power_growth(power->left, var);
+    }
+    if (const auto* call = expr_cast<FuncCall>(expr);
+        call != nullptr && call->func_id == BuiltinOp::Sqrt && call->args.size() == 1U) {
+        return is_positive_power_growth(call->args.front(), var);
     }
     if (const auto* product = expr_cast<Product>(expr)) {
         for (ExprPtr factor : product->factors) {
@@ -39,6 +51,9 @@ namespace {
     return false;
 }
 
+// A factor that decays like x^(-p) with p > 0 (rational) as x → +∞, i.e. the
+// reciprocal of a positive power. Covers 1/sqrt(x) = Pow(sqrt(x), -1) and
+// x^(-1/2) = Pow(x, -1/2) alike — only the negative exponent sign matters.
 [[nodiscard]] bool is_reciprocal_positive_power_growth(ExprPtr expr, const Symbol& var) {
     const auto* power = expr_cast<Binary>(expr);
     if (power == nullptr || power->op != BinaryOp::Pow) {
@@ -46,7 +61,6 @@ namespace {
     }
     auto exponent = rational_from_expr(power->right);
     return exponent.has_value() &&
-        exponent->is_integer() &&
         exponent->numerator().is_negative() &&
         is_positive_power_growth(power->left, var);
 }
@@ -58,7 +72,6 @@ namespace {
     }
     auto exponent = rational_from_expr(power->right);
     return exponent.has_value() &&
-        exponent->is_integer() &&
         exponent->numerator().is_negative() &&
         is_logarithmic_in_var(power->left, var);
 }
@@ -89,6 +102,31 @@ void collect_multiplicative_factors(ExprPtr expr, std::vector<ExprPtr>& factors)
         return;
     }
     factors.push_back(expr);
+}
+
+// The additive term of `e` with the fastest growth as x → +∞ (Gruntz §3.5,
+// via the shared dynamic `compare_growth`). For a non-additive expression it is
+// `e` itself. Used to take the leading-term ratio of a quotient of sums.
+[[nodiscard]] ExprPtr dominant_growth_term(
+    ExprPtr e, const Symbol& var, symbolic::CASContext& ctx) {
+    std::vector<ExprPtr> terms;
+    if (const auto* sum = expr_cast<Sum>(e)) {
+        terms = sum->terms;
+    } else if (const auto* bin = expr_cast<Binary>(e);
+               bin != nullptr && (bin->op == BinaryOp::Add || bin->op == BinaryOp::Sub)) {
+        terms.push_back(bin->left);
+        terms.push_back(bin->op == BinaryOp::Sub
+            ? static_cast<ExprPtr>(ctx.arena().make<Unary>(UnaryOp::Neg, bin->right))
+            : bin->right);
+    } else {
+        return e;
+    }
+    if (terms.empty()) return e;
+    ExprPtr best = terms.front();
+    for (std::size_t i = 1; i < terms.size(); ++i) {
+        if (compare_growth(terms[i], best, var, ctx) > 0) best = terms[i];
+    }
+    return best;
 }
 
 [[nodiscard]] std::optional<Result<ExprPtr>> try_multiplicative_growth_limit(
@@ -173,7 +211,7 @@ Result<ExprPtr> try_infinite_limit(ExprPtr expr, const Symbol& var, ExprPtr poin
                 return ok(arena.make<Constant>(MathConstant::Infinity));
             }
         }
-        if (call->func_id == BuiltinOp::Ln) {
+        if (call->func_id == BuiltinOp::Ln || call->func_id == BuiltinOp::Log) {
             auto inner = try_infinite_limit(call->args[0], var, point, ctx);
             if (inner.is_ok() && limit_is_infinity(inner.value())) {
                 if (expr_is<Unary>(inner.value())) {
@@ -190,6 +228,31 @@ Result<ExprPtr> try_infinite_limit(ExprPtr expr, const Symbol& var, ExprPtr poin
             if (inner.is_ok() && limit_is_infinity(inner.value())) {
                 if (expr_is<Unary>(inner.value())) return ok(arena.make<Constant>(MathConstant::Infinity));
                 return ok(arena.make<Unary>(UnaryOp::Neg, arena.make<Constant>(MathConstant::Infinity)));
+            }
+        }
+    }
+
+    // Leading-term reduction for ∞/∞ quotients — handles both Binary Div and the
+    // canonical Product·Pow(-1) form via extract_quotient_view. Replace a sum
+    // numerator/denominator by its fastest-growing additive term (Gruntz growth
+    // comparison) and recurse on the ratio: (x + log x)/(x - log x) → x/x → 1.
+    // This runs before the multiplicative/Product handling, which would otherwise
+    // mis-report the 0·∞ form as indeterminate. Guarded so at least one side
+    // actually reduces ⇒ the ratio of two single terms is structurally simpler,
+    // so the recursion terminates.
+    if (auto qv = extract_quotient_view(expr, arena); qv.has_value()) {
+        ExprPtr dom_num = dominant_growth_term(qv->numerator, var, ctx);
+        ExprPtr dom_den = dominant_growth_term(qv->denominator, var, ctx);
+        if (dom_num != qv->numerator || dom_den != qv->denominator) {
+            auto num_lim = try_infinite_limit(qv->numerator, var, point, ctx);
+            auto den_lim = try_infinite_limit(qv->denominator, var, point, ctx);
+            if (num_lim.is_ok() && den_lim.is_ok() &&
+                limit_is_infinity(num_lim.value()) && limit_is_infinity(den_lim.value())) {
+                ExprPtr ratio = arena.make<Binary>(BinaryOp::Div, dom_num, dom_den);
+                auto rs = ctx.simplify(ratio);
+                ExprPtr rexpr = rs.is_ok() ? rs.value() : ratio;
+                auto rl = try_infinite_limit(rexpr, var, point, ctx);
+                if (rl.is_ok()) return rl;
             }
         }
     }

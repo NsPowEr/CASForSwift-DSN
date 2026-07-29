@@ -168,20 +168,61 @@ translate_to_maxima() {
 }
 
 # ---------------------------------------------------------------------------
+# translate_assume: convert a corpus "assume" predicate (comma-separated
+# conjunction) to Maxima assume()/declare() directives. MUST mirror the CAS-side
+# grammar in test/golden/main.cpp::apply_assume_predicates (A32) so both oracle
+# and CAS operate on the SAME restricted domain. Grammar:
+#   <sym> real | <sym> integer | <E> (>=|>|<=|<) <V> | <E> != <V>
+# Emits: declare(sym,real)$ / declare(sym,integer)$ / assume(<ineq>)$ /
+#        assume(notequal(E,V))$  (Maxima has no `!=`).
+# ---------------------------------------------------------------------------
+translate_assume() {
+    local pred="$1"
+    local out=""
+    local atom
+    local -a atoms=()
+    IFS=',' read -ra atoms <<< "$pred"
+    for atom in "${atoms[@]}"; do
+        atom="$(printf '%s' "$atom" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+        [[ -z "$atom" ]] && continue
+        if [[ "$atom" =~ ^([^[:space:]]+)[[:space:]]+real$ ]]; then
+            out+="declare(${BASH_REMATCH[1]}, real)\$ "
+        elif [[ "$atom" =~ ^([^[:space:]]+)[[:space:]]+integer$ ]]; then
+            out+="declare(${BASH_REMATCH[1]}, integer)\$ "
+        elif [[ "$atom" == *"!="* ]]; then
+            local l="${atom%%!=*}"; local r="${atom##*!=}"
+            l="$(printf '%s' "$l" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+            r="$(printf '%s' "$r" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+            out+="assume(notequal(${l}, ${r}))\$ "
+        elif [[ "$atom" == *">"* || "$atom" == *"<"* ]]; then
+            # >=, >, <=, < — Maxima assume() accepts the inequality verbatim.
+            out+="assume(${atom})\$ "
+        fi
+    done
+    printf '%s' "$out"
+}
+
+# ---------------------------------------------------------------------------
 # run_one: run a single input through Maxima and write output file.
-# Args: $1=index(0-based)  $2=input_expr  $3=output_dir
+# Args: $1=index(0-based)  $2=input_expr  $3=output_dir  $4=assume_predicate
 # ---------------------------------------------------------------------------
 run_one() {
     local idx="$1"
     local input_expr="$2"
     local out_dir="$3"
+    local assume_pred="${4:-}"
     local out_file="${out_dir}/${idx}.maxima.out"
 
     local maxima_expr
     maxima_expr=$(translate_to_maxima "$input_expr")
 
-    # Build batch string: display2d:false to get 1-line output, then the expr.
-    local batch="display2d:false$ ${maxima_expr};"
+    local assume_prefix=""
+    if [[ -n "$assume_pred" ]]; then
+        assume_prefix=$(translate_assume "$assume_pred")
+    fi
+
+    # Build batch string: display2d:false, per-entry assume/declare, then expr.
+    local batch="display2d:false$ ${assume_prefix}${maxima_expr};"
 
     # Run maxima; capture stdout+stderr; timeout 30s per input.
     local result
@@ -200,7 +241,7 @@ run_one() {
     fi
 }
 
-export -f run_one translate_to_maxima
+export -f run_one translate_to_maxima translate_assume
 export MAXIMA_BIN
 
 # ---------------------------------------------------------------------------
@@ -219,14 +260,18 @@ echo ""
 # Collect jobs for optional parallel execution
 declare -a JOB_INDICES=()
 declare -a JOB_INPUTS=()
+declare -a JOB_ASSUMES=()
 
 IDX=0
 while IFS= read -r line; do
     # Skip empty lines and comments
     [[ -z "$line" || "$line" == \#* ]] && continue
 
-    # Extract "input" field using basic parameter expansion (no jq dependency)
+    # Extract "input" and "assume" fields (no jq dependency). A32: the assume
+    # predicate drives per-entry Maxima assume()/declare() so the reference is
+    # computed on the SAME restricted domain the CAS uses.
     input_expr=$(echo "$line" | python3 -c "import sys,json; d=json.loads(sys.stdin.read()); print(d.get('input',''))" 2>/dev/null || true)
+    assume_expr=$(echo "$line" | python3 -c "import sys,json; d=json.loads(sys.stdin.read()); print(d.get('assume',''))" 2>/dev/null || true)
     if [[ -z "$input_expr" ]]; then
         echo "WARN: could not parse line $IDX: $line" >&2
         IDX=$((IDX + 1))
@@ -235,6 +280,7 @@ while IFS= read -r line; do
 
     JOB_INDICES+=("$IDX")
     JOB_INPUTS+=("$input_expr")
+    JOB_ASSUMES+=("$assume_expr")
     IDX=$((IDX + 1))
     TOTAL=$IDX
 done < "$CORPUS_FILE"
@@ -247,8 +293,9 @@ if [[ "$PARALLEL_N" -le 1 ]]; then
     for i in "${!JOB_INDICES[@]}"; do
         idx="${JOB_INDICES[$i]}"
         inp="${JOB_INPUTS[$i]}"
+        asm="${JOB_ASSUMES[$i]}"
         printf "  [%3d/%3d] %s ... " "$((idx+1))" "$TOTAL" "$inp"
-        run_one "$idx" "$inp" "$OUTPUT_DIR"
+        run_one "$idx" "$inp" "$OUTPUT_DIR" "$asm"
         out_file="${OUTPUT_DIR}/${idx}.maxima.out"
         if grep -q "^TIMEOUT\|^ERROR:" "$out_file" 2>/dev/null; then
             status=$(head -1 "$out_file")
@@ -262,16 +309,16 @@ else
     # GNU parallel or xargs -P fallback
     if command -v parallel &>/dev/null; then
         printf '%s\n' "${!JOB_INDICES[@]}" | parallel -j"$PARALLEL_N" \
-            run_one "${JOB_INDICES[{1}]}" "${JOB_INPUTS[{1}]}" "$OUTPUT_DIR"
+            run_one "${JOB_INDICES[{1}]}" "${JOB_INPUTS[{1}]}" "$OUTPUT_DIR" "${JOB_ASSUMES[{1}]}"
     else
-        # xargs fallback: write index:input pairs to temp file
+        # xargs fallback: write index|input|assume triples to temp file.
         TMPF=$(mktemp)
         for i in "${!JOB_INDICES[@]}"; do
-            echo "${JOB_INDICES[$i]}|${JOB_INPUTS[$i]}"
+            echo "${JOB_INDICES[$i]}|${JOB_INPUTS[$i]}|${JOB_ASSUMES[$i]}"
         done > "$TMPF"
         cat "$TMPF" | xargs -P"$PARALLEL_N" -I{} bash -c '
-            IFS="|" read -r idx inp <<< "{}"
-            run_one "$idx" "$inp" "'"$OUTPUT_DIR"'"
+            IFS="|" read -r idx inp asm <<< "{}"
+            run_one "$idx" "$inp" "'"$OUTPUT_DIR"'" "$asm"
         '
         rm -f "$TMPF"
     fi

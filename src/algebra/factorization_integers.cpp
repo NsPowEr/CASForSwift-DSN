@@ -38,8 +38,7 @@ namespace cas::algebra {
 }
 
 [[nodiscard]] static std::optional<IntPoly> try_kronecker_quadratic_factor(
-    const IntPoly& f,
-    symbolic::CASContext& ctx) {
+    const IntPoly& f) {
     if (f.size() < 5U) return std::nullopt;
 
     const BigInt v0 = eval_int_poly_at_int(f, 0);
@@ -69,15 +68,15 @@ namespace cas::algebra {
                             IntPoly g(std::vector<BigInt>{BigInt(c_v), BigInt(b_v), BigInt(a_v)});
                             normalize_integer_poly(g);
                             if (g.size() != 3U) continue;
-                            
-                            // Conversione manuale a PolyExpr per dividere
-                            std::vector<ExprPtr> f_coeffs, g_coeffs;
-                            for(auto c : f.coefficients()) f_coeffs.push_back(ctx.arena().make<IntegerLit>(c));
-                            for(auto c : g.coefficients()) g_coeffs.push_back(ctx.arena().make<IntegerLit>(c));
-                            PolyExpr f_e(f_coeffs), g_e(g_coeffs);
-                            
-                            auto div = divide_poly_with_remainder(f_e, g_e, ctx);
-                            if (div.is_ok() && is_zero_poly(div.value().remainder)) {
+
+                            // Divisibility test in pure BigInt: prem(f, g) = 0
+                            // iff g | f in Q[x], the same predicate the old
+                            // PolyExpr division computed — but that one interned
+                            // an arena IntegerLit for every coefficient of f on
+                            // every one of the ~17.6k candidates, at ~8 ms each.
+                            IntPoly rem = pseudo_remainder_integer_poly(f, g);
+                            normalize_integer_poly(rem);
+                            if (rem.is_zero()) {
                                 return g;
                             }
                         }
@@ -314,7 +313,7 @@ void append_factor_with_multiplicity(
     }
 
     while (remaining.size() >= 5U && remaining.size() <= 7U) {
-        auto quad = try_kronecker_quadratic_factor(remaining, ctx);
+        auto quad = try_kronecker_quadratic_factor(remaining);
         if (!quad.has_value()) break;
         auto quad_expr = integer_coefficients_to_expr(*quad, var, ctx);
         if (quad_expr.is_error()) return fail<void>(quad_expr.error());

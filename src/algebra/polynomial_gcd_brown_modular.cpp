@@ -39,106 +39,13 @@ using fp_helpers::reduce_sparse_mod_p;
 using fp_helpers::sparse_inf_norm;
 using fp_helpers::deg_in_var;
 using fp_helpers::sparse_gcd_fp;
+using fp_helpers::to_sparse;
+using fp_helpers::from_sparse;
+using fp_helpers::collect_vars;
+using fp_helpers::multivar_mignotte_bound;
+using fp_helpers::divides_sparse_z;
 
-namespace {
 
-static BSparsePoly to_sparse(const MultivariatePolynomial& p,
-                              const std::vector<Symbol>& vars) {
-    BSparsePoly sp;
-    for (const auto& term : p.terms()) {
-        BMonomial mono(vars.size(), 0U);
-        for (const auto& [sym, exp] : term.factors)
-            for (std::size_t i = 0; i < vars.size(); ++i)
-                if (vars[i].name == sym.name) mono[i] = exp;
-        sp[mono] += term.coefficient;
-        if (sp[mono].is_zero()) sp.erase(mono);
-    }
-    return sp;
-}
-
-static MultivariatePolynomial from_sparse(const BSparsePoly& sp,
-                                           const std::vector<Symbol>& vars) {
-    std::vector<MultivariateTerm> terms;
-    for (const auto& [m, c] : sp) {
-        if (c.is_zero()) continue;
-        std::vector<std::pair<Symbol, unsigned int>> f;
-        for (std::size_t i = 0; i < vars.size(); ++i)
-            if (m[i] > 0U) f.emplace_back(vars[i], m[i]);
-        terms.push_back(MultivariateTerm{ .coefficient = c, .factors = std::move(f) });
-    }
-    return MultivariatePolynomial(std::move(terms));
-}
-
-static std::vector<Symbol> collect_vars(const MultivariatePolynomial& p,
-                                         const MultivariatePolynomial& q) {
-    auto vp = p.variables();
-    auto vq = q.variables();
-    std::vector<Symbol> all = vp;
-    for (const auto& s : vq)
-        if (std::none_of(all.begin(), all.end(),
-                         [&](const Symbol& a){ return a.name == s.name; }))
-            all.push_back(s);
-    std::sort(all.begin(), all.end(),
-              [](const Symbol& a, const Symbol& b){ return a.name < b.name; });
-    return all;
-}
-
-// Multivariate Mignotte bound: 2^{min total deg} * min(||P||_∞, ||Q||_∞).
-static BigInt multivar_mignotte_bound(const BSparsePoly& P, const BSparsePoly& Q) {
-    std::size_t dP = 0, dQ = 0;
-    for (const auto& [m, _] : P) {
-        std::size_t td = 0; for (auto e : m) td += e;
-        dP = std::max(dP, td);
-    }
-    for (const auto& [m, _] : Q) {
-        std::size_t td = 0; for (auto e : m) td += e;
-        dQ = std::max(dQ, td);
-    }
-    BigInt nP = sparse_inf_norm(P);
-    BigInt nQ = sparse_inf_norm(Q);
-    BigInt mn = (nP < nQ) ? nP : nQ;
-    if (mn.is_zero()) mn = BigInt(1);
-    return BigInt(1).shift_left_bits(std::min(dP, dQ)) * mn;
-}
-
-// Exact divisibility test in Z[x1,...,xn] via sparse lex pseudo-division.
-[[nodiscard]] static bool divides_sparse_z(
-    const BSparsePoly& dividend, const BSparsePoly& divisor,
-    std::size_t n_vars) {
-    if (divisor.empty()) return false;
-    if (dividend.empty()) return true;
-    BSparsePoly rem = dividend;
-    auto [dlm, dlc] = *std::prev(divisor.end());
-    const std::size_t budget = (rem.size() + 1U) * (divisor.size() + 1U) + 16U;
-    std::size_t steps = 0;
-    while (!rem.empty()) {
-        if (++steps > budget) return false;
-        auto [rlm, rlc] = *std::prev(rem.end());
-        for (std::size_t i = 0; i < n_vars; ++i) {
-            std::size_t ri = (i < rlm.size()) ? rlm[i] : 0U;
-            std::size_t di = (i < dlm.size()) ? dlm[i] : 0U;
-            if (ri < di) return false;
-        }
-        if ((rlc % dlc) != BigInt(0)) return false;
-        BigInt qc = rlc / dlc;
-        BMonomial qm(n_vars, 0U);
-        for (std::size_t i = 0; i < n_vars; ++i) {
-            std::size_t ri = (i < rlm.size()) ? rlm[i] : 0U;
-            std::size_t di = (i < dlm.size()) ? dlm[i] : 0U;
-            qm[i] = static_cast<unsigned int>(ri - di);
-        }
-        for (const auto& [dm, dc] : divisor) {
-            BMonomial nm(n_vars, 0U);
-            for (std::size_t i = 0; i < n_vars; ++i)
-                nm[i] = qm[i] + ((i < dm.size()) ? dm[i] : 0U);
-            rem[nm] -= qc * dc;
-            if (rem[nm].is_zero()) rem.erase(nm);
-        }
-    }
-    return true;
-}
-
-}  // namespace
 
 [[nodiscard]] Result<MultivariatePolynomial> gcd_brown_modular(
     const MultivariatePolynomial& P, const MultivariatePolynomial& Q,
@@ -207,97 +114,12 @@ static BigInt multivar_mignotte_bound(const BSparsePoly& P, const BSparsePoly& Q
     const std::size_t main_var = n - 1U;
 
     // ─ Polynomial-content pre-extraction w.r.t. main_var (Geddes §7.4 setup) ─
-    // Decompose ppP = cont_main(ppP) · pp_main(ppP), similarly ppQ, where
-    // cont_main is the (n-1)-variable gcd of the main_var-layer coefficients.
-    // Then gcd(ppP, ppQ) = gcd(cont_main_P, cont_main_Q) · gcd(pp_main_P, pp_main_Q).
-    // The modular machinery below handles only the primitive part w.r.t. main_var;
-    // without this pre-extraction, content factors common to every main_var
-    // layer (e.g. P = x·(yz+1)(w+...), gcd_content_z = x) get stripped by
-    // remove_spurious_main_var_factor leading to under-divided results.
-    auto layers_main = [&](const BSparsePoly& sp) {
-        std::map<std::size_t, BSparsePoly> out;
-        for (const auto& [m, c] : sp) {
-            std::size_t k = (main_var < m.size()) ? m[main_var] : 0U;
-            BMonomial m2 = m;
-            if (main_var < m2.size()) m2[main_var] = 0U;
-            out[k][m2] = c;
-        }
-        return out;
-    };
-    auto content_main_z = [&](const BSparsePoly& sp) -> MultivariatePolynomial {
-        if (n < 2U) return MultivariatePolynomial({{.coefficient = BigInt(1), .factors = {}}});
-        auto layers = layers_main(sp);
-        if (layers.size() <= 1U) {
-            return MultivariatePolynomial({{.coefficient = BigInt(1), .factors = {}}});
-        }
-        MultivariatePolynomial acc;
-        bool first = true;
-        for (auto& [k, layer] : layers) {
-            if (layer.empty()) continue;
-            MultivariatePolynomial cur = sub_sparse_to_mv(layer, vars, main_var);
-            if (first) { acc = std::move(cur); first = false; continue; }
-            auto rec = gcd_brown_modular(acc, cur, ctx);
-            if (rec.is_error()) {
-                return MultivariatePolynomial({{.coefficient = BigInt(1), .factors = {}}});
-            }
-            acc = std::move(rec.value());
-            if (acc.terms().size() == 1U && acc.terms()[0].factors.empty()
-                && acc.terms()[0].coefficient == BigInt(1)) {
-                return acc;
-            }
-        }
-        return acc;
-    };
-
-    MultivariatePolynomial cont_main_P_mv, cont_main_Q_mv;
-    MultivariatePolynomial cont_main_gcd_mv =
-        MultivariatePolynomial({{.coefficient = BigInt(1), .factors = {}}});
-    bool have_main_content_gcd = false;
-    if (n >= 2U) {
-        cont_main_P_mv = content_main_z(ppP);
-        cont_main_Q_mv = content_main_z(ppQ);
-        auto is_one = [](const MultivariatePolynomial& m){
-            return m.terms().size() == 1U && m.terms()[0].factors.empty()
-                && m.terms()[0].coefficient == BigInt(1);
-        };
-        if (!is_one(cont_main_P_mv) || !is_one(cont_main_Q_mv)) {
-            auto cg = gcd_brown_modular(cont_main_P_mv, cont_main_Q_mv, ctx);
-            if (cg.is_ok() && !is_one(cg.value())) {
-                cont_main_gcd_mv = std::move(cg.value());
-                BSparsePoly cont_sp = mv_to_sub_sparse(cont_main_gcd_mv, vars, main_var);
-                if (!cont_sp.empty()) {
-                    auto strip = [&](const BSparsePoly& X) -> std::optional<BSparsePoly> {
-                        auto layers = layers_main(X);
-                        std::map<std::size_t, BSparsePoly> out_layers;
-                        for (const auto& [k, layer] : layers) {
-                            if (layer.empty()) { out_layers[k] = {}; continue; }
-                            BSparsePoly quo;
-                            if (!exact_divide_sparse_z(layer, cont_sp, n, quo))
-                                return std::nullopt;
-                            out_layers[k] = std::move(quo);
-                        }
-                        BSparsePoly res;
-                        for (const auto& [k, layer] : out_layers) {
-                            for (const auto& [m, c] : layer) {
-                                BMonomial nm = m;
-                                if (nm.size() <= main_var) nm.resize(main_var + 1U, 0U);
-                                nm[main_var] = static_cast<unsigned int>(k);
-                                res[nm] = c;
-                            }
-                        }
-                        return res;
-                    };
-                    auto sp_pp_P = strip(ppP);
-                    auto sp_pp_Q = strip(ppQ);
-                    if (sp_pp_P.has_value() && sp_pp_Q.has_value()) {
-                        ppP = std::move(*sp_pp_P);
-                        ppQ = std::move(*sp_pp_Q);
-                        have_main_content_gcd = true;
-                    }
-                }
-            }
-        }
-    }
+    // Extracted to polynomial_gcd_brown_content.cpp (anti-monolith split).
+    // ppP/ppQ are divided in place by the content gcd when extraction succeeds.
+    MainVarContentGcd main_content =
+        extract_main_var_content_gcd(ppP, ppQ, vars, n, main_var, ctx);
+    const MultivariatePolynomial& cont_main_gcd_mv = main_content.content_gcd;
+    const bool have_main_content_gcd = main_content.stripped;
     const std::size_t dP_main = deg_in_var(ppP, main_var);
     const std::size_t dQ_main = deg_in_var(ppQ, main_var);
     BigInt lcP(0), lcQ(0);
@@ -375,6 +197,10 @@ static BigInt multivar_mignotte_bound(const BSparsePoly& P, const BSparsePoly& Q
     std::size_t prime_attempts = 0;
     const std::size_t max_attempts = max_primes * 4U;
     while (primes_used < max_primes && prime_attempts < max_attempts) {
+        // HC-F70-A33: poll interrupt per prime (pure modular arithmetic loop).
+        if (auto chk = ctx.check_interrupt(); chk.is_error()) {
+            return fail<MultivariatePolynomial>(chk.error());
+        }
         ++prime_attempts;
         if (consecutive_useless >= useless_streak_cap) {
             return make_unimplemented<MultivariatePolynomial>(
@@ -565,7 +391,6 @@ static BigInt multivar_mignotte_bound(const BSparsePoly& P, const BSparsePoly& Q
                     }
                 }
             }
-
             M_need = M_need + M_need;
             if (++cert_fail_count >= 4U) {
                 return make_unimplemented<MultivariatePolynomial>(
@@ -578,7 +403,6 @@ static BigInt multivar_mignotte_bound(const BSparsePoly& P, const BSparsePoly& Q
             }
         }
     }
-
     return make_unimplemented<MultivariatePolynomial>(
         "algebra", "gcd_brown_modular",
         "primes_used=" + std::to_string(primes_used) + ",budget=" + std::to_string(max_primes),
@@ -586,11 +410,9 @@ static BigInt multivar_mignotte_bound(const BSparsePoly& P, const BSparsePoly& Q
         "Increase ctx.max_gcd_total_calls() or input is adversarial for current bound",
         "F3.1");
 }
-
 [[nodiscard]] Result<MultivariatePolynomial> gcd_brown_modular(
     const MultivariatePolynomial& P, const MultivariatePolynomial& Q,
     symbolic::CASContext& ctx) {
     return gcd_brown_modular(P, Q, ctx, nullptr);
 }
-
 }  // namespace cas::algebra

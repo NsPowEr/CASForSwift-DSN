@@ -8,6 +8,7 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <string>
 
 namespace cas::calculus {
@@ -624,11 +625,26 @@ TEST(CalculusIntegrateTest, AllowsRemovableRationalSingularityAfterExactCancella
     expect_equivalent(result.value(), expected.value());
 }
 
-TEST(CalculusIntegrateTest, RejectsNonElementaryCaseForNow) {
+TEST(CalculusIntegrateTest, SolvesGaussianViaMeijerGFallback) {
+    // Storia: questo test si chiamava RejectsNonElementaryCaseForNow e
+    // asseriva Unimplemented. Da A7 step 5 il fallback Meijer G POST-Risch
+    // produce la forma chiusa (sqrt(pi)/2)*erf(x) (Meijer_G_Slater.md §9.4),
+    // quindi il contratto è cambiato: successo + verifica per
+    // differenziazione (mai toString — D(F) − f deve semplificare a 0).
     symbolic::CASContext context;
-    auto integrated = integrate_input("exp(-x^2)", "x", context);
-    ASSERT_TRUE(integrated.is_error());
-    EXPECT_EQ(integrated.error().kind, CASErrorKind::Unimplemented);
+    auto integrand = parse_expr("exp(-x^2)", context.arena());
+    ASSERT_TRUE(integrand.is_ok());
+    auto integrated = integrate(integrand.value(), Symbol("x"), context);
+    ASSERT_TRUE(integrated.is_ok()) << integrated.error().message;
+    auto derivative = diff(integrated.value(), Symbol("x"), 1U, context);
+    ASSERT_TRUE(derivative.is_ok()) << derivative.error().message;
+    ExprPtr residual = context.arena().make<Binary>(BinaryOp::Sub,
+        derivative.value(), integrand.value());
+    auto zero = context.simplify(residual);
+    ASSERT_TRUE(zero.is_ok());
+    const auto* lit = expr_cast<IntegerLit>(zero.value());
+    EXPECT_TRUE(lit != nullptr && lit->value.is_zero())
+        << "D(F) - f non semplifica a zero";
 }
 
 TEST(CalculusLimitTest, ComputesDirectSubstitutionAndLHopitalCases) {
@@ -1267,6 +1283,38 @@ TEST(L0_14_DecimalToRational, DiffWithVariableCoeff) {
     ASSERT_TRUE(result.is_ok()) << result.error().message;
     auto simp = ctx.simplify(result.value());
     ASSERT_TRUE(simp.is_ok()) << "diff(0.1*t^3, t) must not fail";
+}
+
+TEST(CalculusIntegrateTest, SubstitutionRecognizesExpReciprocal) {
+    // A42 triage: 1/(exp(x)+exp(-x)) = 1/(2cosh(x)), classical antiderivative
+    // arctan(exp(x)). Candidate g=exp(x) is found, but exp(-x) is a
+    // *different* ExprPtr shape from exp(x) (not 1/exp(x) syntactically),
+    // so replace_expr's literal structural match alone never substitutes it
+    // and the candidate looks like it still depends on x. Fixed by having
+    // replace_expr recognize exp(k*w) for any nonzero integer k (including
+    // k=-1) when the pattern is exp(w), substituting u^k.
+    expect_integration_oracle("1/(exp(x) + exp(-x))", "x");
+}
+
+TEST(CalculusIntegrateTest, SubstitutionVerificationRobustToReciprocalShape) {
+    // A37/A42 triage: 1/(x*log(x)) = log(log(x)). The u=log(x) candidate
+    // was found correctly by integrate_by_substitution (f_u = 1/u), but the
+    // mandatory verification step rejected it: diff(log(log(x))) simplifies
+    // to Product([x^-1, log(x)^-1]) while the integrand simplifies to
+    // Pow(Product([x,log(x)]), -1) — the same value, different shape, so a
+    // raw structural_equal on the two independently-simplified sides was a
+    // false negative. Fixed by comparing via together(D(F)-f) == 0 instead
+    // (same zero-difference idiom integrate_by_parts already uses).
+    expect_integration_oracle("1/(x*log(x))", "x");
+}
+
+TEST(CalculusIntegrateTest, SubstitutionFixpointCatchesEmergentCandidate) {
+    // A42 triage: x^3*cos(x^2), candidate g=x^2. The residual x^3/(2x) only
+    // reduces to x^2/2 *during* simplify, which runs after the single
+    // replace_expr pass, so the emergent x^2 factor was invisible to the
+    // first pass and the candidate looked like it still depended on x.
+    // Fixed by re-running replace+simplify to a bounded fixpoint.
+    expect_integration_oracle("x^3*cos(x^2)", "x");
 }
 
 }  // namespace

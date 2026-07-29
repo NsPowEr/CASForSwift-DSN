@@ -13,8 +13,8 @@ TEST(UnimplementedPayloadTest, PayloadIsCorrectlyFormed) {
     ASSERT_TRUE(err.payload.has_value());
     EXPECT_EQ(err.payload->module, "test_mod");
     EXPECT_EQ(err.payload->function, "test_fn");
-    EXPECT_EQ(err.payload->reason_code, error::reason_codes::GENERIC);
-    EXPECT_EQ(err.payload->ticket_id, "T-123");
+    EXPECT_EQ(err.payload->reason, error::reason_codes::GENERIC);
+    EXPECT_EQ(err.payload->ticket, "T-123");
     EXPECT_EQ(err.message, "Brief msg");
 }
 

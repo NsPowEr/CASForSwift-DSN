@@ -28,11 +28,10 @@ public:
     static constexpr std::uint32_t API_VERSION = 1;
     static constexpr std::size_t DEFAULT_BLOCK_BYTES = 64U * 1024U;
 
-    // F1.3-NEW: number of interning shards. Power-of-2 for cheap modulo.
-    static constexpr std::size_t N_INTERN_SHARDS = 16U;
-
-    AstArena() = default;
+    explicit AstArena(std::size_t num_shards = 0);
     ~AstArena();
+    void configure_shards(std::size_t num_shards);
+    [[nodiscard]] std::size_t num_shards() const noexcept { return num_shards_; }
     AstArena(const AstArena&) = delete;
     AstArena& operator=(const AstArena&) = delete;
     AstArena(AstArena&& other) noexcept;
@@ -67,7 +66,7 @@ public:
         // F1.3-NEW: compute shard from structural hash of the candidate node.
         ExprPtr candidate_ptr(&candidate);
         const std::size_t h = expr_hash(candidate_ptr);
-        const std::size_t shard_idx = h & (N_INTERN_SHARDS - 1U);
+        const std::size_t shard_idx = h & (num_shards_ - 1U);
 
         std::lock_guard<std::mutex> shard_lock(intern_shards_[shard_idx]);
 
@@ -169,13 +168,10 @@ private:
     std::vector<std::vector<ExprNode*>> node_chunks_;
     std::size_t total_nodes_{0U};
 
-    // F1.3-NEW / HPP-016: interning table sharded by hash % N_INTERN_SHARDS.
-    mutable std::array<std::mutex, N_INTERN_SHARDS> intern_shards_;
-    std::array<std::unordered_set<ExprPtr, ExprHash, ExprEqual>, N_INTERN_SHARDS>
-        intern_shard_tables_;
-
-    static_assert((N_INTERN_SHARDS & (N_INTERN_SHARDS - 1U)) == 0U,
-                  "N_INTERN_SHARDS must be a power of two");
+    // F1.3-NEW / HPP-016: interning table sharded dynamically by hash % num_shards_.
+    std::size_t num_shards_{16U};
+    mutable std::unique_ptr<std::mutex[]> intern_shards_;
+    std::unique_ptr<std::unordered_set<ExprPtr, ExprHash, ExprEqual>[]> intern_shard_tables_;
 
     // F1.3-NEW: hot-constant caches as atomics for lock-free fast-path reads.
     std::array<std::atomic<ExprPtr>, 5U> interned_constants_{};

@@ -86,43 +86,35 @@ static ExprPtr build_paper_example1_r(symbolic::CASContext& ctx) {
         a.make<Binary>(BinaryOp::Add, t1, t2), t3);
 }
 
-// ─── C3-2: Paper Example 1 (p. 23) — currently n=12 (icosahedral) scope debt ──
-// Mathematically the paper proves Case 3 with n=12 holds for this DE.  Our
-// implementation currently scopes out n=12 because the §5 recurrence's
-// 13-level chain exceeds the symbolic-op timeout under the present
-// together()+simplify() infrastructure (HC-KV-06 in HARDCODE_LEDGER.md).
-// Test acceptance: Case 3 returns Unimplemented (no silent wrong answer).
-TEST_F(OdeKovacicCase3Test, Paper_Example1_p23_Currently_N12ScopeDebt) {
+// ─── C3-2: Paper Example 1 (p. 23) — n=12 (icosahedral A₅) MUST succeed ──────
+// Kovacic 1986 proves Case 3 with n=12 holds for this DE.  Since the
+// HC-KV-06 closure (PolyExpr recurrence + general linear-factor pole
+// extraction, 2026-07-08) the engine finds the degree-12 minimal polynomial
+// of ω; a regression back to Unimplemented is a hard failure.
+TEST_F(OdeKovacicCase3Test, Paper_Example1_p23_N12_Icosahedral) {
     Symbol x("x");
     ExprPtr r = build_paper_example1_r(ctx);
 
     auto res = kovacic_impl::case3_omega(r, x, ctx);
-    // Either Unimplemented (current state) or ok (future n=12 fix lands).
-    if (res.is_error()) {
-        EXPECT_EQ(res.error().kind, CASErrorKind::Unimplemented)
-            << "Unsupported-input failure must surface as Unimplemented, "
-               "not a different error class.  Got: " << res.error().message;
-    } else {
-        // If future work enables n=12, validate structural soundness.
-        auto* root = expr_cast<RootOf>(res.value().plus);
-        ASSERT_NE(root, nullptr);
-        EXPECT_FALSE(root->variable.name.empty());
-    }
+    ASSERT_TRUE(res.is_ok())
+        << "Paper Example 1 (p. 23) is a proven n=12 Case 3 instance; "
+           "case3_omega must succeed.  Got: " << res.error().message;
+    auto* root = expr_cast<RootOf>(res.value().plus);
+    ASSERT_NE(root, nullptr);
+    EXPECT_FALSE(root->variable.name.empty());
 }
 
-// ─── C3-5: structural soundness when Case 3 succeeds ─────────────────────────
-// Whenever case3_omega returns ok, the wrapped minimal polynomial must
-// reference the fresh ω-variable.  Probe via a small synthetic input where
-// Case 3 hits the n=4 branch; on failure tolerate via SKIP.
-TEST_F(OdeKovacicCase3Test, MinPoly_Structural_Soundness_WhenSuccess) {
+// ─── C3-5: structural soundness of the returned minimal polynomial ───────────
+// The wrapped minimal polynomial must reference the fresh ω-variable.
+// Probe input: paper Example 1 (guaranteed-success since HC-KV-06 closure).
+TEST_F(OdeKovacicCase3Test, MinPoly_Structural_Soundness) {
     Symbol x("x");
     ExprPtr r = build_paper_example1_r(ctx);
 
     auto res = kovacic_impl::case3_omega(r, x, ctx);
-    if (res.is_error()) {
-        GTEST_SKIP() << "Case 3 not applicable to probe input (scope debt "
-                        "n=12 — HC-KV-06); structural assertion skipped.";
-    }
+    ASSERT_TRUE(res.is_ok())
+        << "case3_omega must succeed on paper Example 1: "
+        << res.error().message;
     auto* root = expr_cast<RootOf>(res.value().plus);
     ASSERT_NE(root, nullptr);
     const std::string poly_str = debug_print(root->polynomial);

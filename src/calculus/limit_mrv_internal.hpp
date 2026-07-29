@@ -4,6 +4,7 @@
 
 #include "calculus_internal.hpp"
 #include "cas/error.hpp"
+#include "cas/error_helpers.hpp"
 #include "cas/symbolic.hpp"
 #include "../symbolic/simplify_impl.hpp"
 #include "cas/algebra.hpp"

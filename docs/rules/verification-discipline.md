@@ -1,0 +1,190 @@
+# DISCIPLINA DI VERIFICA — come si PROVA una chiusura
+
+> Dettaglio normativo su cosa conta come **prova** che una task è chiusa.
+> L'indice vive in `CLAUDE.md`. Carica questo file prima di dichiarare
+> completata una task, e sempre quando erediti claim da ledger/tasklist.
+>
+> **Motivazione storica**: chiusure delegate rivelate false a suite verde;
+> claim di ledger smentiti alla verifica empirica (A27 "clean bail" che era
+> silent-wrong; A8 "perf blow-up" che era shape-bug; "no factor" della
+> ricombinazione che non implicava irriducibilità).
+
+## Regola d'oro
+
+Una task è chiusa quando il **SINTOMO originale, rimisurato, è sparito** —
+non quando la suite è verde. La suite verde è condizione necessaria, mai
+sufficiente: il sintomo può essere un WARN debug-only, una misura di
+performance o un comportamento che nessun test copre.
+
+## Protocollo
+
+1. **Sintomo prima/dopo**: riproduci il sintomo su un worktree al commit
+   precedente al fix, poi sul fix. Stesso comando, stessi input, stesse
+   condizioni di carico. Riporta entrambe le misure.
+2. **Equivalenza matematica dubbia** → certificato numerico multi-punto ad
+   alta precisione (skill `numeric-certify`, mpmath). **Limite noto**: il
+   multi-punto NON prova identità che coinvolgono trascendenti in generale
+   (lezione A47) — lì serve un argomento strutturale o un certificato esatto.
+3. **Claim ereditati** (ledger, tasklist, commit message: "clean bail",
+   "perf blow-up", "no factor", "già coperto") → verificare empiricamente
+   PRIMA di costruirci sopra. Leggere sempre `file:riga` reali prima di
+   scrivere spec o piani (lezione A31).
+4. **Misure golden**: dati freschi obbligatori — `cas_golden_runner` NON si
+   ricompila da solo, va rebuildato dopo modifiche al codice o si misura
+   stale; ratchet solo in foreground; guard di freschezza attivo.
+
+## Un gate deve misurare il codice, non la macchina (A51)
+
+Un gate il cui esito dipende dal carico è peggio di nessun gate: dà un verde
+che non significa niente e un rosso che non si riproduce.
+
+1. **Ripetere la misura non basta come prova di determinismo.** Due run
+   consecutive identiche sulla stessa macchina scarica non escludono che il
+   verdetto sia deciso dal tempo. La prova forte è l'**invarianza rispetto al
+   budget**: stessa misura con cap diversi (30 s vs 60 s vs 300 s) deve dare
+   gli stessi verdetti. In A51 non li dava — e a cap diversi cambiavano entry
+   *diverse*, cosa che due run identiche non avrebbero mai rivelato.
+2. **Un esito troncato non è un verdetto.** Se il motore viene interrotto a
+   metà, ciò che il runner registra (`false` da un confronto incompleto,
+   `NO_STRATEGY` da una strategia interrotta) parla della macchina, non della
+   matematica. Va classificato in una categoria propria (`over_budget`) e
+   tenuto fuori da pass/fail — con un suo tetto nel ratchet, o si "passa" il
+   gate lasciando scadere le entry scomode.
+3. **La soglia si sceglie nel vuoto della distribuzione, misurandola.** Cap
+   utile = margine ≥3× fra l'entry decisa più lenta e la soglia, con nessuna
+   entry nella fascia intermedia. Serve strumentazione (`--ops-report`:
+   ops + ms per entry): senza dati la soglia è un numero preso a intuito e le
+   entry al confine restano invisibili finché non oscillano.
+4. **Un budget che non morde mai non è un gate.** Il gate deterministico di
+   A30 (`max_operation_ops`) non ha mai deciso nulla nel golden runner: il
+   wall-clock scattava a ~400k ops contro un tetto di 2M. Verificare sempre
+   *quale* dei due limiti taglia per primo, sul lavoro reale.
+
+## Il gate vale solo per il codice su cui è girato
+
+Una suite verde **non si eredita** attraverso modifiche successive. Nel caso
+A51 la quick suite era verde, poi sono arrivate altre modifiche al motore, e il
+commit è partito sulla fiducia in quel verde: la suite rieseguita dopo ha
+trovato uno stack overflow. Regola operativa: l'ultima esecuzione della suite
+completa deve essere **posteriore all'ultima modifica** a `src/` o `include/`;
+se una modifica arriva dopo, il gate va rifatto, anche se "tocca solo commenti"
+(nel caso reale erano commenti *e* uno split di header).
+
+Corollario: i test mirati (`--gtest_filter`) servono a iterare, non a chiudere.
+Un fix può essere verde sui test della sua area e rompere un'altra area — e
+succede soprattutto quando si stringe un budget condiviso.
+
+## Trappole note (repo-specifiche)
+
+- `polynomial_normal_form` NON è idempotente sotto `operation_active_`:
+  helper zero-diff dentro `mathematically_equal` danno falsi negativi;
+  pulire `operation_active_` al call site.
+- Test di no-pollution delle side-conditions: servono DUE emittenti di
+  condizioni **diverse** — uno spacer neutro maschera il bug (lezione A31).
+- Test flaky sotto carico (timeout wall-clock, caso A30): verificare in
+  isolamento prima di attribuire una regressione al proprio diff.
+- Mai `toString()` per validare la logica (costituzione §Testing): solo
+  confronto strutturale o equivalenza matematica.
+- Nessuna verifica (build/test/benchmark propri) mentre un gate gira in
+  background: timeout falsi-positivi e risultati non attendibili.
+- **Il NOME di un test può escluderlo dal gate.** `test_quick.sh` filtra via
+  `*Stress*`, `*Fuzz*` e `*Disabled*` (convenzione gtest): un test chiamato
+  `...DisabledOpsGate...` non sarebbe mai girato, restando verde per non
+  esistere (A53, intercettato contando i `[ RUN ]`). Dopo aver aggiunto test:
+  contarli nel log del gate, non fidarsi del totale — `2894` invece di `2895`
+  è l'unico segnale che ne manca uno.
+- **Un "risultato sbagliato" può essere il VERIFICATORE che sbaglia** (A54).
+  `D(F) ≠ f` accusa il produttore (Risch), ma l'antiderivata era corretta —
+  certificata mpmath a 40 cifre in 7 punti — e a fallire era `is_zero_expr`,
+  perché `expand` non garantiva la propria post-condizione (nessun `Sum` sotto
+  un `Product`) e una differenza identicamente nulla non si cancellava.
+  **Prima di aprire il codice del produttore, certificare numericamente il suo
+  output**: se il valore è giusto, il difetto è a valle. Corollario: quando un
+  verdetto dipende dalla FORMA dell'input, sospettare per primo chi normalizza,
+  non chi decide.
+- **Un flag che cambia il risultato di `simplify` deve entrare nella chiave di
+  cache, o bypassarla** (A54). `simplify_cache_` è indicizzata sul solo
+  `ExprPtr`: un parametro nuovo che altera l'output rende gli hit precedenti
+  risposte sbagliate — e il difetto si ripresenta *solo* quando la cache è
+  calda, cioè nei test end-to-end e mai nei microtest a contesto fresco.
+- **Il benchmark è un gate solo a macchina scarica.** Eseguito nella coda di
+  una misura golden (load 30 su 10 CPU) produce numeri gonfiati; lo script
+  avvisa, ma l'avviso si perde nel log di build. Attendere `load < 4`, e usare
+  `--check --baseline <file>`: senza `--check` lo script stampa le misure e
+  NON confronta nulla (A53).
+- **Una fase successiva può nascondere il difetto che il test cerca nella fase
+  precedente** (A56). Testare la scorciatoia di `add_parts`/`subtract_parts`
+  chiamando `together()` (pubblica, comoda) non distingue nulla: `together()`
+  applica SEMPRE la riduzione GCD dopo `apart_num_den`, quindi un denominatore
+  cross-moltiplicato viene comunque ridotto a valle e il test strutturale
+  passa identico con o senza la scorciatoia. Bisogna chiamare la funzione
+  interna (`apart_num_den`) PRIMA della fase che maschera la differenza — e
+  verificarlo col canary (rosso su HEAD pre-fix, verde col fix), non fidarsi
+  che "il test passa" basti.
+- **Una diagnosi d'apertura sbagliata su ENTRAMBI i punti può comunque
+  puntare all'area giusta** (A55). La scoperta citava "GCD non collassa
+  potenze" e "binomi espansi": nessuno dei due riproduce isolatamente (la GCD
+  collassa correttamente le potenze condivise; i binomi non si espandono mai
+  nel repro originale). La causa vera — lo Step 8 del simplifier che
+  ridistribuisce `Product(Sum(N), Pow(D,-1))` non appena `together()` lo
+  assembla — non emerge finché non si rimisura il repro DOPO che un fix
+  correlato (A56) ha eliminato il rumore che mascherava il vero sintomo.
+  **Corollario**: quando riapri un task "quasi chiuso da un fix vicino",
+  rimisura il repro letterale prima di fidarti della diagnosi scritta
+  all'apertura — può essere obsoleta pur restando nell'area giusta.
+- **Una regola di canonicalizzazione del simplifier che è l'inversa della
+  post-condizione di una funzione va sospesa via RAII scope, non aggirata
+  altrove** (A54/A55, pattern gemello). `expand()` sospende la raccolta
+  (F1.4) perché la sua post-condizione è la forma espansa; `together()`
+  sospende la distribuzione (Step 8) perché la sua post-condizione è la
+  forma combinata. Stesso meccanismo in entrambi i sensi: flag su
+  `CASContext` (default = comportamento storico, attivo per ogni altro
+  chiamante), RAII scope rientrante che lo sospende per la durata della
+  propria costruzione, bypass della cache di `simplify()` quando sospeso
+  (la chiave è il solo `ExprPtr`, non il flag).
+- **Un test che confronta contro `ctx.simplify(expected)` può passare per
+  coincidenza se ENTRAMBI i lati subiscono la stessa trasformazione
+  indesiderata** (A55, `AlgebraTogetherTest.RebuildsSingleRationalExpression`).
+  Il test dichiarava di verificare "una sola frazione combinata", ma
+  `together()` restituiva una `Sum` distribuita E `ctx.simplify(expected)`
+  la distribuiva allo stesso modo — structural_equal passava confrontando
+  due forme ugualmente sbagliate. Il fix ha rivelato il falso positivo.
+  Quando il nome del test dichiara una proprietà strutturale, asserirla
+  esplicitamente (es. `!expr_is<Sum>(risultato)`), non solo l'uguaglianza
+  con un "expected" costruito con lo stesso path che potrebbe condividere il
+  bug.
+- **Generalizzare una regola del simplifier può scontrarsi con una regola
+  OPPOSTA già esistente altrove nel motore** (A50, `collapse_sqrt_pairs`
+  Phase 2 vs `builtin_rewrite_algebraic.cpp`). Estendere `sqrt(a)*sqrt(b) →
+  sqrt(a·b)` oltre i letterali razionali ha silenziosamente disfatto la
+  regola opposta e deliberata che espande `sqrt(prodotto non-negativo)` in
+  fattori separati (serve a valle per cancellazioni QR) — le due direzioni
+  oscillavano sullo stesso input. I test mirati (stessa area, stesso file)
+  non lo vedono: il conflitto emerge solo su un `CASContext` con le
+  assumption giuste, in un test scritto per la regola OPPOSTA. **Solo la
+  quick suite intera l'ha preso.** Corollario: dopo aver toccato un
+  primitivo di simplify condiviso (Product/Sum/Pow chain), la quick suite
+  completa non è opzionale — un filtro mirato, per quanto ampio, campiona
+  l'area sbagliata. Fix sound: restringere la generalizzazione a quando
+  produce una VERA riduzione (coefficiente non banale o base condivisa), non
+  la semplice concatenazione che l'altra regola già possiede.
+- **Un letterale negativo (`IntegerLit(-2)`) non è mai `Unary(Neg, ...)`** —
+  sono due forme AST diverse per lo stesso valore. Le regole di parità che
+  pattern-matchano sulla forma sintattica `Neg` (es. `sin(-x)=-sin(x)`)
+  quindi NON riconoscono `sin(IntegerLit(-2))`: `cos(-2)` e `cos(2)` restano
+  atomi strutturalmente distinti che nessuna regola confronta (A50, bloccava
+  `∫sin(x)/(x-c)`). Quando si costruisce un rewrite che sa GIÀ di maneggiare
+  una fase/costante isolata (qui: l'identità di addizione trig), canonicizzare
+  il segno di quella costante localmente nel proprio codice è lo scope
+  corretto — non serve (e sarebbe rischioso) estendere le regole di parità
+  globali a riconoscere anche i letterali negativi.
+- **Prima di scrivere una regola nuova, verificare se ne esiste già una
+  spenta da un flag mai acceso fuori dal suo primo consumer** (A50, identità
+  3). La regola `ln(b^e)→e·ln(b)` condizionata al dominio era già
+  implementata e testata da A31 fase 2, dietro `conditional_domain_rules`
+  (default `false`, acceso solo dal golden runner per le entry con
+  `assume`). La verifica bloccata non serviva NESSUN codice motore nuovo:
+  serviva solo accendere il flag, localmente, per la durata del confronto —
+  stesso pattern del golden runner. Accenderlo GLOBALMENTE dentro
+  `mathematically_equal` sarebbe stato un errore diverso: relaxerebbe la
+  soundness di ogni confronto nel motore, non solo di questo.

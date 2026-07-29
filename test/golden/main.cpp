@@ -24,6 +24,7 @@
 #include "integrate_equiv.hpp"
 #include "runner_timeout.hpp"
 #include "runner_format.hpp"
+#include "giac_parser.hpp"
 
 #include "cas/algebra.hpp"
 #include "cas/ast.hpp"
@@ -35,11 +36,13 @@
 #include "cas/symbolic.hpp"
 
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -117,12 +120,105 @@ static std::string format_expr(ExprPtr expr) {
 }
 
 // ---------------------------------------------------------------------------
+// A32 — parse the corpus "assume" predicate and register the symbol-level
+// domain restrictions on ctx, so simplify produces the same restricted output
+// as the assume-aware Maxima reference (run_golden_maxima.sh emits the matching
+// assume()/declare() directives). Grammar (a comma-separated conjunction):
+//   <sym> real | <sym> integer | <expr> (>=|>|!=|<=|<) <expr>
+// Only atoms of the form <bare symbol> vs 0 (or `real`/`integer`) change the
+// generic symbolic CAS output; expression-level facts (e.g. `a*d - b*c != 0`,
+// `n != -1`) do not alter it and are handled on the Maxima side only.
+// Returns the human-readable list of restrictions actually applied CAS-side.
+static std::string apply_assume_predicates(
+    cas::symbolic::CASContext& ctx, const std::string& assume_str) {
+    auto trim = [](std::string s) -> std::string {
+        const std::size_t a = s.find_first_not_of(" \t");
+        if (a == std::string::npos) return {};
+        const std::size_t b = s.find_last_not_of(" \t");
+        return s.substr(a, b - a + 1);
+    };
+    auto parse_expr = [&](const std::string& tok) -> ExprPtr {
+        auto lx = cas::Lexer(tok).tokenize();
+        if (!lx.is_ok()) return nullptr;
+        cas::Parser p(lx.value(), ctx.arena());
+        auto r = p.parse();
+        return r.is_ok() ? r.value() : nullptr;
+    };
+    std::string applied;
+    auto note = [&](const std::string& s) {
+        if (!applied.empty()) applied += ", ";
+        applied += s;
+    };
+    std::size_t start = 0;
+    while (start <= assume_str.size()) {
+        const std::size_t comma = assume_str.find(',', start);
+        const std::string atom = trim(assume_str.substr(
+            start, comma == std::string::npos ? std::string::npos : comma - start));
+        start = (comma == std::string::npos) ? assume_str.size() + 1 : comma + 1;
+        if (atom.empty()) continue;
+
+        auto ends_with = [&](const char* suf) {
+            const std::string s(suf);
+            return atom.size() >= s.size()
+                && atom.compare(atom.size() - s.size(), s.size(), s) == 0;
+        };
+        if (ends_with(" real")) {
+            if (const auto* s = expr_cast<Symbol>(
+                    parse_expr(trim(atom.substr(0, atom.size() - 5))))) {
+                ctx.assumptions().assume_real(*s); note(s->name + " real");
+            }
+            continue;
+        }
+        if (ends_with(" integer")) {
+            if (const auto* s = expr_cast<Symbol>(
+                    parse_expr(trim(atom.substr(0, atom.size() - 8))))) {
+                ctx.assumptions().assume_integer(*s); note(s->name + " integer");
+            }
+            continue;
+        }
+        // Relational atom. Test ">=" / "<=" / "!=" before "<" / ">".
+        static const char* kOps[] = {">=", "<=", "!=", ">", "<"};
+        for (const char* op : kOps) {
+            const std::size_t pos = atom.find(op);
+            if (pos == std::string::npos) continue;
+            const std::string op_s(op);
+            ExprPtr lhs = parse_expr(trim(atom.substr(0, pos)));
+            const std::string rhs = trim(atom.substr(pos + op_s.size()));
+            const auto* sym = expr_cast<Symbol>(lhs);
+            const bool rhs_zero = (rhs == "0");
+            if (sym != nullptr && rhs_zero) {
+                if (op_s == ">=") {
+                    ctx.assumptions().assume_greater_equal(lhs, ExprPtr());
+                    note(sym->name + " >= 0");
+                } else if (op_s == ">") {
+                    ctx.assumptions().assume_positive(*sym);
+                    note(sym->name + " > 0");
+                } else if (op_s == "!=") {
+                    ctx.assumptions().assume_nonzero(*sym);
+                    note(sym->name + " != 0");
+                }
+                // "<= 0" / "< 0" absent from the corpus; expression LHS or a
+                // non-zero RHS have no generic-output effect (Maxima side only).
+            }
+            break;
+        }
+    }
+    return applied;
+}
+
+// ---------------------------------------------------------------------------
 // Per-area statistics
 // ---------------------------------------------------------------------------
 struct AreaStats {
     int pass{0};
     int fail{0};
     int skip{0};
+    // A51 — entry troncate dal budget per-entry. Sono una categoria a se':
+    // il loro verdetto non dice nulla sulla matematica, dice solo che il
+    // motore non ha finito nel tempo concesso. Contarle come PASS o FAIL
+    // lega gli aggregati del ratchet alla velocita' della macchina — e' il
+    // difetto che A51 chiude.
+    int over_budget{0};
     std::vector<std::string> fail_examples; // up to 5 examples
 };
 
@@ -132,21 +228,54 @@ struct AreaStats {
 int main(int argc, char* argv[]) {
     if (argc < 3) {
         std::cerr << "Usage: " << argv[0]
-                  << " <corpus.jsonl> <maxima_out_dir> [--json <output.json>]\n";
+                  << " <corpus.jsonl> <maxima_out_dir> [--json <output.json>]"
+                     " [--per-entry-json <output.jsonl>]\n";
         return 1;
     }
 
     const std::string corpus_path = argv[1];
     const std::string maxima_dir  = argv[2];
     std::string json_output_path;
+    std::string per_entry_json_path;
+    std::string giac_dir; // A35 — opt-in, per-area dir written by run_golden_giac.sh
     unsigned int per_entry_timeout_sec = 30;
+    bool ops_report = false;
+    std::optional<std::uint64_t> max_operation_ops_override;
 
     for (int i = 3; i < argc; ++i) {
         std::string a(argv[i]);
         if (a == "--json" && i + 1 < argc) {
             json_output_path = argv[++i];
+        } else if (a == "--per-entry-json" && i + 1 < argc) {
+            // A35 — dump per-entry {idx, area, ref, input, verdict, cas_output}
+            // (JSONL, una entry per riga) necessario per il cross-diff con i
+            // verdetti giac gia' salvati per-entry da run_golden_giac.sh: gli
+            // aggregati di --json non bastano a produrre la lista "giac
+            // risolve, noi no" ne' a confrontare il VALORE (non solo
+            // ANSWERED/pass) contro giac.
+            per_entry_json_path = argv[++i];
+        } else if (a == "--giac-dir" && i + 1 < argc) {
+            // A35 — quando fornita, per ogni entry si legge anche
+            // <giac-dir>/<idx>.giac.out (scritto da run_golden_giac.sh) e si
+            // confronta col risultato CAS via la STESSA equivalenza vera gia'
+            // usata per Maxima (mathematically_equal / compare_solve_sets /
+            // antiderivative_equivalent) — non solo ANSWERED vs pass. Il
+            // verdetto giac finisce SOLO nel dump --per-entry-json: non tocca
+            // AreaStats / il ratchet, che resta ancorato a Maxima soltanto.
+            giac_dir = argv[++i];
         } else if (a == "--per-entry-timeout" && i + 1 < argc) {
             per_entry_timeout_sec = static_cast<unsigned int>(std::stoul(argv[++i]));
+        } else if (a == "--ops-report") {
+            // A51: emette per ogni entry il budget deterministico consumato.
+            ops_report = true;
+        } else if (a == "--max-ops" && i + 1 < argc) {
+            // A53: il gate ops del runner e' l'oggetto stesso della misura di
+            // calibrazione — con OperationScope aperto su calculus::integrate
+            // il budget vale ora per l'INTERA integrazione, non per singola
+            // simplify. Misurare il costo reale richiede quindi di poter
+            // allargare (o spegnere, con 0 — contratto A30) il gate per un run
+            // di sola misura, senza toccare il default nel codice.
+            max_operation_ops_override = std::stoull(argv[++i]);
         }
     }
 
@@ -154,6 +283,18 @@ int main(int argc, char* argv[]) {
     if (!corpus_file.is_open()) {
         std::cerr << "ERROR: cannot open corpus: " << corpus_path << "\n";
         return 1;
+    }
+
+    // A35 — JSONL, una entry per riga: scritta in streaming (non un array
+    // JSON accumulato) cosi' un run interrotto lascia comunque righe valide.
+    std::ofstream per_entry_jf;
+    if (!per_entry_json_path.empty()) {
+        per_entry_jf.open(per_entry_json_path);
+        if (!per_entry_jf.is_open()) {
+            std::cerr << "ERROR: cannot open --per-entry-json output: "
+                      << per_entry_json_path << "\n";
+            return 1;
+        }
     }
 
     std::map<std::string, AreaStats> area_stats;
@@ -167,6 +308,36 @@ int main(int argc, char* argv[]) {
     auto* ctx_ptr = new symbolic::CASContext();
     symbolic::CASContext& ctx = *ctx_ptr;
     ctx.set_caching_enabled(false);
+
+    // A51 — il verdetto di una entry deve dipendere SOLO dal suo input.
+    //
+    // Il contesto e' condiviso da tutte le entry dell'area, quindi ogni budget
+    // ereditato implicitamente lega il verdetto alla storia del run. Due
+    // conseguenze misurate prima di questa dichiarazione esplicita:
+    //   * il wall-clock interno (10s di default) era a 1.4x dal costo reale
+    //     del confronto piu' caro dell'area (7.1s, misurato): sotto carico
+    //     sforava, l'esito passava da FALSE a errore, e il runner lo contava
+    //     SKIP invece che FAIL — la stessa entry oscillava fra due misure con
+    //     lo STESSO binario;
+    //   * `set_timeout` senza `set_max_operation_ops` DISATTIVA il gate
+    //     deterministico (contratto A30), e il ramo gcd di corpus_runner.hpp
+    //     lo faceva, spegnendolo per tutto il resto del run.
+    //
+    // Qui si dichiara l'opposto, e l'ORDINE delle due righe e' parte del
+    // contratto — invertirlo le rende una disattivazione silenziosa:
+    //   1. il gate ops reso ESPLICITO al suo stesso valore di default (quello
+    //      calibrato da A30), cosi' nessun `set_timeout` successivo puo' piu'
+    //      spegnerlo. Deve venire PRIMA perche' `set_timeout` azzera il
+    //      budget ops finche' e' implicito (context_core.cpp, contratto A30):
+    //      leggere il getter dopo restituirebbe 0, e la riga renderebbe
+    //      esplicito proprio lo ZERO — gate spento con un commento che
+    //      dichiara il contrario. Misurato: e' cosi' che il gate e' rimasto
+    //      spento per l'intero run della prima stesura di A51.
+    //   2. il wall-clock interno pari al budget per-entry gia' dichiarato
+    //      dallo script — nessun numero nuovo inventato, e la protezione
+    //      anti-hang vera resta il SIGALRM per-entry installato sotto.
+    ctx.set_max_operation_ops(max_operation_ops_override.value_or(ctx.max_operation_ops()));
+    ctx.set_timeout(std::chrono::seconds(per_entry_timeout_sec));
 
     // F7.5.A3: install SIGALRM handler + register ctx as interrupt target.
     cas::golden::install_alarm_handler();
@@ -188,15 +359,148 @@ int main(int argc, char* argv[]) {
         }
         if (area.empty()) area = "unknown";
 
+        // A32: the corpus "assume" predicate is now PARSED and applied — both
+        // CAS-side (symbol-level domain restrictions on ctx, below) and in the
+        // Maxima references (run_golden_maxima.sh emits the matching
+        // assume()/declare()). The A31 conditional-domain path stays enabled as
+        // a fallback for symbolic cases the explicit assumption does not prove.
+        const std::string assume_str = json_string_field(line, "assume");
+        ctx.set_conditional_domain_rules(!assume_str.empty());
+
         auto& stats = area_stats[area];
 
-        // Reset context state between entries (variables and assumptions only;
+        // Reset context state between entries (variables, caches AND assumptions;
         // arena is intentionally reused — all prior ExprPtrs remain valid).
         ctx.clear_variables();
         ctx.clear_caches();
+        ctx.clear_assumptions();
+
+        // A32: apply THIS entry's domain restrictions after the reset, so
+        // simplify matches the assume-aware Maxima reference for this line.
+        if (!assume_str.empty()) {
+            const std::string applied = apply_assume_predicates(ctx, assume_str);
+            std::cout << "  INFO [" << std::setw(3) << idx << "] assume \""
+                      << assume_str << "\""
+                      << (applied.empty()
+                              ? " (no CAS-side symbol restriction; Maxima-side only)"
+                              : " -> CAS: " + applied)
+                      << "\n";
+        }
 
         // F7.5.A3: arm per-entry timer. Handler will set interrupt flag.
         cas::golden::start_entry_timer(per_entry_timeout_sec);
+
+        // A51 — con `--ops-report` ogni entry dichiara quanto budget
+        // deterministico ha consumato la sua operazione piu' cara. E' il dato
+        // che permette di tarare `max_operation_ops` sul lavoro reale del
+        // corpus invece che a intuito. Emesso da un distruttore perche' il
+        // corpo del loop esce da decine di punti diversi (un `continue` per
+        // ogni classe di SKIP): un'unica riga a valle e' l'unico modo di
+        // coprirli tutti senza toccarli tutti.
+        // A51 — riclassificazione delle entry troncate.
+        //
+        // Il SIGALRM per-entry interrompe il motore a meta' lavoro: cio' che
+        // il runner registra dopo quel punto (un `false` da un confronto
+        // rimasto a meta', un NO_STRATEGY da una strategia interrotta) NON e'
+        // un verdetto sulla matematica, ma su quanto tempo aveva a
+        // disposizione la macchina. Misurato sul corpus: 16 entry su 1026
+        // toccano il cap, e fra queste tre FAIL (`bronstein[69][70][73]`) e un
+        // PASS (`integrate[94]`) con margine 1.0x — cioe' il loro esito si
+        // decide esattamente sul confine.
+        //
+        // A35 — output CAS testuale per il dump per-entry, popolato dal ramo
+        // che effettivamente calcola un risultato (matrix/solve/generico);
+        // resta vuoto per gli SKIP decisi prima di ottenere un risultato CAS
+        // (nessun dispatch, area matrice non supportata, ecc.).
+        std::string current_cas_output;
+
+        // A35 — verdetto/valore giac per QUESTA entry, popolati dai blocchi
+        // solve/generico via la stessa equivalenza vera usata per Maxima
+        // (mathematically_equal / compare_solve_sets / antiderivative_equivalent
+        // per integrate-bronstein). "not_compared" quando --giac-dir non e'
+        // fornita o l'area non ha ancora un confronto giac cablato (matrix).
+        std::string current_giac_verdict = "not_compared";
+        std::string current_giac_output;
+
+        // A35 — dump {idx, area, ref, input, verdict, cas_output, giac_verdict,
+        // giac_output} per il cross-diff con Giac: gli aggregati non bastano a
+        // produrre la lista "giac risolve, noi no". Stesso trucco RAII di
+        // OverBudgetGuard sotto (dichiarato PRIMA cosi' il suo distruttore
+        // gira DOPO — vede lo stato FINALE di stats, incluso l'eventuale
+        // over_budget) per non dover toccare ognuno dei punti di uscita del
+        // corpo del loop: il verdetto CAS si deduce dal DIFF dei contatori
+        // invece di essere passato a mano.
+        struct PerEntryJsonGuard {
+            std::ofstream& out;
+            AreaStats& stats;
+            int entry_idx;
+            const std::string& area;
+            const std::string& ref;
+            const std::string& input;
+            const std::string& cas_output;
+            const std::string& giac_verdict;
+            const std::string& giac_output;
+            int pass0, fail0, skip0, over0;
+            ~PerEntryJsonGuard() {
+                if (!out.is_open()) return;
+                const char* verdict = "unknown";
+                if (stats.over_budget > over0)      verdict = "over_budget";
+                else if (stats.pass > pass0)        verdict = "pass";
+                else if (stats.fail > fail0)        verdict = "fail";
+                else if (stats.skip > skip0)        verdict = "skip";
+                out << "{\"idx\":" << entry_idx
+                    << ",\"area\":\"" << json_escape(area) << "\""
+                    << ",\"ref\":\"" << json_escape(ref) << "\""
+                    << ",\"input\":\"" << json_escape(input) << "\""
+                    << ",\"verdict\":\"" << verdict << "\""
+                    << ",\"cas_output\":\"" << json_escape(cas_output) << "\""
+                    << ",\"giac_verdict\":\"" << json_escape(giac_verdict) << "\""
+                    << ",\"giac_output\":\"" << json_escape(giac_output) << "\"}\n";
+            }
+        } per_entry_json_guard{per_entry_jf, stats, idx, area, ref, input_str,
+                                current_cas_output,
+                                current_giac_verdict, current_giac_output,
+                                stats.pass, stats.fail, stats.skip, stats.over_budget};
+
+        struct OverBudgetGuard {
+            AreaStats& stats;
+            int entry_idx;
+            const std::string& input;
+            int pass0, fail0, skip0;
+            ~OverBudgetGuard() {
+                if (!cas::golden::entry_timed_out()) return;
+                if (stats.pass > pass0)       --stats.pass;
+                else if (stats.fail > fail0)  --stats.fail;
+                else if (stats.skip > skip0)  --stats.skip;
+                ++stats.over_budget;
+                std::cout << "  OVER [" << std::setw(3) << entry_idx << "] "
+                          << input
+                          << " => troncata dal budget per-entry"
+                             " (verdetto non attendibile)\n";
+            }
+        } over_budget_guard{stats, idx, input_str, stats.pass, stats.fail, stats.skip};
+
+        ctx.reset_ops_high_water();
+        struct OpsReportGuard {
+            const symbolic::CASContext& ctx;
+            bool enabled;
+            int entry_idx;
+            std::chrono::steady_clock::time_point start{
+                std::chrono::steady_clock::now()};
+            ~OpsReportGuard() {
+                if (enabled) {
+                    const auto ms = std::chrono::duration_cast<
+                        std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now() - start).count();
+                    // Il TEMPO accanto alle ops non e' ridondante: dice quanto
+                    // margine ha l'entry rispetto al cap per-entry, cioe' se il
+                    // suo verdetto e' al riparo dal carico della macchina o
+                    // sta sul confine (il difetto che A51 deve chiudere).
+                    std::cout << "       ops[" << entry_idx << "]="
+                              << ctx.ops_high_water() << " ms=" << ms << "\n";
+                }
+            }
+        } ops_guard{ctx, ops_report, idx};
 
         // --- Matrix area: dispatch det/trace/transpose/rank/inverse/eigenvalues (F7.5.A2) ---
         if (area == "matrix") {
@@ -223,6 +527,44 @@ int main(int argc, char* argv[]) {
             bool pass = false;
             bool skip = false;
             std::string skip_reason;
+
+            // A35 — cattura il risultato CAS per il dump per-entry, prima del
+            // confronto: nessun formatter di matrici esiste ancora nel
+            // runner, ne basta uno minimale (righe fra parentesi quadre).
+            switch (cas_v.kind) {
+                case K::Scalar:
+                    current_cas_output = format_expr(cas_v.scalar);
+                    break;
+                case K::Matrix: {
+                    std::ostringstream ms;
+                    ms << "[";
+                    for (std::size_t r = 0; r < cas_v.matrix.rows(); ++r) {
+                        if (r) ms << ",";
+                        ms << "[";
+                        for (std::size_t c = 0; c < cas_v.matrix.cols(); ++c) {
+                            if (c) ms << ",";
+                            ms << format_expr(cas_v.matrix(r, c));
+                        }
+                        ms << "]";
+                    }
+                    ms << "]";
+                    current_cas_output = ms.str();
+                    break;
+                }
+                case K::Eigenvalues: {
+                    std::ostringstream es;
+                    es << "{";
+                    for (std::size_t i = 0; i < cas_v.eigenvalues_list.size(); ++i) {
+                        if (i) es << ",";
+                        es << format_expr(cas_v.eigenvalues_list[i]);
+                    }
+                    es << "}";
+                    current_cas_output = es.str();
+                    break;
+                }
+                default:
+                    break;
+            }
             switch (cas_v.kind) {
                 case K::Scalar: {
                     // HC-F75-A2-MAXIMA-MATTRACE: if Maxima emits
@@ -327,6 +669,37 @@ int main(int argc, char* argv[]) {
                 ++idx;
                 continue;
             }
+            // A35 — cattura il set di radici per il dump per-entry.
+            {
+                std::ostringstream rs;
+                rs << "{";
+                for (std::size_t i = 0; i < cas_solve.value().size(); ++i) {
+                    if (i) rs << ",";
+                    rs << format_expr(cas_solve.value()[i]);
+                }
+                rs << "}";
+                current_cas_output = rs.str();
+            }
+            // A35 — confronto giac (opt-in, indipendente da Maxima/dal ratchet).
+            if (!giac_dir.empty()) {
+                auto gf = read_giac_file(giac_dir, idx);
+                if (gf.tag.empty()) {
+                    current_giac_verdict = "no_giac_file";
+                } else if (gf.tag != "ANSWERED") {
+                    current_giac_verdict = gf.tag; // UNEVALUATED | TIMEOUT | ERROR
+                } else {
+                    auto giac_solve = parse_giac_solve_list(gf.result, ctx.arena());
+                    if (!giac_solve.is_ok()) {
+                        current_giac_verdict = "unparseable";
+                        current_giac_output = gf.result;
+                    } else {
+                        current_giac_output = gf.result;
+                        auto geq = compare_solve_sets(cas_solve.value(), giac_solve.value(), ctx);
+                        current_giac_verdict = (!geq.is_ok()) ? "inconclusive"
+                                              : (geq.value() ? "pass" : "fail");
+                    }
+                }
+            }
             std::string maxima_out_path = maxima_dir + "/" + std::to_string(idx) + ".maxima.out";
             std::string maxima_raw = read_file(maxima_out_path);
             if (maxima_raw.empty()) {
@@ -387,6 +760,61 @@ int main(int argc, char* argv[]) {
                       << input_str << " => " << cas_result.error().message << "\n";
             ++idx;
             continue;
+        }
+
+        // A35 — cattura il risultato CAS per il dump per-entry: da qui in
+        // poi ogni ramo (SKIP lato Maxima incluso) ha gia' un cas_output.
+        current_cas_output = format_expr(cas_result.value());
+
+        // A35 — confronto giac (opt-in, indipendente da Maxima/dal ratchet).
+        // Stessa equivalenza vera usata sotto per Maxima: mathematically_equal
+        // con fallback antiderivative_equivalent per integrate/bronstein
+        // (due antiderivate dello stesso integrando differiscono al piu' per
+        // una costante — lo stesso motivo per cui serve anche lato Maxima).
+        if (!giac_dir.empty()) {
+            auto gf = read_giac_file(giac_dir, idx);
+            if (gf.tag.empty()) {
+                current_giac_verdict = "no_giac_file";
+            } else if (gf.tag != "ANSWERED") {
+                current_giac_verdict = gf.tag; // UNEVALUATED | TIMEOUT | ERROR
+            } else {
+                auto giac_expr = parse_giac_expr(gf.result, ctx.arena());
+                if (!giac_expr.is_ok()) {
+                    current_giac_verdict = "unparseable";
+                    current_giac_output = gf.result;
+                } else {
+                    current_giac_output = gf.result;
+                    auto geq = mathematically_equal(cas_result.value(), giac_expr.value(), ctx);
+                    bool gpass = geq.is_ok() && geq.value();
+                    if (!gpass && (area == "integrate" || area == "bronstein")) {
+                        auto gantieq = cas::golden::antiderivative_equivalent(
+                            input_str, cas_result.value(), giac_expr.value(), ctx);
+                        gpass = gantieq.is_ok() && gantieq.value();
+                    }
+                    current_giac_verdict = (!geq.is_ok() && !gpass) ? "inconclusive"
+                                          : (gpass ? "pass" : "fail");
+                }
+            }
+        }
+
+        // A31 §10.5: show the domain conditions registered while evaluating
+        // this entry (the flag's contract: whoever enables it reads them).
+        // Best effort: multi-call pipelines report the LAST top-level set.
+        if (!assume_str.empty() && !ctx.last_side_conditions().empty()) {
+            std::cout << "  INFO [" << std::setw(3) << idx << "] conditions taken:";
+            for (const auto& c : ctx.last_side_conditions().items()) {
+                const char* kind_name = "?";
+                switch (c.kind) {
+                    case symbolic::DomainConditionKind::NonZero:     kind_name = "nonzero"; break;
+                    case symbolic::DomainConditionKind::Positive:    kind_name = "positive"; break;
+                    case symbolic::DomainConditionKind::NonNegative: kind_name = "nonnegative"; break;
+                    case symbolic::DomainConditionKind::Real:        kind_name = "real"; break;
+                    case symbolic::DomainConditionKind::IntegerVal:  kind_name = "integer"; break;
+                    case symbolic::DomainConditionKind::PrincipalBranch: kind_name = "principal-branch"; break;
+                }
+                std::cout << " " << kind_name << "(" << format_expr(c.subject) << ")";
+            }
+            std::cout << "\n";
         }
 
         // --- Step 2: Read Maxima output file ---
@@ -508,14 +936,15 @@ int main(int argc, char* argv[]) {
               << std::setw(6)  << "PASS"
               << std::setw(6)  << "FAIL"
               << std::setw(6)  << "SKIP"
+              << std::setw(6)  << "OVER"
               << std::setw(8)  << "TOTAL"
               << std::setw(10) << "PASS%"
               << "\n";
     std::cout << "-------------------------------------------------------------\n";
 
-    int grand_pass = 0, grand_fail = 0, grand_skip = 0;
+    int grand_pass = 0, grand_fail = 0, grand_skip = 0, grand_over = 0;
     for (auto& [area, st] : area_stats) {
-        int tot = st.pass + st.fail + st.skip;
+        int tot = st.pass + st.fail + st.skip + st.over_budget;
         double pct = (tot > 0) ? (100.0 * st.pass / (st.pass + st.fail)) : 0.0;
         if (st.pass + st.fail == 0) pct = 0.0;
         std::cout << std::left
@@ -523,15 +952,17 @@ int main(int argc, char* argv[]) {
                   << std::setw(6)  << st.pass
                   << std::setw(6)  << st.fail
                   << std::setw(6)  << st.skip
+                  << std::setw(6)  << st.over_budget
                   << std::setw(8)  << tot
                   << std::fixed << std::setprecision(1) << pct << "%\n";
         grand_pass += st.pass;
         grand_fail += st.fail;
         grand_skip += st.skip;
+        grand_over += st.over_budget;
     }
 
     std::cout << "-------------------------------------------------------------\n";
-    int grand_tot = grand_pass + grand_fail + grand_skip;
+    int grand_tot = grand_pass + grand_fail + grand_skip + grand_over;
     double grand_pct = (grand_pass + grand_fail > 0)
                        ? (100.0 * grand_pass / (grand_pass + grand_fail))
                        : 0.0;
@@ -540,6 +971,7 @@ int main(int argc, char* argv[]) {
               << std::setw(6)  << grand_pass
               << std::setw(6)  << grand_fail
               << std::setw(6)  << grand_skip
+              << std::setw(6)  << grand_over
               << std::setw(8)  << grand_tot
               << std::fixed << std::setprecision(1) << grand_pct << "%\n";
     std::cout << "=============================================================\n";
@@ -558,6 +990,7 @@ int main(int argc, char* argv[]) {
             jf << "    \"pass\": " << st.pass << ",\n";
             jf << "    \"fail\": " << st.fail << ",\n";
             jf << "    \"skip\": " << st.skip << ",\n";
+            jf << "    \"over_budget\": " << st.over_budget << ",\n";
             jf << "    \"examples_fail\": [";
             for (std::size_t i = 0; i < st.fail_examples.size(); ++i) {
                 if (i > 0) jf << ", ";

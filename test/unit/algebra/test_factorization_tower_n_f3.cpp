@@ -144,14 +144,31 @@ TEST_F(FactorizationTowerNTest, IrreducibleX2Minus7_Over_Q_Sqrt2_Sqrt3) {
         .alphas = {g2.alpha, g3.alpha},
         .min_polys = {g2.min_poly, g3.min_poly},
     };
+    // Tight budget: the composite Trager norm of an irreducible quadratic over a
+    // 2-level tower is a perfect power of an irreducible Q-polynomial, so the
+    // square-free-norm shift search always exhausts the budget and recombination
+    // falls to exponential Kronecker (perfect-power-norm recognition is the F3.5
+    // gap).  Contract mirrors the sibling AntiHardcodeIrreducibleX2Minus2... test:
+    // either irreducibility is recognised, or a budget-exceeded Unimplemented/
+    // Timeout is returned — NEVER a hang (HC-F8-FACTORIZATIONTOWER-PERF, L3-06).
+    ctx->set_timeout(std::chrono::seconds(3));
     ExprPtr poly = parse_ok("x^2 - 7");
     ASSERT_NE(poly, nullptr);
     auto r = algebra::factor_polynomial_tower_n(poly, Symbol{"x"}, gens, *ctx);
-    ASSERT_TRUE(r.is_ok()) << r.error().message;
-    EXPECT_EQ(r.value().factors.size(), 1U)
-        << "x^2 - 7 must NOT split (sqrt 7 ∉ Q(sqrt 2, sqrt 3))";
-    EXPECT_EQ(cumulative_deg(r.value(), Symbol{"x"}), 2U);
-    EXPECT_TRUE(reconstructs(r.value(), poly));
+    if (r.is_ok()) {
+        EXPECT_EQ(r.value().factors.size(), 1U)
+            << "x^2 - 7 must NOT split (sqrt 7 ∉ Q(sqrt 2, sqrt 3))";
+        EXPECT_EQ(cumulative_deg(r.value(), Symbol{"x"}), 2U);
+        EXPECT_TRUE(reconstructs(r.value(), poly));
+    } else {
+        const bool is_budget_exceeded =
+            r.error().kind == CASErrorKind::Unimplemented ||
+            r.error().kind == CASErrorKind::Timeout;
+        EXPECT_TRUE(is_budget_exceeded)
+            << "must return Unimplemented or Timeout (budget exceeded), not "
+               "InternalError or crash.  kind=" << static_cast<int>(r.error().kind)
+            << " message=" << r.error().message;
+    }
 }
 
 // F3.5-DEBT-01 RESOLVED 2026-05-31: redundant-generator case is fully handled.

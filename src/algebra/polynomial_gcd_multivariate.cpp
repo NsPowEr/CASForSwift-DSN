@@ -17,7 +17,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cmath>
 #include <map>
 #include <optional>
 #include <vector>
@@ -132,18 +131,18 @@ namespace cas::algebra {
         std::min(degree_in_var(p, interpolation_var), degree_in_var(q, interpolation_var));
     const std::size_t required_samples = std::max<std::size_t>(interpolation_degree_bound + 1U, 2U);
 
-    // Dynamic samples calculation via Schwartz-Zippel (ZP-1):
-    // k = ceil(log(delta) / log(p_fail)) with p_fail = d / S.
-    // We choose a conservative evaluation box of size S = 10000.
-    const double delta = ctx.zippel_error_probability();
-    const double S = 10000.0;
-    const double d = std::max(1.0, static_cast<double>(interpolation_degree_bound));
-    const double p_fail = std::min(0.5, d / S);
-    const std::size_t extra_samples = (delta > 0.0 && delta < 1.0)
-        ? static_cast<std::size_t>(std::ceil(std::log(delta) / std::log(p_fail)))
-        : 8U;
-
-    const std::size_t max_samples = required_samples + std::max<std::size_t>(2U, extra_samples);
+    // Sample count from a DETERMINISTIC degree bound (HPP-004). The evaluation
+    // points below are distinct consecutive integers, not random draws, so the
+    // probabilistic Schwartz-Zippel |S| does not apply (and the old S = 10000 box
+    // size was a magic constant). Univariate interpolation in the interpolation
+    // variable needs D+1 good samples (= required_samples). A sample is "bad" only
+    // when the evaluation point is a root of the main-variable leading coefficient
+    // (causing a degree drop); the number of such roots is bounded by its degree in
+    // the interpolation variable, which is ≤ interpolation_degree_bound. Allowing
+    // for every bad point plus one guarantees ≥ required_samples good points — an
+    // exact bound with no magic constant or confidence parameter.
+    const std::size_t max_samples =
+        required_samples + interpolation_degree_bound + 1U;
 
     struct SamplePoint {
         BigInt value;

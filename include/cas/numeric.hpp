@@ -22,18 +22,26 @@ using NumericEnv = std::unordered_map<std::string, double>;
  */
 class NumericEvaluator {
 public:
-    explicit NumericEvaluator(const NumericEnv& env = {}) : env_(env) {}
+    explicit NumericEvaluator(const NumericEnv& env = {}, std::size_t max_recursion_depth = 256U)
+        : env_(env), max_recursion_depth_(max_recursion_depth) {}
+    explicit NumericEvaluator(symbolic::CASContext& ctx, const NumericEnv& env = {});
 
     [[nodiscard]] Result<double> evaluate(ExprPtr expr);
 
 private:
     NumericEnv env_;
+    std::size_t max_recursion_depth_{256U};
+    std::size_t hyp_1f1_max_terms_{4000U};
+    double hyp_1f1_rel_tol_{1e-16};
+    std::size_t current_depth_{0U};
+    std::unordered_set<ExprPtr, ExprHash> active_nodes_;
 };
 
 /**
  * Funzione di comodo per valutazioni rapide (double).
  */
 [[nodiscard]] Result<double> eval(ExprPtr expr, const NumericEnv& env = {});
+[[nodiscard]] Result<double> eval(ExprPtr expr, symbolic::CASContext& ctx, const NumericEnv& env = {});
 
 /**
  * Valutazione MPFR a precisione arbitraria (L3-01).

@@ -1,0 +1,42 @@
+# test_quarantine.txt — Test NOTI-ROSSI (fail o hang) esclusi dal gate quick E slow.
+#
+# Questo file NON è una scorciatoia: è debito VISIBILE e RATCHETATO. Ogni riga è
+# un test che OGGI fallisce o va in hang per una regressione/bug nel MOTORE
+# (CLAUDE.md REGOLA 0.2: un test rosso è un bug da fixare, non da nascondere).
+# La differenza con una semplice esclusione: qui il rosso è elencato, legato a un
+# id di ledger, contato e con un tetto. `scripts/test_quick.sh` stampa un banner
+# con questi test ad ogni run, così il "verde" del quick è onesto ("verde ECCETTO
+# questi rossi noti"). `scripts/check_quarantine_ratchet.sh` ne fa rispettare il tetto.
+#
+# Formato riga:  <gtest_full_name>  <ledger_id>  <motivo breve>
+#   (il PRIMO token è il nome test; il resto è metadato leggibile)
+#
+# RATCHET:
+#   - CEILING è il numero MASSIMO di entry ammesse.
+#   - Aggiungere un test RICHIEDE alzare CEILING: atto deliberato e reviewabile,
+#     "alzo il tetto del debito" — il gate lo rende un costo, non un gesto gratis.
+#   - Fixare un test → rimuovi la riga e ABBASSA CEILING per bloccare il progresso.
+#   - Il gate FALLISCE se (entry reali) > CEILING.
+#
+# Stato reale dei quarantenati (hang → fail veloce, per-test timeout):
+#   bash scripts/test_quick.sh --quarantine
+#
+CEILING: 0
+#
+# Risolti 2026-06-29 (A3: integer fraction-free LLL + opt-in Kronecker hard-deadline
+# nel tower) — rimossi dalla quarantena, terminano in <6s:
+#   - FactorizationTowerTest.AntiHardcodeIrreducibleX2Minus2OverQSqrt3Sqrt5 (3.2s)
+#   - FactorizationTowerTest.PreservesLeadingCoefficientAsContent (5.8s)
+#   - FactorizationTowerNTest.IrreducibleX2Minus7_Over_Q_Sqrt2_Sqrt3 (3.5s, contratto allineato ad AntiHardcode)
+#
+#
+# Risolti 2026-07-10:
+#   - A25 chiuso dal best-prime Zassenhaus (commit 88d0b0e): la scelta del primo che
+#     minimizza i fattori modulari elimina il collo di bottiglia Hensel-lift sulla
+#     norma deg-16. SplitsProductOfQuadratics 9.9s, SplitsX4Minus10X2Plus1 12.5s (erano >200s).
+#   - PrimitiveElementTest.SqrtTwoSqrtThreeSqrtFive 1.25s, sbloccato da A9 (chain flattening).
+#   - F2GateBenchmark.FactorOneHundredRandomZxUnderBudget (145s -> 4.4s): il collo era
+#     try_kronecker_quadratic_factor, che faceva la divisione di prova su PolyExpr
+#     (IntegerLit d'arena per ogni coefficiente, ~8ms per candidato). Ora pseudo-resto BigInt.
+#
+# Quarantena VUOTA: nessun test noto-rosso.

@@ -22,6 +22,7 @@
 #include "algebra_internal.hpp"
 
 #include "cas/ast.hpp"
+#include "cas/error_helpers.hpp"
 #include "cas/numeric.hpp"
 
 #include "cas/rational.hpp"
@@ -31,6 +32,19 @@
 namespace cas::algebra {
 
 namespace {
+
+void collect_symbols_in_expr(ExprPtr e, std::vector<std::string>& out) {
+    if (!e) return;
+    if (const auto* s = expr_cast<Symbol>(e)) {
+        out.push_back(s->name);
+        return;
+    }
+    if (const auto* u = expr_cast<Unary>(e)) { collect_symbols_in_expr(u->operand, out); return; }
+    if (const auto* b = expr_cast<Binary>(e)) { collect_symbols_in_expr(b->left, out); collect_symbols_in_expr(b->right, out); return; }
+    if (const auto* sum = expr_cast<Sum>(e)) { for (ExprPtr t : sum->terms) collect_symbols_in_expr(t, out); return; }
+    if (const auto* p = expr_cast<Product>(e)) { for (ExprPtr f : p->factors) collect_symbols_in_expr(f, out); return; }
+    if (const auto* fc = expr_cast<FuncCall>(e)) { for (ExprPtr a : fc->args) collect_symbols_in_expr(a, out); return; }
+}
 
 // F7.0-A2.1: search window + tolerance are read from CASContextParams
 // (ctx.solve_inequality_search_half_width() / _sturm_tolerance_inv()).
@@ -91,6 +105,21 @@ Result<std::vector<InequalityInterval>> solve_inequality_1var(
             CASErrorKind::InvalidArgument, "solve_inequality_1var: null polynomial"));
     }
 
+    std::vector<std::string> syms;
+    collect_symbols_in_expr(poly, syms);
+    for (const auto& s : syms) {
+        if (s != var.name) {
+            return make_unimplemented<std::vector<InequalityInterval>>(UnimplementedInfo{
+                .module      = "algebra",
+                .function    = "solve_inequality_1var",
+                .input_shape = "multivariate expression with symbol " + s,
+                .reason      = cas::error::reason_codes::ALGEBRA_MULTIVAR_REMAINING_VARS,
+                .suggestion  = "solve_inequality_1var supports univariate Q[var] polynomials only",
+                .ticket      = "F6.4"
+            });
+        }
+    }
+
     // F7.0-A2.1: bounds + tolerance from CASContextParams (long long),
     // converted to double only at the numeric-evaluator boundary.
     const long long half_width_ll = ctx.solve_inequality_search_half_width();
@@ -103,6 +132,16 @@ Result<std::vector<InequalityInterval>> solve_inequality_1var(
     auto roots_res = cas::numeric::find_polynomial_roots_sturm(
         poly, var.name, ctx, low, high, tol);
     if (roots_res.is_error()) {
+        if (roots_res.error().kind == CASErrorKind::Unimplemented) {
+            return make_unimplemented<std::vector<InequalityInterval>>(UnimplementedInfo{
+                .module      = "algebra",
+                .function    = "solve_inequality_1var",
+                .input_shape = "non-polynomial or unsupported inequality",
+                .reason      = cas::error::reason_codes::GENERIC,
+                .suggestion  = "Sturm root isolation failed on input",
+                .ticket      = "F6.4"
+            }, roots_res.error().message);
+        }
         return fail<std::vector<InequalityInterval>>(roots_res.error());
     }
     auto root_doubles = roots_res.value();

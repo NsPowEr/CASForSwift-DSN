@@ -75,4 +75,16 @@ struct OdeClassification {
     unsigned int num_terms,
     symbolic::CASContext& ctx);
 
+// Frobenius series solution for a homogeneous linear 2nd-order ODE
+//   a_2(x) y'' + a_1(x) y' + a_0(x) y = 0
+// expanded around the regular singular point x = x_0.
+[[nodiscard]] Result<ExprPtr> solve_ode_frobenius(
+    ExprPtr a_2,
+    ExprPtr a_1,
+    ExprPtr a_0,
+    const Symbol& x,
+    ExprPtr x_0,
+    unsigned int num_terms,
+    symbolic::CASContext& ctx);
+
 } // namespace cas::calculus

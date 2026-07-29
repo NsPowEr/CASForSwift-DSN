@@ -41,10 +41,6 @@ Result<MatrixExpr> bareiss(const MatrixExpr& matrix, symbolic::CASContext& ctx) 
                 best_score = score;
                 pivot_row = i;
             }
-            // Early exit: a literal-nonzero, degree-0 pivot dominates any
-            // other candidate this column can offer. (Higher certainty
-            // would be impossible; lower degree would be impossible too.)
-            if (score.certainty == 3 && score.neg_total_degree == 0) break;
         }
 
         if (pivot_row == result.rows()) {

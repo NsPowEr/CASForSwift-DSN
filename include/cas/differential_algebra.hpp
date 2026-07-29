@@ -38,6 +38,15 @@ public:
     /// Compute the formal derivative D(expr) in the field
     Result<ExprPtr> derive(ExprPtr expr, symbolic::CASContext& ctx) const;
 
+    /// A27: derivative CLOSED on the generator representation.  derive() of a
+    /// generator symbol t_i returns D(t_i) in ORIGINAL form (e.g. D(t_1) =
+    /// 1/(x·ln x) for t_1 = ln(ln x)), which mixes representations when the
+    /// input was in generator form — resultants/GCDs over such mixed
+    /// expressions silently miss factors (Rothstein-Trager returned ln|1|=0).
+    /// This maps the result back through to_field_generators so K = C(x,
+    /// t_1..t_n) is differentially closed, as the theory requires.
+    Result<ExprPtr> derive_in_generators(ExprPtr expr, symbolic::CASContext& ctx) const;
+
     /// Replace original functions (log/exp) with generator variables (t_i)
     Result<ExprPtr> to_field_generators(ExprPtr expr, symbolic::CASContext& ctx) const;
 

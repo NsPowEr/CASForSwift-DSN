@@ -53,6 +53,39 @@ protected:
     }
 };
 
+// A11 / F5.2 — fractional-power growth vs logarithm. A positive rational power of
+// x dominates every logarithm, so log(x)/sqrt(x) → 0 (not ∞). Regression for the
+// integer-only growth predicates + Log-vs-Ln logarithm recognition.
+TEST_F(GruntzNestedLogTest, LogOverSqrtX) {
+    EXPECT_TRUE(is_zero(limit_at_pos_inf("log(x) / sqrt(x)")));
+    EXPECT_TRUE(is_zero(limit_at_pos_inf("log(x) / x^(1/2)")));
+    EXPECT_TRUE(is_zero(limit_at_pos_inf("sqrt(x) * log(x) / x")));
+    // Same with the natural-log spelling.
+    EXPECT_TRUE(is_zero(limit_at_pos_inf("ln(x) / sqrt(x)")));
+}
+
+TEST_F(GruntzNestedLogTest, FractionalPowerBeatsLog) {
+    // sqrt(x)·log(x) → +∞ (positive fractional power dominates the logarithm).
+    EXPECT_TRUE(is_pos_infinity(limit_at_pos_inf("sqrt(x) * log(x)")));
+    // NOTE: the harder x^(3/2)/(x·log(x)) form still needs the full Gruntz
+    // slowly-varying-coefficient track (a ComplexRational coefficient hits a
+    // division-by-zero in the leading-power path) — tracked under A11 as the
+    // remaining nested-coefficient work, not covered by this fix.
+}
+
+
+// A11-minor — sum-ratio leading-term sign. (x+log x)/(x-log x) → 1: both num and
+// den are dominated by x, so the ratio of leading terms is x/x = 1 (no spurious
+// sign from the subtracted log term). Regression for Log-vs-Ln recognition in the
+// infinite-limit dispatcher + the leading-term quotient reduction.
+TEST_F(GruntzNestedLogTest, SumRatioLeadingTermSign) {
+    EXPECT_TRUE(is_one(limit_at_pos_inf("(x + log(x)) / (x - log(x))")));
+    EXPECT_TRUE(is_one(limit_at_pos_inf("(x - log(x)) / (x + log(x))")));
+    EXPECT_TRUE(is_one(limit_at_pos_inf("x / (x - log(x))")));
+    EXPECT_TRUE(is_one(limit_at_pos_inf("(x - log(x)) / x")));
+    EXPECT_TRUE(is_one(limit_at_pos_inf("(2*x + log(x)) / (2*x - log(x))")));
+}
+
 // Case 1: lim x→∞ log(log(x)) / x = 0
 TEST_F(GruntzNestedLogTest, LogLogOverX) {
     auto r = limit_at_pos_inf("log(log(x)) / x");

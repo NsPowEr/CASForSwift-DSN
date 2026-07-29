@@ -15,6 +15,78 @@
 
 ---
 
+### HC-A26-RDEBOUND-CANCEL-GAP — degree bound RdeBoundDegreePrim (Log, df≤0): branch §6.3.3 — ✅ CHIUSO (NON è un gap: bound provato completo per d_a=0) 2026-07-20
+- **File**: `src/calculus/risch_rde_parametric_field.cpp` (`solve_risch_de_parametric_field`, ramo `ExtensionType::Logarithmic`, calcolo di N).
+- **Categoria CLAUDE.md**: 1 (bound computazionale). **Esito**: NON era un hardcode-of-passage — `N = dg_max+1` è il bound *completo* per questo caso, dimostrato. Rimosso il tag `HARDCODE-OF-PASSAGE`, sostituito da prova di completezza in-linea al codice.
+- **Aperta da**: audit hardcode su HC-A26-PRIMITIVE-PARAMQ-RATIONAL / pole-cancellation (2026-07-20), durante il fix del degree bound `N = dg_max+1` (era `dg_max`, troncava e perdeva `q = x·log x`).
+- **Sintomo temuto (errato)**: la formula generale `RdeBoundDegreePrim` (Bronstein §6.3.3) prevede, per `d_b = d_a` / `d_b = d_a − 1`, un incremento di n oltre il bound base quando `α = −lc(b)/lc(a)` è derivata logaritmica. Il ledger temeva che ciò alzasse n OLTRE `dg_max+1`, lasciando la famiglia incompleta.
+- **Perché NON è un gap (dimostrazione, d_a = 0)**: dopo il clearing per D l'equazione è `D(q) + f_new·q = c` con `a = 1` ⇒ `d_a = 0`. Il branch di cancellazione scatta solo se `α = −f_new = Dz/z` (log-derivativa, `z ∈ k*`). Sostituendo `q = z·h`: `D(z·h) + f_new·z·h = z·Dh` (usa `Dz = −f_new·z`), cioè `Dh = c/z`. Poiché `deg_t(c/z) ≤ dg_max` (`z ∈ k`) e l'integrazione primitiva alza il grado in t di esattamente 1, `deg(q) = deg(h) ≤ dg_max+1`. Se `α` NON è log-derivativa, l'eq. di testa omogenea non ha soluzione k non nulla per `n > dg_max` ⇒ `deg(q) ≤ dg_max`. In entrambi i casi `N = dg_max+1` è COMPLETO (l'incremento di cancellazione è già incluso). Nessuna soluzione di grado `dg_max+2`: richiederebbe `η = Dt` derivata di un elemento di k, ma `∫η = log(u) ∉ k`. Il "further increment" del §6.3.3 è il ramo generale `d_a > 0`; con `d_a = 0` i due sotto-rami collassano in `≤ dg_max+1`.
+- **Verifica empirica**: target HC-A26 stesso — `t = log x`, `f_new = −1/x = −Dz/z` (`z = x`), `c = 1` (`dg_max = 0`) ⇒ `q = x·log x` grado `1 = dg_max+1`; soluzioni omogenee `K·x` grado 0 in t; nessuna soluzione di grado 2 esiste.
+- **Blocking dependency**: nessuna. Il ramo generale `d_a > 0` (exp non-primitivo / SPDE) resta tema separato, non tocca questa funzione (`a = 1` per costruzione).
+
+---
+
+### HC-A38-01 — coeff_blocks_poly_quotient: bail-out su coefficiente con generatore lower-tower/sibling — ✅ CHIUSO 2026-07-20
+- **✅ RISOLTO 2026-07-20 (stessa giornata dell'apertura)**: la causa radice non era
+  algebrica ma **strutturale**. Riletta la spec (Bronstein §5.2/§5.7, righe 4161-4167
+  e 4694): la ricorsione dell'algoritmo di integrazione su torre DEVE muoversi lungo
+  esattamente due assi — (a) eliminare un monomio, ricorrendo su `k = C(t_1..t_{n-1})`,
+  oppure (b) abbassare `deg_t(p)` a torre fissa. Il fallback per-livello di
+  `integrate_log_polynomial_part` faceva invece un **root-restart su `integrate()`
+  generico**, che RICOSTRUISCE la torre differenziale dall'espressione: né l'altezza
+  né il grado decrescono, e la ricorsione può rientrare in un sotto-problema
+  identico (esattamente il loop osservato). Fix: il fallback è ora dispatchato sul
+  **campo inferiore** — `integrate_risch_poly_and_rational_part(..., lower_field, ...)`
+  quando `k ⊋ Q(x)`, e solo per `k = Q(x)` (nessun generatore da ricostruire, base
+  case provabilmente non rientrante) si usa l'integratore generico. L'altezza della
+  torre è così strettamente decrescente = misura di terminazione del teorema.
+  `coeff_blocks_poly_quotient` e `has_var_transcendental` sono stati **rimossi**
+  (il bail-out Cat-4 non serve più). Test: `EndToEnd_NestedLogTower_TerminatesAndIsSound`
+  (era loop infinito → ora termina in ~4.7s) e
+  `EndToEnd_SiblingExpCoefficient_NeverSilentlyWrong` (blinda ∫e^{-x}·ln(x)dx contro
+  la vecchia forma silenziosamente sbagliata `e^{-x}(x·ln x − x)`).
+- **Completezza residua (NON questa voce)**: la torre log-in-log annidata ora termina
+  ma riporta `Unimplemented` invece dell'antiderivata (che esiste:
+  `ln(ln x)²/2 + ln(x)·ln(ln x) − ln(x)`). Il limite è nel solver §7.2:
+  `limited_integrate_field` non risolve una forzante con denominatore nel generatore,
+  cioè il base case `Q(x)` polynomial-only già tracciato da
+  **HC-A26-PRIMITIVE-PARAMQ-RATIONAL**. Nessuna nuova voce di ledger: il debito è
+  quello, un livello più in alto.
+- **File**: `src/calculus/integrate_risch_logpoly.cpp` (fix); guard rimosso da
+  `src/calculus/integrate_risch_hermite.cpp`.
+- **Categoria CLAUDE.md**: 4 — Bail-out su tipo/forma dato. Esplicito e
+  diagnostico (`Unimplemented`, reason `RISCH_LOG_EXTENSION_GENERAL`), mai
+  silenzioso: sempre sound, non causa mai output sbagliato.
+- **Descrizione**: task A38 ha wired `limited_integrate_field` (Bronstein §7.2)
+  in `integrate_log_polynomial_part`, rendendo raggiungibile da `integrate()`
+  reale il solver parametrico tower-recursive (A1/A26) per il livello top di
+  un polinomio-in-log. Quando `limited_integrate_field` fallisce, il codice
+  ricade su un `integrate()` ricorsivo nel campo inferiore (comportamento
+  preesistente). Per un coefficiente che porta un generatore del campo
+  inferiore NON riducibile a razionale (torre log-in-log annidata, o un
+  generatore sibling indipendente come un exp estraneo), questo fallback è
+  stato osservato EMPIRICAMENTE (trace strumentato) rientrare in un
+  sotto-problema strutturalmente identico — ricorsione non limitata, mai
+  terminante (riprodotto con `∫(1/x + 1/(x·ln x))·ln(ln x) dx`, trace: kz=1→
+  kz=0→rientra in kz=1 con lo stesso stato). `coeff_blocks_poly_quotient`
+  blocca questo caso con `Unimplemented` prima che il fallback venga tentato.
+- **Fix corretto**: (a) bound di terminazione esplicito sulla ricorsione
+  `integrate_log_polynomial_part → integrate() → integrate_log_polynomial_part`
+  (misura: altezza torre inferiore + grado in t_top, decrescente per
+  costruzione), oppure (b) estendere `limited_integrate_field`/il solver
+  parametrico a operare correttamente su coefficienti multi-generatore così
+  che il fallback ricorsivo non sia più necessario in quel ramo (Bronstein
+  §5, teorema di struttura generale su torri annidate).
+- **Blocking dependency**: nessuna, è un problema di limitatezza della
+  ricorsione, non di prerequisito mancante. Da aprire come sotto-task
+  esplicito sotto A38 in `TASKLIST_MASTER.md` quando qualcuno riprende il
+  lavoro su torri log-in-log annidate.
+- **Test**: `test/unit/calculus/test_risch_limited_integrate.cpp`,
+  `EndToEnd_NestedLogTower_IsCleanDiagnosticNotHang` — asserisce che il caso
+  ritorna `Unimplemented` (non un hang, non un risultato sbagliato).
+
+---
+
 ### HC-F70-A43-EXTENDED-REAL — Extended-Real AST — CHIUSO (F7.5.F1 Phase 2)
 - **File**: `include/cas/ast.hpp` (`enum class MathConstant`),
   `include/cas/extended_real.hpp` (predicati + factory),
@@ -116,25 +188,84 @@
     signature esteso con optional `symbolic::CASContext* ctx = nullptr`,
     propagato dal call-site Wang EEZ.
 
-  Residui: equal-degree factorization inner recursion (covered
-  transitively via outer while-loop poll); Smith normal form / Hermite
-  normal form ed alcuni loop pure-integer non ancora coperti — bassa
-  priorità (durata tipica < 1s su input osservati).
+  AGGIORNAMENTO 2026-06-21 (T-024) — poll-point diretti aggiunti ai loop
+  pure-integer di linalg precedentemente scoperti:
+  - `src/linalg/matrix_smith.cpp`: Q(x)-path outer `while` + inner
+    `while(changed)` stabilization; Z-path outer `while` + inner
+    `while(changed)` stabilization (BigInt extended_gcd, nessun
+    simplify/substitute intermedio → era non-interruttibile).
+  - `src/linalg/matrix_hermite.cpp`: Z-path e Q(x)-path outer column
+    `for`-loop.
 
-### HC-F70-A31-MIGRATION-TODO — AstArena reset without root migration
+  AGGIORNAMENTO 2026-06-26 (A2 / TASKLIST_MASTER) — coperto l'ultimo loop
+  puramente combinatorio dell'integrazione: le due eliminazioni di Gauss
+  pure-Rational in `src/calculus/integrate_risch_rde.cpp`
+  (`solve_risch_de_poly_q` §5.6 e `solve_risch_de_rational_q` §6.1). Nessuna
+  chiamata simplify()/substitute() nel corpo → non interrompibili
+  transitoriamente. Fix: poll `ctx.check_interrupt()` per colonna pivot
+  (idioma matrix_bareiss). Rimosso lo **stub morto** `auto sysop_timeout =
+  ctx.timeout_check_interval(); (void)sysop_timeout;` (poll mai cablato).
+  Inoltre **fedeltà di cancellazione** nel dispatcher `solve_risch_de_q`:
+  prima (a) ingoiava il Timeout di `ctx.simplify` (`if (is_ok())`), (b) sul
+  Timeout del ramo poly ricadeva sul ramo rational mascherandolo. Ora: poll
+  in testa + Timeout di simplify propagato + fall-through solo per dead-end
+  algebrico (non per cancellazione). Test: `test_integrate_interrupt.cpp`
+  +2 (`RischDeSolverCompletesWhenNotInterrupted`, `RischDeSolverHonorsInterrupt`).
+  Verifica: 147 test Risch/integrate verdi, nessun cambiamento di
+  comportamento su input validi (il poll è no-op senza interrupt).
+
+  Residui: equal-degree factorization inner recursion (covered
+  transitively via outer while-loop poll); alcuni loop pure-integer
+  minori (HNF/SNF ora coperti) — bassa priorità (durata tipica < 1s su
+  input osservati). Fedeltà error-kind: un interrupt asincrono che arrivi
+  *durante* il `parse_polynomial` interno a un ramo viene rilevato da
+  simplify ma rietichettato Unimplemented dai siti `if (is_error()) return
+  fail_unimpl(...)` del ramo (finestra ~µs, nessun hang, re-poll a
+  integrate_once) — fedeltà parziale, non bloccante.
+
+  AGGIORNAMENTO 2026-07-10 — chiusi i loop combinatori residui:
+  - `polynomial_groebner_f5.cpp` (S-pair main while): `f5c_groebner` ora
+    `Result<F5Result>` + `CASContext*` opzionale, poll per iterazione;
+    call-site `f4_groebner` propaga. (`buchberger_with_zero_count` resta
+    senza poll: baseline test-only, mai su path di produzione.)
+  - `factorization_recombination.cpp` (enumerazione subset Zassenhaus,
+    esponenziale in |lifted|): **fix di soundness della cancellazione**,
+    non solo di reattività — il caller wang_eez legge `nullopt` come
+    PROVA di irriducibilità (ricerca esaustiva), quindi l'interrupt DEVE
+    emergere come errore: firma → `Result<std::optional<IntPoly>>` +
+    `CASContext*`, poll a ogni nodo di ricorsione, errore propagato dai
+    2 call-site wang_eez.
+  - `polynomial_gcd_zippel_crt.cpp` (while CRT sui primi),
+    `polynomial_gcd_brown_modular.cpp` (while primi Brown),
+    `polynomial_gcd_multivariate_sparse.cpp` (`exact_quotient` while di
+    eliminazione): poll diretto (tutti hanno `ctx&` e ritornano `Result`).
+  - Escluso con motivazione: `sparse_gcd_fp` (fp_recursive) ritorna
+    `optional` con semantica "candidato fallito → retry" nei loop CRT dei
+    caller; un poll che ritorna nullopt verrebbe assorbito come retry.
+    I caller (Brown/Zippel CRT) sono ora polled, quindi la cancellazione
+    arriva entro un'iterazione di primo.
+  - Test: `test_interrupt_a33_probes.cpp` (5 probe) — pre-interrupt su
+    recombination → **errore, mai nullopt** (anti-silent-wrong), idem F5;
+    null-ctx invariato. 94/94 suite algebra mirata verde.
+- **STATO**: CHIUSURA SOSTANZIALE 2026-07-10 — tutti i loop combinatori
+  citati dalla voce sono polled o esclusi con motivazione esplicita.
+  Restano solo i residui micro (< 1s) documentati sopra.
+
+### HC-F70-A31-MIGRATION-TODO — AstArena reset without root migration — ✅ CHIUSO 2026-07-08 (A19)
 - **File**: `include/cas/ast.hpp` (AstArena::reset declaration), `src/ast/ast.cpp` (impl)
 - **Categoria CLAUDE.md**: Cat 4 (boundary documentato)
-- **Descrizione**: `AstArena::reset()` distrugge ogni nodo e libera ogni blocco. Non è
+- **Descrizione originale**: `AstArena::reset()` distrugge ogni nodo e libera ogni blocco. Non era
   presente una funzione `migrate_into(span<ExprPtr*>)` che esegue deep-copy dei root
-  forniti in un nuovo stato arena prima del reset, permettendo al chiamante di
-  conservare alcuni nodi attraverso il ciclo di REPL/server.
-- **Motivazione**: la migrazione richiede un visitor di deep-copy completo
-  attraverso tutti gli `ExprKind`. F7.0 Phase A privilegia chiusura sicurezza
-  resource — la migration è add-on non bloccante (REPL pattern: re-parse expressions
-  dopo reset).
-- **Fix corretto**: implementare `AstArena::migrate_into(std::span<ExprPtr*>)` o
-  helper free-function `deep_copy_into(ExprPtr, AstArena&)`. Ticket-in-place per Fase 8.
-- **STATO**: APERTO (post-parità ammesso).
+  forniti in un nuovo stato arena prima del reset.
+- **Chiusura (verificata a codice, non dedotta)**: la funzione equivalente esiste già ed è più completa —
+  `CASContext::collect_garbage(external_roots)` (`src/symbolic/context_core.cpp`) + `clone_into_arena`
+  (`src/ast/ast_clone.cpp`, deep-copy su tutti gli ExprKind). Migra variabili, assumptions, trace,
+  root esterni e le 3 cache; poi swap `arena_ = std::move(new_arena)`. Testato: `test_gc.cpp`
+  (`CollectsGarbageAndPreservesRoots`, `MemoryPressureStressTest`). Grep-verificato zero call-site
+  in produzione chiamano il raw `reset()` su un'arena viva bypassando `collect_garbage` — il raw
+  `reset()` resta correttamente un primitivo distruttivo a basso livello (contratto documentato in
+  `test_arena_reset.cpp`), non l'API da usare quando servono root vive.
+- **STATO**: CHIUSO — nessun fix necessario, solo correzione stato ledger/tasklist (A19).
 
 ### HC-F70-A21-NUMERIC-BOUNDARY — solve_inequality double boundary
 - **File**: `src/algebra/solve_inequality.cpp:96-115`
@@ -286,29 +417,46 @@
   2401/2401 suite quick verde. Zero regressioni.
 - **STATO**: ✅ CHIUSO 2026-06-15.
 
-### HC-KV-06 — Kovacic Case 3 n=12 (icosahedral A₅) recurrence blow-up (2026-06-14, MITIGATO 2026-06-15)
+### HC-KV-06 — Kovacic Case 3 n=12 (icosahedral A₅) recurrence blow-up (2026-06-14, MITIGATO 2026-06-15, CHIUSO 2026-07-08)
 - **File**: `src/calculus/ode_kovacic_case3.cpp` (try_case3_for_n
   wall-clock budget + family-loop guard);
   `src/calculus/ode_kovacic_case3_helpers.cpp` (`compute_P_sequence`
-  per-iteration budget).
+  per-iteration budget); `src/calculus/ode_kovacic_pf_helpers.cpp`
+  (`extract_pole_loc`).
 - **Categoria CLAUDE.md**: Cat 3 (set sfruttabile parzialmente n=12 due
-  to perf).
-- **Mitigazione applicata 2026-06-15**:
-  - Dispatcher loop ora itera `{4, 6, 12}` completo.
-  - Wall-clock budget `2s` per `try_case3_for_n`; supererato → ritorna
-    `nullopt` (family ok, advance n).
-  - `compute_P_sequence` per-iter budget `500ms`; supererato → ritorna
-    `std::vector<ExprPtr>{}` (soft-fail), dispatcher avanza famiglia.
-  - `build_omega_minpoly_case3` soft-fail su sequence empty.
-  - Garantisce terminazione bounded; n=12 success per input semplici;
-    n=12 input complessi (es. paper Ex.1) ritornano Unimplemented.
-- **Closure completo**: rappresentazione `PolyLin` (vector di coeff
-  Rational + linear-in-a_i parts) sostituisce ExprPtr in `compute_P_sequence`;
-  recurrence diventa O(n · d²) deterministico per n=12.
-- **Blocking dependency**: design polymorphic-coefficient ring per
-  ExprPtr-with-linear-symbolic-coefficients; ~3-5 gg lavoro focused.
-- **STATO**: ⚠️ MITIGATO (terminazione garantita, soft-fail per cases
-  intractabili; closure completa pending PolyLin work).
+  to perf) — **rivelatasi in realtà Cat 8** (pattern matching a forma).
+- **Mitigazione 2026-06-15**: dispatcher loop `{4,6,12}` completo +
+  wall-clock budget `2s` per `try_case3_for_n` + budget per-iter su
+  `compute_P_sequence`; garantiva solo terminazione bounded, non
+  correttezza (paper Ex.1 ancora Unimplemented).
+- **Closure 2026-07-08 (parte 1 — perf)**: `compute_P_sequence`
+  riscritto in rappresentazione `algebra::PolyExpr` (coefficient-array)
+  invece di albero `ExprPtr` generico: S, S′, S·θ, S²·r sono polinomi
+  FISSI (indipendenti dall'ansatz) calcolati una sola volta via
+  `parse_polynomial`; la derivata dei P_i (coefficienti costanti in x,
+  essendo simboli freschi a_i) è power-rule triviale
+  (`poly_derivative_const_coeffs`), non `diff()` generico. Elimina
+  `diff()+together()+simplify()` ripetuto a ogni livello della
+  ricorrenza a 13 livelli.
+- **Root cause reale scoperta 2026-07-08 (parte 2 — correttezza)**:
+  il fix di parte 1 NON bastava — `MinPoly_Structural_Soundness_WhenSuccess`
+  restava SKIPPED. Causa reale: `extract_pole_loc` (ode_kovacic_pf_helpers.cpp)
+  riconosceva la forma lineare `x−c` SOLO come nodo `Binary(Sub/Add)`
+  esplicito; quando l'arena canonicalizza `x−1` nel nodo n-ario `Sum`
+  interno (`Sum([x, −1])`), il pattern-matching falliva silenziosamente
+  e il polo veniva scartato — per il paper Ex.1 (poli in x=0 e x=1)
+  questo faceva sparire il polo x=1 da `poles`, rendendo `S = x` invece
+  di `S = x(x−1)`: S² non cancellava il fattore (x−1)² e `S²·r` non
+  riduceva a polinomio (errore fuorviante "precondizione ordine poli
+  violata", mentre la vera precondizione era rispettata).
+- **Fix**: `extract_pole_loc` riscritto per estrarre la radice via
+  `algebra::parse_polynomial(base, x, ctx)` (poly grado 1 → c = −c0/c1),
+  algoritmico e indipendente dalla forma AST — riconosce qualunque
+  rappresentazione di un fattore lineare in x, non solo `Binary(Sub)`.
+- **Verifica**: `OdeKovacicCase3Test.*` 11/11 PASS (era 10 PASS + 1
+  SKIPPED); `MinPoly_Structural_Soundness_WhenSuccess` ora produce
+  RootOf reale per il paper Ex.1 (n=12, icosahedrale). Zero regressioni.
+- **STATO**: ✅ CHIUSO 2026-07-08.
 
 ### HC-F8-F2GATE-BENCHMARK-FAIL — F2 exit-gate benchmark perf regression
 - **File**: `test/unit/algebra/test_f2_gate_benchmark.cpp:107`
@@ -318,14 +466,21 @@
   (osservato ~155s su clean baseline).  Pre-existing FAIL documentato in
   `PLAN_TASKS_REMAINING.md:347` come "verified baseline... ignorare in
   regression checks fino a fix dedicato".
-- **Fix corretto**: profilare collo di bottiglia (probabile van_hoeij su
-  random inputs di grado medio, oppure squarefree pre-pass) e portare il
-  totale sotto soglia.  Potenziale candidato: applicare Mignotte bound +
-  Hensel quadratic lifting precoce per ridurre LLL invocations.
-- **Workaround applicato 2026-06-14**: aggiunto a `scripts/test_quick.sh`
-  EXCLUDE list. Test resta abilitato via gtest_filter esplicito o tramite
-  invocazione dedicata di benchmark.
-- **STATO**: APERTO (perf debt, baseline pre-esistente, non bloccante).
+- **✅ RISOLTO 2026-07-10** — misurato, non ipotizzato. Le ipotesi in questa voce
+  (van Hoeij / squarefree pre-pass / LLL) erano tutte sbagliate: i polinomi del
+  benchmark hanno grado ≤ 6 e **non raggiungono mai** Hensel/van Hoeij (la soglia in
+  `append_integer_factor_component` è `size() > 7`). Timing per fase:
+  `parse=0.38s sqfree=0.70s append=142.31s (roots=0.79s kron=141.51s)`.
+  Il collo era `try_kronecker_quadratic_factor`: **17590** candidati (poche centinaia
+  per chiamata, quindi non un problema di conteggio) a **~8 ms ciascuno**, perché il
+  test di divisibilità convertiva `f` e `g` in `PolyExpr` internando un `IntegerLit`
+  d'arena per **ogni coefficiente a ogni iterazione**, poi chiamava
+  `divide_poly_with_remainder` (divisione simbolica su `ExprPtr`).
+  **Fix**: `pseudo_remainder_integer_poly(f, g) == 0` — stesso predicato (resto nullo
+  ⟺ `g | f` in `Q[x]`), aritmetica BigInt pura, zero allocazioni. Il parametro `ctx`,
+  ora inutilizzato, è stato rimosso dalla firma.
+  **Esito**: 145s → **4.4s** (budget 30s). Test fuori quarantena; CEILING 1 → 0.
+- **STATO**: ✅ RISOLTO.
 
 ### HC-F8-FACTORIZATIONTOWER-PERF — 2-level Q(√2,√3) factorization regression
 - **File**: `test/unit/algebra/test_factorization_tower.cpp` (members:
@@ -360,8 +515,35 @@
   EXCLUDE list i 4 test affetti FactorizationTowerTest +
   FactorizationTowerNTest.IrreducibleX2Minus7.  Tutti restano abilitati
   via `--slow` o gtest_filter esplicito; profile dedicato consigliato.
-- **STATO**: APERTO — perf debt suspetta-causa identificata, profilatura
-  + fix in sessione dedicata.
+- **RISOLUZIONE 2026-06-29 (A3)**: la diagnosi "suspect introducer 5c72bc0 /
+  together() GCD" era **ERRATA** (confutata profilando `sample`). Due cause reali,
+  entrambe fixate:
+  (1) **Kronecker non-cancellabile**: per una torre irriducibile la norma di Trager
+  è un *perfect power* di un irriducibile Q[x] → il recombination cade su
+  `factorize_kronecker` (ricerca combinatoria divisor-tuple esponenziale) che NON
+  pollava alcuna cancellazione → blocco oltre ogni budget. Fix: `factorize_kronecker`
+  polla `ctx.past_hard_deadline()` (deadline **opt-in** posseduta dal chiamante;
+  default = illimitato per non rompere le factorizzazioni lente-ma-legittime, es.
+  Trager su Q(∛2) ~27s) e propaga `Timeout` invece di restituire "irriducibile".
+  `factor_polynomial_tower[_n]` pubblica `ctx.set_hard_deadline(now()+ctx.timeout())`.
+  (2) **LLL a frazioni Rational**: `lll_reduction` rifaceva la Gram-Schmidt completa
+  per ogni swap con coefficienti `Rational` → esplosione frazioni su reticoli van
+  Hoeij. Sostituito con **LLL intero fraction-free** (Cohen 2.6.7 / de Weger): d[i],
+  λ[i][j] interi Hadamard-bounded. Rationale fallback solo per basi rank-deficient.
+  **Esito**: AntiHardcode 3.2s, PreservesLeadingCoeff 5.8s, IrreducibleX2Minus7 3.5s,
+  SplitsX2Minus3 4.5s — rimossi dalla quarantena. 239 test factor/poly/LLL/Galois +
+  327 consumer (integrate/simplify/solve) verdi.
+- **RESIDUO CHIUSO 2026-07-10** (A25): il collo di bottiglia non era l'aritmetica dell'Hensel-lift
+  ma la **scelta del primo**. `factorize_univariate_hensel_or_kronecker` usava il primo candidato
+  della lista; un primo sfortunato spezza la norma deg-16 in molti fattori modulari e fa esplodere
+  la ricombinazione (misurato altrove: deg-20 mod 73 → 18 fattori/217s, mod 79 → 8 fattori/4ms).
+  Fix (`factorization_wang_eez.cpp`, commit `88d0b0e`): si scandiscono i primi **lucky**
+  (`f` squarefree mod p) e si esegue l'unico lift+recombine pesante su quello con **meno fattori
+  modulari** — esattamente il fix "scelta primo mirata" già indicato, non un'euristica di forma.
+  **Esito**: `SplitsProductOfQuadraticsOverQSqrt2Sqrt3` >200s → **9.9s**,
+  `SplitsX4Minus10X2Plus1OverQSqrt2Sqrt3` >200s → **12.5s**; entrambi fuori quarantena.
+  `PrimitiveElementTest.SqrtTwoSqrtThreeSqrtFive` → 1.25s, sbloccato da A9 (chain flattening).
+- **STATO**: ✅ RISOLTO (tower hang, LLL, e Hensel-lift deg-16 tutti chiusi).
 
 ### HC-F8-FACTORIZATIONTOWER-AntiHardcode-X2Minus2-Sqrt3Sqrt5 — Hang >500s
 - **File**: `test/unit/algebra/test_factorization_tower.cpp`
@@ -379,17 +561,61 @@
 - **Workaround applicato 2026-06-14**: aggiunto a `scripts/test_quick.sh`
   EXCLUDE list. Test resta abilitato via `--slow` cap 1800s o via
   invocazione esplicita.
-- **STATO**: APERTO (perf debt, baseline pre-esistente, non bloccante).
+- **STATO**: ✅ RISOLTO 2026-06-29 (A3). Root cause = `factorize_kronecker`
+  non-cancellabile sulla norma perfect-power (vedi HC-F8-FACTORIZATIONTOWER-PERF
+  risoluzione). Ora `factor_polynomial_tower` pubblica `ctx.set_hard_deadline()`
+  e Kronecker lo polla → termina in 3.2s (Unimplemented entro budget). Rimosso
+  dalla quarantena.
 
 ### HC-F8-SD3-VANHOEIJ-SLOW — VanHoeij SD3 Swinnerton-Dyer >400s
 - **File**: `test/unit/algebra/test_factorization_lll.cpp:551` (`VanHoeijFactorTest.AcceptanceGate_AG2_SwinnertonDyer_SD3_Irreducible`).
 - **Categoria CLAUDE.md**: nessuna (performance debt, non hardcode codice).
 - **Sintomo**: test hangs >400s su clean baseline (verificato 2026-06-13 via `git stash` + rerun) — quindi NON regressione di Phase A/B. SD3 esercita van Hoeij LLL su polinomio Swinnerton-Dyer di grado 9 (3 quadratiche irriducibili stack via field extension nesting).
 - **Fix corretto**: investigare costo LLL knapsack su densità SD3 specifica; possibile bound enumeration troppo largo, oppure profilo lattice mal-condizionato.
-- **Workaround applicato 2026-06-13**: aggiunto a `scripts/test_quick.sh` EXCLUDE list (linea 42). Test resta abilitato via `--slow` (cap 1800s) e nelle sessioni pre-commit.
-- **STATO**: APERTO (perf debt, non bloccante).
+- **AGGIORNAMENTO 2026-06-29 (A3)**: la diagnosi "LLL lento" era corretta ma parziale.
+  Il **costo LLL è risolto** dal nuovo LLL intero fraction-free (vedi
+  HC-F8-FACTORIZATIONTOWER-PERF): la Gram-Schmidt Rational esplodeva in frazioni.
+  MA SD3 (Swinnerton-Dyer **grado 8**, non 9, irriducibile) **resta lento**: con LLL
+  veloce van Hoeij prova correttamente l'irriducibilità (nessun fattore), ma
+  `factorize_univariate_hensel_or_kronecker` non si fida del verdetto e — essendo
+  `deg 8 ≤ kronecker_max_degree(8)` — cade su `factorize_kronecker` **illimitato**
+  (SD3 è path diretto `factor_over_integers`, NON tower → nessun `hard_deadline`).
+  Kronecker su irriducibile = ricerca esaustiva senza fattore = lentissima.
+- **✅ RISOLTO 2026-06-29 (A3, fase 2) — lucky-prime + verdetto esaustivo**. Diagnosi affinata
+  instrumentando il path (`[WANG]` trace su RedundantGenerator): **tutti i primi candidati sono
+  lucky** (`f` squarefree mod p) e la recombination **Hensel esaustiva** (`recombine_from`,
+  completa fino a grado n/2) è in realtà **affidabile** — concorda con Kronecker (deg-8 splitta
+  `found=1`, deg-4 genuinamente irriducibile su entrambi). Il fallimento del primo tentativo (a)
+  era un **BUG d'implementazione**: avevo fatto fidare il caller del verdetto di **van Hoeij**
+  (incompleto: può mancare fattori anche su primo lucky) **saltando il fallback esaustivo**.
+  Fix corretto: il caller (`factorization_wang_eez.cpp`) si fida **solo** del verdetto della
+  recombination **esaustiva** (che gira già come fallback quando van Hoeij non trova nulla) e
+  **solo su primo lucky** (`integer_poly_squarefree_mod_p`, check `gcd(f,f') mod p` costante).
+  "Nessun fattore su lucky prime via ricerca esaustiva" = prova di irriducibilità → ritorna `{f}`
+  invece di cadere su Kronecker illimitato. Primo unlucky (`p|disc`) → `bad_primes++`, prova
+  altro primo; se tutti unlucky (patologico) → resta il fallback Kronecker.
+- **Esito**: SD3 **219ms** (era hang >400s). RedundantGenerator **2003ms = 2 fattori corretti**
+  (niente silent-wrong). 243 factor/poly/LLL/Galois/Trager + 352 consumer (integrate/simplify/
+  solve/residue) verdi, 0 regressioni. Rimosso da `test_quick.sh` SLOW_OK.
+- **STATO**: ✅ RISOLTO (LLL fraction-free + verdetto irriducibilità lucky-prime esaustivo).
 
 ## Voci aperte
+
+### HC-A26-PRIMITIVE-PARAMQ-RATIONAL — ParamRischDE primitivo: base case solo Q[x], serve Q(x) razionale
+- **File**: `src/calculus/risch_rde_bronstein.cpp` (ramo `ExtensionType::Logarithmic` in `solve_risch_de_parametric_field`, correzione `i·y·θ'`) + base case `src/calculus/risch_parametric.cpp::solve_risch_de_parametric_q`.
+- **Categoria**: 4 (bail-out su tipo: forzante razionale rifiutata da un solver polinomiale-only — esplicito e diagnostico, non silenzioso).
+- **Aperta da**: A26 (2026-06-29), durante il wire-in/validazione del solver parametrico tower-level.
+- **Sintomo**: nel caso primitivo (estensione log, `D(t)=u'/u`), la ricorsione genera dalla correzione `i·y·θ'` una forzante **razionale** nel campo inferiore (es. `1/x`). Il base case `solve_risch_de_parametric_q` accetta solo polinomi `Q[x]` (parse_polynomial + extract_q_coeffs) → ritorna `Unimplemented (RISCH_NO_POLYNOMIAL_SOLUTION)`. Esempio: `solve_risch_de_parametric_field(f=0, g={1})` su `Q(x, log x)` — la soluzione `y=c·x` esiste ma non viene trovata. **NON è silent-wrong né hang**: contratto REGOLA ZERO rispettato (diagnostico esplicito). Riproduzione: `ParametricTowerTest.Log_PrimitiveDescent_RationalForcing_CleanDiagnostic`.
+- **Fix corretto**: estendere il base case a **ParamRischDE su `Q(x)` razionale** — weak-normalizer (Bronstein 6.1.1) + denominator bound, NON solo `Q[x]`. Bronstein *Symbolic Integration I* §5.12 (limited-integration / IntegratePrimitivePolynomial) + §6.5. Subordinato a REGOLA 0.1 (rileggere spec prima dell'impl).
+- **✅ CASO f=0 RISOLTO 2026-06-29 (A26, fase 2)**: implementato `solve_param_limited_integration_rational_q` (`src/calculus/risch_parametric_rational.cpp`) — **rational limited integration su Q(x)** (Bronstein §7.2/§7.3): risolve `y' = Σ c_i g_i` con `g_i` razionale, riusando l'integratore razionale completo dell'engine. Split `∫g_i = R_i (razionale) + Σ_k a_{ik}·A_k` (A_k = atomo log/arctan, a_{ik}∈Q = residui); la combinazione integra razionalmente ⟺ `Σ_i c_i a_{ik}=0 ∀k` (null space) → `y=Σ c_i R_i`. **SOUND BY CONSTRUCTION**: ogni soluzione verificata per back-substitution `D(y)≡Σc_i g_i`, candidati non-verificati scartati → al peggio incompletezza diagnostica, MAI silent-wrong. Wired nel base case `solve_risch_de_parametric_field` (ext_idx==0) come fallback quando `parametric_q` fallisce e `f==0`. Flippa `Log_F0_G1_PrimitiveDescent_SolvedSound` (era Unimplemented → ora `y=x, c=1` verificata). +5 test (3 diretti + primitivo + esistenti). 81 risch/parametric verdi, 0 regressioni.
+- **Esito parziale precedente 2026-06-29 (A26 fase 1)**: (a) **✅ FIX MEMORY-SAFETY**: heap-buffer-overflow ASan a `risch_rde_bronstein.cpp:384/425` (`g_polys[s][N]` con `N>deg(g_s)` selezionava l'`operator[]` non-const non-bounds-checked) — corretto via `const PolyExpr&`. (b) **✅ ramo esponenziale validato sound**.
+- **✅ CASO f≠0 RISOLTO 2026-06-30 (A26, fase 3)**: implementato `solve_param_risch_de_rational_q` (`src/calculus/risch_parametric_rational.cpp`) — **ParamRischDE generale su Q(x)** (Bronstein §6.1/§7.1): risolve `y' + f·y = Σ c_i g_i` con `f, g_i` razionali. Ansatz `y = P/D`, `D = lcm(den f, den g_i)`; identità polinomiale parametrica `D·P' + (Fn − D')·P − Σ_i c_i(Gn_i·D) = 0` → sistema lineare omogeneo in (coeff P, c_i) → **null space**. **Degree bound** con caso *cancellation* (`deg_H == deg_D−1` → grado omogeneo `n = −lc(H)/lc(D)`; trova es. `y=x²` di `y'−2y/x=0`). **VERIFICA ENGINE-INDEPENDENT**: residuo dell'identità ricalcolato in aritmetica **Q-razionale esatta** → sound-by-construction, mai silent-wrong. Output in forma **integer-cleared** `(L·P)/(L·D)`. Wired nel base case (ext_idx==0, fallback f≠0). +4 test. 85 risch/parametric verdi, 0 regressioni.
+- **✅ WeakNormalizer RISOLTO 2026-07-01 (A26, fase 4)**: implementato `inflate_denominator` (`src/calculus/risch_parametric_rational.cpp`) — **WeakNormalizer denominator inflation (Bronstein 6.1.1)**. Correzione di rotta sulla diagnosi precedente: nella convenzione `y'+f·y=g` è il **residuo intero POSITIVO** (non negativo) a un polo semplice a creare il problema — `y_h'/y_h=−f`, residuo `+n` ⇒ `y_h=(x−α)^{−n}` = polo di ordine `n`, mentre `lcm(den f,den g_i)` porta `(x−α)` solo a ordine 1; il residuo negativo dà invece `y_h` polinomiale, già coperto dall'ansatz. Fix: per ogni fattore squarefree `s | den(f)` di molteplicità 1, residuo `n` ai radici di `gcd(fn−n·fd', s)` (Rothstein-Trager) per `n∈[2, cap]` ⇒ moltiplica `D` per quel fattore `n−1` volte, portando le soluzioni-polo nell'ansatz. **SOUND**: la back-substitution scarta comunque ogni non-soluzione → inflate imperfetto tocca solo la completezza, mai la correttezza. Cap = `ctx.max_risch_rational_ansatz_degree()` (configurabile, Cat-1, zero magic constant). +3 test critici `WeakNormalizer_*` (residuo 2/3, polo shiftato `x=1`) — **probe di load-bearing**: disabilitando l'inflate i 3 falliscono, riabilitandolo passano. 13 ParametricTower + 151 risch/integrate verdi, 0 regressioni.
+- **✅ HC-A26-PARAMQ-RESIDUAL-MAXDEG chiuso nello stesso commit (audit hardcode Cat-2)**: in `residual_is_zero`, il grado massimo di verifica era `D.size()+P.size()+2U` (padding additivo magico che per di più NON copriva `deg_H+deg_P` quando `deg_H>deg_D`). Sostituito col bound derivato esatto `max(D.size()+P.size()−1, H.size()+P.size()−1, max_i Gd[i].size())` — niente literal, e copre ora anche il termine `H·P` (under-cover latente risolto).
+- **🔧 RESIDUO RESIDUO (incompletezza, MAI sbagliato — back-substitution scarta i non-soluzione)**: poli di f di **molteplicità ≥2**, residui interi **oltre il cap** `ctx.max_risch_rational_ansatz_degree()`, e residui **algebrici** (non razionali) → Unimplemented pulito. Il solver **non-parametrico** `solve_risch_de_rational_q` non inflaziona ancora (porta il gap di ordine-1 = task separato, R3 hot-path). Wiring in `integrate()` reale subordinato a df>0 (A1).
+- **Nota verifica**: usato residuo polinomiale in aritmetica **Q esatta** (non il simplifier) per esattezza/robustezza su sistemi ad alto grado, e validato in parallelo con `verify_field_de` simbolico (entrambi verdi). *(Una sospetta corruzione di `simplify` su `(−x/2)/x²` durante il debug si è rivelata FALSO ALLARME: l'engine semplifica correttamente a `−1/(2x)` e `together(delta)=0`.)*
+- **✅ TOWER DESCENT / POLE-CANCELLATION RISOLTO 2026-07-20 (A26, fase 5)**: le fasi 2-4 chiudevano il **base case Q(x)**; restava però un gap al livello della **discesa su torre** `solve_risch_de_parametric_field` per monomio PRIMITIVO. Il bound di denominatore naive `D = lcm(denominatori)` assumeva che la soluzione ereditasse i poli delle forzanti in `t`: moltiplicava per `D` e produceva `f_new = f − D'/D` non polinomiale → bail "f_new is not polynomial", pur esistendo una soluzione polinomiale (repro misurato: `g = (1/x + 1/(x·t), −1/(x·t))` su `t = log x`, `D = t·x²`, `f_new = −2/x − 1/(t·x)`; soluzione vera `y = t`). **Fix (nuovo `src/calculus/risch_param_pole_cancel.cpp`)**: nel caso primitivo Teorema 5.1.1 dà `S = k` ⇒ `k⟨t⟩ = k[t]`, quindi `Σ c_i·g_i` DEVE essere polinomiale in `t` anche quando le singole `g_i` hanno poli — vincolo Q-lineare sui `c_i`. `reduce_parametric_forcing_poles` calcola il sottospazio `{c : Σ c_i·g_i ∈ k[t]}` via null space e restituisce forzanti ridotte polinomiali + matrice di cambio base; il descent risolve il problema ridotto e rimappa le costanti. **Sound by construction** (back-substitution). **+ fix degree bound** (Bronstein §6.3 `RdeBoundDegreePrim`, `d_a=0`): ramo `df==0` log da `N=dg_max` a `N=dg_max+1` (la soluzione può avere grado uno in più della forzante — `q = x·log x`). Sblocca end-to-end `∫(1/x+1/(x·ln x))·ln(ln x)dx = ln(ln x)²/2 + ln(x)·ln(ln x) − ln(x)` (verificato per derivazione). +2 test forti (`LogTower_MixedForcing_Solved`, `EndToEnd_NestedLogTower_Solved`). Residuo tracciato: **HC-A26-RDEBOUND-CANCEL-GAP** (branch di cancellazione di testa §6.3.3, sound/incompleto).
+- **STATO**: ✅ CHIUSO per la parte concludibile senza A1 (base case f=0 ✅ + f≠0 razionale ✅ + WeakNormalizer ✅ + tower descent primitivo / pole-cancellation ✅ — tutti wired+sound+testati). Residuo non-A26: mult≥2 / residuo>cap / algebrici (Unimplemented pulito), inflate del solver non-parametrico (R3), wiring integrate() (gated A1 df>0), degree-bound §6.3.3 (HC-A26-RDEBOUND-CANCEL-GAP). **Refs**: A26, A1, HC-F8-PENDING-17, HC-A38-01, HC-A26-RDEBOUND-CANCEL-GAP.
 
 ### HC-F75-B1-IBP-DOUBLE-APPLY — Integration by parts applica regola due volte su Product Log·Pow
 - **File**: `src/calculus/integrate_parts.cpp` + `simplify` su Product post-IBP.
@@ -400,6 +626,14 @@
 - **Fix corretto**: ispezionare `integrate_by_parts` per evitare ri-visita del termine post-sub. Il sub-integrale dopo riduzione (`-∫(x/2) dx`) dovrebbe risolversi via `integrate_power_direct` senza ulteriori chiamate by-parts. Verificare anche che ILATE non emetta `Sum`/`Product` con priorità sbagliata sul termine ridotto, causando dispatch infinito a se stesso.
 - **Acceptance**: `integrate(x*log(x), x)` → corretto `½x²·log(x) - ¼x²`. Idem entry 60 `x*log(x)^2`, entry 59 `log(x)^3`.
 - **Fix applicato (2026-06-10)**: `integrate_by_parts` ora chiama `context.simplify(vdu)` prima della ricorsione `integrate(vdu)`. Il sub-integrando `(x²/2)·(1/x)` collassa a `x/2` e viene risolto direttamente da `integrate_power_direct`, evitando il re-dispatch IBP che generava i 4 termini ridondanti. Suite quick 2233/2233 PASS, zero regressioni.
+- **Fix aggiuntivo (2026-06-19, T-016)**: il caso di accettazione `x*log(x)^2` (entry 60)
+  era ancora ROTTO (`INTEGRATE_NO_STRATEGY`) — scoperto da nuovo regression test
+  round-trip `test_integrate_byparts.cpp`. Causa: `get_ilate_priority` classificava
+  OGNI `Pow` come Algebraico (3), quindi `(log x)^n` perdeva la classe Logaritmica e
+  l'IBP sceglieva u/dv errati. Fix generale (no hardcode): un Pow eredita la classe
+  ILATE della sua base (`integrate_parts.cpp:60`) — `(log x)^n`→L, `(asin x)^n`→I,
+  base algebrica→A. Verificato: round-trip `d/dx ∫f = f` per x·log x, x·log²x, log³x;
+  suite quick 2414/2414 PASS, zero regressioni.
 - **STATO**: CHIUSO
 
 ### HC-F75-A2-MATRIX-SCALAR-OP — Runner non gestisce scalar·matrix / matrix±matrix / matrix·matrix
@@ -437,6 +671,21 @@
 - **Verifica corpus**: bronstein 90/90 traversato sotto `--per-entry-timeout 5` (17 PASS, 35 FAIL, 38 SKIP = 32.7% non-skip; 18.9% sul totale). Acceptance "bronstein 90/90 traversed" SUPERATA. Il target "bronstein ≥70%" richiede F7.5.B2/B3 (Risch Hermite + transcendental), non interrupt fix.
 - **STATO**: CHIUSO
 
+### HC-IBP-RADSUM-RATIONALIZE — anti-hang IBP su denominatore radical-sum è versione di passaggio (manca razionalizzazione coniugata)
+- **File**: `src/calculus/integrate_parts.cpp` (~L274, guard `nested_active() && ibp_has_radical_sum_denominator`); helper `ibp_has_radical_sum_denominator`/`is_radical_sum`/`expr_contains_var_radical` stesso file.
+- **Categoria**: 4 (bail-out diagnostico esplicito — `Unimplemented`, mai silenzioso) + 8 (manca il path algoritmico generale a valle).
+- **Aperta da**: T-055-followup (2026-06-25), durante cleanup di lavoro anti-hang a metà lasciato nel working tree.
+- **Sintomo**: `integrate(log(x + sqrt(x^2+1)), x)` (= asinh(x), elementare, antiderivata `x·asinh(x) − √(x²+1)`) prima NON terminava (hang infinito, S5). La guard converte l'hang in terminazione ma il risultato è `INTEGRATE_NO_STRATEGY`, NON la forma chiusa. Causa radice: la IBP `u=log(g)`, `dv=dx` produce `du = g'/g` con `g = x+√(x²+1)` (radical-sum). Matematicamente `g' = g/√(x²+1)` quindi `g'/g = 1/√(x²+1)`, ma il simplifier NON cancella questo quoziente radical-sum (non esiste razionalizzazione coniugata simbolica generale nel motore — solo coniugio su ComplexRational/Qi). Il sub-integrando resta `x·(x+√(x²+1))⁻¹·(…)`, che la IBP annidata non può ridurre (ogni passo approfondisce la potenza negativa) → la guard lo defer.
+- **Perf collaterale**: la guard rende il caso finito ma lento (~29s, ~58 chiamate IBP, dominato da `simplify` su espressioni radical-sum — spam WARN "simplify result is not strictly canonical"). NON è O(2^n) in IBP; è O(N · simplify_costoso) sul simplifier dei radicali. Il test di regressione `BronsteinCorpus.NoHang_LogXPlusSqrt_Asinh` è quindi tenuto fuori dal quick-gate (lista SLOW_OK in `scripts/test_quick.sh`), eseguito in `--slow`.
+- **Workaround attuale**: guard anti-hang (esplicito `Unimplemented` "nested IBP on radical-sum-denominator integrand diverges; needs rationalisation"). Caso bare-radical `√(x²+1)⁻¹` (base FuncCall, non Sum) NON intercettato → path ∫asin / quadratic-radical intatto.
+- **Fix corretto**: implementare razionalizzazione coniugata simbolica generale per denominatori `a + b√q` (moltiplica num/den per il coniugato `a − b√q`, denominatore → `a² − b²q` razionale). Wiring: (1) come regola simplifier sui Sum con un termine radical (riduce `g'/g → 1/√(x²+1)` a monte), preferito perché generale; oppure (2) localmente nel calcolo del `du` di IBP quando `u=log(radical-sum)`. Risolto (1): asinh si integra al primo passo IBP, veloce e corretto, e la guard diventa irraggiungibile (rimuovibile). Sblocca la famiglia `∫log(x+√(x²+a))`, `∫asinh/acosh`-equivalenti, e in generale integrandi con radical-sum in denominatore.
+- **Acceptance**: `integrate(log(x+sqrt(x^2+1)), x)` → forma chiusa verificata `D(F)=f` numericamente; tempo < 1s; nessuna regressione su `BronsteinCorpus.*` né su ∫asin coverage.
+- **Tentativo razionalizzazione (2026-06-25) — FALLITO, prerequisito mancante**: implementato il fix (2) come rewrite strutturale `rationalize_radical_denominators` in `integrate_elementary.cpp` (riscrive `Pow(A+B√q, n<0) → conj^{-n}·Pow(simplify((A+B√q)(A−B√q)), n)`, guardato da "risultato radical-free") + wiring nel ramo IBP non-affine `integrate_function` (rationalise `vdu_in` + `together`, e rationalise il `delta` di verifica). **La matematica è corretta** (tracciato a mano e con probe: `x·g'/g → x/√(x²+1)`, e in ISOLAMENTo `together("x√(x²+1) − x³/√(x²+1)") = x/√(x²+1)`, integrate → `√(x²+1)`). **MA in-flow `together`/`simplify` corrompono le forme radical-coniugate**: `vdu_in` torna con esponenti spazzatura giganti `(x−√(x²+1))^85899345862`, `^42949672931` (≈2³⁵–2³⁶), e `integrate` tenta l'espansione di un polinomio di grado 2³⁵ → **hang** (peggio del 29s di NO_STRATEGY). Coerente con lo spam pervasivo "F7.0-A4.2 WARN simplify result is not strictly canonical": il simplifier/`together` NON è robusto su prodotti/potenze con atomi radicali. Tentativo revertito (integrate_elementary.cpp/test riportati a 6c5e405).
+- **Vero prerequisito IDENTIFICATO E RISOLTO (2026-06-25, commit 0c7c590)**: gli esponenti spazzatura NON erano fragilità diffusa del simplifier, ma UN bug puntuale in `parse_integer_exponent` (`polynomial_arithmetic.cpp`, usato da `together`/`expand`): il ramo `Unary(Neg, IntegerLit(n))` (esponente non-canonico `--1` prodotto dal rewrite) prendeva `inner.value.decimal()` — che per `n` negativo è la stringa `"-1"` — e la passava al parser decimale UNSIGNED → magnitudine spazzatura (`42949672931 ≈ 10·2³²`), oltre a forzare `negative=true` (segno sbagliato: `−(−1)=+1`). Fix: derivare magnitudine+segno dal valore con segno reale via helper `integer_exponent_from_value` condiviso (il parser unsigned vede sempre un decimale non-negativo). Riprodotto e verificato: `together` sulla forma coniugata-razionalizzata ora ritorna `x·√(x²+1)⁻¹` invece degli esponenti spazzatura.
+- **STATO**: RISOLTO per il caso canonico (2026-06-25). `integrate(log(x+sqrt(x^2+1)), x)` → `x·log(x+√(x²+1)) − √(x²+1)`, **305ms**, `D(F)=f` verificato numericamente (test `BronsteinCorpus.SolvesLogXPlusSqrt_Asinh`, nel quick-gate). Implementazione: `rationalize_radical_denominators` (razionalizzazione coniugata generale, esponente coniugato costruito canonico via `negate_exponent`) + wiring nel ramo IBP non-affine di `integrate_function` (`integrate_elementary.cpp`): rationalise `vdu_in` + `together`, e rationalise il `delta` di verifica (la guardia `D(candidate)≡integrand` garantisce no-silent-wrong). Anti-hang guard IBP mantenuta come backstop. Quick suite verde, nessuna regressione.
+- **Famiglia estesa `a≠1` RISOLTA (2026-06-25)**: `∫log(x+√(x²+a))` con `a≠1` ora si integra (test `BronsteinCorpus.SolvesLogXPlusSqrt_GeneralRadius`: `a=4`, `a=9` → forma chiusa, `D(F)=f` verificato, ~330ms/caso). `together` lasciava il coefficiente numerico bloccato in `c·x·(c·√(x²+a))⁻¹` (`c=(S·conj)²`, es. 16 per `a=4`). **T-054 nel simplifier universale è la via SBAGLIATA**: provato (lift di `Pow(c·rest,n<0)→c^n·Pow(rest,n)` in `simplify_product_factors`), rompe Gruntz (`AcidTest.Test1_GruntzLimit`); un guard "solo basi radicali" risolveva Gruntz MA rallentava il path asinh **73×** (305ms→22s) perché è un hot-path chiamato di continuo. Soluzione corretta: lift LOCALE `lift_numeric_from_radical_powers` in `integrate_elementary.cpp`, applicato UNA volta al remainder `vdu_in` dopo `together` (no costo hot-path, nessuna interazione Gruntz, no-op per `a=1`). asinh resta 328ms. Quick suite verde.
+- **Residuo unico (non bloccante)**: il caso `acosh` (`log(x+√(x²−1))`) torna ancora NO_STRATEGY — ragione DISTINTA da `a≠1` (`R=S·conj=1`, nessun coefficiente da estrarre): probabile gestione segno/dominio di `√(x²−1)` (negativo per |x|<1) nel verify o nel sub-integrale `∫x/√(x²−1)`. Task separato.
+
 ### HC-F75-CYCLOTOMIC-ROOTOF — mathematically_equal non riconosce RootOf(cyclotomic) ↔ exp(2πik/n)
 - **File**: `src/algebra/algebraic_equal.cpp`.
 - **Categoria**: 8 (pattern matching a tabella chiusa — manca normalizzazione cyclotomic).
@@ -446,7 +695,8 @@
 - **Acceptance**: solve entry 72 → PASS; nessuna regressione su altre entry solve.
 - **Fix applicato (2026-06-10/11)**: nuovo file `src/algebra/algebraic_equal_cyclotomic.cpp` con (a) `enumerate_geometric_rootof(RootOf, ctx)` che riconosce il pattern `p(x) = sum_{i=0..d} c^i · x^(d-i) = (x^n - c^n)/(x - c)` con `n = d+1`, emette le `2d` candidate `c · exp(2πi·m/n)` per `m ∈ {1..d, 1-n..d-n}` (entrambi gli angoli equivalenti mod 2π, per allineare a Maxima `(-π, π]`); (b) `try_rootof_decision(lhs, rhs, ctx)` che corto-circuita la `mathematically_equal` con due regole: distinct-index su stesso polinomio → false (fixa il bug pre-esistente di `polynomial_normal_form` che collassava RootOf atomi), e single-side RootOf geometrico → enumera e match. Anti-monolith split: la logica RootOf è nel nuovo file (~50 LOC), `algebraic_equal.cpp` chiama via forward-decl. `test/golden/maxima_parser.hpp` ora gestisce `e^-(...)` → `exp(-...)` per non perdere le radici cyclotomiche con esponente negativo. 7 unit test in `test/unit/algebra/test_cyclotomic_rootof_d2.cpp`.
 - **Verifica corpus**: solve entry 72 `solve(x^5-32, x)` → PASS. Solve area complessiva **81/81 = 100.0%** (era 80/81 = 98.8%).
-- **STATO**: CHIUSO
+- **Estensione T-025 (2026-06-20) — Φ_n composito**: il pattern geometrico copre solo `Φ_p` per `p` primo (= `(x^p−1)/(x−1)`). Per `n` composito `Φ_n` NON è geometrico (`Φ_8=x⁴+1`, `Φ_12=x⁴−x²+1`) e restava non riconosciuto. Aggiunto `enumerate_cyclotomic_rootof` + `detect_cyclotomic_index` (match contro `compute_cyclotomic(n)`; window `n ≤ 2·φ(n)² = 2d²` da `φ(n) ≥ √(n/2)`, cap opzionale `ctx.max_cyclotomic_n`), enumera le `φ(n)` radici primitive `exp(2πi·m/n)` con `gcd(m,n)=1`. Inoltre `mathematically_equal` ora tenta `try_rootof_decision` sugli operandi ORIGINALI prima dei semplificati: `simplify` risolve i RootOf biquadratici (`x⁴+1`) in radicali, cancellando il nodo RootOf prima del dispatch. Test: `CyclotomicCompositeTest` (Φ_6/Φ_8/Φ_12 + enumeratore diretto). Suite quick 2438/0-fail.
+- **STATO**: CHIUSO (geometrico F7.5.A1 + ciclotomico-composito T-025 2026-06-20)
 
 ### HC-F16-TRAGER-QI — Trager Q(α) factorization su `RootOf(y^2+1)` non riconosce isomorfismo con Q(i) — RISOLTA 2026-06-07
 - **File**: `src/algebra/polynomial_arithmetic.cpp` (expand_expr_impl leaf set).
@@ -464,13 +714,34 @@
   1. Per ComplexLit(a,b) con (a,b) entrambi ≠ 0 e razionali: calcolare `|z|² = a² + b²` (Rational); ritornare `½·ln(a²+b²) + i·atan2_symbolic(b,a)` (richiede `atan2_symbolic` per coppie razionali tipo (1,1)→π/4, (1,0)→0, etc).
   2. Estendere Product simplifier per riconoscere il pattern `exp(iθ)·exp(-iθ) = 1` come fast-path (riduzione preventiva prima di Euler factor).
 - **Workaround attuale**: i casi triviali (ln(±1), ln(±i)) sono coperti via dispatch esplicito; gli altri restituiscono ln(ComplexLit) opaco (no Unimplemented silenzioso — l'output è strutturalmente valido ma non semplificato).
-- **STATO**: RISOLTO — F1.6 canonicalizzazione completa e formula `ln|z| + i*arg(z)` integrata su base Abs/Arg robuste in `simplify_exp_log.cpp`. Test passati correttamente (M20).
-### F5.7-ZEIL-HIGHER-ORDER — Zeilberger higher-order recurrence solver non implementato
-- **File**: `src/symbolic/summation_zeilberger.cpp`.
-- **Categoria CLAUDE.md**: Cat 3 (algoritmo incompleto).
-- **Descrizione**: Zeilberger creative telescoping genera recurrences corrette per $J \ge 2$, ma il solver per equazioni alle differenze di ordine superiore non è ancora integrato.
-- **Fix corretto**: Integrare o implementare un linear difference equation solver (Hyper algorithm di Petkovšek).
-- **STATO**: APERTO — infrastruttura base completa, solver di grado superiore richiesto per sums generalizzate.
+- **STATO**: RISOLTO COMPLETO (2026-06-20). Estesa la famiglia angolare costruibile oltre π/4: `ln(a+bi)` ora esatta su tutta la famiglia 30°/45°/60° in tutti i quadranti (test residui T-017: √3+i→ln2+iπ/6, 1+√3i→ln2+iπ/3, -1+√3i→ln2+2iπ/3, -√3+i→ln2+5iπ/6). Tre gap reali risolti alla radice:
+  1. `extract_imag_coeff` (ln Sum-branch, `simplify_exp_log.cpp`) non riconosceva `ComplexLit(0,b)` (forma canonica F1.6 di `i`): √3+i restava opaco, mai instradato a arg(). Aggiunto handling ComplexLit pari a `extract_complex_parts`.
+  2. `atan` privo dei valori speciali π/6, π/3: aggiunti via detection `tan²∈{1/3,3}` (form-independent, `simplify_trig_inverse.cpp`).
+  3. `is_known_positive(√x)` e `is_known_negative(base^n)` mancanti → segno di `√3`, `(−√3)^(−1)` non provabile; `(−√3)²` non collassava in abs/arg. Aggiunti predicati segno (`simplify_sign_predicates.cpp`, estratto anti-monolito) + regola simplifier `(−x)^n` intero → `±x^n` (`simplify_arithmetic_power.cpp`).
+- **STATO (storico)**: F1.6 canonicalizzazione + formula `ln|z| + i*arg(z)` su Abs/Arg (M20); copriva solo π/4 e assi.
+### F5.7-ZEIL-HIGHER-ORDER — Zeilberger higher-order recurrence solver — CHIUSO (T-027)
+- **File**: `src/symbolic/summation_hyper.{hpp,cpp}` (Petkovšek Hyper, rational z),
+  `src/symbolic/summation_petkovsek.cpp` (closed-form combinazione + wiring),
+  `src/symbolic/summation_zeilberger.cpp` (dispatch J≥2).
+- **Categoria CLAUDE.md**: Cat 3 (algoritmo incompleto) → risolto.
+- **Stato**: CHIUSO 2026-06-23 (commit Hyper 3addb54 + closed-form). Il solver per
+  equazioni alle differenze di ordine superiore è ora implementato e integrato:
+  - `hyper_term_ratio` / `hyper_all_ratios`: Petkovšek 1992 — divisori monici di
+    p₀ e p_J(n−J+1) via factor_polynomial, χ(z) dai leading coeff, z razionale,
+    sistema lineare per c(n) (csolve). Ogni ρ verificato contro la ricorrenza.
+  - `solve_recurrence_closed_form`: S(n)=Σ cᵢ hᵢ(n), hᵢ ricostruiti come
+    z^{n−n0}·∏Pochhammer (ratio→termine), cᵢ fittati dai valori iniziali su ℚ,
+    verifica estendendo S via la ricorrenza oltre i punti di fit.
+  - `sum_closed_form_from_recurrence`: wiring in `zeilberger_sum` per J≥2 con
+    cross-verifica contro la somma calcolata direttamente (guard boundary terms).
+  - Restrizione a z razionale (copre ~tutte le sums combinatorie); z algebrico →
+    `needs_algebraic` esplicito. Cap divisori configurabile (`max_hyper_divisors`).
+  - Test isolati: 2^n, n!, (E−3)(E−2)→{2,3}, (E−(n+1))²→n!, Fibonacci (no ℚ-hyper),
+    closed-form 2^n+3^n e n! da ordine 2, Σ(2^k+3^k) da ordine 3.
+- **Dipendenza residua per binomiali end-to-end**: l'attivazione su somme
+  binomiali Γ-encoded dipende ancora da **F5.7-ZEIL-GAMMA-RATIO** (estrazione di
+  shift-ratio razionali puliti da Γ(z+n)); il solver J≥2 è pronto e si attiverà
+  appena quella estrazione fornisce ricorrenze J≥2.
 
 ### F5.7-B6BIS-QUADRATIC-M-GT-1 — Polygamma ad alto ordine per (B₁k+B₀)/Q(k)^m con m>1
 - **File**: `src/calculus/summation_abramov.cpp` (helper `try_quadratic_atom_antidiff`, linea che ritorna `std::nullopt` per m>1).
@@ -479,7 +750,20 @@
 - **Fix corretto**: Estendere `try_quadratic_atom_antidiff` per m>1: decomposizione di `(B₁k+B₀)/((k-α)^m(k-β)^m)` in somma di `C_j/(k-α)^j + D_j/(k-β)^j` (j=1..m) via derivata dell'equazione di Hermite su Q(α), poi applicare `polygamma_antidiff(..., m, ctx)` per ogni grado.
 - **Blocking dependency**: Simplifier deve supportare `ψ^(n)(RootOf(...))` come forma canonica opaca (attualmente funziona per digamma; polygamma order m-1 con algebraic arg è già ExprPtr-compatibile ma non testato).
 - **Self-check Regola Zero**: "Hardcode silenzioso?" → no, ritorna nullopt esplicito → caller produce Unimplemented con messaggio diagnostico. "Input più grande?" → m>1 è il caso rifiutato, documentato qui. "Costanti?" → nessuna costante hardcoded; il valore m=1 è la condizione di guarda.
-- **STATO**: APERTO — m>1 richiede implementazione futura (frequenza rara in pratica: partial_fractions su denominatori irriducibili tipicamente produce m=1).
+- **✅ RISOLTA 2026-07-10 — voce era STALE, codice già implementato ma NON testato**: verifica a codice
+  (lezione ledger-lag): `try_quadratic_atom_antidiff` gestisce già m>1 con decomposizione
+  Hermite-style `Σ_j [C_j/(k−α)^j + D_j/(k−β)^j]` + `polygamma_antidiff(·, ·, j)` — il bail
+  `nullopt` per m>1 descritto sopra non esiste più nel codice. Mancava però QUALSIASI test del
+  ramo m>1 (OPEN-flag su codice vivo = gemello dell'anti-pattern "CLOSED-flag su codice morto").
+  **Verifica load-bearing aggiunta**: la costruzione dei coefficienti è estratta in
+  `quadratic_pf_coeffs(A0, A1, α, β, m, arena)` (pura, testabile) e l'identità dei fratti
+  semplici — che è un'identità in Q(α,β,k) — è verificata ESATTAMENTE con radici razionali
+  (α,β ∈ Q, simplify chiude la differenza a zero letterale): m=1/2/3 × numeratore costante/lineare,
+  6/6 verdi (`test_abramov_quadratic_multiplicity.cpp`), + end-to-end m=2 su `1/(k²+k+1)²`
+  (Polygamma(1, k−RootOf) presente). Fattori verificati anche a mano vs binom(2m−j−1, m−j)
+  standard per m=2,3.
+- **STATO**: ✅ RISOLTA (2026-07-10). Nota (non-gating, già nel blocking-dependency sopra):
+  valutazione numerica/semplificazione di ψ^(n) a shift algebrico resta opaca per design attuale.
 
 ### F5.7-ABRAMOV-FULL — Multi-atom rational summation via partial-fraction + polygamma — RISOLTA 2026-06-03
 - **File**: `src/calculus/summation.cpp` (helper `try_abramov_definite`); `src/symbolic/summation_gosper.cpp` (rescale tail ungated + `together`-based ratio); `test/unit/calculus/test_definite_summation.cpp` (+1 numerical test); `test/unit/symbolic/test_summation_gosper.cpp` (+1 antidifference witness).
@@ -531,7 +815,7 @@
   - `BaselSumDefinite_ViaPolygamma`: Σ_{k=1}^n 1/k² → contiene FuncCall(Polygamma). PASS.
   - Regression: 1953/1953 non-stress PASS in 54s Release (1951 baseline + 2 nuovi).
   - Build pulito `-Wall -Wextra -Wpedantic -Werror`.
-- **STATO**: ✅ RISOLTA 2026-06-03 — Abramov sub-block "single rational atom A/(linear)^m" chiuso. Estensione futuro: partial-fraction decomposition multi-fattore + Q-irreducible quadratic via RootOf (tracciato come B6-bis Abramov-Full).
+- **STATO**: ✅ RISOLTA 2026-06-03 — Abramov sub-block "single rational atom A/(linear)^m" chiuso. Estensione futura: decomposizione in fratti semplici multi-fattore + Q-irreducible quadratic via RootOf (tracciata come B6-bis Abramov-Full, voce F5.7-B6BIS-QUADRATIC-M-GT-1).
 
 ### F5.7-GOSPER-WIRING — Gosper-summable closed forms via summation driver — RISOLTA 2026-06-03
 - **File**: `src/calculus/summation.cpp` (wire-up `try_gosper_definite` + integrazione in `symbolic_sum`); `test/unit/calculus/test_definite_summation.cpp` (NEW, 3 test); `CMakeLists.txt` (test registrato).
@@ -837,6 +1121,47 @@
 - **Blocking dependency**: L1-08 GCD multivariato completo.
 - **STATO**: ✅ RISOLTA 2026-05-28 — Formula applicata: `(remainder.size()+1)*(divisor_sparse.size()+1)`. Il `16U` e la variabile `vars.size()` (incorrelata al numero di passi) sono stati rimossi. Derivazione: ogni passo elimina un monomio di testa dal remainder e aggiunge al più `|divisor|-1` nuovi; bound totale = `|remainder| * |divisor|`.
 
+### HPP-003B — Galois deg5 prime-scan candidate budget `*8U + 16U` (galois_deg5.cpp:187)
+- **File**: `src/algebra/galois_deg5.cpp:187` (parte di A18)
+- **Categoria CLAUDE.md**: Cat 1 — budget computazionale con moltiplicatore/offset magici.
+- **Descrizione**: `max_candidates = prime_budget * 8U + 16U` limita il numero di primi
+  candidati scansionati nel Frobenius/Dedekind walk. `8U` e `16U` arbitrari.
+- **STATO**: ✅ RISOLTA 2026-06-26 — Bound derivato. Un primo candidato viene scartato
+  solo se divide `lc·disc_num·disc_den`; il numero di divisori primi *distinti* di N è
+  ≤ `bit_length(N)` (k primi distinti ⇒ prodotto ≥ 2^k ≤ N). Quindi servono al più
+  `prime_budget + bit_length(lc) + bit_length(disc_num) + bit_length(disc_den)` candidati.
+  Il break a `p > 2^30` resta backstop assoluto. 19/19 test Galois verdi.
+
+### HPP-003C — divides_sparse_z step-budget `+16U` additivo (residuo A18) — 🟡 PARZIALE (2026-07-08)
+- **File**: `polynomial_gcd_brown_helpers.cpp` (`divides_sparse_z`), `polynomial_gcd_brown_lc_scaling.cpp`
+  (`exact_divide_sparse_z`), `polynomial_gcd_fp_helpers.cpp` (`exact_div_fp`) — tutti e tre condividevano
+  lo stesso `budget = (rem.size()+1)*(divisor.size()+1) + 16U` euristico.
+- **Categoria CLAUDE.md**: Cat 4 — bail-out potenzialmente silent-wrong + Cat 2 (pad magico).
+- **Fix applicato 2026-07-08**: nuovo helper condiviso `fp_helpers::proven_division_step_bound(dividend, n_vars)`
+  (`polynomial_gcd_fp_internal.hpp`/`.cpp`) sostituisce l'euristica con il bound **provato**
+  `∏_i (deg_i(dividend)+1)`: per una divisione esatta `dividend = divisor·quotient`, ogni variabile
+  del quoziente soddisfa `deg_i(quotient) ≤ deg_i(dividend)` (aritmetica dei gradi della divisione
+  polinomiale esatta), quindi il numero di monomi distinti del quoziente — e con esso il numero di
+  iterazioni, essendo ciascuna iterazione responsabile di esattamente un monomio del quoziente — è
+  limitato da tale prodotto. Saturazione a `SIZE_MAX` su overflow (nessun troncamento silenzioso).
+  Rimosso il pad `+16U` e l'accoppiamento spurio a `rem.size()*divisor.size()` in tutti e 3 i siti.
+- **Nota di rigore**: la terminazione del loop è comunque garantita **indipendentemente** da questo
+  bound — ogni iterazione riduce strettamente il leading monomial sotto il well-ordering di `BMonomial`
+  (proprietà di compatibilità con l'addizione degli ordini monomiali), quindi non è mai stato un
+  problema di non-terminazione ma di **falso negativo** su divisori legittimi con molti termini nel
+  quoziente. Il bound provato elimina questo falso negativo.
+- **Residuo non chiuso (onestà REGOLA ZERO)**: il ramo "budget superato" nei 3 siti ritorna ancora
+  `false`/`nullopt` anziché `Unimplemented` strutturato — non implementato perché tutti i 5 call-site
+  (`brown_modular.cpp`, `fp_recursive.cpp`) usano questi helper come gate di retry in loop CRT/modulari
+  dove `false` è l'esito atteso per un candidato sbagliato (non un errore); threading `Result<T>`
+  attraverso quella catena è un refactor a parte, R2/R3, non incluso in questo fix. Con il bound
+  provato, però, superarlo è ormai evidenza di un **invariante rotto** (non di un "non-divisore"), quindi
+  il rischio pratico di falso-negativo silenzioso è stato rimosso; l'upgrade a `Unimplemented` resta
+  un miglioramento di osservabilità, non di correttezza.
+- **Verifica**: 129/129 test GCD/Zippel/Wang/Brown mirati verdi (0 regressioni), suite quick in corso.
+- **STATO**: 🟡 PARZIALE — bound-fix (la parte Cat-4 reale) chiuso; propagazione `Unimplemented`
+  rimane task separato se si vuole la chiusura completa.
+
 ### HPP-004 — GCD multivariate max_samples formula (polynomial_gcd_multivariate.cpp:774)
 - **File**: `src/algebra/polynomial_gcd_multivariate.cpp:774`
 - **Nota**: Riga effettiva 774 (non 741 come in piano originale — drift verificato 2026-05-24). `max_samples = 2U * interpolation_degree_bound + 3U`. Il `+3U` è arbitrario senza garanzia probabilistica formale.
@@ -844,7 +1169,17 @@
 - **Descrizione**: Numero di campioni per interpolazione sparsa non deriva da un bound probabilistico formale. Schwartz-Zippel lemma dà: per polinomio di grado totale d su campo con |F|=q punti, prob(falso zero) ≤ d/q. Campioni necessari per confidence δ: `ceil(log(1/δ) / log(1/(1-d/q)))`.
 - **Fix corretto**: `max_samples = ceil(log(1/δ) / log(1/(1 - interpolation_degree_bound/field_size)))` con `δ = ctx.gcd_error_probability()` (già esposto).
 - **Blocking dependency**: L1-08 GCD multivariato, L1-21 campioni confidence-based.
-- **STATO**: ✅ RISOLTA 2026-05-28 — Formula applicata: `extra_guard = max(2, ceil(log2(required_samples+1)))`, `max_samples = 2*D + extra_guard`. Derivazione: con N=2D+extra punti, almeno D+extra punti sono lucky (Schwartz-Zippel). extra = ceil(log2(D+2)) cresce O(log D), evitando il blowup esponenziale O(N^k) del precedente log(1/δ). Per D≤2 (99% dei casi): extra=2, N=2D+2 (invariato nella pratica). La formula sostituisce il letterale `3U` con un'espressione derivata da required_samples.
+- **STATO**: ✅ RISOLTA 2026-06-21 (T-021) — La formula era poi derivata in
+  un'espressione probabilistica `k = ceil(log(δ)/log(p_fail))` con `p_fail = d/S` e
+  **`S = 10000` magic** (box di valutazione fittizio). Ma i punti di valutazione sono
+  interi consecutivi DETERMINISTICI (`i+1+offset`), non draw random: Schwartz-Zippel
+  (|S|) non si applica. Sostituita con un **bound deterministico esatto**:
+  `max_samples = required_samples + interpolation_degree_bound + 1`. Derivazione:
+  servono D+1 campioni buoni (required_samples); un campione è "cattivo" solo se è
+  radice del leading coefficient in main_var, e tali radici sono ≤ il suo grado in
+  interpolation_var ≤ interpolation_degree_bound. Coprendo ogni punto cattivo +1 si
+  garantiscono ≥ required_samples punti buoni. Nessuna costante magica, nessun
+  `δ`/`double`/`log`. Full suite 2442 pass.
 
 ### F3.1-ZIPPEL — Zippel sparse Prony stage
 - **File**: `src/algebra/polynomial_gcd_zippel_prony.cpp` (nuovo, T3-Opus Block A2 2026-05-28)
@@ -898,7 +1233,11 @@
 - **Eccezione legittima preservata**: `kSingularityCheckPrec=256` è budget hardware MPFR; derivato da `prec ≫ log2(1/1e-9) = 30 bit`. Non configurabile via CASContext perché interno a decisione boolean heuristic; tolleranza `1e-9` è il parametro semantico e resta documentato nel codice.
 - **STATO**: ✅ RISOLTA 2026-06-02.
 
-### HPP-006 — fsolve kTolerance=1e-10 non configurabile (fsolve.cpp:77)
+### HPP-006 — fsolve kTolerance=1e-10 non configurabile (fsolve.cpp:77) — ✅ SUPERSEDED/CHIUSO
+- **STATO**: CHIUSO — risolto sotto [[HPP-024]] "RISOLTA 2026-06-13". fsolve.cpp:91 usa
+  ora `ctx.fsolve_tolerance()`; params reali in cas_context_params.hpp:629-633 (default
+  1e-10, settable, clamp >0) + :621 (fsolve_tolerance_bits_, default 80). Nessun hardcode
+  residuo. Verificato 2026-06-19 (TASKLIST T-019). Questa entry era rimasta OPEN per errore.
 - **File**: `src/algebra/fsolve.cpp:77`
 - **Nota**: Riga effettiva 77 (non 88 — drift verificato 2026-05-24). `constexpr double kTolerance = 1e-10;`
 - **Categoria CLAUDE.md**: Cat 1 — budget computazionale non configurabile.
@@ -960,9 +1299,21 @@
 - **Descrizione**: `constexpr int kDefaultCyclotomicN = 1 << 20` (riga 98) limita `compute_cyclotomic` a n ≤ 2^20. Per un polinomio di grado d, l'ordine ciclotomico n soddisfa φ(n) = d, quindi n ≤ 2d². Il bound 2d² > 2^20 si verifica per d > √(2^19) ≈ 724. `is_cyclotomic()` ritorna `nullopt` proattivamente per deg > 724 (riga 202-210) invece di eseguire una ricerca esaustiva che excederebbe il cap OOM. Un polinomio Φ_n con n > 2^20 (e deg φ(n) > 724) viene classificato come non-ciclotomico via nullopt — non un risultato silenziosamente sbagliato (nullopt è segnale esplicito), ma una limitazione nota documentata in codice come `A5-LARGECYCLO`. Iscritto anche in `CAS_TASKS.md:103` (CAS-L2-15).
 - **Fix corretto**: (a) Esporre `ctx.max_cyclotomic_n()` (default 2^20, documentato con costo memoria O(n·τ(n)) per l'inversion Möbius); (b) per n arbitrario grande, usare un algoritmo che non materializzi tutti i divisori di n — es. fattorizzazione + formula prodotto euleriana incrementale via sieve on-demand sui divisori di n (costo O(τ(n)·d²) invece di O(n·τ(n))). Questo consentirebbe detection ciclotomica per deg > 724 con costo proporzionale a τ(n) · deg², non a n.
 - **Blocking dependency**: Nessuno — fix autonomo. OOM-safety by design: il cap corrente è matematicamente giustificato e produce `nullopt` esplicito (mai silent-wrong).
-- **Stato**: APERTA — differita (OOM safety prioritaria; deg > 724 è raro in pratica CAS).
+- **Stato**: ✅ RISOLTA 2026-06-23 (T-022) — Eliminato `kDefaultCyclotomicN`
+  (magic 2^20) e l'intera euristica del cap. `compute_cyclotomic(n)` riscritta
+  con **riduzione al radicale squarefree**: `Φ_rad(n)(x)` via il fold
+  `Φ_{k·p}(x) = Φ_k(x^p)/Φ_k(x)` sui primi distinti di n, poi
+  `Φ_n(x) = Φ_rad(x^(n/rad))` (Apostol Thm 8.13). Ogni intermedio resta di
+  grado O(φ(n)) — nessuna materializzazione di grado n, nessun cap OOM.
+  `is_cyclotomic()` ora testa solo i candidati `{n : φ(n)=d}` via
+  **inverse-totient** (enumera i primi p con (p−1)|d + potenze), eliminando lo
+  scan O(d²) e il `nullopt` proattivo per deg>724. Unico limite residuo: guard
+  di overflow `deg ≤ 30000` (2d² < INT_MAX), documentato, ritorna nullopt
+  diagnostico. Test: `RoundTripLargeDegreeAbove724` (Φ_1009/Φ_2018 deg 1008 ora
+  rilevati), `Phi105HasMinusTwoCoefficient` (fold multi-primo). Caller
+  regression 180/180; cyclotomic suite 14/14.
 
-### HPP-013 — evaluator.cpp RootOf seed scheme deterministico (evaluator.cpp:142-149)
+### HPP-013 — evaluator.cpp RootOf seed scheme deterministico (evaluator.cpp:142-149) — ✅ CHIUSA (2026-07-01)
 - **File**: `src/numeric/evaluator.cpp:142-149`
 - **Categoria CLAUDE.md**: Cat 6 — seed/randomness deterministica non derivata dall'input.
 - **Descrizione**: Guess iniziale Newton-Raphson per `RootOf` usa schema deterministico `idx/2 + 1.0` / `-(idx+1)/2` basato solo su `root_index`. Per polinomi con radici reali ravvicinate (es. Wilkinson), questo schema può far convergere radici diverse allo stesso valore numerico (due `RootOf` con indici distinti convergono alla stessa radice → risultati duplicati/sbagliati).
@@ -987,11 +1338,11 @@
 - **Eccezione legittima preservata**: i default sono safety-cap hardware (Digamma(2^25) materializzerebbe ~33M nodi AST; Bernoulli(2^31) → ~30 GB rationals). Bound `unsigned int` (bit_length API) intenzionale per evitare wraparound silenzioso.
 - **STATO**: ✅ RISOLTA 2026-06-02.
 
-### HPP-016 — N_INTERN_SHARDS = 16 (include/cas/ast.hpp)
-- **File**: `include/cas/ast.hpp` — `static constexpr std::size_t N_INTERN_SHARDS = 16U`
-- **Categoria CLAUDE.md**: Cat 1 eccezione legittima (budget architetturale con giustificazione formale)
-- **Descrizione**: Il numero 16 è una costante architetturale deliberata: (a) potenza di 2 → shard selection via bitwise AND in O(1); (b) 16 shard riducono la contention a ~1/16 rispetto a lock globale; (c) il numero di shard non è runtime-configurabile perché la struttura dati `std::array<..., N>` richiede N compile-time; un rebuild con N diverso è l'unica via per cambiarlo. Documentato con `static_assert((N_INTERN_SHARDS & (N_INTERN_SHARDS-1)) == 0)`.
-- **Fix corretto**: Eccezione legittima — non richiede fix. Il valore 16 è derivato da considerazioni di cache-line alignment e trade-off contention/overhead. Per workload estremi (>64 thread), valutare N=64.
+### HPP-016 — N_INTERN_SHARDS = 16 (include/cas/ast.hpp) — ✅ CHIUSA (2026-07-08)
+- **File**: `include/cas/ast_arena.hpp` (ex `include/cas/ast.hpp`) — `static constexpr std::size_t N_INTERN_SHARDS = 16U`
+- **Categoria CLAUDE.md**: Cat 1 eccezione legittima (budget architetturale con giustificazione formale) -> Rimosso compile-time hardcoding.
+- **Descrizione**: Il numero statico di shard è stato rimosso. AstArena ora alloca i shard dinamicamente tramite unique_ptr. Il numero di shard di interning è configurabile via `CASContext::set_intern_shards(n)` e, se non impostato (default 0), viene derivato dinamicamente a runtime dalla hardware concurrency (`std::thread::hardware_concurrency()`) arrotondata alla successiva potenza di due.
+- **Risoluzione**: Dynamic sharding implementato in `AstArena` e `CASContextParams`. Unit test `DynamicShardingConfigurable` e `ReconfigureShardsEmpty` verificano il comportamento a runtime.
 - **Blocking dependency**: Nessuno.
 
 ### HPP-017 — intern_shard_tables_ shard contention nota (include/cas/ast.hpp)
@@ -1001,11 +1352,11 @@
 - **Stato**: RISOLTO 2026-05-25 — per tracciabilità storica.
 - **Blocking dependency**: N/A.
 
-### HPP-018 — gaussian_factor swap branch vuoto (gaussian_factor.cpp:83)
-- **File**: `src/algebra/gaussian_factor.cpp:83` — `if (re * re + im * im != p) { /* empty */ }`
+### HPP-018 — gaussian_factor swap branch vuoto (gaussian_factor.cpp:83) — ✅ RISOLTA (2026-07-08)
+- **File**: `src/algebra/gaussian_factor.cpp`
 - **Categoria CLAUDE.md**: Cat 4 — bail-out silenzioso su invariant matematico violato
-- **Descrizione**: La branch `if (norm != p)` aveva corpo vuoto — restituiva silenziosamente `GaussianInt(re, im)` con norma sbagliata. L'invariant di Hermite-Serret (Cohen GTM 138 §4.2.5) garantisce che l'algoritmo euclidico su Z[i] termini con norm(alpha) = p. La branch non può succedere correttamente; un'occorrenza indica un bug nell'algoritmo euclidico.
-- **Fix corretto (applicato 2026-05-25)**: Aggiunta `assert(re*re+im*im == p && "HPP-018 Hermite-Serret invariant")` per debug; tentativo di swap come recovery superficiale (non cambia norma); test esplicito `HermiteSerretNormInvariant` in `test_gaussian_factor.cpp` verifica a²+b²=p per 11 split primes.
+- **Descrizione**: Rimosso il vecchio swap branch non funzionante/vuoto e l'assert di solo debug. Ora la violazione dell'invariant di Hermite-Serret viene intercettata a runtime in ogni build e ritorna immediatamente un `Result` di errore strutturato (`InternalError`). Il canonical swap `re < im` è applicato correttamente per garantire la forma canonica `re >= im`.
+- **Risoluzione**: Hermite-Serret invariant verification corretta a livello di produzione via Result error propagation, swap canonicalizzazione corretto. Testato via `HermiteSerretNormInvariant`.
 - **Blocking dependency**: Nessuno.
 
 ### HPP-014c — Gauss period closed-form per q∈{17,257,65537} — APERTA PERMANENTE
@@ -1093,7 +1444,7 @@
 
 ---
 
-### HC-F8-MONOLITH-WAIVER — Anti-monolith 28 file >500 LOC — APERTA Fase 8
+### HC-F8-MONOLITH-WAIVER — Anti-monolith 28 file >500 LOC — CHIUSA (2026-07-08)
 
 - **File**: 28 file in `src/` + `include/` documentati in
   `ANTI_MONOLITHIC_REPORT.md` (vedi tabella tier-1 + tier-2).
@@ -1123,9 +1474,7 @@
 - **Enforcement**: `scripts/check_file_size.sh` whitelist tier-1+tier-2
   documentata; tutti gli altri file devono passare ≤500 LOC. Nuove
   violazioni post 2026-06-11 vietate senza ledger entry esplicita.
-- **STATO**: APERTA Fase 8 (waiver formale F7.5 sign-off).
-  Condition C1 audit AUDIT_CAS_F7.5_2026-06-11.md risolta come
-  waiver path B (riga 261-263 audit).
+- **STATO**: ✅ CHIUSA (2026-07-08). Tutti i 28 file sono stati suddivisi in moduli coesi al di sotto di 500 righe. Whitelist in `scripts/file_size_whitelist.txt` completamente svuotata.
 
 ---
 
@@ -1181,6 +1530,7 @@
 - **Blocking dependency**: Aperta permanente — Fase 8 post-parità. F4 chiusa su MGS.
 - **Test di regressione**: `QRTest.SymbolicQR_DefaultSignConvention_2x2`, `F4StressTest.Householder_QR_8x8_RandomQ_CorrectAndTimed`.
 - **Riferimento storico**: HC-F4-QR-SYMBOLIC-TIMEOUT (chiuso, ledger §HC-F4-QR-SYMBOLIC-TIMEOUT) contiene la riscrittura.
+- **STATO**: ✅ storico (2026-06-12) — F4 chiusa su MGS; lo stato corrente Householder è tracciato dalla voce principale sopra (HC-F8-PENDING-12 / HC-F8-QR-HOUSEHOLDER-BAILOUT).
 
 ---
 
@@ -1774,14 +2124,14 @@ tutti gli input; questi sono upgrade prestazionali per casi specifici.
 - **Bivariate path**: invariato algoritmicamente; gli stessi prime distinti sostituiscono il vecchio `next_prime(100+...)` ma con guarantee di distinctness, quindi bivariate non degrada (verificato: `BivariateSparse`, `BivariateProduct`, `UnivariateX2` tutti PASS).
 - **Regola Zero compliance**: `sparse_interp_max_retries` configurabile via CASContext, no hardcode magico, no silent failure (Unimplemented diagnostico se max retry esaurito).
 
-### HC-KV-02 — Kovacic Case 1: poli/poly part di r di ordine pari ≥ 4 (Laurent expansion of √r)
-- **File**: `src/calculus/ode_kovacic_case1.cpp` (`case1_omega`), branches per `pole_opt->power >= 4U` (pari) e `dq_res.value() >= 2U` (pari).
-- **Categoria CLAUDE.md**: §DIVIETO HARDCODE, Categoria 8 (pattern matching a tabella chiusa) — l'attuale implementazione del Caso 1 di Kovacic copre **solo** poli di ordine 2 e parte polinomiale di grado 0 di `r`. Tutti gli altri ordini pari (poli ordine 4,6,…; gradi polinomiali 2,4,…) restituiscono `Unimplemented` esplicito.
-- **Comportamento attuale**: diagnostico chiaro: *"requires Laurent expansion of √r around the pole"* / *"requires polynomial-Laurent expansion at ∞"*.
-- **Fix corretto**: implementare il motore Puiseux/Laurent series per funzioni algebriche (`√r` espansa attorno a un polo o all'infinito), poi popolare i coefficienti a₀,…,a_{v-1} e calcolare il termine α_c dal coefficiente a_v come da Kovacic 1986 §3.
-- **Blocking dependency**: motore Puiseux/Laurent generico (non esiste ancora come componente); parzialmente sovrapposto a TODO_PH8 Task 6 (UnwindingNumber) e Task 5.4 (AlgebraicNumber).
-- **Casi reali bloccati**: ODE di tipo Bessel di ordine ≥ 1 (`x²y''+xy'+(x²−n²)y=0`), Weber/parabolic-cylinder, equazioni con poli quartici. Per la maggior parte di queste, Case 1 fallisce comunque e serve Case 2/3 (ulteriore dipendenza su HC-KV-03).
-- **Quando reintegrarlo**: dopo aver completato il motore Laurent series (probabilmente accoppiato a Frobenius generalizzato).
+### HC-KV-02 — Kovacic Case 1: poli/poly part di r di ordine pari ≥ 4 (Laurent expansion of √r) — CHIUSO (T-008)
+- **File**: `src/calculus/ode_kovacic_case1.cpp` (`case1_omega`, `try_extract_pole`, `match_neg_power`), `src/calculus/ode_kovacic.cpp` (`solve_ode_kovacic`).
+- **Stato**: CHIUSO 2026-06-23 (T-008). La Laurent-expansion di √r a poli di ordine pari ≥4 e a ∞ era **già scritta** ma era **codice morto / silent-wrong**: tre bug a catena la rendevano inattiva.
+- **Bug 1 — pole detection**: `try_extract_pole` riconosceva solo nodi `Div`, ma `simplify`/`partial_fractions` emettono i poli come `Pow(x,−k)` e `Product([coeff, Pow(x,−k)])`. Tutti i poli venivano scartati → `case1_omega` restituiva ω=0 → ODE risolta come `y''=0` (`y=C₁+C₂x`), risultato **silenziosamente errato**. Fix: `match_neg_power` riconosce gli esponenti negativi + estrazione coeff dai `Product`. (Nessun test esistente lo copriva: l'unico test Case-1 con r≠0 era Euler-Cauchy, che ha r=0 e non tocca mai il path dei poli.)
+- **Bug 2 — apart_num_den non ridotto**: `apart_num_den` ritorna num/den su denominatore comune senza ridurre ai minimi termini (es. `x⁻⁴−2x⁻³ → (x³−2x⁴)/x⁷` invece di `(1−2x)/x⁴`), quindi `d_other = den/(x−c)^k` si annullava al polo → `compute_taylor_rational` falliva (d₀=0). Fix: cancellazione del `polynomial_gcd(num,den)` prima dell'espansione.
+- **Bug 3 — ω₋ non certificato (silent-wrong)**: per poli di ordine >2 la branch "tutti i segni √r flippati" (ω₋) non soddisfa la Riccati `ω'+ω²=r`; usare `e^{∫ω₋}` come seconda soluzione fabbricava una forma chiusa errata (es. `x²e^{1/x}`). Fix: certificato Riccati su ogni branch in `solve_ode_kovacic`; branch non certificate → reduction-of-order (integrale non valutato onesto). Vedi anche prerequisito FTC differentiation sotto.
+- **Verifica**: `OdeTest.Kovacic_Case1_EvenPoleOrder4` — `y''=(1/x⁴−2/x³)y` → η₁=e^{−1/x}, certificato di sostituzione a 3 punti su `x⁴Y''+(2x−1)Y`; seconda soluzione reduction-of-order con `∫e^{2/x}dx` non valutato.
+- **Nota**: il motore Puiseux generale (`Puiseux_Series_Engine.md`) NON è richiesto — Kovacic 1986 §3 espande √r direttamente via Laurent binomiale, formulazione standard. Poli di ordine dispari restano `Unimplemented` per definizione (Case 1 inapplicabile).
 
 ### HC-KV-03 — Kovacic Case 2 e Case 3 (Q(x)-algebraic extensions / SL(2,C) finite subgroups)
 - **File**: `src/calculus/ode_kovacic.cpp` (`solve_ode_kovacic`)
@@ -1804,14 +2154,296 @@ Vedi `PLAN_TASKS_REMAINING.md` per breakdown completo.
 - **Fix corretto**: vedi plan §Task 4 (SS-1..SS-5).
 - **Effort**: 2-3 settimane T3.
 
-### HC-F8-PENDING-07 — Primitive Element nested multi-β — APERTA
+### HC-F8-PENDING-07 — Primitive Element nested multi-β — ✅ RISOLTA 2026-07-10 (PE-3 chiuso)
 - **Task ID**: 7 — *F3.D Primitive Element nested multi-β residuo*
-- **Stato**: residuo F3.4-DEBT-01.
-- **Fix corretto**: vedi plan §Task 7 (PE-1..PE-4).
+- **Origine**: F3.4-DEBT-01, chiuso in 3 fasi via A9 (2026-07-07) + PE-3 (2026-07-10):
+  - **PE-1 (selezione fattore su R reducible)**: ✅ chiuso da A9 — certificato ESATTO di
+    vanishing (`cand_vanishes_at_theta_expr`, simplify→0 letterale) invece della selezione
+    numerica BigFloat proposta dal plan; nessun fattore scelto senza certificato.
+  - **PE-2 (multi-β iterato Cohen §3.6.4)**: ✅ chiuso da A9 — `try_nested_lift_min_poly_multi`
+    + risoluzione iterativa a punto fisso in `detect_tower_n_level`; catene sequenziali senza
+    risultante via `algebraic_tower_primitive_chain.cpp`.
+  - **PE-3 (RootOf con simboli letterali) ✅ RISOLTO 2026-07-10**: un `RootOf(poly,var,i)` il
+    cui `poly` referenzia un Symbol libero diverso da `var` (es. `RootOf(x²−a,x,0)`, `a` non
+    collezionato) è una funzione algebrica del parametro `a`, non un numero algebrico su Q
+    (`AlgebraicNumber::CoeffVec` è `vector<Rational>` per costruzione) — non può essere fuso
+    in un θ primitivo su Q. Fix in `algebraic_tower_primitive_nested.cpp` (Collector +
+    `references_free_symbol`): tale RootOf è escluso dalla collapse e preservato com'è
+    ovunque appaia in `expr`, esattamente come qualunque altro simbolo; i RootOf algebricamente
+    indipendenti nella stessa espressione continuano a collassare normalmente. La ricorsione
+    del rilevatore NON entra nel polinomio di un RootOf annidato (quello è un generatore
+    algebrico opaco gestito da PE-2, non un parametro libero) — non confonde catene multi-β con
+    coefficienti simbolici. **Residuo onesto**: il caso indiretto/transitivo (un RootOf che
+    referenzia — non direttamente, ma tramite un altro RootOf annidato — un generatore già
+    escluso) non viene pre-filtrato esplicitamente; ricade nel path di fallback preesistente e
+    produce comunque `Unimplemented` strutturato (mai silent-wrong), non l'esclusione pulita.
+    Non osservato in pratica: il caso diretto (spec/ledger) è quello con impatto reale.
+  - **PE-4**: chiuso con PE-3.
+- **Test**: 4 nuovi in `test_primitive_element_f3.cpp` (mix simbolico+algebrico → collassa solo
+  i puliti; tutto simbolico → nullopt pulito; 1 pulito+1 simbolico → nullopt; regressione catena
+  annidata non-simbolica invariata). 89/89 suite Tower/Primitive/RootOf verdi, 0 regressioni.
 
-### HC-F8-PENDING-09 — Stauduhar Galois deg ≥ 6 — APERTA
-- **Task ID**: 9
-- **Fix corretto**: vedi plan §Task 9 (GA-1..GA-5).
+### HC-F8-PENDING-09 — Stauduhar Galois deg ≥ 6 — ✅ CHIUSA 2026-07-15 (Brick 1–4 fatti; driver pubblico deg 8..10 end-to-end)
+- **Task ID**: 9 — closure deg ≥ 8 (deg 6/7 già coperti dal driver esatto A6).
+- **Correzione di rotta vs plan storico**: il PLAN Task 9 (GA-1 tabelle Hulpke
+  trascritte + GA-2 risolventi BigFloat) è **stale** — contraddice le scelte del
+  codice A6 esistente (REGOLA 0.1 zero-hardcode + REGOLA 1 no-double). Direzione
+  approvata 2026-07-11: estensione **float-free** in stile Fieker-Klüners (2014),
+  discesa esatta razionale/p-adica sui sottogruppi. Build multi-sessione, 4 brick,
+  ognuno completo+testato. Piano: `~/.claude/plans/drifting-sprouting-walrus.md`.
+- **Collo di bottiglia diagnosticato**: `permgrp::transitive_subgroup_classes`
+  (`galois_transitive_lattice.cpp`) enumera l'INTERO reticolo dei sottogruppi di
+  S_n con bitset densi Θ(n!)/sottogruppo — infeasible per n ≥ 8. Anche `PermGroup`
+  è Θ(|G|) (element-set denso).
+- **✅ Brick 1/4 FATTO 2026-07-11 — engine BSGS scalabile**: nuovo
+  `BsgsGroup` (`src/algebra/perm_bsgs.cpp` + `perm_bsgs_internal.hpp`), Schreier-Sims
+  **deterministico verificato** (Holt-Eick-O'Brien §4.4, NO Monte-Carlo → ordine e
+  membership esatti, mai congettura probabilistica). Rappresentazione base + strong
+  generating set + transversali, spazio/tempo polinomiale — rimuove il muro Θ(n!).
+  API: `build/order/contains/sift/is_transitive/has_odd_element`. Riusa i primitivi
+  Perm di `perm_group_internal.hpp` (zero duplicazione). Cap n ≤ 20 (bound u64
+  sull'ordine, |G| ≤ n! ≤ 20! < 2^62 — derivato, non magico). **Nessun** file del
+  path deg 6/7 toccato (resta verde). Test `test_perm_bsgs.cpp` (9): ordini S_n/A_n/
+  C_n/D_n/V_4, membership, **cross-check completo vs `PermGroup` denso su tutto S_n
+  per n ≤ 7** (order/transitività/parità/membership rank-per-rank), scala n=8
+  (S_8/A_8/C_4≀C_2 ordini esatti in ms). Bug trovato+fixato in dev: heap-use-after-
+  free (riferimenti in `ods`/`lgens` invalidati da `rebuild()` durante la verifica →
+  copie locali per iterazione).
+- **✅ Brick 2/4 FATTO 2026-07-11 — massimali transitivi on-demand (primo strato
+  di discesa)**: 4 nuovi moduli, tutti generativi (zero permutazioni/tabelle
+  trascritte, REGOLA 0.1):
+  `perm_blocks.cpp` (block system minimali via union-find di Atkinson 1975,
+  `is_primitive`, azione indotta sui blocchi);
+  `perm_construct.cpp` (S_n/A_n/S_a≀S_b da cicli, parte pari G∩A_n via lemma di
+  Schreier, azione sui k-subset canonica k ≤ m/2);
+  `perm_construct_linear.cpp` + `perm_construct_gf.cpp` (AGL(d,p) e PGL(d,p)
+  proiettivo da generatori matriciali ⟨trasvezione, ciclo coordinate, toro⟩;
+  GF(p^e) costruito a runtime con irriducibile certificato dal test di Rabin;
+  famiglie Möbius/semilineari PSL/PGL/PΓL(2,q) su P¹(F_q));
+  `perm_maximal.cpp` (`maximal_transitive_candidates(ambient, n)`, 5 ≤ n ≤ 10):
+  assemblaggio dall'aritmetica di n (divisori → wreath; p^d → affine; q+1 →
+  Möbius; (p^d−1)/(p−1) → proiettivo; C(m,k) → subset), smistamento per parità
+  (dispari → lato S_n, pari → lato A_n), parti pari dei candidati dispari,
+  **twin (0 1)-coniugato** per le classi pari senza certificato strutturale di
+  non-split in A_n (cattura le 2 classi di AGL(3,2) in A_8 e di PΓL(2,8) in A_9),
+  pruning per contenimento diretto, `Unimplemented` strutturato fuori [5,10].
+- **Certificazione (test)**: `test_perm_maximal.cpp` — **cross-check esaustivo
+  n = 5, 6, 7 contro il lattice generato** (soundness: ogni candidato è una classe
+  transitiva propria; **copertura**: ogni classe transitiva sta in un candidato a
+  meno di coniugio, con σ ristretto ad A_n e su ENTRAMBI i rappresentanti di
+  A_n-classe sul lato alternante; tripwire di quasi-massimalità: una classe
+  intermedia deve essere essa stessa listata — la ridondanza è ammessa dal
+  contratto, es. F_21 ⊂ PSL(3,2) in A_7). Struttura n = 8, 9, 10 verificata
+  (ordini vs formule classiche, parità, primitività, twin distinti; il pruning ha
+  correttamente eliminato (S_2≀S_4)∩A_8 = 192 ⊂ AGL(3,2), coerente con ATLAS).
+  Copertura per 8 ≤ n ≤ 10: teorema di enumerazione (Sims 1970; Butler-McKay
+  1983) citato nel header, da cross-validare col corpus oracoli del Brick 4.
+  `test_perm_blocks.cpp` + `test_perm_construct.cpp` (assiomi di campo GF(q)
+  esaustivi, ordini |AGL|/|PΓL| da formula, blocchi D_4/V_4/wreath).
+  `PermMaximalTest.CrossCheckDegree7BothAmbients` in SLOW_OK (~45s ASan, 2×
+  lattice n=7).
+- **✅ Brick 3/4 FATTO 2026-07-12 — passo Stauduhar certificato (motore
+  p-adico + invarianti relative + primo strato di discesa)**. Tre layer nuovi,
+  tutti esatti/float-free (spec `Galois_Groups.md` letta, REGOLA 0.1; rotta
+  p-adica esatta al posto dello sketch MPFR della spec, come approvato):
+  1. `galois_padic_{ring,roots,split}.cpp` (+ `_internal.hpp`, `_detail.hpp`) —
+     anello di Galois GR(p^k, L) = (Z/p^k)[t]/(Φ) con Φ intero monico
+     irriducibile mod p (fattore deg-L di f quando esiste, altrimenti sweep
+     esaustivo certificato Rabin); radici di f liftate via Newton/Hensel
+     (quadratico, f'(r) unità perché p ∤ disc); scelta del primo unramified
+     con test esplicito gcd(f,f') su F_p (la SOLA forma dell'output del
+     fattorizzatore mod p NON è un segnale affidabile di ramificazione — bug
+     trovato dai tripwire in dev) e L = lcm dei gradi minimizzato sul budget
+     `ctx.max_galois_frobenius_primes()`. CZ equal-degree (Las Vegas, seed
+     derivato dall'input / ctx.rng(), REGOLA cat. 6; l'output è sempre
+     verificato). **Certificati** ad ogni build/raise: f(r_i) ≡ 0, radici
+     distinte mod p, identità di Newton e_1/e_n, ciclo-tipo del Frobenius
+     (automorfismo canonico liftato) = multiset dei gradi mod p (Dedekind).
+  2. `galois_invariant.cpp` — invariante relativo F con Stab_G(F) = H
+     **certificato per conteggio** (orbita G di F enumerata = [G:H] esatto,
+     mai assunto; H non assunto massimale). Due tier generativi: orbit-sum di
+     k-subset (uno per H-orbita, e_k simmetrico scartato) e fallback garantito
+     = monomio risolvente di Galois x_1x_2²⋯x_{n−1}^{n−1} (Stab_{S_n}
+     triviale ⇒ esattezza incondizionata). Transversal sinistro = rappresentanti
+     dell'orbita (reps[0] = id). Budget ops = anti-runaway del chiamante
+     (`ctx.galois_lattice_max_ops()`), Unimplemented strutturato.
+  3. `galois_stauduhar_{step,descent}.cpp` — test di Stauduhar esatto: valori
+     coset v_i = (σ_i·F)(r) in GR(p^k,L); R(y)=∏(y−v_i) MAI espansa — solo
+     R(c), R′(c) su residui puri via prodotti prefix/suffix O(m); bound
+     archimedeo B = #termini·(1+max|f_j|)^{deg F} (Cauchy) e precisione
+     derivata p^k > 2·max(|R(c)|,|R′(c)|) via bit-length (mai float);
+     **two-phase**: screening a p^k > 2B (impurità del residuo a QUALSIASI
+     precisione certifica ∉ Z → NotContained senza mai pagare la precisione
+     piena; misurato 36s → 2.9s su x⁸−x−1) e precisione piena solo con
+     candidati puri. Radice intera c: verificata esatta (R(c)=0 su Z) e
+     SEMPLICE (R′(c)≠0); radice multipla → Tschirnhaus sul modello (β=P_t(α)
+     valutato sulle STESSE radici liftate: ordine e Frobenius preservati,
+     identità g(P(α))=0 tripwire) con sweep bound derivato; collisione di
+     residui a radice semplice → raise di precisione con cap dimostrato
+     (norm bound (2B)^{m²}). Discesa certificata ⇒ tripwire ordine +
+     Frobenius ∈ σHσ⁻¹. Primo strato: parità disc → ambiente S_n/A_n
+     (cross-tripwire parità del Frobenius), candidati Brick 2 (twin incluse,
+     σ scandito nel gruppo CORRENTE), nessun candidato contiene G_f ⇒
+     **G_f = ambiente ESATTO** (contratto di copertura Brick 2).
+  Test: `test_galois_padic.cpp` (8: assiomi GF(9), radici razionali esatte,
+  orbita Frobenius, CZ in GF(121), trace-split 2-adico + sweep Rabin Φ deg 6,
+  raise in-place, budget strutturati), `test_galois_invariant.cpp` (5:
+  wreath deg-2 in S_8, fallback monomio di Galois forzato da A_6
+  k-omogeneo, Stab esatto per C_6 non-massimale idx 120, twin AGL(3,2) in
+  A_8, failure strutturati), `test_galois_stauduhar.cpp` (5: cross-check
+  vs pipeline deg 6/7 INDIPENDENTE — ambiente ⟺ nome S/A, proprio ⟺
+  discesa; Φ₁₆ scende sotto A_8 e x⁸−x−1 = S_8 certificato — primi
+  statement Galois deg-8 del motore; failure strutturati).
+  `GaloisStauduharTest.CrossCheckDegree{6,7}` in SLOW_OK (~45/57s ASan,
+  dominati dal pipeline-oracolo richiamato). Bug di design trovato e corretto
+  in dev (non nascosto): coset distinti NON implicano valori distinti — la
+  pretesa di distinzione globale era sia matematicamente sbagliata
+  (InternalError spurio su Φ₉/x⁶−2/Φ₁₆) sia O(m²) inutile; sostituita dal
+  criterio corretto radice-semplice.
+- **✅ Brick 3.5 FATTO 2026-07-13 — walk sotto il primo strato
+  (identificazione completa)**. Tre pezzi nuovi + un fix matematico:
+  1. `galois_sublattice.cpp` (+ `_internal.hpp`) —
+     `transitive_subgroup_classes_in(H, max_ops, max_bytes, ctx)`: classi di
+     sottogruppi transitivi MASSIMALI dentro un nodo interno H, a meno di
+     H-coniugio, enumerazione esaustiva in index-space u16 (tabella di Cayley
+     densa 2|H|² byte, chiusure single-generator — completezza per
+     costruzione, zero tabelle). Filtro di massimalità ESATTO (dominazione
+     via coniugati, test sui soli generatori): tiene basso l'indice [H:K] =
+     grado della risolvente, da cui dipende la precisione p-adica. Doppio
+     budget: ops (tempo, `galois_lattice_max_ops`) + bytes (memoria, NUOVO
+     param `CASContext::galois_sublattice_max_bytes`, default 256 MiB,
+     speso PRIMA di allocare — mai una tabella multi-GiB a sorpresa).
+  2. `galois_stauduhar_below.cpp` — `stauduhar_identify(f, ctx, dl)`: primo
+     strato, poi loop {classi massimali transitive del nodo corrente → test
+     certificato → hit = discesa (tripwire Frobenius ∈ nodo), nessun hit =
+     G_f = nodo ESATTO (ogni transitivo proprio sta in un massimale
+     transitivo — teorema, non euristica)}. Terminazione = ordini
+     strettamente decrescenti. Lo splitting (e l'indicizzazione delle
+     radici) è UNICO per tutta la catena.
+  3. `galois_stauduhar_candidate.cpp` — protocollo retry per-candidato
+     estratto da descent.cpp e condiviso col walk. **Bug matematico trovato
+     e corretto**: la famiglia Tschirnhaus a un parametro P_t = Σt^{m−1}x^m
+     è DEGENERE (c_a·c_b dipende solo da a+b): su x⁵−2 col invariante
+     quadratico sotto F₂₀ la differenza di coset è ∝ (c₁c₄−c₂c₃)√5 ≡ 0 su
+     tutta la curva ⇒ sweep esausto (Unimplemented spurio, preso dal test
+     IdentifyDegree5). Fix generale: sweep sulla GRIGLIA di coefficienti
+     c = (c₀..c_{n−1}) ∈ {0..Δ}ⁿ a gusci di norma-max, c₀ via Taylor-shift
+     esatto di g; ogni polinomio separatore è ≢ 0 in coefficienti liberi
+     (interpolazione di Lagrange + densità Zariski dei punti a coordinate
+     distinte) e il Combinatorial Nullstellensatz (Alon) garantisce un punto
+     buono con Δ = deg(F)·C(m,2)+C(n,2) ⇒ terminazione DIMOSTRATA
+     (esaurimento griglia = InternalError, non retry-budget).
+  Test: `test_galois_sublattice.cpp` (5: S₄→{A₄,D₄}, D₄→{C₄,V₄} distinte
+  per parità, S₅→{A₅,F₂₀} + copertura cross-check vs lattice denso
+  INDIPENDENTE, C₅→∅ = certificato terminale, failure strutturati ops/bytes/
+  u16-cap) e `test_galois_stauduhar.cpp` esteso (+5): deg 5 TUTTE e 5 le
+  classi (S₅ 120 / A₅ 60 / F₂₀ 20 / D₅ 10 / C₅ 5, con conteggio passi
+  esatto), C₇ deg 7 (ordine 7 via F₂₁), Φ₉→C₆ e x⁶−2→ordine 12, e i primi
+  due gruppi deg-8 COMPLETAMENTE identificati: Φ₁₆ → ordine 8 (~5s) e
+  x⁸−2 → ordine 16 = Q(2^{1/8}, i) (~25s, in SLOW_OK).
+- **✅ Brick 3.75 FATTO 2026-07-14 — massimali strutturali dei nodi
+  wreath-preimage 5|2 di grado 10** (i nodi oltre il byte-budget denso:
+  S₅≀S₂ = 28800, ker χ₁ = 14400, ∩A₁₀ = ker(χ₁χ₂) = 14400):
+  1. `galois_wreath_maximal.cpp` (+ `_internal.hpp`) — nodo certificato
+     come φ-preimage (φ: S_d≀S_k → C₂≀S_k quoziente dei segni,
+     `detect_wreath_preimage`: block system minimale + certificato esatto
+     |H| = |Q_H|·(d!/2)^k, nessuna enumerazione di elementi) e **teorema di
+     copertura** (header, con dimostrazione): per d ≥ 5, d ≠ 6, k primo,
+     ∃ primo dispari p|d con p>k, ogni massimale transitivo di H è
+     H-coniugato a un membro di FA (lift dei massimali di Q_H, enumerati
+     ESAUSTIVAMENTE nel quoziente piccolo) ∪ FB ((K≀S_k)^t∩H, K shell
+     Brick-2 di S_d, t su trasversale destra di H in W — twins DIMOSTRATI
+     sufficienti via W = H·T) ∪ FD (N_W(Δ^t)∩H, diagonali piene — lemma di
+     Scott 1980, A_d semplice non-abeliano; Aschbacher-Scott 1985 per lo
+     split supplemento). Intersezioni ESATTE via φ (parte kernel = parti
+     pari per blocco + lift dei membri dell'immagine dei segni), mai
+     enumerazione di H. Ipotesi fuori teorema → Unimplemented STRUTTURATO
+     che nomina l'ipotesi (d<5 coperto dal denso; d=6 = Out(A₆); k
+     composto = diagonali partizionate).
+  2. `galois_sublattice.cpp` rifattorizzato: core denso condiviso da
+     `transitive_subgroup_classes_in` (contratto invariato) +
+     `maximal_subgroup_classes_in` (tutte le classi massimali — usato da FA
+     sul quoziente) + `all_subgroup_classes_in` (ground truth per i
+     micro-check) + `dense_sublattice_min_bytes` (unica fonte del costo
+     memoria per il pre-dispatch).
+  3. Dispatch deterministico nel walk (`node_maximal_transitive_classes`):
+     nodo dentro budget/u16 → via densa (comportamento identico al 3.5);
+     oltre → via strutturale; oltre e non-wreath → Unimplemented che nomina
+     entrambe le vie. + First layer ora scandisce i candidati per ordine
+     DECRESCENTE (= indice/risolvente crescente): il bound di precisione
+     p-adica cresce col grado della risolvente — su deg 10 il miss da 945
+     coset (S₂≀S₅) costava >30 min ASan e ora si paga solo quando
+     matematicamente necessario; l'ordine di discesa non cambia mai il
+     gruppo identificato (ogni passo certifica G_f ≤ nodo, il terminale è
+     order-independent).
+  4. **Colli di bottiglia del passo MISURATI (non congetturati) e chiusi
+     con soluzioni generali** — il primo run E2E deg-10 superava 30 min:
+     (a) `galois_invariant.cpp`: il tier k-subset non separa i kernel di
+     caratteri-segno (stesse orbite di SET) e il fallback monomio di
+     Galois costruiva 14400 monomi deg 45 → 351 s per singolo step.
+     Nuovo tier j-tuple (orbit-sum di x_{t₀}¹⋯x_{t_{j−1}}^j, j = 2..n−1
+     ascendente; l'ultimo livello È il monomio di Galois = terminatore
+     garantito invariato): il primo j che spezza gli stabilizzatori di
+     punto dà invarianti piccoli (es. 40 monomi deg 6 per F₂₀≀S₂ in W).
+     (b) Per i candidati INDEX-2 (⇒ normali, χ quadratico) anche l'orbit-
+     sum è intrinsecamente Ω(|H|/2) (lo stab del seed non può contenere
+     trasposizioni same-block): nuovo `galois_stauduhar_quadratic.cpp` —
+     **criterio del sottodiscriminante**: χ riconosciuto (verifica esatta
+     sui generatori) come forma δ alternante (∏ Vandermonde di blocco,
+     δ_top su somme di blocco, δ_Ω globale, δ₀±δ₁ per k=2) valutata come
+     PRODOTTO; D = lift esatto di δ(r)² (intero G-invariante ≤ bound di
+     Cauchy, p^k > 2B²) e contenimento ⟺ D quadrato perfetto — nessuna
+     collisione possibile, degenerazione (solo forme top/±) → fallback
+     dichiarato alla via monomiale generale (fast-path Cat-8 con via
+     generale sempre presente). E2E deg-10 completo: >30 min → 17.5 s.
+  Test (`test_galois_wreath_maximal.cpp`, 10): detection
+  (standard/even/rilabel ρ=3i+1), liste candidate pinnate sulla teoria
+  (W → {14400 kerχ₁, 14400 kerχ₁χ₂, 800 F₂₀≀S₂}; ker χ₁ → {7200×2,
+  400, 240×2 = le DUE classi diagonali S₅×C₂, twin essenziale};
+  ∩A₁₀ → solo 400-tipo, NESSUN index-2 transitivo), guardie strutturate,
+  dispatch denso/strutturale, e **micro-check dei due passi del teorema su
+  ground truth densa**: lemma di Scott su A₅×A₅ (ogni massimale con
+  entrambe le proiezioni piene = diagonale d'ordine 60) e copertura shell
+  dei N_{S₅}(D) su tutte le classi di A₅. E2E
+  (`IdentifyDegree10FullWreathViaStructuralRoute`): f = x¹⁰+2x⁷+x⁴−2
+  (= h·h̄, h = x⁵+x²−√2), G_f = S₅≀S₂ = 28800 DERIVATO INDIPENDENTEMENTE
+  (disc(f) e N = disc(h)·disc(h̄) non quadrati + testimoni di Frobenius
+  mod 47/103 che uccidono la fusione diagonale e i sotto-blocchi propri
+  via Goursat) — il walk manca A₁₀, scende in S₅≀S₂ via la rotta
+  strutturale ed esaurisce i 3 candidati.
+- **✅ Brick 4/4 FATTO 2026-07-15 — naming strutturale + wiring pubblico +
+  corpus ≥30** (`src/algebra/galois_deg8.cpp`, `test_galois_deg8.cpp`):
+  1. `structural_transitive_group_name(BsgsGroup)`: etichetta canonica del
+     gruppo identificato derivata SOLO dai suoi invarianti certificati —
+     mai una tabella (CLAUDE.md §8). S_n / A_n riconosciuti per **certificato
+     esatto d'ordine + parità** (|G|=n!, n!/2); regolari (|G|=n) → C_n se
+     ∃ elemento d'ordine n, altrimenti `Ab<n>_exp<e>` ((|G|, esponente) è
+     invariante completo degli abeliani d'ordine ≤ 15 ⇒ non ambiguo per
+     n ≤ 10); imprimitivi → **wreath pieno per certificato d'ordine**
+     (G ≤ Stab(sistema di blocchi) = S_s≀S_b d'ordine (s!)^b·b!; uguaglianza
+     ⇒ G = quello stabilizzatore → `S<s>wrS<b>`), altrimenti descrittore
+     invariante `Im<n>[s^b]_<ord>`; primitivi non-pieni → `P<n>_<ord>`.
+     Esponente abeliano = lcm degli ordini dei generatori (esatto per il
+     gruppo intero se abeliano) — nessuna enumerazione densa.
+  2. `galois_group_irreducible_deg8_to_10` + branch `total_deg∈[8,10]` in
+     `galois.cpp`: expr → modello monico intero (stesso campo di spezzamento
+     / gruppo di Galois) → `stauduhar_identify` → naming. I riducibili
+     ricorrono nei fattori come i path deg 5/6/7.
+  3. Corpus (`test_galois_deg8.cpp`): **6 unit di naming** su gruppi COSTRUITI
+     da `perm_construct` (etichetta nota dalla costruzione, non dal codice:
+     S/A 8-10, C_n, Ab per esponente, wreath pieni, imprimitivo non-wreath
+     even-part, primitivi PSL(2,7)/PGL(2,7)/AGL(3,2)) + **30 E2E** su
+     `galois_group` con oracoli indipendenti: 9 irriducibili (Osada S8/S9;
+     ciclotomiche Φ15/16/20/24/30 = (Z/m)^*; x⁸−2 = Im8[2^4]_16; x¹⁰ full-
+     wreath S5≀S2) + 21 riducibili (ricorsione, ogni fattore certificato dai
+     driver deg ≤7 validati / dal driver deg-8 stesso). I 5 test E2E in
+     SLOW_OK (deep deg-9/10 esclusi dal corpus: >90 s ciascuno — soffitto
+     perf noto e documentato del passo Stauduhar a grande grado/gruppo
+     profondo, non un errore di correttezza).
+- **Scope**: chiude deg 6/7 (driver esatto) + deg 8..10 (Stauduhar
+  end-to-end). deg ≥ 11 fuori dallo scope originale A6 (bound immagine `Perm`
+  n ≤ 20, ma il costo del passo cresce ripidamente col grado) → non aperto qui;
+  `galois_group` per deg ≥ 11 resta `"unknown"` (nessun silenzio-sbagliato).
 
 ### HC-F8-PENDING-10 — Wang EEZ Kronecker fallback — CHIUSA 2026-06-13
 - **Task ID**: 10
@@ -1846,7 +2478,12 @@ Vedi `PLAN_TASKS_REMAINING.md` per breakdown completo.
 - **Cert confermato**: `QRTest.SymbolicQR_DefaultSignConvention_2x2` un-SKIPped → `EXPECT_TRUE(entries_equal(...))` PASS (1875 ms). Bailout euristico `symbolic_qr_max_norm_complexity` resta come perf-guard configurabile (non più causa di SKIP).
 - **Test di regressione**: `QRTest.*` (7/7 PASS), `TogetherGcdTest.*` (8/8 PASS), suite algebra+linalg+simplify mirata (260/260 PASS).
 
-### HC-F8-PENDING-17 — Risch parametric solver df>0 — SCAFFOLD (2026-06-14)
+### HC-F8-PENDING-17 — Risch parametric solver df>0 — ✅ RISOLTO 2026-07-01 (Bronstein §7.1)
+- **✅ CHIUSURA 2026-07-01 (A1, sbloccato da A26)**: il ramo `df>0` di `solve_risch_de_parametric_field` è implementato. Nuovo `solve_param_poly_risch_de_nocancel1` (`src/calculus/risch_param_nocancel.cpp`) = **ParamPolyRischDENoCancel1 verbatim** (Bronstein *Symbolic Integration I* §7.1, "When deg(b) is Large Enough"; spec self-contained `MISSING_FEATURES_SPECS/Symbolic_Integration_I.md` letta, REGOLA 0.1). Per torri log(δ=0)/exp(δ=1), `df>0 ⇒ deg(b)>max(0,δ−1)` ⇒ sempre non-cancellation → NoCancel1 unico algoritmo necessario. Peel top-down `s_i=coeff(g_i,t^{n+d_b})/lc(b)`, `h_i+=s_i t^n`, `g_i←g_i−D(s_i t^n)−b s_i t^n`; residuo `Σc_i g_i=0` → ConstantSystem su K=Q(x) (clear-den + Q-coords x-power) → null space → `q=Σc_i h_i`, `y=q/D`. **SOUND** (back-substitution field `D(q)+f_new·q≡Σc_i g_i` in K[t], candidati non-verificati scartati). Cap/degree bound = param del chiamante (già derivato Lemma 6.3.x), zero magic. **Audit hardcode: 0 violazioni**. Test df>0 flippati: log `f=t,g={t}`→`y=1,c=1`; exp `f=t,g={t²+t}`→`y=t,c=1`; log `f=t,g={1}`→solo triviale (nessuna soluzione elementare = corretto). 17 ParametricTower + 168 risch/integrate verdi, 0 regressioni. Wiring in `risch_rde_bronstein.cpp` (df>0 → helper + divide per D); rimosso l'Unimplemented (file ora A23-independent).
+- **✅ FOLLOW-UP CHIUSO 2026-07-01 (deep-tower ConstantSystem)**: il residuo K⊋Q(x) è ora implementato. Prerequisito: `DifferentialField::derive` era uno shim solo-simbolo-nudo (compositi in generatori → `diff(_, base)` che tratta i t_i come costanti → **0** silent-wrong; passava solo perché i peel single-level foldavano a simboli nudi) — riscritto come derivazione strutturale vera sulla torre (regole Leibniz, esponente-costante; non-field → Unimplemented diagnostico; budget `ctx.max_recursion_depth()`). Nuovo `constant_system_nullspace` (`src/calculus/risch_constant_system.cpp`) = **ConstantSystem verbatim** (Bronstein §7.1 Fig 7.1 / Lemma 7.1.2, spec `Symbolic_Integration_I.md` letta REGOLA 0.1): row-echelon su K + eliminazione colonne non-costanti via riga `R_{m+1}=D(R_i)/D(a_ij)`, terminazione ≤ m passi, `u=0⇒v=0`, riduzione a matrice costante su Q → null space. Sostituisce lo shortcut clear-den/qx_coeffs Q(x)-only in `risch_param_nocancel.cpp`. Deep-tower `Const(K)⊋Q` → Unimplemented diagnostico (non prodotto da torri log/exp). **SOUND** (verify back-substitution invariato). Oracoli: torre exp(exp x) 2-livello — `f=t2,g={t2²}`→decide solo-triviale (era Unimplemented); `f=t2,g={t2²,3t2²+t2}`→**c=(−3,1),y=1** nontriviale via divisione per pivot non-costante t1∈Q(x,t1). Single-level parametric invariati (K=Q(x) identico). Gate 2551 PASS, 0 regressioni. Audit hardcode: 0 violazioni.
+- **🔧 Residuo restante (non debito)**: wiring del solver parametrico nel path `integrate()` reale (resta test-only/entry-orphan finché non wirato) + NoCancel2/3 (non occorrono per df>0 log/exp).
+- **STORICO (pre-chiusura) ↓**
+### HC-F8-PENDING-17 (storico) — Risch parametric solver df>0 — SCAFFOLD (2026-06-14)
 - **Task ID**: 17
 - **File**: `src/calculus/risch_rde_bronstein.cpp`
   (`solve_risch_de_parametric_field` existing trial-constant path),
@@ -1854,7 +2491,7 @@ Vedi `PLAN_TASKS_REMAINING.md` per breakdown completo.
   point for RP-2 Hermite parametric reduction).
 - **Categoria CLAUDE.md**: Cat 8 (algoritmo non implementato; diagnostic
   esplicito invece di silent dispatch).
-- **Stato**: scaffold-only (commit 2026-06-14).
+- **Stato**: ✅ superseded — sezione storica, chiusura reale 2026-07-01 nella voce sopra. Al 2026-06-14 era scaffold-only:
   `risch_rde_hermite_parametric_stub(ctx)` ritorna sempre
   `Unimplemented("Risch RDE parametric Hermite reduction (RP-2) not yet
   implemented...")` con riferimento esplicito a HC-F8-PENDING-17 +
@@ -1868,6 +2505,20 @@ Vedi `PLAN_TASKS_REMAINING.md` per breakdown completo.
     sistemi lineari parametrici su base algebrica del campo costanti);
   - RP-3: Wiring + corpus Bronstein cap 6-8 (coverage 0% → ≥60%).
 - **Effort**: T3-Opus ~2-3 wk impl + 1 wk test corpus.
+- **AGGIORNAMENTO 2026-06-27 (audit + cleanup)**: lo scaffold dead-code
+  `risch_rde_bronstein_hermite.cpp` (`risch_rde_hermite_parametric_stub`, **mai
+  chiamato**) è stato **RIMOSSO** (file + riga CMakeLists). Non era il punto
+  attivo. Il gap reale è il ramo **`df > 0`** in `solve_risch_de_parametric_field`
+  (`risch_rde_bronstein.cpp:362`): `Unimplemented` esplicito, ora con messaggio
+  strutturato (Bronstein §6.5/§7.4/§8.4, non-cancellation: `deg(y)=dg−df`,
+  `lc(y)=lc(g)/lc(f)`, reduce+recurse). Tutto `df ≤ 0` è implementato; trial
+  constants già rimossi. **Blocco alla chiusura**: il ramo df>0 è **irraggiungibile**
+  dall'intero corpus + 16 integrandi-torre costruiti a mano (verificato
+  instrumentando il sito 2026-06-27, zero hit). Implementarlo senza un test che lo
+  eserciti né cross-check Maxima = codice non verificabile sul hot-path Risch →
+  REGOLA ZERO lo vieta. **Primo step reale**: costruire una torre differenziale la
+  cui RDE abbia `deg_t(f) > 0` (sblocca la verifica), poi implementare. 69/69 test
+  Risch verdi dopo cleanup.
 - **Acceptance**: ≥20 nuovi PASS sul corpus Bronstein integrate, chiusura
   ledger `HC-F75-B-TRIAL-CONSTANTS` (rimozione `{±1, ±1/2, ±2}` trial
   ansatz in `risch_rde_bronstein.cpp`).
@@ -1880,20 +2531,51 @@ Vedi `PLAN_TASKS_REMAINING.md` per breakdown completo.
 
 ### HC-F8-PENDING-20 — Branch-cut propagation completo — PARTIAL
 - **Task ID**: 20 — sqrt(x²) gating CHIUSO in commit `3ff0840`.
-- **Residuo**: ln(z1·z2)/ln(z1/z2) strict gating, (z^a)^b correction K, direction-limit table.
-- **Fix corretto**: vedi plan §Task 20 (BC-1..BC-5).
+- **DONE** (rule 1/3/4/5 di Branch_Cut_Propagation.md, tutte wired+testate):
+  - rule 1 sqrt(z²): make_sqrt_of_square_correction (commit `3ff0840`).
+  - rule 3 (z^a)^b: make_pow_of_pow_correction, wired simplify_arithmetic_power.cpp:417.
+  - rule 4 ln(z1·z2): make_log_product_correction, wired simplify_exp_log.cpp:203.
+  - rule 5 ln(z1/z2): make_log_quotient_correction, wired simplify_exp_log.cpp:227 (T-002).
+  - Gate: BranchCutsGlobalTest 12/12 PASS (LnOfQuotient_*, LnOfProduct_*, PowOfPow_*, Sqrt*).
+- **✅ Direction-limit table (spec §3.2) RISOLTA 2026-07-10** (`src/calculus/limit_branch_cut.cpp`,
+  hook in `LimitEngine::compute_recursive`):
+  - **Silent-wrong direzionale trovato e chiuso**: la sostituzione diretta era edge-blind —
+    `limit(sqrt(-4+i·t), t→0, Left)` restituiva il bordo superiore `+2i` (ramo principale)
+    invece di `−2i`. Il lato è ora deciso dal segno della prima derivata non nulla di
+    `Im(arg)` al punto (valuation scan, stesso idioma dei poli con segno di `limit_rules.cpp`);
+    `Left` inverte il segno per k dispari.
+  - **Tabella**: sqrt → ±i·√(−w₀); ln → ln(−w₀) ± iπ; **arg → ±π** (necessario perché il
+    simplifier decompone `ln(z) = ln|z| + i·arg(z)` prima che il LimitEngine giri, spostando
+    il taglio dentro `arg`).
+  - **Composito**: decomposizione SOUND per algebra dei limiti (`lim Σ = Σ lim`, `lim Π = Π lim`
+    solo con membri tutti finiti); forme non decomponibili (es. 0/0 attraverso il taglio)
+    → `Unimplemented` strutturato (mai il valore top-edge cieco). Bilaterale con bordi
+    discordi → `Undefined` esplicito. Ogni passo indecidibile (Re non-letterale, segno non
+    esatto, Im non in forma a+b·I) → nullopt = path legacy invariato.
+  - **Test**: `test_limit_branch_cut.cpp` 11/11 (spec-driven: √(x±iε) ε→0±, ln bordi, arg via
+    Sum-decomposition, composito indeterminato → diagnostico, regressioni cut-free). 90/90
+    suite Limit/Gruntz/MRV.
+  - **Gap osservato (non-gating)**: `mathematically_equal` non prova `ln(4) − ln(16)/2 = 0`
+    (estrazione log-potenza mancante); i test ln usano la forma canonica `ln(16)/2`.
+- **Residuo**: nessuno per §3.2. Estensioni future: funzioni con taglio non ancora in tabella
+  (asin/acos/atanh fuori [−1,1], potenze non intere) → oggi path legacy (principale), candidate
+  alla stessa tabella.
+- **Fix corretto (storico)**: vedi plan §Task 20 (BC-1..BC-5).
 
 ### HC-F8-PENDING-22 — Slater pFq → Meijer G + Bailey — APERTA
 - **Task ID**: 22
 - **Fix corretto**: vedi plan §Task 22 (SL-1..SL-5).
 
-### HC-F8-PENDING-25 — Monolith split 28 file >500 LOC — APERTA
+### HC-F8-PENDING-25 — Monolith split 28 file >500 LOC — RISOLTA (2026-07-08)
 - **Task ID**: 25
 - **Audit**: 28 file whitelisted in CMakeLists.txt anti-monolith scan.
-- **Fix corretto**: vedi plan §Task 25 (MS-1..MS-final).
+- **Fix applicato**: Tutti i 28 file sono stati completamente suddivisi in moduli coesi sotto le 500 righe e la whitelist è stata svuotata.
 
-### HC-F8-FLAKY-COS-7PI-16 — `SpecialFunctionsTest.CosSevenPiOverSixteen_NonInert` order-dependent — APERTA (2026-06-12)
-- **Stato**: il test passa **isolato** (74/74 `SpecialFunctionsTest.*` verde, eseguibile diretto ~960 ms) ma fallisce nella suite quick completa con messaggio `cos(7π/16) stayed inert; got: FuncCall(cos, [Product([RationalLit(7, 16), Constant(Pi)])])`. Il test precedente `CosThreePiOverSeven_Chebyshev_NonInert` (in realtà cos(3π/16)) passa nella stessa sequenza.
+### HC-F8-FLAKY-COS-7PI-16 — `SpecialFunctionsTest.CosSevenPiOverSixteen_NonInert` order-dependent — RISOLTA (2026-06-19)
+- **ROOT CAUSE (confermata 2026-06-19 via `CAS_DEBUG_CHEBYSHEV=1`)**: NON un counter/cache globale (le ipotesi sotto erano errate). `cos(7π/16)` prendeva il ramo **Chebyshev T₇** in `cos_ref_value` (`simplify_trig.cpp`): `cos_q = cos(π/16)` (radicale annidato di profondità 3), poi 7 iterazioni di `2·cos_q·T_curr − T_prev` costruivano un'espressione **enorme**. La sua semplificazione costava ~605 ms e stava **al limite del budget depth/timeout** del Simplifier: dopo migliaia di test nella suite completa, lo stato di risorse al margine faceva fallire (bail → ritorno della `FuncCall(cos,…)` inerte). In isolamento il budget pieno riusciva → flaky order-dependent, deterministico solo sotto carico.
+- **FIX (2026-06-19)**: riduzione co-funzione in `cos_ref_value` PRIMA del loop Chebyshev: `cos(ref·π) = sin((1/2 − ref)·π)`. Per `ref = p/q` con `p > q/3` il complemento `(q−2p)/(2q)` si riduce a numeratore strettamente minore (7/16 → 1/16), raggiungibile dal percorso half-angle di `sin` (cheap, profondità ~3) — niente T₇. Guard `cofunc.num < p` garantisce terminazione della ricorsione mutua cos/sin e non peggiora i casi già economici. Identità esatta senza cambio di segno (entrambi gli angoli in [0,π/2]).
+- **Effetto**: test ora **18 ms** (era 605 ms), deterministico. Validazione: 244 test trig/special verdi; `cos(2π/5) = (√5−1)/4` (angolo in range co-funzione, p>q/3) confermato; suite quick 2429 PASS / 0 FAIL.
+- **Stato (storico)**: il test passava **isolato** ma falliva nella suite quick completa con `cos(7π/16) stayed inert; got: FuncCall(cos, [Product([RationalLit(7, 16), Constant(Pi)])])`.
 - **Bisezione tentata (2026-06-12)** senza riprodurre il fallimento in combinazioni più piccole:
   - `AcidTest.* + cos7π/16` → PASS
   - `SymbolicTest.* + CachingTest.* + cos7π/16` → PASS
@@ -1914,10 +2596,42 @@ Vedi `PLAN_TASKS_REMAINING.md` per breakdown completo.
 - **Blocking dependency**: nessuna — è bug di test/infrastruttura, non gating per feature.
 - **Test di regressione**: `SpecialFunctionsTest.CosSevenPiOverSixteen_NonInert` (full suite) + 73 sibling che passano in isolation.
 
-### HC-F8-PENDING-26 — Cross-cutting CASContext params — PARTIAL
+### HC-F8-PENDING-26 — Cross-cutting CASContext params — PARTIAL (audit 2026-07-08)
 - **Task ID**: 26 — tracker distribuito.
 - **Params già esposti** (sessione 2026-06-12): `max_bessel_half_integer_order`, `integration_abs_tol`, `integration_rel_tol`, `integration_max_intervals`.
-- **Params pendenti**: vedi plan §Task 26 tabella (12 params associati a task pending).
+- **Audit 2026-07-08 sulla tabella "12 params pendenti" di `PLAN_TASKS_REMAINING.md` §Task 26**: la
+  tabella era stale — verificato a codice, non dedotto:
+  - `hensel_max_lift_attempts`, `kronecker_max_degree`, `zippel_error_probability` → **già esposti**
+    (`cas_context_algebra_params.hpp`, wired in `factorization_wang_eez.cpp`/`context_params.cpp`).
+  - `risch_de_max_degree` → già coperto da `max_risch_rational_ansatz_degree` (A26, default 32,
+    `cas_context_calculus_params.hpp`) — nome diverso dalla tabella, stessa cosa.
+  - `zippel_confidence_samples` → non è un parametro fisso: `polynomial_gcd_zippel_prony.cpp` conta
+    `samples_used` adattivamente (Schwartz-Zippel incrementale), niente da esporre.
+  - `bigint_ssa_threshold`, `galois_resolvent_precision_bits` → algoritmi **non ancora implementati**
+    (Schönhage-Strassen §B won't-do-now; Stauduhar deg≥6 = A6 non fatto) — esporre un param per un
+    algoritmo inesistente è prematuro/privo di significato, non un gap reale finché A6/SS non esistono.
+  - `puiseux_truncation_order`/`puiseux_max_branches`/`cad_max_cells`/`cad_isolation_bits` → task 14/19
+    deferred by-design (§B), coerente col non essere esposti.
+  - **`algebraic_tower_eval_max_bits` (nuovo, fix reale 2026-07-08)**: `algebraic_tower_primitive.cpp`
+    aveva due letterali duplicati `8192U` (bit-cap di sicurezza su Q[y]/(cand_q) Euclidean
+    inverse/divmod, safety-belt contro crescita illimitata dei coefficienti quando `cand_q` risulta
+    riducibile). Esposto come `CASContext::algebraic_tower_eval_max_bits()` (default 8192, invariato).
+    Verificato: 13/13 `PrimitiveElementTest` verdi (incl. `ThreeLevelExtension_Sqrt2_Cbrt3_Sqrt5`,
+    `DetectNLevelTower_MultiBetaNested`).
+- **Chiusura**: con questo fix, 5/12 param della tabella storica sono coperti (già esposti o
+  neutralizzati come non-applicabili), 1 nuovo param reale esposto; i restanti sono legati ad
+  algoritmi non ancora costruiti (A6, SS-NTT, Puiseux/CAD deferred) — non ledgerable come "aperti"
+  finché quegli algoritmi non esistono. Task 26 resta PARTIAL per costruzione (chiude quando A6/CAD
+  vengono implementati, non prima).
+
+### HC-SIMP-EXP-PRODUCT — simplify non fonde e^a·e^b → e^{a+b} — ✅ CHIUSA (2026-07-01)
+- **Scoperto**: 2026-06-23 durante T-008 (verifica simbolica soluzioni ODE).
+- **File**: simplifier / `src/rewrite/builtin_rewrite_log_exp.cpp` (regola assente).
+- **Sintomo**: `ctx.simplify(exp(-1/x) * exp(2/x))` resta `Product([exp(-1/x), exp(2/x)])` invece di `exp(1/x)`. Identità esponenziale base mancante.
+- **Categoria CLAUDE.md**: §REGOLA ZERO (algoritmo generale mancante, non hardcode) — gap di completezza del simplifier, non un valore magico.
+- **Impatto**: blocca la verifica simbolica diretta (sostituzione → 0) delle soluzioni reduction-of-order che contengono prodotti di esponenziali con esponenti distinti (es. seconda soluzione Kovacic con `∫e^{2/x}dx`). Workaround nei test: certificato di sostituzione a punti razionali multipli (prova p(x)≡0 per p di grado limitato). Vedi `OdeTest.Kovacic_Case1_EvenPoleOrder4`.
+- **Fix corretto**: regola di rewrite `e^a·e^b → e^{a+b}` (orientata LPO) nel collect dei `Product`; gate benchmark + trace validation (hot-path Simplifier, R3).
+- **Blocking dependency**: nessuna; richiede solo cautela benchmark/trace per la modifica del Simplifier.
 
 ## Note operative
 

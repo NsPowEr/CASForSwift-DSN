@@ -3,6 +3,10 @@ build/
 build-*/
 build_*/
 build-ast/
+# CMake FetchContent artifacts. The real dep tree lives under build/_deps
+# (regenerated from the pinned URL/GIT_TAG in CMakeLists.txt); a top-level
+# _deps/ is accidental cruft (never referenced by the build).
+_deps/
 bin/
 lib/
 *.o
@@ -15,6 +19,10 @@ CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
 Testing/
+/Makefile
+/CTestTestfile.cmake
+/DartConfiguration.tcl
+/*_include.cmake
 .qt/
 .rcc/
 
@@ -27,7 +35,6 @@ graphify-out/
 
 .idea/
 .cache/
-.claude/
 .gemini/
 .trae/
 .codex/
@@ -66,3 +73,19 @@ CMakeLists.txt_parser_fix
 
 # Hooks
 rtk
+
+# Claude Code — config PROJECT-SCOPED, condivisa solo via questo repo (NON nel
+# globale ~/.claude, così altri progetti default non ereditano hook/skill/agent).
+# Si committano: settings.json, hooks/, agents/, skills/.
+# Restano locali (path macchina / transitori): settings.local.json, worktrees/.
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
+!.claude/agents/
+!.claude/skills/
+.claude/settings.local.json
+.claude/worktrees/
+.claude/*.local.json
+
+# Python bytecode cache (scripts/)
+__pycache__/

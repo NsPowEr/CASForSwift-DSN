@@ -6,7 +6,7 @@
 #include <chrono>
 #include <functional>
 #include <string>
-#include <unordered_set>
+
 #include <vector>
 #include <optional>
 
@@ -18,11 +18,6 @@ namespace detail {
 thread_local extern int simplification_depth;
 constexpr int MAX_SIMPLIFICATION_DEPTH = 300;
 
-// Fingerprint set for cycle detection: tracks ExprPtr nodes currently
-// being simplified on this thread's call stack. If a node is re-entered
-// before its first simplification completes, a rewrite cycle is detected.
-thread_local extern std::unordered_set<ExprPtr, ExprHash> active_simplify_nodes;
-
 struct DepthGuard {
     explicit DepthGuard(int max_depth = MAX_SIMPLIFICATION_DEPTH);
     ~DepthGuard();
@@ -32,25 +27,8 @@ private:
 };
 
 // F7.0-A3.2: async-aware depth propagation primitives.
-//
-// CAS core is currently single-threaded by design (CASContext is NOT
-// thread-safe — see CLAUDE.md + F7.0 voice 7). However the `thread_local`
-// `simplification_depth` is a known footgun if any caller ever spawns a
-// std::async / std::jthread worker that calls into the simplifier: the worker
-// starts at depth 0 and bypasses the parent's recursion budget.
-//
-// To make the propagation pattern explicit when (and if) async simplification
-// is introduced, use the snapshot+scope helpers below:
-//
-//   // ON PARENT THREAD:
-//   const int parent_depth = current_simplify_depth();
-//   auto fut = std::async(std::launch::async, [parent_depth, ...] {
-//       AsyncDepthScope scope(parent_depth);   // worker inherits depth
-//       return ctx_clone.simplify(sub_expr);   // recursion budget preserved
-//   });
-//
-// AsyncDepthScope sets the current thread's simplification_depth to the given
-// value on construction and restores it on destruction.
+// AsyncDepthScope propagates the parent thread's recursion budget to a worker
+// thread if async simplification is ever introduced.
 [[nodiscard]] int current_simplify_depth() noexcept;
 
 class AsyncDepthScope {
@@ -63,23 +41,34 @@ private:
     int prev_;
 };
 
-// RAII guard that inserts expr into active_simplify_nodes on construction
-// and removes it on destruction. cycle_detected() returns true if the
-// node was already present (i.e., we are inside a cycle).
+// Path-based cycle guard (A20).  Tracks the current recursion *path* (the
+// direct ancestor chain) rather than the global set of all active nodes.
+// A node is a cycle only if it appears as a direct ancestor on the current
+// descent — i.e. the same pointer is already being simplified in an enclosing
+// stack frame on this thread.  Structurally-shared nodes (same ExprPtr
+// appearing as a valid child in multiple parents) are NOT false-positives
+// because they are inserted+erased independently per call frame.
+// Complexity: O(depth) linear scan, depth ≤ MAX_SIMPLIFICATION_DEPTH.
+extern thread_local std::vector<ExprPtr> simplify_ancestor_path;
+
 struct CycleGuard {
     ExprPtr expr_;
     bool cycle_{false};
 
     explicit CycleGuard(ExprPtr expr) : expr_(expr) {
-        cycle_ = !active_simplify_nodes.insert(expr).second;
+        for (ExprPtr anc : simplify_ancestor_path) {
+            if (anc == expr) { cycle_ = true; return; }
+        }
+        simplify_ancestor_path.push_back(expr);
     }
     ~CycleGuard() {
         if (!cycle_) {
-            active_simplify_nodes.erase(expr_);
+            simplify_ancestor_path.pop_back();
         }
     }
     [[nodiscard]] bool cycle_detected() const noexcept { return cycle_; }
 };
+
 
 struct LiteralRational {
     Rational value;
@@ -203,7 +192,18 @@ private:
     // Specialized simplification methods
     [[nodiscard]] Result<ExprPtr> simplify_additive_chain_fast(ExprPtr original);
     [[nodiscard]] Result<ExprPtr> simplify_power(ExprPtr base, ExprPtr exponent, ExprPtr target_before = ExprPtr{});
+    // Chebyshev/DeMoivre linearization of sin^n / cos^n (integer n ≥ 2).
+    // Returns std::nullopt when the rule does not apply (base not sin/cos, n out
+    // of range, etc.) so the caller falls through. Defined in
+    // simplify_arithmetic_power_trig.cpp.
+    [[nodiscard]] std::optional<Result<ExprPtr>> try_linearize_trig_power(ExprPtr base, const BigInt& n);
     [[nodiscard]] Result<ExprPtr> simplify_sum_terms(const std::vector<ExprPtr>& terms, ExprPtr target_before = ExprPtr{}, bool inputs_are_simplified = false);
+    // T-054b: combine sum terms over a common denominator and cancel. Non-recursive
+    // (local univariate Rational-polynomial arithmetic, no simplify_expr). Rewrites
+    // `terms` in place and returns true when a denominator fully cancels; otherwise
+    // leaves the sum untouched. Defined in simplify_combine_fractions.cpp.
+    [[nodiscard]] bool try_combine_common_denominator(std::vector<ExprPtr>& terms);
+    [[nodiscard]] ExprPtr poly_to_expr_for_combine(const std::vector<Rational>& coeffs, ExprPtr var);
     [[nodiscard]] Result<ExprPtr> simplify_product_factors(const std::vector<ExprPtr>& factors, ExprPtr target_before = ExprPtr{}, bool inputs_are_simplified = false);
 
     // Rewrite and trace helpers
@@ -231,6 +231,9 @@ private:
     [[nodiscard]] Result<ExprPtr> simplify_funcall_trig(ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr target_before);
     [[nodiscard]] Result<ExprPtr> simplify_funcall_arc_trig(ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr target_before);
     [[nodiscard]] Result<ExprPtr> simplify_funcall_exp_log_sqrt(ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr target_before);
+    // W9.3 split: sqrt branch extracted from simplify_funcall_exp_log_sqrt to keep
+    // both translation units under the 500-line anti-monolith limit.
+    [[nodiscard]] Result<ExprPtr> simplify_funcall_sqrt(ExprPtr original, std::vector<ExprPtr> args, ExprPtr target_before);
     [[nodiscard]] Result<ExprPtr> simplify_funcall_special(ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr target_before);
     // F7.5.E1: hypergeometric/elliptic split out from simplify_funcall_special
     // to keep simplify_special_fn.cpp under the 500-line anti-monolith limit.

@@ -30,14 +30,26 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const FuncCall& node
         args.push_back(res.value());
     }
 
+    // Reconstruct a FuncCall preserving identity. Non-enumerated named functions
+    // (asinh/acosh/atanh, sech/csch, …) carry func_id == Unknown but a real
+    // `name`; rebuilding them from func_id alone collapses the name to the
+    // literal "unknown" (BuiltinOp::Unknown → "unknown"), silently corrupting
+    // e.g. ∫√(x²−1)'s acosh term into `unknown(x)`. Keep the name string when
+    // the op is not enumerated.
+    auto rebuild_call = [&](std::vector<ExprPtr> a) -> ExprPtr {
+        return node.func_id == BuiltinOp::Unknown
+            ? arena_.make<FuncCall>(node.name, std::move(a))
+            : arena_.make<FuncCall>(node.func_id, std::move(a));
+    };
+
     const ExprPtr target_before = expr_ptr_sequence_identical(args, node.args)
         ? original
-        : (trace_enabled_ ? arena_.make<FuncCall>(node.func_id, args) : ExprPtr{});
+        : (trace_enabled_ ? rebuild_call(args) : ExprPtr{});
 
     if (rewrite_provider_ != nullptr && may_rewrite_function_call(node.func_id, args)) {
         ExprPtr rewrite_target = expr_ptr_sequence_identical(args, node.args)
             ? original
-            : arena_.make<FuncCall>(node.func_id, args);
+            : rebuild_call(args);
         auto rewritten = rewrite_provider_->try_rewrite(
             rewrite_target, arena_, assumptions_, context_);
         if (rewritten.is_ok() && rewritten.value() != rewrite_target) {
@@ -223,7 +235,7 @@ Result<ExprPtr> Simplifier::simplify_node(ExprPtr original, const FuncCall& node
     }
 
     if (expr_ptr_sequence_identical(args, node.args)) return ok(original);
-    return ok(arena_.make<FuncCall>(node.func_id, std::move(args)));
+    return ok(rebuild_call(std::move(args)));
 }
 
 // ── Other node types ──────────────────────────────────────────────────────────
@@ -420,81 +432,7 @@ bool Simplifier::may_rewrite_power(ExprPtr base, ExprPtr exponent) const {
 }
 
 // ── Sign predicates ───────────────────────────────────────────────────────────
-
-bool Simplifier::is_known_positive(ExprPtr expr) const {
-    if (!expr) return false;
-    if (assumptions_ != nullptr && assumptions_->is_positive(expr)) return true;
-    LiteralRational rat;
-    if (auto exact = try_get_exact_rational(expr, rat); exact.is_ok() && exact.value())
-        return !rat.value.numerator().is_zero() && !rat.value.numerator().is_negative();
-    if (const auto* constant = expr_cast<Constant>(expr))
-        return is_known_positive_constant(constant->value);
-    if (const auto* bin = expr_cast<Binary>(expr)) {
-        if (bin->op == BinaryOp::Pow) return is_known_positive(bin->left);
-        if (bin->op == BinaryOp::Div)
-            return is_known_positive(bin->left) && is_known_positive(bin->right);
-    }
-    if (const auto* prod = expr_cast<Product>(expr)) {
-        if (prod->factors.empty()) return false;
-        for (ExprPtr f : prod->factors) if (!is_known_positive(f)) return false;
-        return true;
-    }
-    return false;
-}
-
-bool Simplifier::is_known_nonnegative(ExprPtr expr) const {
-    if (!expr) return false;
-    if (assumptions_ != nullptr && assumptions_->is_nonnegative(expr)) return true;
-    if (is_known_positive(expr)) return true;
-    LiteralRational rat;
-    if (auto exact = try_get_exact_rational(expr, rat); exact.is_ok() && exact.value())
-        return !rat.value.numerator().is_negative();
-    if (const auto* constant = expr_cast<Constant>(expr))
-        return is_known_nonnegative_constant(constant->value);
-    if (const auto* bin = expr_cast<Binary>(expr)) {
-        if (bin->op == BinaryOp::Div)
-            return is_known_nonnegative(bin->left) && is_known_positive(bin->right);
-    }
-    if (const auto* prod = expr_cast<Product>(expr)) {
-        if (prod->factors.empty()) return false;
-        for (ExprPtr f : prod->factors) if (!is_known_nonnegative(f)) return false;
-        return true;
-    }
-    return false;
-}
-
-bool Simplifier::is_known_negative(ExprPtr expr) const {
-    if (!expr) return false;
-    if (assumptions_ != nullptr && assumptions_->is_negative(expr)) return true;
-    LiteralRational rat;
-    if (auto exact = try_get_exact_rational(expr, rat); exact.is_ok() && exact.value())
-        return rat.value.numerator().is_negative();
-    if (const auto* bin = expr_cast<Binary>(expr)) {
-        if (bin->op == BinaryOp::Div)
-            return (is_known_negative(bin->left) && is_known_positive(bin->right))
-                || (is_known_positive(bin->left) && is_known_negative(bin->right));
-    }
-    if (const auto* prod = expr_cast<Product>(expr)) {
-        int negative_count = 0;
-        for (ExprPtr f : prod->factors) {
-            if (is_known_negative(f)) negative_count++;
-            else if (!is_known_positive(f)) return false;
-        }
-        return (negative_count % 2 != 0);
-    }
-    if (const auto* unary = expr_cast<Unary>(expr);
-        unary != nullptr && unary->op == UnaryOp::Neg)
-        return is_known_positive(unary->operand);
-    return false;
-}
-
-bool Simplifier::is_assumed_nonzero(ExprPtr expr) const {
-    if (!expr) return false;
-    if (assumptions_ != nullptr && assumptions_->is_nonzero(expr)) return true;
-    LiteralRational rat;
-    if (auto exact = try_get_exact_rational(expr, rat); exact.is_ok() && exact.value())
-        return !rat.value.numerator().is_zero();
-    return is_known_positive(expr) || is_known_negative(expr);
-}
+// is_known_positive / _nonnegative / _negative / is_assumed_nonzero are defined
+// in simplify_sign_predicates.cpp (anti-monolith split 2026-06-19).
 
 } // namespace cas::symbolic::detail

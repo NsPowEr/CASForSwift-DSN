@@ -127,21 +127,30 @@ set(CAS_PARSER_SOURCES
 
 set(CAS_SYMBOLIC_SOURCES
     src/rewrite/builtin_rewrite.cpp
+    src/rewrite/builtin_rewrite_trig.cpp
+    src/rewrite/builtin_rewrite_log_exp.cpp
+    src/rewrite/builtin_rewrite_algebraic.cpp
     src/rewrite/discrimination_net.cpp
     src/symbolic/simplify_core.cpp
     src/symbolic/simplify_arithmetic.cpp
     src/symbolic/simplify_arithmetic_power.cpp
+    src/symbolic/simplify_arithmetic_power_trig.cpp
     src/symbolic/simplify_arithmetic_chain_liketerm.cpp
     src/symbolic/summation_gosper.cpp
+    src/symbolic/summation_hyper.cpp
+    src/symbolic/summation_petkovsek.cpp
     src/symbolic/summation_zeilberger.cpp
     src/symbolic/summation_zeilberger_helpers.cpp
+    src/symbolic/summation_zeilberger_shift_ratio.cpp
     src/symbolic/simplify_arithmetic_chain_sum.cpp
+    src/symbolic/simplify_combine_fractions.cpp
     src/symbolic/simplify_arithmetic_chain.cpp
     src/symbolic/simplify_arithmetic_chain_gamma.cpp
     src/symbolic/simplify_arithmetic_chain_sqrt.cpp
     src/symbolic/simplify_arithmetic_chain_exp.cpp
     src/symbolic/simplify_extended_real.cpp
     src/symbolic/simplify_functions.cpp
+    src/symbolic/simplify_sign_predicates.cpp
     src/symbolic/simplify_trig_chebyshev.cpp
     src/symbolic/simplify_trig_tables.cpp
     src/symbolic/simplify_trig.cpp
@@ -149,6 +158,8 @@ set(CAS_SYMBOLIC_SOURCES
     src/symbolic/simplify_hyperbolic.cpp
     src/symbolic/simplify_combinatorial.cpp
     src/symbolic/simplify_exp_log.cpp
+    src/symbolic/simplify_sqrt.cpp          # W9.3 split — sqrt branch of simplify_funcall_exp_log_sqrt
+    src/symbolic/simplify_sqrt_helpers.cpp  # W9.3 split — rational-sqrt / denesting helpers
     src/symbolic/simplify_branch_cut.cpp  # F8.0-6.2 / Task 20 BC-1..BC-3 — unwinding-number corrections
     src/symbolic/simplify_special_fn.cpp
     src/symbolic/simplify_special_fn_hyper.cpp
@@ -157,9 +168,20 @@ set(CAS_SYMBOLIC_SOURCES
     src/symbolic/simplify_complex.cpp
     src/symbolic/simplify_utils.cpp
     src/symbolic/context_core.cpp
+    src/symbolic/side_conditions.cpp
+    src/symbolic/meijerg_construct.cpp
+    src/symbolic/meijerg_convert.cpp
+    src/symbolic/meijerg_from.cpp
+    src/symbolic/meijerg_identities.cpp
+    src/symbolic/meijerg_slater.cpp
+    src/symbolic/context_params.cpp
+    src/symbolic/context_helpers.cpp
     src/symbolic/context_utils.cpp
-    src/symbolic/assumptions.cpp
+    src/symbolic/assumptions_core.cpp
+    src/symbolic/assumptions_predicates.cpp
     src/symbolic/term_order.cpp
+    src/symbolic/term_order_lpo.cpp
+    src/symbolic/term_order_kbw.cpp
     src/symbolic/rewrite_engine.cpp
     src/symbolic/rewrite_matching.cpp
     src/symbolic/substitute.cpp
@@ -172,31 +194,51 @@ set(CAS_SYMBOLIC_SOURCES
 
 set(CAS_CALCULUS_SOURCES
     src/calculus/differentiate.cpp
+    src/calculus/differentiate_visitor.cpp
+    src/calculus/differentiate_rules.cpp
+    src/calculus/differentiate_rules_multiarg.cpp
     src/calculus/integrate.cpp
     src/calculus/integrate_definite_patterns.cpp
     src/calculus/bessel_orthogonality.cpp
     src/calculus/orthogonal_polynomials.cpp
+    src/calculus/orthogonal_polynomials_chebyshev.cpp
     src/calculus/integrate_improper.cpp
     src/calculus/summation.cpp
     src/calculus/summation_abramov.cpp
+    src/calculus/summation_abramov_quadratic.cpp
     src/calculus/summation_zeilberger_driver.cpp
     src/calculus/integrate_core.cpp
+    src/calculus/integrate_definite_guards.cpp
+    src/calculus/integrate_condition_guard.cpp
     src/calculus/integrate_elementary.cpp
     src/calculus/integrate_helpers.cpp
     src/calculus/integrate_quadratic_rational.cpp
     src/calculus/integrate_inverse_quadratic_power.cpp
     src/calculus/integrate_product_power.cpp
+    src/calculus/integrate_power.cpp
     src/calculus/integrate_substitution.cpp
     src/calculus/integrate_trig_substitution.cpp
     src/calculus/integrate_weierstrass.cpp
+    src/calculus/integrate_meijerg.cpp
+    src/calculus/integrate_nonelementary.cpp
+    src/calculus/integrate_nonelementary_special.cpp
+    src/calculus/integrate_mellin_convolution.cpp
+    src/calculus/integrate_rational_part.cpp
     src/calculus/integrate_hermite.cpp
     src/calculus/integrate_risch.cpp
     src/calculus/integrate_risch_rde.cpp
     src/calculus/integrate_risch_hermite.cpp
+    src/calculus/integrate_risch_logpoly.cpp
     src/calculus/risch_parametric.cpp
+    src/calculus/risch_parametric_rational.cpp
+    src/calculus/risch_parametric_limited.cpp
+    src/calculus/risch_limited_integrate.cpp
+    src/calculus/risch_param_pole_cancel.cpp
+    src/calculus/risch_param_nocancel.cpp
+    src/calculus/risch_constant_system.cpp
     src/calculus/risch_de_extensions.cpp
     src/calculus/risch_rde_bronstein.cpp
-    src/calculus/risch_rde_bronstein_hermite.cpp
+    src/calculus/risch_rde_parametric_field.cpp
     src/calculus/risch_log_expand.cpp
     src/calculus/risch_exp_expand.cpp
     src/calculus/z_transform.cpp
@@ -205,11 +247,16 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/integrate_dirac.cpp
     src/calculus/fourier_transform.cpp
     src/calculus/differential_field.cpp
+    src/calculus/differential_field_generators.cpp
+    src/calculus/differential_field_integration.cpp
     src/calculus/limit.cpp
+    src/calculus/limit_branch_cut.cpp
+    src/calculus/limit_rules.cpp
     src/calculus/limit_helpers.cpp
     src/calculus/limit_infinite.cpp
     src/calculus/limit_polynomial.cpp
     src/calculus/limit_series.cpp
+    src/calculus/taylor_removable.cpp
     src/calculus/limit_mrv.cpp
     src/calculus/limit_mrv_compare.cpp
     src/calculus/limit_mrv_set.cpp
@@ -218,6 +265,8 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/limit_quotient_d2.cpp
     src/calculus/residue.cpp
     src/calculus/residue_theorem.cpp
+    src/calculus/residue_theorem_symbolic.cpp
+    src/calculus/residue_theorem_numeric.cpp
     src/calculus/laurent_general.cpp
     src/calculus/pade.cpp
     src/calculus/puiseux.cpp
@@ -238,10 +287,12 @@ set(CAS_CALCULUS_SOURCES
     src/calculus/ode_kovacic_laurent.cpp
     src/calculus/ode_kovacic.cpp
     src/calculus/ode_solver_frobenius.cpp
+    src/calculus/ode_solver_frobenius_series.cpp
     src/calculus/ode_solver_nonlinear.cpp
     src/calculus/asymptotes.cpp
     src/calculus/numeric_diff.cpp
     src/calculus/laplace_transform.cpp
+    src/calculus/laplace_transform_inverse.cpp
     src/calculus/ode_laplace.cpp
 )
 
@@ -259,9 +310,12 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/algebraic_number.cpp
     src/algebra/algebraic_number_qx.cpp
     src/algebra/algebraic_number_bridge.cpp
+    src/algebra/algebraic_number_bridge_express.cpp
     src/algebra/algebraic_tower_bridge.cpp
+    src/algebra/algebraic_tower_bridge_parse.cpp
     src/algebra/algebraic_tower_primitive.cpp
     src/algebra/algebraic_tower_primitive_nested.cpp
+    src/algebra/algebraic_tower_primitive_chain.cpp
     src/algebra/polynomial_arithmetic.cpp
     src/algebra/polynomial_multivariate.cpp
     src/algebra/factor_multivariate_mpoly.cpp
@@ -292,14 +346,20 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/polynomial_groebner_f4_conversion.cpp
     src/algebra/polynomial_groebner_f4_solver.cpp
     src/algebra/polynomial_groebner_fglm.cpp
+    src/algebra/polynomial_groebner_fglm_linalg.cpp
     src/algebra/polynomial_groebner_f5.cpp
+    src/algebra/polynomial_groebner_f5_buchberger.cpp
     src/algebra/csolve.cpp
     src/algebra/fsolve.cpp
     src/algebra/solve_inequality.cpp
     src/algebra/partial_fractions.cpp
     src/algebra/partial_fractions_lrt.cpp
+    src/algebra/partial_fractions_logtoreal.cpp
+    src/algebra/partial_fractions_quartic_split.cpp
     src/algebra/solve_polynomial.cpp
+    src/algebra/solve_polynomial_cubic_quartic.cpp
     src/algebra/polynomial_internal.cpp
+    src/algebra/polynomial_internal_xgcd.cpp
     src/algebra/polynomial_hensel.cpp
     src/algebra/lattice_lll.cpp
     src/algebra/polynomial_modular.cpp
@@ -307,9 +367,14 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/polynomial_gcd_modular.cpp
     src/algebra/polynomial_gcd_brown.cpp
     src/algebra/polynomial_gcd_brown_modular.cpp
+    src/algebra/polynomial_gcd_brown_content.cpp
+    src/algebra/polynomial_gcd_brown_helpers.cpp
     src/algebra/polynomial_gcd_brown_lc_scaling.cpp
     src/algebra/polynomial_gcd_fp_recursive.cpp
+    src/algebra/polynomial_gcd_fp_helpers.cpp
     src/algebra/polynomial_gcd_zippel_prony.cpp
+    src/algebra/polynomial_gcd_zippel_certify.cpp
+    src/algebra/polynomial_gcd_zippel_crt.cpp
     src/algebra/polynomial_gcd_multivariate_helpers.cpp
     src/algebra/polynomial_gcd_multivariate_interp.cpp
     src/algebra/polynomial_gcd_multivariate_sparse.cpp
@@ -318,7 +383,12 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/algebraic_equal.cpp
     src/algebra/algebraic_equal_cyclotomic.cpp
     src/algebra/algebraic_equal_weierstrass.cpp
+    src/algebra/algebraic_equal_trig_exp.cpp
+    src/algebra/algebraic_equal_subset_risch.cpp
+    src/algebra/algebraic_equal_radical.cpp
     src/algebra/hyperbolic_normalize.cpp
+    src/algebra/nonelementary_normalize.cpp
+    src/algebra/trig_addition_normalize.cpp
     src/algebra/polynomial_integer.cpp
     src/algebra/polynomial_conversions.cpp
     src/algebra/polynomial_gcd_core.cpp
@@ -329,6 +399,28 @@ set(CAS_ALGEBRA_SOURCES
     src/algebra/gaussian_factor.cpp
     src/algebra/galois.cpp
     src/algebra/galois_deg5.cpp
+    src/algebra/perm_group.cpp
+    src/algebra/perm_bsgs.cpp
+    src/algebra/perm_blocks.cpp
+    src/algebra/perm_construct.cpp
+    src/algebra/perm_construct_linear.cpp
+    src/algebra/perm_construct_gf.cpp
+    src/algebra/perm_maximal.cpp
+    src/algebra/galois_transitive_lattice.cpp
+    src/algebra/galois_setpoly.cpp
+    src/algebra/galois_deg6.cpp
+    src/algebra/galois_deg8.cpp
+    src/algebra/galois_padic_ring.cpp
+    src/algebra/galois_padic_roots.cpp
+    src/algebra/galois_padic_split.cpp
+    src/algebra/galois_invariant.cpp
+    src/algebra/galois_stauduhar_step.cpp
+    src/algebra/galois_stauduhar_descent.cpp
+    src/algebra/galois_stauduhar_candidate.cpp
+    src/algebra/galois_stauduhar_quadratic.cpp
+    src/algebra/galois_sublattice.cpp
+    src/algebra/galois_wreath_maximal.cpp
+    src/algebra/galois_stauduhar_below.cpp
 )
 
 set(CAS_LINALG_SOURCES
@@ -338,6 +430,7 @@ set(CAS_LINALG_SOURCES
     src/linalg/matrix_eigenvalues.cpp
     src/linalg/matrix_null_space_extension.cpp
     src/linalg/matrix_smith.cpp
+    src/linalg/matrix_smith_qx.cpp
     src/linalg/matrix_jordan.cpp
     src/linalg/matrix_determinant_modular.cpp
     src/linalg/matrix_structured_determinant.cpp
@@ -582,6 +675,18 @@ if(CAS_ENABLE_TESTING)
         test/fuzz/test_symbolic_fuzz.cpp
         test/unit/error/test_diagnostic.cpp
         test/unit/error/test_unimplemented_payload.cpp
+        test/unit/error/test_unimplemented_info.cpp
+
+        # T-053: reactivated orphan tests (were on disk but not wired → 0 coverage)
+        test/unit/numtheory/test_miller_rabin.cpp
+        test/unit/algebra/test_multivariate_square_free.cpp
+        test/unit/symbolic/test_gc.cpp
+        test/unit/symbolic/test_side_conditions.cpp
+        test/unit/symbolic/test_conditional_rules.cpp
+        test/unit/symbolic/test_meijerg.cpp
+        test/unit/symbolic/test_meijerg_convert.cpp
+        test/unit/symbolic/test_meijerg_roundtrip.cpp
+        test/unit/symbolic/test_gaps.cpp
 
         test/unit/ast/test_ast_model.cpp
         test/unit/ast/test_ast_debug.cpp
@@ -595,6 +700,9 @@ if(CAS_ENABLE_TESTING)
         test/unit/symbolic/test_calculus.cpp
 test/unit/symbolic/test_unwinding_number.cpp
 test/unit/symbolic/test_sqrt_fold.cpp
+        test/unit/symbolic/test_a50_sqrt_product_general.cpp
+        test/unit/symbolic/test_a50_trig_addition_normalize.cpp
+        test/unit/symbolic/test_strict_canonical.cpp
         test/unit/symbolic/test_complex_simplification.cpp
         test/unit/symbolic/test_extended_real.cpp
         test/unit/symbolic/test_simplify_hyperbolic_zero.cpp
@@ -608,16 +716,36 @@ test/unit/symbolic/test_sqrt_fold.cpp
         test/unit/calculus/test_risch_logarithmic_probe.cpp
         test/unit/calculus/test_differential_field_probe.cpp
         test/unit/calculus/test_differentiate_smoke.cpp
+    test/unit/symbolic/test_a39_canonical_nesting.cpp
+    test/unit/symbolic/test_a48_sum_fixpoint.cpp
+    test/unit/symbolic/test_a51_operation_budget.cpp
+    test/unit/symbolic/test_a53_condition_rollback.cpp
+    test/unit/calculus/test_a53_integration_budget.cpp
+    test/unit/calculus/test_a49_exp_pole_no_ibp.cpp
+    test/unit/calculus/test_a43_nonelementary_builtins.cpp
+    test/unit/calculus/test_a43_nonelementary_integrate.cpp
         test/unit/calculus/test_limit_smoke.cpp
+        test/unit/calculus/test_series_removable_singularity.cpp
         test/unit/calculus/test_limit_gruntz_nested_log.cpp
         test/unit/calculus/test_integrate_interrupt.cpp
+        test/unit/calculus/test_integrate_byparts.cpp
+        test/unit/calculus/test_integrate_ibp_coverage.cpp
         test/unit/calculus/test_integrate_risch_smoke.cpp
+        test/unit/calculus/test_integrate_meijerg.cpp
+        test/unit/calculus/test_integrate_mellin_convolution.cpp
+        test/unit/calculus/test_integrate_bronstein_corpus.cpp
         test/unit/calculus/test_integrate_substitution.cpp
         test/unit/algebra/test_polynomial_sparse_interpolation.cpp
+        test/unit/algebra/test_lrt_subresultant_a45.cpp
+        test/unit/algebra/test_a47_together_cost.cpp
+        test/unit/algebra/test_a56_together_shortcut.cpp
+        test/unit/algebra/test_a55_together_combine.cpp
+        test/unit/algebra/test_logtoreal_a46.cpp
         test/unit/algebra/test_algebraic_number_rootof.cpp
 test/unit/algebra/test_cyclotomic_rootof_d2.cpp
         test/unit/algebra/test_csolve_linear.cpp
         test/unit/symbolic/test_summation_gosper.cpp
+        test/unit/symbolic/test_summation_hyper.cpp
         test/unit/algebra/test_factorization_polynomials_smoke.cpp
         test/unit/algebra/test_polynomial_gcd_multivariate_smoke.cpp
         test/unit/algebra/test_zippel_sparse_gcd.cpp
@@ -626,8 +754,13 @@ test/unit/algebra/test_cyclotomic_rootof_d2.cpp
         test/unit/symbolic/test_rootof_auto_trigger.cpp
         test/unit/calculus/test_integrate_risch_exp_mix.cpp
         test/unit/calculus/test_risch_parametric.cpp
+        test/unit/calculus/test_risch_parametric_tower.cpp
+        test/unit/calculus/test_risch_limited_integrate.cpp
+        test/unit/calculus/test_a54_form_dependence.cpp
         test/unit/calculus/test_risch_de_extensions.cpp
         test/unit/calculus/test_risch_exp_expand.cpp
+        test/unit/calculus/test_risch_nested_transcendental.cpp
+        test/unit/calculus/test_risch_nested_log.cpp
         test/unit/calculus/test_z_transform.cpp
         test/unit/calculus/test_mellin_transform.cpp
         test/unit/calculus/test_inverse_laplace_residue.cpp
@@ -670,8 +803,24 @@ test/unit/numeric/test_sturm_bigfloat.cpp
         test/unit/calculus/test_laplace.cpp
         test/unit/algebra/test_galois.cpp
         test/unit/algebra/test_galois_deg5_f3.cpp
+        test/unit/algebra/test_perm_group.cpp
+        test/unit/algebra/test_perm_bsgs.cpp
+        test/unit/algebra/test_perm_blocks.cpp
+        test/unit/algebra/test_perm_construct.cpp
+        test/unit/algebra/test_perm_maximal.cpp
+        test/unit/algebra/test_galois_lattice.cpp
+        test/unit/algebra/test_galois_setpoly.cpp
+        test/unit/algebra/test_galois_deg6.cpp
+        test/unit/algebra/test_galois_deg8.cpp
+        test/unit/algebra/test_galois_deg7.cpp
+        test/unit/algebra/test_galois_padic.cpp
+        test/unit/algebra/test_galois_invariant.cpp
+        test/unit/algebra/test_galois_stauduhar.cpp
+        test/unit/algebra/test_galois_sublattice.cpp
+        test/unit/algebra/test_galois_wreath_maximal.cpp
         test/unit/algebra/test_solve_closure.cpp
         test/unit/calculus/test_ode_laplace.cpp
+        test/unit/calculus/test_ode_frobenius.cpp
         test/unit/symbolic/test_jacobi.cpp
         test/unit/linalg/test_qr_decomposition.cpp
 test/unit/linalg/test_cholesky_ldlt.cpp
@@ -721,6 +870,9 @@ test/unit/algebra/test_half_gcd.cpp
         test/unit/algebra/test_root_of.cpp
         test/unit/algebra/test_groebner.cpp
         test/unit/algebra/test_groebner_f5_pruning_f3.cpp
+        test/unit/algebra/test_interrupt_a33_probes.cpp
+        test/unit/calculus/test_limit_branch_cut.cpp
+        test/unit/calculus/test_abramov_quadratic_multiplicity.cpp
         test/unit/algebra/test_polynomial_gcd_subresultant.cpp
         test/unit/algebra/test_polynomial_gcd_multivariate_robust.cpp
         test/unit/algebra/test_gcd_brown_f3.cpp
@@ -783,6 +935,7 @@ test/unit/algebra/test_half_gcd.cpp
         test/unit/calculus/test_ode_kovacic_case2.cpp
         test/unit/calculus/test_ode_kovacic_case3.cpp
         test/unit/calculus/test_integrate_inverse_trig.cpp
+        test/unit/calculus/test_integrate_exp_rational.cpp
         test/unit/test_ode_critical.cpp
         test/unit/test_ode_class_f5.cpp
         test/unit/test_ode_solv_f5.cpp
@@ -867,6 +1020,52 @@ test/unit/algebra/test_half_gcd.cpp
         PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0" TIMEOUT 60)
     gtest_discover_tests(assumptions_stability_test DISCOVERY_TIMEOUT 60
         PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0" TIMEOUT 60)
+
+    # A43 — certificato numerico mpmath delle antiderivate non elementari.
+    #
+    # Perche' e' un test a se' e non un'asserzione C++: per una parte della
+    # famiglia (gaussiana con |A| non quadrato perfetto, trigonometrica con
+    # fase, ∫x^s/ln x) il motore NON riesce a chiudere `D(F) = f`
+    # simbolicamente (task A50), quindi i test C++ possono solo fissare la
+    # forma chiusa attesa — confrontandola con una stringa scritta a mano.
+    # Da soli non proverebbero nulla sulla CORRETTEZZA della formula: se la
+    # formula fosse sbagliata, implementazione e attesa lo sarebbero insieme e
+    # il test passerebbe. Il banco mpmath a 30 cifre e' l'oracolo indipendente,
+    # e registrarlo qui lo mette dentro `ctest`, che la CI esegue e non e'
+    # bypassabile. I builtin non sono ancora valutabili numericamente dal
+    # motore (spec §6), quindi mpmath e' l'unico strumento disponibile.
+    # L'interprete che CMake trova per primo non e' necessariamente quello che
+    # ha mpmath (misurato: find_package sceglieva un Python 3.14 senza mpmath
+    # mentre due interpreti sul PATH ce l'avevano). Si sondano i candidati e si
+    # usa il primo che importa mpmath; se nessuno lo fa il test NON viene
+    # registrato silenziosamente, ma con un warning esplicito a configure-time —
+    # un certificato assente deve essere visibile, non passare per verde.
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    find_program(A43_PYTHON_ON_PATH python3)
+    set(A43_NUMERIC_PY "")
+    foreach(_cand IN LISTS Python3_EXECUTABLE A43_PYTHON_ON_PATH)
+        if(_cand AND NOT A43_NUMERIC_PY)
+            execute_process(COMMAND "${_cand}" -c "import mpmath"
+                            RESULT_VARIABLE _a43_mpmath_rc
+                            OUTPUT_QUIET ERROR_QUIET)
+            if(_a43_mpmath_rc EQUAL 0)
+                set(A43_NUMERIC_PY "${_cand}")
+            endif()
+        endif()
+    endforeach()
+    if(A43_NUMERIC_PY)
+        add_test(NAME a43_nonelementary_numeric_certificate
+            COMMAND "${A43_NUMERIC_PY}"
+                    ${CMAKE_CURRENT_SOURCE_DIR}/scripts/a43_special_fn_check.py)
+        set_tests_properties(a43_nonelementary_numeric_certificate
+            PROPERTIES TIMEOUT 120)
+    else()
+        message(WARNING
+            "mpmath non disponibile in nessun interprete Python trovato: il "
+            "certificato numerico A43 (scripts/a43_special_fn_check.py) NON "
+            "verra' eseguito da ctest. Installare mpmath per avere la verifica "
+            "indipendente delle antiderivate non elementari.")
+    endif()
 endif()
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     include(CheckCXXCompilerFlag)

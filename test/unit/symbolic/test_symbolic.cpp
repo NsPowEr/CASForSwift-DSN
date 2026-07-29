@@ -4,9 +4,11 @@
 #include "cas/normal_form.hpp"
 #include "cas/parser.hpp"
 #include "cas/symbolic.hpp"
+#include "cas/numeric.hpp"
+#include "cas/error.hpp"
+#include "cas/formatter.hpp"
 #include "../../helpers/property_test.hpp"
 
-// Dummy comment for rebuild
 #include <gtest/gtest.h>
 
 #include <chrono>
@@ -409,9 +411,21 @@ TEST(AlgebraTogetherTest, RebuildsSingleRationalExpression) {
     auto merged = algebra::together(expr.value(), ctx);
     ASSERT_TRUE(merged.is_ok()) << merged.error().message;
 
-    auto simplified_expected = ctx.simplify(expected.value());
-    ASSERT_TRUE(simplified_expected.is_ok()) << simplified_expected.error().message;
-    EXPECT_TRUE(structural_equal(merged.value(), simplified_expected.value()));
+    // A55 — `ctx.simplify()` diretto ridistribuisce (Step 8 è attivo lì,
+    // sospeso solo dentro `together`): confrontare contro `together(expected)`
+    // mette entrambi i lati sotto la STESSA sospensione, la sola forma
+    // corretta per verificare "una sola frazione combinata".
+    auto together_expected = algebra::together(expected.value(), ctx);
+    ASSERT_TRUE(together_expected.is_ok()) << together_expected.error().message;
+    EXPECT_TRUE(structural_equal(merged.value(), together_expected.value()));
+
+    // Il valore non deve cambiare, e il risultato deve restare una singola
+    // frazione (non una Sum di termini distribuiti sul denominatore comune).
+    auto eq = symbolic::mathematically_equal(merged.value(), expr.value(), ctx);
+    ASSERT_TRUE(eq.is_ok());
+    EXPECT_TRUE(eq.value());
+    EXPECT_FALSE(expr_is<Sum>(merged.value()))
+        << "together ha lasciato il risultato distribuito sul denominatore comune";
 }
 
 TEST(AlgebraExpandTest, ExpandsBinomialSquare) {
@@ -1582,12 +1596,26 @@ TEST(SymbolicSimplifyTest, RewritesNegativePowerAsDivision) {
     EXPECT_TRUE(structural_equal(simplified.value(), expected.value()));
 }
 
-TEST(SymbolicSimplifyTest, RewritesSqrtSquareToAbsWithoutAssumptions) {
+TEST(SymbolicSimplifyTest, DoesNotRewriteSqrtSquareToAbsWithoutRealAssumption) {
     AstArena parse_arena;
-    AstArena simplify_arena;
     AstArena expected_arena;
+    CASContext context;
 
-    auto simplified = simplify_input("sqrt(x^2)", parse_arena, simplify_arena);
+    auto simplified = simplify_input_with_context("sqrt(x^2)", parse_arena, context);
+    auto expected = parse_expr("sqrt(x^2)", expected_arena);
+    ASSERT_TRUE(simplified.is_ok()) << simplified.error().message;
+    ASSERT_TRUE(expected.is_ok()) << expected.error().message;
+
+    EXPECT_TRUE(structural_equal(simplified.value(), expected.value()));
+}
+
+TEST(SymbolicSimplifyTest, RewritesSqrtSquareToAbsWithRealAssumption) {
+    AstArena parse_arena;
+    AstArena expected_arena;
+    CASContext context;
+    context.assumptions().assume_real(Symbol{"x"});
+
+    auto simplified = simplify_input_with_context("sqrt(x^2)", parse_arena, context);
     auto expected = simplify_input("abs(x)", expected_arena, expected_arena);
     ASSERT_TRUE(simplified.is_ok()) << simplified.error().message;
     ASSERT_TRUE(expected.is_ok()) << expected.error().message;
@@ -1615,6 +1643,34 @@ TEST(SymbolicSimplifyTest, ExpandsExponentialOfSum) {
     AstArena expected_arena;
 
     auto simplified = simplify_input("exp(a + b)", parse_arena, simplify_arena);
+    auto expected = simplify_input("exp(a) * exp(b)", expected_arena, expected_arena);
+    ASSERT_TRUE(simplified.is_ok()) << simplified.error().message;
+    ASSERT_TRUE(expected.is_ok()) << expected.error().message;
+
+    EXPECT_TRUE(structural_equal(simplified.value(), expected.value()));
+}
+
+TEST(SymbolicSimplifyTest, FoldsExponentialProductsWhenArgsSimplify) {
+    AstArena parse_arena;
+    AstArena simplify_arena;
+    AstArena expected_arena;
+
+    // exp(-1/x) * exp(2/x) -> exp(1/x) because sum of exponents (-1/x + 2/x = 1/x) simplifies to fewer terms
+    auto simplified = simplify_input("exp(-1/x) * exp(2/x)", parse_arena, simplify_arena);
+    auto expected = simplify_input("exp(1/x)", expected_arena, expected_arena);
+    ASSERT_TRUE(simplified.is_ok()) << simplified.error().message;
+    ASSERT_TRUE(expected.is_ok()) << expected.error().message;
+
+    EXPECT_TRUE(structural_equal(simplified.value(), expected.value()));
+}
+
+TEST(SymbolicSimplifyTest, PreventsFoldingExponentialProductsWithoutReduction) {
+    AstArena parse_arena;
+    AstArena simplify_arena;
+    AstArena expected_arena;
+
+    // exp(a) * exp(b) -> exp(a) * exp(b) because sum of exponents (a+b) does not simplify/reduce
+    auto simplified = simplify_input("exp(a) * exp(b)", parse_arena, simplify_arena);
     auto expected = simplify_input("exp(a) * exp(b)", expected_arena, expected_arena);
     ASSERT_TRUE(simplified.is_ok()) << simplified.error().message;
     ASSERT_TRUE(expected.is_ok()) << expected.error().message;
@@ -2043,6 +2099,128 @@ TEST(SymbolicCycleDetectionTest, DeepNestedExprTerminates) {
         acc = ctx.arena().make<Sum>(std::vector<ExprPtr>{acc, sym});
     }
     auto result = ctx.simplify(acc);
+    ASSERT_TRUE(result.is_ok()) << result.error().message;
+}
+
+TEST(TaskA20_CycleDetection, ContextMaxRecursionDepthConfigurable) {
+    CASContext ctx;
+    EXPECT_EQ(ctx.max_recursion_depth(), 256U);
+    ctx.set_max_recursion_depth(150U);
+    EXPECT_EQ(ctx.max_recursion_depth(), 150U);
+    ctx.set_max_recursion_depth(0U);
+    EXPECT_EQ(ctx.max_recursion_depth(), 1U);
+}
+
+TEST(TaskA20_CycleDetection, SimplifierRecursionDepthExceeded) {
+    // The simplifier budget is max_simplification_depth (L0-12 contract);
+    // max_recursion_depth governs the numeric evaluators.
+    CASContext ctx;
+    ctx.set_max_simplification_depth(10);
+    ExprPtr sym = ctx.arena().make<Symbol>(std::string("w"));
+    ExprPtr acc = sym;
+    for (int i = 0; i < 15; ++i) {
+        acc = ctx.arena().make<Unary>(UnaryOp::Neg, acc);
+    }
+    auto result = ctx.simplify(acc);
+    ASSERT_TRUE(result.is_error());
+    EXPECT_EQ(result.error().kind, CASErrorKind::Unimplemented);
+    ASSERT_TRUE(result.error().payload.has_value());
+    EXPECT_EQ(result.error().payload->reason, error::reason_codes::RECURSION_DEPTH_EXCEEDED);
+}
+
+TEST(TaskA20_CycleDetection, SimplifierCyclicExpressionDetected) {
+    CASContext ctx;
+    ExprPtr sym = ctx.arena().make<Symbol>(std::string("c"));
+    ExprPtr node = ctx.arena().make<Unary>(UnaryOp::Neg, sym);
+    // Mutate internal operand to introduce a pointer cycle: node -> node
+    const Unary* unary_ptr = expr_cast<Unary>(node);
+    const_cast<ExprPtr&>(unary_ptr->operand) = node;
+
+    auto result = ctx.simplify(node);
+    ASSERT_TRUE(result.is_error());
+    EXPECT_EQ(result.error().kind, CASErrorKind::Unimplemented);
+    ASSERT_TRUE(result.error().payload.has_value());
+    EXPECT_EQ(result.error().payload->reason, error::reason_codes::CYCLE_DETECTED);
+}
+
+TEST(TaskA20_CycleDetection, EvaluatorRecursionDepthExceeded) {
+    cas::numeric::NumericEvaluator evaluator({}, 5U);
+    AstArena arena;
+    ExprPtr val = arena.make<IntegerLit>(BigInt(1));
+    ExprPtr acc = val;
+    for (int i = 0; i < 10; ++i) {
+        acc = arena.make<Unary>(UnaryOp::Neg, acc);
+    }
+    auto result = evaluator.evaluate(acc);
+    ASSERT_TRUE(result.is_error());
+    EXPECT_EQ(result.error().kind, CASErrorKind::Unimplemented);
+    ASSERT_TRUE(result.error().payload.has_value());
+    EXPECT_EQ(result.error().payload->reason, error::reason_codes::RECURSION_DEPTH_EXCEEDED);
+}
+
+TEST(TaskA20_CycleDetection, EvaluatorCyclicExpressionDetected) {
+    cas::numeric::NumericEvaluator evaluator({});
+    AstArena arena;
+    ExprPtr val = arena.make<IntegerLit>(BigInt(1));
+    ExprPtr node = arena.make<Unary>(UnaryOp::Neg, val);
+    const Unary* unary_ptr = expr_cast<Unary>(node);
+    const_cast<ExprPtr&>(unary_ptr->operand) = node;
+
+    auto result = evaluator.evaluate(node);
+    ASSERT_TRUE(result.is_error());
+    EXPECT_EQ(result.error().kind, CASErrorKind::Unimplemented);
+    ASSERT_TRUE(result.error().payload.has_value());
+    EXPECT_EQ(result.error().payload->reason, error::reason_codes::CYCLE_DETECTED);
+}
+
+TEST(TaskA30_OpsBudget, DefaultBudgetEnabledAndConfigurable) {
+    CASContext ctx;
+    EXPECT_EQ(ctx.max_operation_ops(), 2'000'000ULL);
+    ctx.set_max_operation_ops(500U);
+    EXPECT_EQ(ctx.max_operation_ops(), 500U);
+    ctx.set_max_operation_ops(0U);  // 0 = disabled
+    EXPECT_EQ(ctx.max_operation_ops(), 0U);
+}
+
+TEST(TaskA30_OpsBudget, BudgetExceededIsStructuredUnimplemented) {
+    CASContext ctx;
+    ctx.set_max_operation_ops(50U);
+    // Wide flat sum: enough node visits to exceed the 50-op budget, but far
+    // below any depth limit — isolates the ops gate from the depth gate.
+    ExprPtr sym = ctx.arena().make<Symbol>(std::string("x"));
+    std::vector<ExprPtr> terms(512U, sym);
+    ExprPtr wide_sum = ctx.arena().make<Sum>(std::move(terms));
+    auto result = ctx.simplify(wide_sum);
+    ASSERT_TRUE(result.is_error());
+    EXPECT_EQ(result.error().kind, CASErrorKind::Unimplemented);
+    ASSERT_TRUE(result.error().payload.has_value());
+    EXPECT_EQ(result.error().payload->reason, error::reason_codes::OPS_BUDGET_EXCEEDED);
+    EXPECT_EQ(result.error().payload->ticket, "A30");
+}
+
+TEST(TaskA30_OpsBudget, ExplicitTimeoutDisablesDefaultBudget) {
+    // A30 contract: an explicit set_timeout() without an explicit
+    // set_max_operation_ops() hands the operation budget to the caller's
+    // wall-clock deadline (long factorisation/Galois workloads rely on this).
+    CASContext ctx;
+    ctx.set_timeout(std::chrono::minutes(10));
+    EXPECT_EQ(ctx.max_operation_ops(), 0U);
+}
+
+TEST(TaskA30_OpsBudget, ExplicitBudgetSurvivesSetTimeout) {
+    CASContext ctx;
+    ctx.set_max_operation_ops(123456U);
+    ctx.set_timeout(std::chrono::minutes(10));
+    EXPECT_EQ(ctx.max_operation_ops(), 123456U);
+}
+
+TEST(TaskA30_OpsBudget, HeavyOperationFitsDefaultBudget) {
+    // Regression guard for the calibration: a moderately heavy real operation
+    // must complete well within the default budget (heaviest measured op in
+    // the full suite is ~117k node visits; default is 2M).
+    CASContext ctx;
+    AstArena parse_arena;
+    auto result = simplify_input_with_context("(x+1)^8 - ((x+1)^4)^2", parse_arena, ctx);
     ASSERT_TRUE(result.is_ok()) << result.error().message;
 }
 
@@ -2506,6 +2684,8 @@ TEST(SymbolicRewriteTest, LnDecompositionOverDivisionIsOriented) {
 // and cancel inverse pairs without hardcoded special cases
 TEST(SymbolicNormalFormTest, L1_07_LnProductExpands) {
     CASContext ctx;
+    ctx.assumptions().assume_positive(Symbol{"x"});
+    ctx.assumptions().assume_positive(Symbol{"y"});
     auto e = parse_expr("ln(x * y)", ctx.arena());
     ASSERT_TRUE(e.is_ok());
     auto res = transcendental_normal_form(e.value(), ctx);
@@ -2523,8 +2703,10 @@ TEST(SymbolicNormalFormTest, L1_07_LnProductExpands) {
     EXPECT_EQ(ln_count, 2) << "ln(x*y) must expand to ln(x)+ln(y)";
 }
 
-TEST(SymbolicNormalFormTest, L1_07_LnDivisionExpands) {
+TEST(SymbolicNormalFormTest, L1_07_LnQuotientExpands) {
     CASContext ctx;
+    ctx.assumptions().assume_positive(Symbol{"x"});
+    ctx.assumptions().assume_positive(Symbol{"y"});
     auto e = parse_expr("ln(x / y)", ctx.arena());
     ASSERT_TRUE(e.is_ok());
     auto res = transcendental_normal_form(e.value(), ctx);

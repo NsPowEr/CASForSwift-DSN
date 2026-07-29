@@ -34,6 +34,34 @@ TEST(AstArenaTest, HashConsingInternsIdenticalNodes) {
     EXPECT_TRUE(is_equal(sum1, sum2));
 }
 
+TEST(AstArenaTest, DynamicShardingConfigurable) {
+    AstArena arena(32);
+    EXPECT_EQ(arena.num_shards(), 32U);
+
+    const auto x1 = arena.make<Symbol>(std::string("x"));
+    const auto x2 = arena.make<Symbol>(std::string("x"));
+    EXPECT_EQ(x1.get(), x2.get());
+
+    AstArena default_arena;
+    EXPECT_GT(default_arena.num_shards(), 0U);
+    // Should be power of 2
+    EXPECT_EQ(default_arena.num_shards() & (default_arena.num_shards() - 1U), 0U);
+}
+
+TEST(AstArenaTest, ReconfigureShardsEmpty) {
+    AstArena arena(8);
+    EXPECT_EQ(arena.num_shards(), 8U);
+
+    arena.configure_shards(64);
+    EXPECT_EQ(arena.num_shards(), 64U);
+
+    // After allocation, configure_shards should do nothing
+    const auto x = arena.make<Symbol>(std::string("x"));
+    EXPECT_TRUE(x);
+    arena.configure_shards(128);
+    EXPECT_EQ(arena.num_shards(), 64U);
+}
+
 TEST(AstModelTest, DistinguishesExactAndDecimalLiterals) {
     AstArena arena;
     const auto exact = arena.make<IntegerLit>(BigInt(314));

@@ -60,13 +60,51 @@ void collect_substitution_candidates(
     }
 }
 
-// General expression substituter: replaces occurrences of 'pattern' with 'replacement'.
+// Recognizes `arg` as k*w for a nonzero integer k (any sign), or w itself
+// (k=1), via structural comparison against w (not name-based like the
+// Weierstrass multi-angle helper — w here is an arbitrary expression, not
+// necessarily a bare variable).
+[[nodiscard]] std::optional<BigInt> integer_multiple_of_expr(ExprPtr arg, ExprPtr w) {
+    if (!arg || !w) return std::nullopt;
+    if (structural_equal(arg, w)) return BigInt(1);
+    if (const auto* un = expr_cast<Unary>(arg)) {
+        if (un->op != UnaryOp::Neg) return std::nullopt;
+        auto inner = integer_multiple_of_expr(un->operand, w);
+        if (!inner.has_value()) return std::nullopt;
+        return -(*inner);
+    }
+    if (const auto* prod = expr_cast<Product>(arg)) {
+        if (prod->factors.size() != 2U) return std::nullopt;
+        const auto* int_a = expr_cast<IntegerLit>(prod->factors[0]);
+        const auto* int_b = expr_cast<IntegerLit>(prod->factors[1]);
+        if (int_a && structural_equal(prod->factors[1], w) && !int_a->value.is_zero()) return int_a->value;
+        if (int_b && structural_equal(prod->factors[0], w) && !int_b->value.is_zero()) return int_b->value;
+        return std::nullopt;
+    }
+    return std::nullopt;
+}
+
+// General expression substituter: replaces occurrences of 'pattern' with
+// 'replacement'. When pattern is exp(w), also recognizes exp(k*w) for any
+// nonzero integer k (including exp(-w)) as replacement^k — exp(-x) is
+// algebraically 1/exp(x), but the two are different ExprPtr shapes, so a
+// literal structural_equal match alone would miss it (e.g. candidate
+// g=exp(x) in 1/(exp(x)+exp(-x)): without this, exp(-x) never becomes 1/u
+// and the candidate looks like it still depends on x).
 ExprPtr replace_expr(ExprPtr expr, ExprPtr pattern, ExprPtr replacement, AstArena& arena) {
     if (structural_equal(expr, pattern)) {
         return replacement;
     }
 
     if (const auto* call = expr_cast<FuncCall>(expr)) {
+        if (call->func_id == BuiltinOp::Exp && call->args.size() == 1U) {
+            if (const auto* pattern_call = expr_cast<FuncCall>(pattern);
+                pattern_call && pattern_call->func_id == BuiltinOp::Exp && pattern_call->args.size() == 1U) {
+                if (auto k = integer_multiple_of_expr(call->args[0], pattern_call->args[0]); k.has_value()) {
+                    return arena.make<Binary>(BinaryOp::Pow, replacement, arena.make<IntegerLit>(*k));
+                }
+            }
+        }
         std::vector<ExprPtr> args;
         args.reserve(call->args.size());
         for (auto arg : call->args) args.push_back(replace_expr(arg, pattern, replacement, arena));
@@ -134,7 +172,25 @@ Result<std::optional<ExprPtr>> integrate_by_substitution(
         ExprPtr f_u_raw = replace_expr(ratio_raw, g, u_expr, ctx.arena());
         auto f_u = ctx.simplify(f_u_raw);
         if (f_u.is_error()) continue;
-        
+
+        // Fixpoint pass: algebraic simplification of the raw substitution
+        // can surface *new* literal occurrences of g that were not visible
+        // to the first replace_expr pass (e.g. for x^3*cos(x^2), g=x^2:
+        // ratio_raw = x^3*cos(x^2)/(2x) only reduces x^3/(2x) -> x^2/2
+        // *during* simplify, after replace_expr already ran, so the
+        // emergent x^2 factor is missed and the candidate looks like it
+        // still depends on x). Re-run replace+simplify while a candidate
+        // still depends on var and each pass keeps changing the result;
+        // bounded so a genuinely non-closing candidate cannot loop
+        // unboundedly (a converging fixpoint stabilizes in 1-2 passes).
+        for (unsigned int pass = 0; pass < ctx.max_substitution_fixpoint_passes()
+             && integrate_detail::depends_on(f_u.value(), var); ++pass) {
+            ExprPtr next_raw = replace_expr(f_u.value(), g, u_expr, ctx.arena());
+            auto next = ctx.simplify(next_raw);
+            if (next.is_error() || structural_equal(next.value(), f_u.value())) break;
+            f_u = next;
+        }
+
         // If f_u no longer depends on x, then integrand = f(g(x)) * g'(x).
         if (!integrate_detail::depends_on(f_u.value(), var)) {
             auto primitive_u = integrate(f_u.value(), u_sym, ctx);
@@ -142,15 +198,27 @@ Result<std::optional<ExprPtr>> integrate_by_substitution(
                 // Back-substitute u -> g(x) to get the result in terms of x.
                 auto result = replace_expr(primitive_u.value(), u_expr, g, ctx.arena());
                 
-                // Mandatory Verification: diff(∫f dx, x) == f
+                // Mandatory Verification: diff(∫f dx, x) == f. Compare via
+                // together(D(result) - integrand) simplifying to the zero
+                // literal, not raw structural_equal on two independently
+                // simplified forms: simplify is not confluent on reciprocal
+                // shapes (e.g. Pow(Product(x,log(x)),-1) vs
+                // Product(Pow(x,-1),Pow(log(x),-1)) for the same value), so a
+                // structurally-different-but-equal derivative would be
+                // rejected and the correct substitution discarded. Same
+                // zero-difference idiom as integrate_by_parts' verification.
                 auto verification = diff(result, var, 1U, ctx);
                 if (verification.is_ok()) {
-                     auto s_diff = ctx.simplify(verification.value());
-                     auto s_integrand = ctx.simplify(integrand);
-                     if (s_diff.is_ok() && s_integrand.is_ok() &&
-                         structural_equal(s_diff.value(), s_integrand.value())) {
-                         return ok(std::make_optional(result));
-                     }
+                    ExprPtr delta = ctx.arena().make<Binary>(BinaryOp::Sub, verification.value(), integrand);
+                    auto delta_tog = algebra::together(delta, ctx);
+                    ExprPtr delta_for_simp = delta_tog.is_ok() ? delta_tog.value() : delta;
+                    auto delta_simp = ctx.simplify(delta_for_simp);
+                    bool is_zero = delta_simp.is_ok()
+                        && expr_is<IntegerLit>(delta_simp.value())
+                        && expr_ref<IntegerLit>(delta_simp.value()).value.is_zero();
+                    if (is_zero) {
+                        return ok(std::make_optional(result));
+                    }
                 }
             }
         }
@@ -161,7 +229,7 @@ Result<std::optional<ExprPtr>> integrate_by_substitution(
 
 namespace integrate_detail {
 
-Result<ExprPtr> Integrator::try_u_substitution_for_product(const Product& product, const Symbol& var) {
+Result<ExprPtr> Integrator::try_u_substitution_for_product_impl(const Product& product, const Symbol& var) {
     // Attempt general u-substitution for products.
     auto res = integrate_by_substitution(context_.arena().make<Product>(product), var, context_);
     if (res.is_ok() && res.value().has_value()) {
@@ -171,7 +239,7 @@ Result<ExprPtr> Integrator::try_u_substitution_for_product(const Product& produc
     return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented, "No supported u-substitution pattern found"));
 }
 
-Result<ExprPtr> Integrator::integrate_via_partial_fractions(ExprPtr expr, const Symbol& var) {
+Result<ExprPtr> Integrator::integrate_via_partial_fractions_impl(ExprPtr expr, const Symbol& var) {
     auto terms = algebra::partial_fractions(expr, var, context_);
     if (terms.is_error()) {
         return fail<ExprPtr>(terms.error());

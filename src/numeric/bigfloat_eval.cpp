@@ -6,6 +6,7 @@
 #include "cas/error_helpers.hpp"
 #include <cmath>
 #include <string>
+#include <unordered_set>
 
 namespace cas::numeric {
 
@@ -21,13 +22,43 @@ namespace {
 // Follows the same structure as NumericEvaluator but uses BigFloat throughout.
 class BigFloatEvaluator {
 public:
-    explicit BigFloatEvaluator(mpfr_prec_t prec, const NumericEnv& env)
-        : prec_(prec), env_(env) {}
+    explicit BigFloatEvaluator(mpfr_prec_t prec, const NumericEnv& env, std::size_t max_recursion_depth = 256U)
+        : prec_(prec), env_(env), max_recursion_depth_(max_recursion_depth) {}
 
     [[nodiscard]] Result<BigFloat> evaluate(ExprPtr expr) {
         if (!expr)
             return fail<BigFloat>(make_error(CASErrorKind::InvalidArgument,
                 "Cannot evaluate null expression"));
+
+        if (current_depth_ >= max_recursion_depth_) {
+            return make_unimplemented<BigFloat>(
+                "numeric", "BigFloatEvaluator::evaluate",
+                "expression recursion depth",
+                error::reason_codes::RECURSION_DEPTH_EXCEEDED,
+                "Increase max_recursion_depth",
+                "A20",
+                "BigFloat evaluation recursion depth limit exceeded");
+        }
+
+        auto [it, inserted] = active_nodes_.insert(expr);
+        if (!inserted) {
+            return make_unimplemented<BigFloat>(
+                "numeric", "BigFloatEvaluator::evaluate",
+                "expression cycle",
+                error::reason_codes::CYCLE_DETECTED,
+                "Ensure expression AST has no cyclic references",
+                "A20",
+                "Cyclic evaluation detected during BigFloat evaluation");
+        }
+
+        struct ScopeGuard {
+            std::size_t& depth;
+            std::unordered_set<ExprPtr, ExprHash>& nodes;
+            ExprPtr expr;
+            ScopeGuard(std::size_t& d, std::unordered_set<ExprPtr, ExprHash>& n, ExprPtr e)
+                : depth(d), nodes(n), expr(e) { ++depth; }
+            ~ScopeGuard() { --depth; nodes.erase(expr); }
+        } scope_guard(current_depth_, active_nodes_, expr);
 
         return visit_expr(expr,
             [this](const auto& node) -> Result<BigFloat> {
@@ -212,20 +243,23 @@ public:
 private:
     mpfr_prec_t prec_;
     const NumericEnv& env_;
+    std::size_t max_recursion_depth_{256U};
+    std::size_t current_depth_{0U};
+    std::unordered_set<ExprPtr, ExprHash> active_nodes_;
 };
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
 Result<BigFloat> eval_bigfloat(ExprPtr expr, mpfr_prec_t prec_bits,
-    const NumericEnv& env) {
-    return BigFloatEvaluator(prec_bits, env).evaluate(expr);
+    const NumericEnv& env, std::size_t max_recursion_depth = 256U) {
+    return BigFloatEvaluator(prec_bits, env, max_recursion_depth).evaluate(expr);
 }
 
 Result<std::string> eval_mpfr(ExprPtr expr, unsigned int decimal_digits,
     const NumericEnv& env) {
     if (decimal_digits == 0) decimal_digits = 15;
     const mpfr_prec_t bits = decimal_digits_to_bits(decimal_digits);
-    auto result = eval_bigfloat(expr, bits, env);
+    auto result = eval_bigfloat(expr, bits, env, 256U);
     if (result.is_error()) return fail<std::string>(result.error());
     return ok(result.value().to_string(static_cast<int>(decimal_digits)));
 }
@@ -233,7 +267,12 @@ Result<std::string> eval_mpfr(ExprPtr expr, unsigned int decimal_digits,
 // L3-03 overload context-aware: applica precision dal CASContext.
 Result<std::string> eval_mpfr(ExprPtr expr, symbolic::CASContext& ctx,
     const NumericEnv& env) {
-    return eval_mpfr(expr, ctx.numeric_precision_digits(), env);
+    unsigned int decimal_digits = ctx.numeric_precision_digits();
+    if (decimal_digits == 0) decimal_digits = 15;
+    const mpfr_prec_t bits = decimal_digits_to_bits(decimal_digits);
+    auto result = eval_bigfloat(expr, bits, env, ctx.max_recursion_depth());
+    if (result.is_error()) return fail<std::string>(result.error());
+    return ok(result.value().to_string(static_cast<int>(decimal_digits)));
 }
 
 } // namespace cas::numeric

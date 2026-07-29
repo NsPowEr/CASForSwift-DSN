@@ -90,4 +90,30 @@ TEST_F(LimitSmokeTest, RemovableSingularityCancellation) {
     EXPECT_EQ(lit->value, BigInt(2));
 }
 
+// Helper: classify a limit result as -inf regardless of canonical form
+// (Unary(Neg, Infinity) or Constant(NegInfinity)).
+static bool is_negative_infinity(ExprPtr v) {
+    if (const auto* c = expr_cast<Constant>(v))
+        return c->value == MathConstant::NegInfinity;
+    if (const auto* u = expr_cast<Unary>(v); u && u->op == UnaryOp::Neg)
+        if (const auto* c = expr_cast<Constant>(u->operand))
+            return c->value == MathConstant::Infinity;
+    return false;
+}
+
+// A signed-pole regression: tan(x)/(x-pi/2) ~ -1/(x-pi/2)^2 near pi/2, so the
+// two-sided limit is -inf (the pole has even order, same sign on both sides).
+// The engine previously returned an unsigned +inf for any nonzero/0 pole; the
+// general reciprocal-based sign analysis must recover the -inf.
+TEST_F(LimitSmokeTest, TanPoleSignedInfinityAtHalfPi) {
+    auto pt = parse("pi/2");
+    auto e = parse("tan(x) / (x - pi/2)");
+    auto r = calculus::limit(e, x, pt, LimitDirection::Both, ctx);
+    ASSERT_TRUE(r.is_ok()) << (r.is_ok() ? "" : r.error().message);
+    auto s = ctx.simplify(r.value());
+    ASSERT_TRUE(s.is_ok());
+    EXPECT_TRUE(is_negative_infinity(s.value()))
+        << "expected -inf for tan(x)/(x-pi/2) at pi/2";
+}
+
 }  // namespace

@@ -1,0 +1,371 @@
+// L2-01: Frobenius series solution - Series and recurrence logic.
+#include "ode_solver_frobenius_internal.hpp"
+
+#include "cas/algebra.hpp"
+#include "cas/ast.hpp"
+#include "cas/bigint.hpp"
+#include "cas/calculus.hpp"
+#include "cas/error.hpp"
+#include "cas/error_helpers.hpp"
+#include "cas/result.hpp"
+#include "cas/symbolic.hpp"
+
+#include <vector>
+#include <string>
+
+namespace cas::calculus {
+
+// Recurrence:
+//   c_0 = 1
+//   c_n = -[ sum_{k=1..n} ( (n-k+r) * p_k + q_k ) * c_{n-k} ] / I(n+r)
+Result<std::vector<ExprPtr>> compute_recurrence(
+    ExprPtr root_r,
+    const std::vector<ExprPtr>& p_coeffs,
+    const std::vector<ExprPtr>& q_coeffs,
+    ExprPtr p0,
+    ExprPtr q0,
+    unsigned int num_terms,
+    symbolic::CASContext& ctx) {
+    AstArena& arena = ctx.arena();
+    std::vector<ExprPtr> c;
+    c.reserve(num_terms + 1U);
+    c.push_back(arena.make<IntegerLit>(BigInt(1)));
+
+    for (unsigned int n = 1U; n <= num_terms; ++n) {
+        std::vector<ExprPtr> rhs_terms;
+        rhs_terms.reserve(n);
+        for (unsigned int k = 1U; k <= n; ++k) {
+            if (k >= p_coeffs.size() || k >= q_coeffs.size()) break;
+            ExprPtr p_k = p_coeffs[k];
+            ExprPtr q_k = q_coeffs[k];
+            ExprPtr n_minus_k_plus_r = arena.make<Sum>(std::vector<ExprPtr>{
+                make_int(arena, static_cast<long long>(n - k)),
+                root_r,
+            });
+            ExprPtr bracket = arena.make<Sum>(std::vector<ExprPtr>{
+                arena.make<Binary>(BinaryOp::Mul, n_minus_k_plus_r, p_k),
+                q_k,
+            });
+            ExprPtr term = arena.make<Binary>(BinaryOp::Mul, bracket, c[n - k]);
+            rhs_terms.push_back(term);
+        }
+        ExprPtr rhs_sum = rhs_terms.empty()
+            ? make_int(arena, 0)
+            : arena.make<Sum>(std::move(rhs_terms));
+        auto rhs_simp = ctx.simplify(rhs_sum);
+        if (rhs_simp.is_error()) return fail<std::vector<ExprPtr>>(rhs_simp.error());
+
+        // Denominator: I(n + r)
+        ExprPtr n_plus_r = arena.make<Sum>(std::vector<ExprPtr>{
+            make_int(arena, static_cast<long long>(n)),
+            root_r,
+        });
+        auto denom_res = indicial_value(p0, q0, n_plus_r, ctx);
+        if (denom_res.is_error()) return fail<std::vector<ExprPtr>>(denom_res.error());
+        ExprPtr denom = denom_res.value();
+
+        if (is_literal_zero(denom)) {
+            if (is_literal_zero(rhs_simp.value())) {
+                // Free parameter — pick 0 by convention.
+                c.push_back(make_int(arena, 0));
+                continue;
+            }
+            // Indicial denominator vanishes with non-zero RHS: no plain
+            // Frobenius series with this root exists — the logarithmic
+            // branch is required.  Never emit a bogus series (REGOLA ZERO).
+            return make_unimplemented<std::vector<ExprPtr>>(UnimplementedInfo{
+                .module      = "calculus",
+                .function    = "compute_recurrence",
+                .input_shape = "Frobenius resonance at n=" + std::to_string(n) +
+                               " with non-zero RHS",
+                .reason      = cas::error::reason_codes::SERIES_GENERAL,
+                .suggestion  = "Route this root through the logarithmic branch "
+                               "(build_log_branch)",
+                .ticket      = "A5"
+            });
+        }
+
+        ExprPtr numerator = arena.make<Unary>(UnaryOp::Neg, rhs_simp.value());
+        ExprPtr c_n_raw = arena.make<Binary>(BinaryOp::Div, numerator, denom);
+        auto c_n_simp = ctx.simplify(c_n_raw);
+        if (c_n_simp.is_error()) return fail<std::vector<ExprPtr>>(c_n_simp.error());
+        c.push_back(c_n_simp.value());
+    }
+    return ok(c);
+}
+
+// Logarithmic Frobenius branch — Coddington-Levinson §4.8.
+Result<ExprPtr> build_log_branch(
+    ExprPtr r1,
+    ExprPtr r2,
+    unsigned int N,
+    const std::vector<ExprPtr>& a_coeffs,  // y_1 series coefficients
+    const std::vector<ExprPtr>& p_coeffs,
+    const std::vector<ExprPtr>& q_coeffs,
+    ExprPtr p0,
+    ExprPtr q0,
+    unsigned int num_terms,
+    ExprPtr y_1_series,
+    const Symbol& x,
+    symbolic::CASContext& ctx) {
+    AstArena& arena = ctx.arena();
+    if (num_terms < N) {
+        return fail<ExprPtr>(make_error(CASErrorKind::Unimplemented,
+            "Frobenius log branch: num_terms (" + std::to_string(num_terms) +
+            ") smaller than the integer resonance gap N=" + std::to_string(N) +
+            "; cannot resolve the c·ln(x) coupling.  Increase the series order."));
+    }
+
+    auto coef_term = [&](ExprPtr root_r, unsigned int n, unsigned int k,
+                          ExprPtr b_n_minus_k) -> ExprPtr {
+        ExprPtr p_k = p_coeffs[k];
+        ExprPtr q_k = q_coeffs[k];
+        ExprPtr r_plus_nk = arena.make<Sum>(std::vector<ExprPtr>{
+            make_int(arena, static_cast<long long>(n - k)),
+            root_r});
+        ExprPtr bracket = arena.make<Sum>(std::vector<ExprPtr>{
+            arena.make<Binary>(BinaryOp::Mul, r_plus_nk, p_k),
+            q_k});
+        return arena.make<Binary>(BinaryOp::Mul, bracket, b_n_minus_k);
+    };
+
+    // Pre-compute h_m for m = 0 .. num_terms - N.
+    std::vector<ExprPtr> h(num_terms - N + 1U);
+    for (unsigned int m = 0U; m + N <= num_terms && m < a_coeffs.size(); ++m) {
+        // (2(r_1 + m) + p_0 - 1) · a_m
+        ExprPtr two_r1_m = arena.make<Binary>(BinaryOp::Mul, make_int(arena, 2),
+            arena.make<Sum>(std::vector<ExprPtr>{r1, make_int(arena, static_cast<long long>(m))}));
+        ExprPtr lead_factor = arena.make<Sum>(std::vector<ExprPtr>{
+            two_r1_m, p0, make_int(arena, -1)});
+        ExprPtr lead = arena.make<Binary>(BinaryOp::Mul, lead_factor, a_coeffs[m]);
+        // Σ_{k=1}^m p_k · a_{m-k}
+        std::vector<ExprPtr> cross_terms;
+        cross_terms.push_back(lead);
+        for (unsigned int k = 1U; k <= m && k < p_coeffs.size(); ++k) {
+            cross_terms.push_back(arena.make<Binary>(BinaryOp::Mul,
+                p_coeffs[k], a_coeffs[m - k]));
+        }
+        ExprPtr h_m = (cross_terms.size() == 1U) ? cross_terms[0]
+            : arena.make<Sum>(std::move(cross_terms));
+        auto hs = ctx.simplify(h_m);
+        if (hs.is_error()) return hs;
+        h[m] = hs.value();
+    }
+
+    // Recurrence for b_n with c determined at n = N.
+    std::vector<ExprPtr> b(num_terms + 1U);
+    b[0] = make_int(arena, 1);
+    ExprPtr c_log = make_int(arena, 0);  // updated at n = N
+    bool c_log_resolved = false;
+
+    auto build_S_n = [&](unsigned int n) -> Result<ExprPtr> {
+        std::vector<ExprPtr> terms;
+        for (unsigned int k = 1U; k <= n; ++k) {
+            if (k >= p_coeffs.size() || k >= q_coeffs.size()) break;
+            terms.push_back(coef_term(r2, n, k, b[n - k]));
+        }
+        ExprPtr S = terms.empty() ? make_int(arena, 0)
+            : (terms.size() == 1U ? terms[0]
+               : arena.make<Sum>(std::move(terms)));
+        return ctx.simplify(S);
+    };
+
+    for (unsigned int n = 1U; n <= num_terms; ++n) {
+        auto S_res = build_S_n(n);
+        if (S_res.is_error()) return S_res;
+        ExprPtr S_n = S_res.value();
+
+        if (n == N) {
+            // c · h_0 = -S_N  →  c = -S_N / h_0,  h_0 = N (≠ 0).
+            ExprPtr c_raw = arena.make<Binary>(BinaryOp::Div,
+                arena.make<Unary>(UnaryOp::Neg, S_n), h[0]);
+            auto cs = ctx.simplify(c_raw);
+            if (cs.is_error()) return cs;
+            c_log = cs.value();
+            c_log_resolved = true;
+            b[n] = make_int(arena, 0);  // free parameter
+            continue;
+        }
+
+        // RHS contribution from c·h_{n-N} when n > N.
+        ExprPtr rhs_correction = make_int(arena, 0);
+        if (c_log_resolved && n > N) {
+            unsigned int m = n - N;
+            if (m < h.size()) {
+                rhs_correction = arena.make<Binary>(BinaryOp::Mul, c_log, h[m]);
+            }
+        }
+
+        ExprPtr S_plus_corr = arena.make<Binary>(BinaryOp::Add, S_n, rhs_correction);
+        auto S_total = ctx.simplify(S_plus_corr);
+        if (S_total.is_error()) return S_total;
+
+        ExprPtr n_plus_r2 = arena.make<Sum>(std::vector<ExprPtr>{
+            make_int(arena, static_cast<long long>(n)), r2});
+        auto denom_res = indicial_value(p0, q0, n_plus_r2, ctx);
+        if (denom_res.is_error()) return denom_res;
+        ExprPtr denom = denom_res.value();
+        if (is_literal_zero(denom)) {
+            if (is_literal_zero(S_total.value())) {
+                b[n] = make_int(arena, 0);  // genuine free parameter
+                continue;
+            }
+            // GUARD DIFENSIVO — IRRAGGIUNGIBILE PER IL 2° ORDINE (prova).
+            // Questo è un solver Frobenius di 2° ordine: l'indiciale è la
+            // quadratica I(ρ)=ρ²+(p0−1)ρ+q0 con esattamente due radici, e il
+            // log-branch è invocato SOLO quando differiscono per un intero
+            // positivo N (r_large = r_small + N, `integer_gap`).  Qui
+            // r2 = r_small, quindi il denominatore della ricorrenza è
+            //   denom(n) = I(n+r2) = (n+r2−r_large)(n+r2−r_small) = (n−N)·n,
+            // che si annulla SOLO per n=0 e n=N.  n=N è già gestito sopra
+            // (`if (n == N)`, dove c·h_0 fissa il coefficiente del log) e n=0 è
+            // il termine di testa: per ogni n∈{1,…,num_terms}\{N} vale
+            // denom≠0 (letterale, radici razionali quando il gap è intero).
+            // Una "risonanza secondaria" a n>N richiederebbe un TERZO zero
+            // indiciale — impossibile per una quadratica.  L'ansatz a singolo
+            // log è dunque COMPLETO per il 2° ordine (teoria classica di
+            // Frobenius: due soluzioni indipendenti, al più una logaritmica).
+            // Empiricamente non scatta mai (test Bessel₁ gap N=2 con log reale
+            // + Euler gap N=5 degenere).  Il guard resta come rete di
+            // sicurezza sound: diventerebbe raggiungibile solo estendendo il
+            // solver a ODE di ordine ≥3 (indiciale di grado ≥3, più livelli di
+            // risonanza) — fuori scope A5.  Ledger/tasklist: A5 chiuso come
+            // non-gap provato.  Mai silent-wrong: se mai raggiunto, Unimplemented.
+            return make_unimplemented<ExprPtr>(UnimplementedInfo{
+                .module      = "calculus",
+                .function    = "build_log_branch",
+                .input_shape = "Frobenius secondary resonance at n=" +
+                               std::to_string(n) + " with non-zero forcing "
+                               "(unreachable for 2nd-order indicial)",
+                .reason      = cas::error::reason_codes::SERIES_GENERAL,
+                .suggestion  = "Extended log-power construction — only for "
+                               "order >= 3 ODEs (out of A5 scope)",
+                .ticket      = "A5"
+            });
+        }
+        ExprPtr b_n_raw = arena.make<Binary>(BinaryOp::Div,
+            arena.make<Unary>(UnaryOp::Neg, S_total.value()), denom);
+        auto b_n_simp = ctx.simplify(b_n_raw);
+        if (b_n_simp.is_error()) return b_n_simp;
+        b[n] = b_n_simp.value();
+    }
+
+    // Assemble y_2 = c · ln(x) · y_1  +  x^{r_2} · Σ b_n x^n.
+    ExprPtr x_sym = arena.make<Symbol>(x.name);
+    std::vector<ExprPtr> series_terms;
+    series_terms.push_back(b[0]);
+    for (unsigned int n = 1U; n <= num_terms; ++n) {
+        if (is_literal_zero(b[n])) continue;
+        ExprPtr xn = (n == 1U) ? x_sym
+            : arena.make<Binary>(BinaryOp::Pow, x_sym,
+                make_int(arena, static_cast<long long>(n)));
+        series_terms.push_back(arena.make<Binary>(BinaryOp::Mul, b[n], xn));
+    }
+    ExprPtr inner = (series_terms.size() == 1U) ? series_terms[0]
+        : arena.make<Sum>(std::move(series_terms));
+    auto inner_simp = ctx.simplify(inner);
+    if (inner_simp.is_error()) return inner_simp;
+    ExprPtr power_part = arena.make<Binary>(BinaryOp::Mul,
+        make_x_to_r(r2, x, arena), inner_simp.value());
+
+    ExprPtr ln_x = arena.make<FuncCall>(BuiltinOp::Ln,
+        std::vector<ExprPtr>{x_sym});
+    ExprPtr log_part = arena.make<Binary>(BinaryOp::Mul, c_log,
+        arena.make<Binary>(BinaryOp::Mul, ln_x, y_1_series));
+    ExprPtr y_2 = arena.make<Binary>(BinaryOp::Add, log_part, power_part);
+    return ctx.simplify(y_2);
+}
+
+// Double indicial root r1 (gap N = 0): the second solution always carries a
+// logarithm.  Parameter-derivative construction (Frobenius; Coddington-Levinson
+// §4.8, repeated-root case):
+//   y(r,x) = x^r Σ_{n≥0} a_n(r) x^n,   a_0 ≡ 1
+//   y_1 = y(r1,x)
+//   y_2 = ∂y/∂r |_{r=r1} = ln(x)·y_1 + x^{r1} Σ_{n≥1} a_n'(r1) x^n.
+// The a_n(r) are produced by running the standard recurrence with the indicial
+// root kept as a *free symbol*; then b_n := d/dr a_n(r) |_{r=r1}.  Since the
+// indicial polynomial has a double root at r1, I(n+r1) = n² ≠ 0 for n ≥ 1, so
+// every substitution r→r1 is well defined.
+Result<ExprPtr> build_double_root_log_branch(
+    ExprPtr r1,
+    const std::vector<ExprPtr>& p_coeffs,
+    const std::vector<ExprPtr>& q_coeffs,
+    ExprPtr p0,
+    ExprPtr q0,
+    unsigned int num_terms,
+    ExprPtr y_1_series,
+    const Symbol& x,
+    symbolic::CASContext& ctx) {
+    AstArena& arena = ctx.arena();
+
+    // Recurrence with the indicial root as a free symbol → a_n(ρ).
+    Symbol rho = ctx.make_fresh_symbol("r");
+    ExprPtr rho_expr = arena.make<Symbol>(rho);
+    auto a_sym_res = compute_recurrence(rho_expr, p_coeffs, q_coeffs, p0, q0, num_terms, ctx);
+    if (a_sym_res.is_error()) return fail<ExprPtr>(a_sym_res.error());
+    const std::vector<ExprPtr>& a_rho = a_sym_res.value();
+
+    // Power-series part x^{r1} Σ_{n≥1} b_n x^n with b_n = d/dr a_n(r)|_{r=r1}.
+    // b_0 = 0 because a_0 ≡ 1 (constant in r).
+    ExprPtr x_sym = arena.make<Symbol>(x.name);
+    std::vector<ExprPtr> series_terms;
+    series_terms.push_back(make_int(arena, 0));
+    for (unsigned int n = 1U; n < a_rho.size(); ++n) {
+        auto da = diff(a_rho[n], rho, 1, ctx);
+        if (da.is_error()) return fail<ExprPtr>(da.error());
+        auto da_sub = ctx.substitute(da.value(), rho, r1);
+        if (da_sub.is_error()) return fail<ExprPtr>(da_sub.error());
+        auto b_n = ctx.simplify(da_sub.value());
+        if (b_n.is_error()) return fail<ExprPtr>(b_n.error());
+        if (is_literal_zero(b_n.value())) continue;
+        ExprPtr xn = (n == 1U) ? x_sym
+            : arena.make<Binary>(BinaryOp::Pow, x_sym,
+                make_int(arena, static_cast<long long>(n)));
+        series_terms.push_back(arena.make<Binary>(BinaryOp::Mul, b_n.value(), xn));
+    }
+    ExprPtr inner = (series_terms.size() == 1U) ? series_terms[0]
+        : arena.make<Sum>(std::move(series_terms));
+    auto inner_simp = ctx.simplify(inner);
+    if (inner_simp.is_error()) return inner_simp;
+    ExprPtr power_part = arena.make<Binary>(BinaryOp::Mul,
+        make_x_to_r(r1, x, arena), inner_simp.value());
+
+    // y_2 = ln(x)·y_1 + power_part.
+    ExprPtr ln_x = arena.make<FuncCall>(BuiltinOp::Ln,
+        std::vector<ExprPtr>{x_sym});
+    ExprPtr log_part = arena.make<Binary>(BinaryOp::Mul, ln_x, y_1_series);
+    ExprPtr y_2 = arena.make<Binary>(BinaryOp::Add, log_part, power_part);
+    return ctx.simplify(y_2);
+}
+
+// Build the Frobenius series y_r(x) = x^r * (1 + c_1 x + c_2 x^2 + ... )
+Result<ExprPtr> build_series(
+    ExprPtr root_r,
+    const std::vector<ExprPtr>& c,
+    const Symbol& x,
+    symbolic::CASContext& ctx) {
+    AstArena& arena = ctx.arena();
+    ExprPtr x_sym = arena.make<Symbol>(x.name);
+
+    std::vector<ExprPtr> inner_terms;
+    inner_terms.reserve(c.size());
+    inner_terms.push_back(c[0]);  // by construction c_0 = 1
+    for (std::size_t n = 1; n < c.size(); ++n) {
+        if (is_literal_zero(c[n])) continue;
+        ExprPtr x_power = (n == 1)
+            ? x_sym
+            : arena.make<Binary>(BinaryOp::Pow, x_sym, make_int(arena, static_cast<long long>(n)));
+        inner_terms.push_back(arena.make<Binary>(BinaryOp::Mul, c[n], x_power));
+    }
+    ExprPtr inner = (inner_terms.size() == 1U)
+        ? inner_terms[0]
+        : arena.make<Sum>(std::move(inner_terms));
+    auto inner_simp = ctx.simplify(inner);
+    if (inner_simp.is_error()) return fail<ExprPtr>(inner_simp.error());
+
+    ExprPtr xr = make_x_to_r(root_r, x, arena);
+    ExprPtr series = arena.make<Binary>(BinaryOp::Mul, xr, inner_simp.value());
+    return ctx.simplify(series);
+}
+
+}  // namespace cas::calculus

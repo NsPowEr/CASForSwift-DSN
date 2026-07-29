@@ -4,6 +4,8 @@
 
 #include "simplify_impl.hpp"
 
+#include <utility>
+
 namespace cas::symbolic::detail {
 
 Result<ExprPtr> Simplifier::simplify_funcall_hyper_elliptic(
@@ -45,9 +47,91 @@ Result<ExprPtr> Simplifier::simplify_funcall_hyper_elliptic(
             return simplify_expr(arena_.make<FuncCall>(BuiltinOp::Exp,
                 std::vector<ExprPtr>{args[2]}));
         }
+        auto is_int_val = [](ExprPtr e, long long v) {
+            const auto* il = expr_cast<IntegerLit>(e);
+            return il != nullptr && il->value == BigInt(v);
+        };
+        auto is_rat_val = [](ExprPtr e, long long num, long long den) {
+            const auto* rl = expr_cast<RationalLit>(e);
+            return rl != nullptr && rl->numerator == BigInt(num)
+                && rl->denominator == BigInt(den);
+        };
+        // 1F1(1;2;z) = (e^z - 1)/z (Kummer, DLMF 13.6.1 special case) —
+        // exact for every z != 0, removable singularity at 0 (both sides
+        // -> 1): same generic-point + registration class as x/x -> 1
+        // (A31 fase 1). NonZero(z) registered.
+        if (is_int_val(args[0], 1) && is_int_val(args[1], 2)
+            && !is_zero_expr(args[2])) {
+            if (context_ != nullptr) {
+                auto cond = context_->emit_side_condition(
+                    DomainConditionKind::NonZero, args[2]);
+                if (cond.is_error()) return fail<ExprPtr>(cond.error());
+            }
+            ExprPtr em1 = arena_.make<Binary>(BinaryOp::Sub,
+                arena_.make<FuncCall>(BuiltinOp::Exp,
+                    std::vector<ExprPtr>{args[2]}),
+                make_integer(arena_, BigInt(1)));
+            return simplify_expr(arena_.make<Binary>(BinaryOp::Div,
+                em1, args[2]));
+        }
+        // 1F1(1/2; 3/2; -u^2) = sqrt(pi)*erf(u)/(2u) (DLMF 7.6.2 / A&S
+        // 7.1.21, erf(z) = (2z/sqrt(pi)) M(1/2,3/2,-z^2)) — exact for every
+        // u != 0, removable at 0. Shape-gated on the canonical -u^2 forms.
+        if (is_rat_val(args[0], 1, 2) && is_rat_val(args[1], 3, 2)) {
+            ExprPtr u = nullptr;
+            ExprPtr w = args[2];
+            if (const auto* un = expr_cast<Unary>(w);
+                un != nullptr && un->op == UnaryOp::Neg) {
+                if (const auto* pw = expr_cast<Binary>(un->operand);
+                    pw != nullptr && pw->op == BinaryOp::Pow
+                    && expr_cast<IntegerLit>(pw->right) != nullptr
+                    && expr_cast<IntegerLit>(pw->right)->value == BigInt(2)) {
+                    u = pw->left;
+                }
+            } else if (const auto* prod = expr_cast<Product>(w);
+                       prod != nullptr && prod->factors.size() == 2U) {
+                ExprPtr lit = nullptr;
+                ExprPtr pow_f = nullptr;
+                for (ExprPtr f : prod->factors) {
+                    if (const auto* il = expr_cast<IntegerLit>(f);
+                        il != nullptr && il->value == BigInt(-1)) lit = f;
+                    else pow_f = f;
+                }
+                if (lit != nullptr && pow_f != nullptr) {
+                    if (const auto* pw = expr_cast<Binary>(pow_f);
+                        pw != nullptr && pw->op == BinaryOp::Pow
+                        && expr_cast<IntegerLit>(pw->right) != nullptr
+                        && expr_cast<IntegerLit>(pw->right)->value == BigInt(2)) {
+                        u = pw->left;
+                    }
+                }
+            }
+            if (u != nullptr && !is_zero_expr(u)) {
+                if (context_ != nullptr) {
+                    auto cond = context_->emit_side_condition(
+                        DomainConditionKind::NonZero, u);
+                    if (cond.is_error()) return fail<ExprPtr>(cond.error());
+                }
+                ExprPtr sqrt_pi = arena_.make<FuncCall>(BuiltinOp::Sqrt,
+                    std::vector<ExprPtr>{arena_.make<Constant>(MathConstant::Pi)});
+                ExprPtr erf_u = arena_.make<FuncCall>(BuiltinOp::Erf,
+                    std::vector<ExprPtr>{u});
+                ExprPtr two_u = arena_.make<Product>(std::vector<ExprPtr>{
+                    make_integer(arena_, BigInt(2)), u});
+                return simplify_expr(arena_.make<Binary>(BinaryOp::Div,
+                    arena_.make<Product>(std::vector<ExprPtr>{sqrt_pi, erf_u}),
+                    two_u));
+            }
+        }
     }
     if (op == BuiltinOp::Hypergeometric2F1 && args.size() == 4U) {
         if (is_zero_expr(args[3])) return ok(make_integer(arena_, BigInt(1)));
+        // 2F1(a,b;c;z) = 2F1(b,a;c;z) (DLMF 15.2.1, series symmetric in the
+        // upper pair): canonicalize the order so structurally different
+        // constructions of the same function share one form (Regola 2).
+        if (canonical_compare(args[0], args[1]) > 0) {
+            std::swap(args[0], args[1]);
+        }
         if (symbols_equal(args[1], args[2])) {
             ExprPtr one_minus_z = arena_.make<Binary>(BinaryOp::Sub,
                 make_integer(arena_, BigInt(1)), args[3]);

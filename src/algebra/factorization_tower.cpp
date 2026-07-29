@@ -142,6 +142,17 @@ Result<Factorization> factor_polynomial_tower(
     const auto tower_deadline =
         std::chrono::steady_clock::now() + ctx.timeout();
 
+    // Publish the budget as an opt-in hard deadline so inner combinatorial
+    // routines without a step budget (Kronecker recombination) abort instead of
+    // overrunning a single shift attempt (HC-F8-FACTORIZATIONTOWER-PERF).  Take
+    // the tighter of any existing deadline; restore the previous value on exit.
+    struct DeadlineGuard {
+        symbolic::CASContext& c;
+        std::chrono::steady_clock::time_point prev;
+        ~DeadlineGuard() { c.set_hard_deadline(prev); }
+    } deadline_guard{ctx, ctx.hard_deadline()};
+    ctx.set_hard_deadline(std::min(ctx.hard_deadline(), tower_deadline));
+
     std::size_t attempts = 0U;
     for (std::size_t weight = 0U; attempts < max_attempts; ++weight) {
         if (std::chrono::steady_clock::now() >= tower_deadline) {

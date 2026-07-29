@@ -3,8 +3,9 @@
 // Bronstein "Symbolic Integration I", Chapters 5-6 (rational part).
 //
 // Public API (declared in integrate_risch_internal.hpp):
-//   integrate_log_polynomial_part()        — ∫ poly-in-ln(u) dx
 //   integrate_risch_poly_and_rational_part() — steps 3..end of integrate_risch
+// integrate_log_polynomial_part() (∫ poly-in-ln(u) dx) moved to
+// integrate_risch_logpoly.cpp (anti-monolith split).
 
 #include "integrate_risch_internal.hpp"
 #include "integrate_engine.hpp"
@@ -21,91 +22,16 @@
 
 namespace cas::calculus {
 
-// Integrate the polynomial-in-t part of a single logarithmic extension
-// tower:  ∫ Σ_{k=0..n} a_k(x) * t^k dx,   where t = ln(u(x)),  Dt = u'/u.
-//
-// Standard ansatz:  the antiderivative is again a polynomial in t,
-//   B(t) = Σ_{k=0..n} b_k(x) * t^k,   with
-//
-//   d/dx B(t)
-//     = Σ b_k'(x) * t^k + Σ k * b_k(x) * (u'/u) * t^{k-1}
-//     = b_n' * t^n + Σ_{k=0..n-1} [ b_k' + (k+1) * b_{k+1} * (u'/u) ] * t^k.
-//
-// Matching coefficients with a_k * t^k gives the descending recursion
-//   b_n = ∫ a_n dx
-//   b_k = ∫ [ a_k - (k+1) * b_{k+1} * (u'/u) ] dx,   for k = n-1, ..., 0.
-//
-// Each integration is in the lower field Q(x) via integrate().
-// Failures propagate as Unimplemented.
-Result<ExprPtr> integrate_log_polynomial_part(
+// Defined in integrate_risch_logpoly.cpp (anti-monolith split); uses
+// algebra::PolyExpr, so the declaration needs polynomial_internal.hpp visible
+// at the call site (already included above).
+[[nodiscard]] Result<ExprPtr> integrate_log_polynomial_part(
     const algebra::PolyExpr& quot,
     ExprPtr u_arg,
     const Symbol& t_top,
     const Symbol& var,
-    symbolic::CASContext& context) {
-    AstArena& arena = context.arena();
-
-    if (quot.empty()) {
-        return ok(arena.make<IntegerLit>(BigInt(0)));
-    }
-    const std::size_t deg = quot.size() - 1U;
-
-    // u'/u (simplified once up front)
-    auto du_res = diff(u_arg, var, 1U, context);
-    if (du_res.is_error()) return fail<ExprPtr>(du_res.error());
-    ExprPtr du_over_u = arena.make<Binary>(BinaryOp::Div, du_res.value(), u_arg);
-    if (auto s = context.simplify(du_over_u); s.is_ok()) du_over_u = s.value();
-
-    std::vector<ExprPtr> b(deg + 1U, ExprPtr{});
-
-    for (std::ptrdiff_t k = static_cast<std::ptrdiff_t>(deg); k >= 0; --k) {
-        const std::size_t kz = static_cast<std::size_t>(k);
-        ExprPtr a_k = (kz < quot.size()) ? quot[kz] : ExprPtr{};
-        if (!a_k) a_k = arena.make<IntegerLit>(BigInt(0));
-
-        // rhs = a_k  -  (k+1) * b_{k+1} * (u'/u)
-        ExprPtr rhs = a_k;
-        if (kz + 1U <= deg && b[kz + 1U]) {
-            ExprPtr kp1 = arena.make<IntegerLit>(BigInt(static_cast<std::int64_t>(kz + 1U)));
-            ExprPtr correction = arena.make<Product>(std::vector<ExprPtr>{kp1, b[kz + 1U], du_over_u});
-            rhs = arena.make<Binary>(BinaryOp::Sub, rhs, correction);
-        }
-        if (auto s = context.simplify(rhs); s.is_ok()) rhs = s.value();
-
-        auto b_k_res = integrate(rhs, var, context);
-        if (b_k_res.is_error()) {
-            return b_k_res;
-        }
-        b[kz] = b_k_res.value();
-    }
-
-    // Build B(t) = Σ b_k * t^k.
-    std::vector<ExprPtr> terms;
-    terms.reserve(b.size());
-    ExprPtr t_sym = arena.make<Symbol>(t_top.name);
-    for (std::size_t k = 0; k < b.size(); ++k) {
-        if (!b[k]) continue;
-        if (const auto* il = expr_cast<IntegerLit>(b[k]); il && il->value.is_zero()) continue;
-        ExprPtr term;
-        if (k == 0U) {
-            term = b[k];
-        } else if (k == 1U) {
-            term = arena.make<Binary>(BinaryOp::Mul, b[k], t_sym);
-        } else {
-            ExprPtr t_pow = arena.make<Binary>(
-                BinaryOp::Pow,
-                t_sym,
-                arena.make<IntegerLit>(BigInt(static_cast<std::int64_t>(k))));
-            term = arena.make<Binary>(BinaryOp::Mul, b[k], t_pow);
-        }
-        terms.push_back(term);
-    }
-    if (terms.empty()) return ok(arena.make<IntegerLit>(BigInt(0)));
-    if (terms.size() == 1U) return ok(terms.front());
-    ExprPtr raw = arena.make<Sum>(std::move(terms));
-    if (auto s = context.simplify(raw); s.is_ok()) return ok(s.value());
-    return ok(raw);
-}
+    const DifferentialField& lower_field,
+    symbolic::CASContext& context);
 
 // Steps 3..end of integrate_risch():
 //   3.  Decompose gen_expr into P/Q w.r.t. topmost generator t_n.
@@ -121,7 +47,7 @@ Result<ExprPtr> integrate_risch_poly_and_rational_part(
     ExprPtr poly_integral_part,
     symbolic::CASContext& context) {
     AstArena& arena = context.arena();
-    (void)expr_original; // reserved for future round-trip verification
+    (void)expr_original;  // round-trip verification handled by the per-coefficient guard
 
     // 3. Decompose into P/Q with respect to the topmost generator t_n
     Symbol t_top = field.extensions().empty() ? var : field.extensions().back().t_var;
@@ -164,7 +90,21 @@ Result<ExprPtr> integrate_risch_poly_and_rational_part(
                     const bool handle_log_polynomial = (ext.type == ExtensionType::Logarithmic);
 
                     if (handle_log_polynomial) {
-                        auto B_res = integrate_log_polynomial_part(quot, ext.argument, t_top, var, context);
+                        // HC-A38-01 closed: coefficients carrying a lower-tower
+                        // generator (nested log-in-log, sibling exp, ...) no longer
+                        // need a bail-out here.  integrate_log_polynomial_part now
+                        // dispatches its per-degree fallback on the LOWER field
+                        // (Bronstein §5.2/§5.7 termination axis) instead of
+                        // root-restarting the generic integrate(), so the recursion
+                        // is bounded by the strictly-decreasing tower height.
+                        //
+                        // The lower field k = Q(x, t_1..t_{n-1}) is where the §5.10
+                        // per-degree limited integration problems live (A38).
+                        DifferentialField lower_field(field.base_var(),
+                            std::vector<DifferentialExtension>(
+                                field.extensions().begin(), field.extensions().end() - 1U));
+                        auto B_res = integrate_log_polynomial_part(
+                            quot, ext.argument, t_top, var, lower_field, context);
                         if (B_res.is_error()) return fail<ExprPtr>(B_res.error());
                         int_terms.push_back(B_res.value());
                     }
@@ -288,9 +228,30 @@ Result<ExprPtr> integrate_risch_poly_and_rational_part(
         if (poly_back_res.is_error()) return poly_back_res;
         bool poly_zero = expr_is<IntegerLit>(poly_back_res.value())
             && expr_ref<IntegerLit>(poly_back_res.value()).value.is_zero();
-        if (poly_zero) return back_res;
         bool back_zero = expr_is<IntegerLit>(back_res.value())
             && expr_ref<IntegerLit>(back_res.value()).value.is_zero();
+        // A27 zero-result guard (REGOLA 0.2): 0 is an antiderivative only of
+        // the zero function.  If every component collapsed to 0 while the
+        // integrand is not literally 0, some sub-step silently lost the
+        // integral (this exact path returned 0 for ∫ 1/(x·ln x·ln ln x) dx) —
+        // report Unimplemented instead of a wrong answer.
+        if (poly_zero && back_zero) {
+            bool integrand_zero = false;
+            if (auto is = context.simplify(gen_expr); is.is_ok()) {
+                integrand_zero = (expr_is<IntegerLit>(is.value())
+                    && expr_ref<IntegerLit>(is.value()).value.is_zero());
+            }
+            if (!integrand_zero) {
+                return make_unimplemented<ExprPtr>(
+                    "calculus", "integrate_risch",
+                    "rational/log/poly parts all reduced to 0 for a non-zero integrand",
+                    cas::error::reason_codes::RISCH_LOG_EXTENSION_GENERAL,
+                    "A sub-step (Hermite/Rothstein-Trager) lost the integral; "
+                    "the result would be silently wrong",
+                    "A27");
+            }
+        }
+        if (poly_zero) return back_res;
         if (back_zero) return context.simplify(poly_back_res.value());
         return context.simplify(arena.make<Sum>(std::vector<ExprPtr>{
             poly_back_res.value(), back_res.value()}));

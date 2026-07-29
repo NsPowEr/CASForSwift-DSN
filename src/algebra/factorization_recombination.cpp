@@ -1,5 +1,7 @@
 #include "polynomial_internal.hpp"
 
+#include "cas/symbolic.hpp"
+
 #include <optional>
 #include <vector>
 
@@ -10,20 +12,6 @@ namespace {
     BigInt result = value % modulus;
     if (result.is_negative()) {
         result += modulus.abs();
-    }
-    return result;
-}
-
-[[nodiscard]] BigInt pow_bigint(BigInt base, std::size_t exponent) {
-    BigInt result(1);
-    while (exponent > 0U) {
-        if ((exponent & 1U) != 0U) {
-            result *= base;
-        }
-        exponent >>= 1U;
-        if (exponent > 0U) {
-            base *= base;
-        }
     }
     return result;
 }
@@ -96,41 +84,41 @@ namespace {
     return false;
 }
 
-[[nodiscard]] std::optional<IntPoly> lift_and_check_subset(
+// Zassenhaus subset test on ALREADY-LIFTED factors: the candidate is
+//     primitive(center(lc(f) · ∏_{i∈S} g̃_i  mod p^a)),
+// where the g̃_i are the Hensel factors mod p^a (∏ g̃_i ≡ f mod p^a is the
+// invariant of hensel_lift_multi). No per-subset Hensel lifting — the
+// historic implementation re-lifted a (left, right) pair for EVERY subset,
+// which (a) cost one full quadratic lift per node of the search tree and
+// (b) after dropping large factors from the pool violated
+// left·right ≡ f (mod p), silently producing garbage candidates — real
+// factors were missed and composites declared irreducible (the
+// "recombination misses a factor" silent-wrong found via A6/Φ₇-R₃).
+[[nodiscard]] std::optional<IntPoly> check_subset(
     const IntPoly& f,
-    const std::vector<IntPoly>& factors,
+    const std::vector<IntPoly>& lifted,
     const std::vector<bool>& selected,
-    const BigInt& prime,
     const BigInt& modulus,
-    std::size_t lift_steps,
     std::size_t max_degree,
     const BigInt& mignotte_bound) {
-    IntPoly left(std::vector<BigInt>{BigInt(1)});
-    IntPoly right(std::vector<BigInt>{BigInt(1)});
-    for (std::size_t index = 0U; index < factors.size(); ++index) {
+    IntPoly product(std::vector<BigInt>{mod_positive(f.leading_coeff(), modulus)});
+    for (std::size_t index = 0U; index < lifted.size(); ++index) {
         if (selected[index]) {
-            left = multiply_mod(left, factors[index], prime);
-        } else {
-            right = multiply_mod(right, factors[index], prime);
+            product = multiply_mod(product, lifted[index], modulus);
         }
     }
-
-    if (left.degree() == 0U || left.degree() > max_degree || right.degree() == 0U) {
+    if (product.is_zero() || product.degree() == 0U ||
+        product.degree() > max_degree) {
         return std::nullopt;
     }
 
-    auto lifted = hensel_lift(f, left, right, prime, lift_steps);
-    if (lifted.is_error()) {
-        return std::nullopt;
-    }
-
-    IntPoly candidate = center_modular_coefficients(std::move(lifted.value().first), modulus);
+    IntPoly candidate = center_modular_coefficients(std::move(product), modulus);
     if (candidate.degree() > max_degree) return std::nullopt;
     // Landau-Mignotte pruning: any factor h of f satisfies
     //     ||h||_inf ≤ 2^deg(h) · ||f||_inf.
-    // If the centered Hensel-lifted candidate exceeds this bound, the
-    // subset cannot lift to a Z-factor of f. Cheap O(deg) test that
-    // sidesteps the expensive pseudo-division in divides_exactly.
+    // If the centered candidate exceeds this bound, the subset cannot be a
+    // Z-factor of f. Cheap O(deg) test that sidesteps the expensive
+    // pseudo-division in divides_exactly.
     if (exceeds_factor_bound(candidate, mignotte_bound)) {
         return std::nullopt;
     }
@@ -144,71 +132,84 @@ namespace {
 // Subset enumeration with Mignotte-based pruning (Lecerf 2007 §3 +
 // Landau-Mignotte). The legacy 32768-subset cap is replaced by the
 // natural enumeration bound 2^r where r = |usable_factors|, and the
-// Mignotte coefficient bound check inside lift_and_check_subset prunes
-// the exponential tree to polynomial-time in practice on inputs that
-// are not pathological Swinnerton-Dyer-style products. (A full van
-// Hoeij knapsack-lattice replacement remains as a follow-up for the
+// Mignotte coefficient bound check inside check_subset prunes the
+// exponential tree to polynomial-time in practice on inputs that are
+// not pathological Swinnerton-Dyer-style products. (A full van Hoeij
+// knapsack-lattice replacement remains as a follow-up for the
 // pathological case; see Step 5b in /Users/davidesaba/.claude/plans/.)
 //
 // Termination: bounded structurally by 2^r enumeration depth + the
 // fact that selected_degree > max_degree prunes whole sub-trees.
-[[nodiscard]] std::optional<IntPoly> recombine_from(
+[[nodiscard]] Result<std::optional<IntPoly>> recombine_from(
     const IntPoly& f,
-    const std::vector<IntPoly>& factors,
-    const BigInt& prime,
+    const std::vector<IntPoly>& lifted,
     const BigInt& modulus,
-    std::size_t lift_steps,
     std::size_t max_degree,
     std::size_t start,
     std::vector<bool>& selected,
     std::size_t selected_degree,
-    const BigInt& mignotte_bound) {
-    for (std::size_t index = start; index < factors.size(); ++index) {
-        const std::size_t next_degree = selected_degree + factors[index].degree();
+    const BigInt& mignotte_bound,
+    symbolic::CASContext* ctx) {
+    // HC-F70-A33: the subset enumeration is exponential in |lifted|; an
+    // interrupt MUST surface as an error, never as nullopt — the caller
+    // reads nullopt as a proof of irreducibility (see wang_eez).
+    if (ctx) {
+        if (auto chk = ctx->check_interrupt(); chk.is_error()) {
+            return fail<std::optional<IntPoly>>(chk.error());
+        }
+    }
+    for (std::size_t index = start; index < lifted.size(); ++index) {
+        const std::size_t next_degree = selected_degree + lifted[index].degree();
         if (next_degree > max_degree) {
             continue;
         }
 
         selected[index] = true;
-        auto candidate = lift_and_check_subset(
-            f, factors, selected, prime, modulus, lift_steps, max_degree, mignotte_bound);
+        auto candidate = check_subset(
+            f, lifted, selected, modulus, max_degree, mignotte_bound);
         if (candidate.has_value()) {
-            return candidate;
+            return ok(std::optional<IntPoly>(std::move(candidate)));
         }
 
         auto nested = recombine_from(
-            f, factors, prime, modulus, lift_steps, max_degree,
-            index + 1U, selected, next_degree, mignotte_bound);
-        if (nested.has_value()) {
+            f, lifted, modulus, max_degree,
+            index + 1U, selected, next_degree, mignotte_bound, ctx);
+        if (nested.is_error() || nested.value().has_value()) {
             return nested;
         }
         selected[index] = false;
     }
-    return std::nullopt;
+    return ok(std::optional<IntPoly>{});
 }
 
 } // namespace
 
-std::optional<IntPoly> find_factor_by_hensel_recombination(
+Result<std::optional<IntPoly>> find_factor_by_hensel_recombination(
     const IntPoly& f,
-    const std::vector<IntPoly>& modular_factors,
-    const BigInt& prime,
-    std::size_t lift_steps,
-    std::size_t max_degree) {
-    if (f.is_zero() || prime.is_zero() || modular_factors.empty() || lift_steps == 0U) {
-        return std::nullopt;
+    const std::vector<IntPoly>& lifted_factors,
+    const BigInt& modulus,
+    std::size_t max_degree,
+    symbolic::CASContext* ctx) {
+    if (f.is_zero() || modulus <= BigInt(1) || lifted_factors.empty()) {
+        return ok(std::optional<IntPoly>{});
     }
 
+    // Every nonconstant lifted factor stays in the pool: a factor of degree
+    // > max_degree is never *selected* (recombine_from prunes it via
+    // next_degree > max_degree), but keeping it preserves the product
+    // invariant that makes complements of found factors exact.
     std::vector<IntPoly> usable_factors;
-    usable_factors.reserve(modular_factors.size());
-    for (IntPoly factor : modular_factors) {
+    usable_factors.reserve(lifted_factors.size());
+    bool any_selectable = false;
+    for (IntPoly factor : lifted_factors) {
         normalize_integer_poly(factor);
-        if (!factor.is_zero() && factor.degree() > 0U && factor.degree() <= max_degree) {
+        if (!factor.is_zero() && factor.degree() > 0U) {
+            if (factor.degree() <= max_degree) any_selectable = true;
             usable_factors.push_back(std::move(factor));
         }
     }
-    if (usable_factors.empty()) {
-        return std::nullopt;
+    if (!any_selectable) {
+        return ok(std::optional<IntPoly>{});
     }
 
     std::vector<bool> selected(usable_factors.size(), false);
@@ -216,14 +217,13 @@ std::optional<IntPoly> find_factor_by_hensel_recombination(
     return recombine_from(
         f,
         usable_factors,
-        prime,
-        pow_bigint(prime, lift_steps),
-        lift_steps,
+        modulus,
         max_degree,
         0U,
         selected,
         0U,
-        mignotte_bound);
+        mignotte_bound,
+        ctx);
 }
 
 } // namespace cas::algebra

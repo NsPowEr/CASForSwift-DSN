@@ -1,11 +1,23 @@
 name: ci
 
+# Controllo costi (repo privato, runner macOS = 10× minuti): la CI gira solo dove
+# serve. I push di feature-branch NON triggerano la CI — sono coperti dai gate
+# LOCALI (pre-commit debt-gate + pre-push Tier-2, che girano sul Mac dello
+# sviluppatore). La CI resta il backstop su `main` e sulle PR. La riduzione è di
+# FREQUENZA, non di piattaforma: tutto resta su macOS (Maxima/Homebrew, Swift, Qt).
 on:
   push:
+    branches: [main]
   pull_request:
   schedule:
     # Weekly mutation testing job — every Monday at 03:00 UTC
     - cron: '0 3 * * 1'
+
+# Annulla i run superati quando si pusha in rapida successione (niente minuti
+# bruciati su build già obsolete).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   # ── Original foundation job (preserved) ────────────────────────────────────
@@ -46,9 +58,40 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # required for HARDCODE-OF-PASSAGE diff vs base
 
       - name: Check file sizes
         run: bash scripts/check_file_size.sh --verbose
+
+  # ── Debt-gate (CI wall — non-bypassable) ──────────────────────────────────
+  # Aggregates: anti-monolith + orphan sources + untracked/stale whitelist +
+  # HARDCODE-OF-PASSAGE-without-ledger. Mirrors scripts/pre_commit_hook.sh
+  # so CI and local hooks share the exact same logic.
+  debt-gate:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # required for HCOP diff vs origin/main
+
+      - name: Validate base ref
+        # github.base_ref is a PR target branch name. Defensive regex guards
+        # against the (low-risk) shell-injection surface when this value
+        # flows into git ref parsing inside debt_gate.sh.
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [[ -n "$BASE_REF" ]] && ! [[ "$BASE_REF" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+            echo "::error::Refusing untrusted base ref: '$BASE_REF'"
+            exit 1
+          fi
+          echo "BASE_REF_VALID=$BASE_REF" >> "$GITHUB_ENV"
+
+      - name: Run debt-gate
+        env:
+          GITHUB_BASE_REF: ${{ env.BASE_REF_VALID }}
+        run: bash scripts/debt_gate.sh
 
   # ── F0.6 Sanitizers (ASan + UBSan) ─────────────────────────────────────────
   sanitizers:

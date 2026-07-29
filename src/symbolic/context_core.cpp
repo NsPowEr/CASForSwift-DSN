@@ -5,338 +5,15 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <functional>
 #include <utility>
 #include <vector>
 
 namespace cas::symbolic {
 
-[[nodiscard]] CASError make_error(CASErrorKind kind, std::string message) {
-    return CASError{
-        .kind = kind,
-        .message = std::move(message),
-        .hint = std::nullopt,
-    };
-}
-
-[[nodiscard]] std::optional<Rational> exact_scalar_from_expr(ExprPtr expr) {
-    if (!expr) {
-        return std::nullopt;
-    }
-
-    if (const auto* integer = expr_cast<IntegerLit>(expr)) {
-        return Rational(integer->value);
-    }
-
-    if (const auto* rational = expr_cast<RationalLit>(expr)) {
-        return Rational(rational->numerator, rational->denominator);
-    }
-
-    if (const auto* unary = expr_cast<Unary>(expr)) {
-        if (unary->op == UnaryOp::Neg) {
-            auto inner = exact_scalar_from_expr(unary->operand);
-            if (inner.has_value()) {
-                return -(*inner);
-            }
-        }
-    }
-
-    return std::nullopt;
-}
-
-[[nodiscard]] ExprPtr negate_expr(ExprPtr expr, AstArena& arena) {
-    if (!expr) {
-        return expr;
-    }
-
-    if (const auto* integer = expr_cast<IntegerLit>(expr)) {
-        return arena.make<IntegerLit>(-integer->value);
-    }
-
-    if (const auto* rational = expr_cast<RationalLit>(expr)) {
-        return arena.make<RationalLit>(-rational->numerator, rational->denominator);
-    }
-
-    if (const auto* unary = expr_cast<Unary>(expr); unary != nullptr && unary->op == UnaryOp::Neg) {
-        return unary->operand;
-    }
-
-    return arena.make<Unary>(UnaryOp::Neg, expr);
-}
-
-[[nodiscard]] int compare_exact_scalars(const Rational& lhs, const Rational& rhs) {
-    const BigInt left_cross = lhs.numerator() * rhs.denominator();
-    const BigInt right_cross = rhs.numerator() * lhs.denominator();
-    if (left_cross < right_cross) {
-        return -1;
-    }
-    if (left_cross > right_cross) {
-        return 1;
-    }
-    return 0;
-}
-
-[[nodiscard]] std::size_t expr_weight(ExprPtr expr) {
-    if (!expr) {
-        return 0U;
-    }
-
-    return 1U + visit_expr(
-        expr,
-        [](const auto& node) -> std::size_t {
-            using Node = std::decay_t<decltype(node)>;
-            if constexpr (
-                std::is_same_v<Node, IntegerLit> ||
-                std::is_same_v<Node, RationalLit> ||
-                std::is_same_v<Node, DecimalLit> ||
-                std::is_same_v<Node, Symbol> ||
-                std::is_same_v<Node, Constant>) {
-                return 0U;
-            } else if constexpr (std::is_same_v<Node, Unary>) {
-                return expr_weight(node.operand);
-            } else if constexpr (std::is_same_v<Node, Binary>) {
-                return expr_weight(node.left) + expr_weight(node.right);
-            } else if constexpr (std::is_same_v<Node, FuncCall>) {
-                std::size_t weight = 0U;
-                for (ExprPtr arg : node.args) {
-                    weight += expr_weight(arg);
-                }
-                return weight;
-            } else if constexpr (std::is_same_v<Node, Sum>) {
-                std::size_t weight = 0U;
-                for (ExprPtr term : node.terms) {
-                    weight += expr_weight(term);
-                }
-                return weight;
-            } else if constexpr (std::is_same_v<Node, Product>) {
-                std::size_t weight = 0U;
-                for (ExprPtr factor : node.factors) {
-                    weight += expr_weight(factor);
-                }
-                return weight;
-            } else if constexpr (std::is_same_v<Node, Integral>) {
-                return expr_weight(node.integrand) +
-                    (node.lower.has_value() ? expr_weight(*node.lower) : 0U) +
-                    (node.upper.has_value() ? expr_weight(*node.upper) : 0U);
-            } else if constexpr (std::is_same_v<Node, Derivative>) {
-                return expr_weight(node.expression);
-            } else if constexpr (std::is_same_v<Node, Limit>) {
-                return expr_weight(node.expression) + expr_weight(node.point);
-            } else if constexpr (std::is_same_v<Node, RootOf>) {
-                return expr_weight(node.polynomial);
-            } else if constexpr (std::is_same_v<Node, Matrix>) {
-                std::size_t weight = 0U;
-                for (ExprPtr element : node.elements) {
-                    weight += expr_weight(element);
-                }
-                return weight;
-            } else if constexpr (std::is_same_v<Node, SeriesExp>) {
-                std::size_t weight = expr_weight(node.point);
-                for (const auto& [exp, coeff] : node.terms) weight += expr_weight(coeff);
-                return weight;
-            } else {
-                return 0U;
-            }
-        });
-}
-
-[[nodiscard]] const ComputationTrace& empty_trace() noexcept {
-    static const ComputationTrace trace;
-    return trace;
-}
-
-[[nodiscard]] Result<ExprPtr> materialize_expr_impl(ExprPtr expr, AstArena& arena) {
-    if (!expr) {
-        return fail<ExprPtr>(make_error(CASErrorKind::InvalidArgument, "Cannot clone null expression"));
-    }
-
-    return ok(visit_expr(
-        expr,
-        [&](const auto& node) -> ExprPtr {
-            using Node = std::decay_t<decltype(node)>;
-            if constexpr (
-                std::is_same_v<Node, IntegerLit> ||
-                std::is_same_v<Node, RationalLit> ||
-                std::is_same_v<Node, DecimalLit> ||
-                std::is_same_v<Node, ComplexLit> ||
-                std::is_same_v<Node, Symbol> ||
-                std::is_same_v<Node, Constant>) {
-                return arena.make<Node>(node);
-            } else if constexpr (std::is_same_v<Node, Unary>) {
-                return arena.make<Unary>(node.op, materialize_expr_impl(node.operand, arena).value());
-            } else if constexpr (std::is_same_v<Node, Binary>) {
-                return arena.make<Binary>(
-                    node.op,
-                    materialize_expr_impl(node.left, arena).value(),
-                    materialize_expr_impl(node.right, arena).value());
-            } else if constexpr (std::is_same_v<Node, FuncCall>) {
-                std::vector<ExprPtr> args;
-                args.reserve(node.args.size());
-                for (ExprPtr arg : node.args) {
-                    args.push_back(materialize_expr_impl(arg, arena).value());
-                }
-                return arena.make<FuncCall>(node.name, std::move(args));
-            } else if constexpr (std::is_same_v<Node, Sum>) {
-                std::vector<ExprPtr> terms;
-                terms.reserve(node.terms.size());
-                for (ExprPtr term : node.terms) {
-                    terms.push_back(materialize_expr_impl(term, arena).value());
-                }
-                return arena.make<Sum>(std::move(terms));
-            } else if constexpr (std::is_same_v<Node, Product>) {
-                std::vector<ExprPtr> factors;
-                factors.reserve(node.factors.size());
-                for (ExprPtr factor : node.factors) {
-                    factors.push_back(materialize_expr_impl(factor, arena).value());
-                }
-                return arena.make<Product>(std::move(factors));
-            } else if constexpr (std::is_same_v<Node, Integral>) {
-                return arena.make<Integral>(
-                    materialize_expr_impl(node.integrand, arena).value(),
-                    node.variable,
-                    node.lower.has_value()
-                        ? std::optional<ExprPtr>(materialize_expr_impl(*node.lower, arena).value())
-                        : std::nullopt,
-                    node.upper.has_value()
-                        ? std::optional<ExprPtr>(materialize_expr_impl(*node.upper, arena).value())
-                        : std::nullopt);
-            } else if constexpr (std::is_same_v<Node, Derivative>) {
-                return arena.make<Derivative>(
-                    materialize_expr_impl(node.expression, arena).value(),
-                    node.variable,
-                    node.order);
-            } else if constexpr (std::is_same_v<Node, Limit>) {
-                return arena.make<Limit>(
-                    materialize_expr_impl(node.expression, arena).value(),
-                    node.variable,
-                    materialize_expr_impl(node.point, arena).value(),
-                    node.direction);
-            } else if constexpr (std::is_same_v<Node, RootOf>) {
-                return arena.make<RootOf>(
-                    materialize_expr_impl(node.polynomial, arena).value(),
-                    node.variable,
-                    node.root_index);
-            } else if constexpr (std::is_same_v<Node, Matrix>) {
-                std::vector<ExprPtr> elements;
-                elements.reserve(node.elements.size());
-                for (ExprPtr element : node.elements) {
-                    elements.push_back(materialize_expr_impl(element, arena).value());
-                }
-                return arena.make<Matrix>(node.rows, node.cols, std::move(elements));
-            } else if constexpr (std::is_same_v<Node, SeriesExp>) {
-                std::vector<std::pair<long long, ExprPtr>> terms;
-                terms.reserve(node.terms.size());
-                for (const auto& [exp, coeff] : node.terms) {
-                    terms.push_back({exp, materialize_expr_impl(coeff, arena).value()});
-                }
-                return arena.make<SeriesExp>(node.var, materialize_expr_impl(node.point, arena).value(), std::move(terms), node.order);
-            } else {
-                return ExprPtr{};
-            }
-        }));
-}
-
-[[nodiscard]] ExprPtr instantiate_pattern(ExprPtr pattern, const MatchMap& matches, AstArena& arena) {
-    if (!pattern) {
-        return ExprPtr{};
-    }
-
-    if (const auto* wildcard = expr_cast<Symbol>(pattern)) {
-        if (is_wildcard_name(wildcard->name)) {
-            const auto found = matches.find(wildcard->name);
-            if (found != matches.end()) {
-                return found->second;
-            }
-        }
-    }
-
-    return visit_expr(
-        pattern,
-        [&](const auto& node) -> ExprPtr {
-            using Node = std::decay_t<decltype(node)>;
-            if constexpr (
-                std::is_same_v<Node, IntegerLit> ||
-                std::is_same_v<Node, RationalLit> ||
-                std::is_same_v<Node, DecimalLit> ||
-                std::is_same_v<Node, ComplexLit> ||
-                std::is_same_v<Node, Symbol> ||
-                std::is_same_v<Node, Constant>) {
-                return arena.make<Node>(node);
-            } else if constexpr (std::is_same_v<Node, Unary>) {
-                return arena.make<Unary>(node.op, instantiate_pattern(node.operand, matches, arena));
-            } else if constexpr (std::is_same_v<Node, Binary>) {
-                return arena.make<Binary>(
-                    node.op,
-                    instantiate_pattern(node.left, matches, arena),
-                    instantiate_pattern(node.right, matches, arena));
-            } else if constexpr (std::is_same_v<Node, FuncCall>) {
-                std::vector<ExprPtr> args;
-                args.reserve(node.args.size());
-                for (ExprPtr arg : node.args) {
-                    args.push_back(instantiate_pattern(arg, matches, arena));
-                }
-                return arena.make<FuncCall>(node.name, std::move(args));
-            } else if constexpr (std::is_same_v<Node, Sum>) {
-                std::vector<ExprPtr> terms;
-                terms.reserve(node.terms.size());
-                for (ExprPtr term : node.terms) {
-                    terms.push_back(instantiate_pattern(term, matches, arena));
-                }
-                return arena.make<Sum>(std::move(terms));
-            } else if constexpr (std::is_same_v<Node, Product>) {
-                std::vector<ExprPtr> factors;
-                factors.reserve(node.factors.size());
-                for (ExprPtr factor : node.factors) {
-                    factors.push_back(instantiate_pattern(factor, matches, arena));
-                }
-                return arena.make<Product>(std::move(factors));
-            } else if constexpr (std::is_same_v<Node, Integral>) {
-                return arena.make<Integral>(
-                    instantiate_pattern(node.integrand, matches, arena),
-                    node.variable,
-                    node.lower.has_value()
-                        ? std::optional<ExprPtr>(instantiate_pattern(*node.lower, matches, arena))
-                        : std::nullopt,
-                    node.upper.has_value()
-                        ? std::optional<ExprPtr>(instantiate_pattern(*node.upper, matches, arena))
-                        : std::nullopt);
-            } else if constexpr (std::is_same_v<Node, Derivative>) {
-                return arena.make<Derivative>(
-                    instantiate_pattern(node.expression, matches, arena),
-                    node.variable,
-                    node.order);
-            } else if constexpr (std::is_same_v<Node, Limit>) {
-                return arena.make<Limit>(
-                    instantiate_pattern(node.expression, matches, arena),
-                    node.variable,
-                    instantiate_pattern(node.point, matches, arena),
-                    node.direction);
-            } else if constexpr (std::is_same_v<Node, RootOf>) {
-                return arena.make<RootOf>(
-                    instantiate_pattern(node.polynomial, matches, arena),
-                    node.variable,
-                    node.root_index);
-            } else if constexpr (std::is_same_v<Node, Matrix>) {
-                std::vector<ExprPtr> elements;
-                elements.reserve(node.elements.size());
-                for (ExprPtr element : node.elements) {
-                    elements.push_back(instantiate_pattern(element, matches, arena));
-                }
-                return arena.make<Matrix>(node.rows, node.cols, std::move(elements));
-            } else if constexpr (std::is_same_v<Node, SeriesExp>) {
-                std::vector<std::pair<long long, ExprPtr>> terms;
-                terms.reserve(node.terms.size());
-                for (const auto& [exp, coeff] : node.terms) {
-                    terms.push_back({exp, instantiate_pattern(coeff, matches, arena)});
-                }
-                return arena.make<SeriesExp>(node.var, instantiate_pattern(node.point, matches, arena), std::move(terms), node.order);
-            } else {
-                return ExprPtr{};
-            }
-        });
-}
-
 CASContext::CASContext() : rewrite_provider_(&default_rewrite_provider()) {
+    intern_shards_ = arena_.num_shards();
     ::cas::algebra::register_algebraic_simplify_hook(*this);
 }
 
@@ -346,6 +23,10 @@ void CASContext::define(const Symbol& symbol, ExprPtr value) {
 
 void CASContext::clear_variables() noexcept {
     variables_.clear();
+}
+
+void CASContext::clear_assumptions() noexcept {
+    assumptions_ = Assumptions{};
 }
 
 std::optional<ExprPtr> CASContext::lookup(const Symbol& symbol) const {
@@ -391,91 +72,108 @@ const ComputationTrace& CASContext::get_trace() const noexcept {
     return trace_enabled_ ? trace_ : empty_trace();
 }
 
+// A51 — invariante: CHIUNQUE apra un'operazione top-level (cioe' porti
+// `operation_active_` da false a true) DEVE inizializzarne il budget qui, e
+// azzerarlo alla chiusura con `end_operation_budget`.
+//
+// Senza l'inizializzazione, `Simplifier::check_timeout` misura `elapsed` a
+// partire dall'ULTIMA operazione top-level del contesto — o dall'epoch se non
+// ce n'e' mai stata una, e allora `elapsed` vale l'uptime della macchina e il
+// timeout scatta al primo controllo wall-clock. L'esito di un confronto finiva
+// cosi' per dipendere dalla storia del contesto e dal carico invece che dai
+// suoi operandi: e' esattamente il non-determinismo misurato in A51, dove una
+// entry golden oscillava SKIP<->FAIL fra misure con lo STESSO binario.
+//
+// Il pattern era duplicato in quattro punti (CASContext::simplify,
+// CASContext::substitute, algebra::polynomial_gcd, mathematically_equal) e uno
+// solo — `mathematically_equal` — lo sbagliava. Incapsularlo rende
+// l'invariante impossibile da violare per omissione.
+void CASContext::begin_operation_budget(bool capture_trace) noexcept {
+    trace_capture_active_ = capture_trace;
+    trace_.clear();
+    ops_count_ = 0;
+    operation_started_at_ = std::chrono::steady_clock::now();
+}
+
+void CASContext::end_operation_budget() noexcept {
+    trace_capture_active_ = false;
+    // A51 — high-water mark del budget effettivamente consumato. Serve a
+    // tarare il gate ops su MISURA invece che a intuito: senza questo dato
+    // l'unico modo di sapere se il gate deterministico morde prima del
+    // wall-clock e' dedurlo, e la deduzione era sbagliata (il commento di A30
+    // dava 2'000'000 ops come "coperti da 10 s"; la misura dice ~150 s).
+    if (ops_count_ > ops_high_water_) ops_high_water_ = ops_count_;
+    ops_count_ = 0;
+}
+
+void CASContext::reset_ops_high_water() noexcept { ops_high_water_ = 0; }
+
+CASContext::OperationScope::OperationScope(CASContext& ctx, bool capture_trace) noexcept
+    : ctx_(ctx), owns_(!ctx.operation_active_) {
+    if (owns_) {
+        ctx_.operation_active_ = true;
+        ctx_.begin_operation_budget(capture_trace);
+    }
+}
+
+// A53 — variante con tetto proprio. Il budget effettivo e' il `min` fra quello
+// del contesto e `ops_cap`: un motore interno puo' essere piu' parsimonioso del
+// contesto, mai piu' generoso (sarebbe un aggiramento del gate del chiamante).
+// Gate spento (0) = il chiamante possiede il budget per contratto A30, e nessun
+// tetto interno glielo toglie: e' cio' che rende possibile un run di sola
+// misura, dove imporre il tetto falserebbe proprio il dato da raccogliere.
+CASContext::OperationScope::OperationScope(CASContext& ctx, bool capture_trace,
+                                           std::uint64_t ops_cap) noexcept
+    : ctx_(ctx), owns_(!ctx.operation_active_) {
+    if (!owns_) return;
+    const std::uint64_t current = ctx_.max_operation_ops_;
+    if (current != 0U && ops_cap != 0U && ops_cap < current) {
+        restore_max_ops_ = current;
+        restore_max_ops_explicit_ = ctx_.max_operation_ops_explicit_;
+        capped_ = true;
+        ctx_.max_operation_ops_ = ops_cap;
+        ctx_.max_operation_ops_explicit_ = true;
+    }
+    ctx_.operation_active_ = true;
+    ctx_.begin_operation_budget(capture_trace);
+}
+
+CASContext::OperationScope::~OperationScope() noexcept {
+    if (owns_) {
+        ctx_.operation_active_ = false;
+        ctx_.end_operation_budget();
+        if (capped_) {
+            ctx_.max_operation_ops_ = restore_max_ops_;
+            ctx_.max_operation_ops_explicit_ = restore_max_ops_explicit_;
+        }
+    }
+}
+
+// A53 — vedi symbolic.hpp per la semantica. Il mark e' una COPIA del set, non
+// la sua dimensione: `SideConditionSet::add` puo' RIMUOVERE una condizione piu'
+// debole quando ne entra una che la subsume (Positive subsume NonZero, §3.4),
+// quindi troncare alla dimensione di partenza non ricostruirebbe lo stato.
+CASContext::SideConditionRollback::SideConditionRollback(CASContext& ctx)
+    : ctx_(ctx), mark_(ctx.side_conditions_) {}
+
+CASContext::SideConditionRollback::~SideConditionRollback() noexcept {
+    if (!committed_) {
+        ctx_.side_conditions_ = mark_;
+    }
+}
+
 void CASContext::set_timeout(std::chrono::milliseconds timeout) noexcept {
     timeout_ = timeout;
-}
-
-void CASContext::set_timeout_check_interval(std::uint64_t interval) noexcept {
-    timeout_check_interval_ = (interval < 64U) ? 64U : interval;
-}
-
-void CASContext::set_max_simplification_depth(int depth) noexcept {
-    max_simplification_depth_ = (depth < 10) ? 10 : depth;
-}
-
-void CASContext::set_max_integration_depth(std::size_t depth) noexcept {
-    max_integration_depth_ = (depth < 1U) ? 1U : (depth > 128U) ? 128U : depth;
-}
-
-void CASContext::set_gcd_error_probability(double prob) noexcept {
-    if (prob < 1e-6) prob = 1e-6;
-    if (prob > 0.1)  prob = 0.1;
-    gcd_error_probability_ = prob;
-}
-
-void CASContext::set_zippel_error_probability(double prob) noexcept {
-    if (prob < 1e-15) prob = 1e-15;
-    if (prob > 0.1)   prob = 0.1;
-    zippel_error_probability_ = prob;
-}
-
-void CASContext::set_zippel_density_threshold(double t) noexcept {
-    if (t < 0.0) t = 0.0;
-    zippel_density_threshold_ = t;
-}
-
-void CASContext::set_numeric_precision_digits(unsigned int digits) noexcept {
-    // Clamp: minimum 6 digits (≈ 20 bits MPFR), maximum 10000 (~ 33k bits).
-    if (digits < 6U) digits = 6U;
-    if (digits > 10000U) digits = 10000U;
-    numeric_precision_digits_ = digits;
-}
-
-void CASContext::set_max_rootof_explicit_degree(std::size_t deg) noexcept {
-    max_rootof_explicit_degree_ = (deg < 1U) ? 1U : deg;
-}
-
-void CASContext::set_max_gcd_recursion_depth(std::size_t depth) noexcept {
-    max_gcd_recursion_depth_ = (depth < 4U) ? 4U : depth;
-}
-
-void CASContext::set_min_gcd_division_steps(std::size_t steps) noexcept {
-    min_gcd_division_steps_ = (steps < 1U) ? 1U : steps;
-}
-
-void CASContext::set_max_gcd_total_calls(std::size_t n) noexcept {
-    max_gcd_total_calls_ = (n < 16U) ? 16U : n;
-}
-
-void CASContext::set_max_cyclotomic_n(int n) noexcept {
-    max_cyclotomic_n_ = n;
-}
-
-void CASContext::set_max_q_alpha_bridge_depth(std::size_t depth) noexcept {
-    max_q_alpha_bridge_depth_ = (depth < 8U) ? 8U : depth;
-}
-
-void CASContext::set_max_gamma_recursion(std::size_t iters) noexcept {
-    max_gamma_recursion_ = (iters < 16U) ? 16U : iters;
-}
-
-void CASContext::set_improper_leading_order_scan(std::size_t window) noexcept {
-    improper_leading_order_scan_ = (window < 1U) ? 1U : window;
-}
-
-void CASContext::set_expand_bessel_recurrence(bool enabled) noexcept {
-    expand_bessel_recurrence_ = enabled;
-}
-
-void CASContext::set_max_trager_tower_shift_attempts(std::size_t attempts) noexcept {
-    max_trager_tower_shift_attempts_ = attempts;
+    // A30 contract: an explicit wall-clock budget means the caller owns the
+    // operation budget, so the default deterministic ops gate steps aside
+    // (long-running factorisation/Galois workloads legitimately exceed it).
+    // An explicit set_max_operation_ops call always wins over this default.
+    if (!max_operation_ops_explicit_) {
+        max_operation_ops_ = 0U;
+    }
 }
 
 Symbol CASContext::make_fresh_symbol(const std::string& prefix) {
-    // Probe candidate names of the form "<prefix>_<n>" with monotonically
-    // increasing n until the name is not present in the user-defined
-    // variable map.  The internal counter guarantees we never return
-    // the same name twice from one context.
     std::string base = prefix.empty() ? std::string("_g") : prefix;
     while (true) {
         ++fresh_symbol_counter_;
@@ -524,10 +222,6 @@ CacheMetrics CASContext::get_integrate_metrics() const noexcept {
 Result<ExprPtr> CASContext::simplify(ExprPtr expr) {
     if (!expr) return fail<ExprPtr>(make_error(CASErrorKind::InvalidArgument, "Cannot simplify null expression"));
 
-    // F7.0-A4.1: invalidate caches if assumptions have changed since last fill.
-    // simplify(abs(x)) result depends on whether x is known positive/negative;
-    // a stale cache entry from a different assumption regime would corrupt
-    // the result. Cheap check: one std::uint64_t comparison per simplify call.
     {
         const std::uint64_t cur_rev = assumptions_.revision();
         if (cur_rev != last_assumptions_revision_) {
@@ -536,47 +230,66 @@ Result<ExprPtr> CASContext::simplify(ExprPtr expr) {
         }
     }
 
-    if (caching_enabled_ && !trace_enabled_) {
+    // A54: la chiave di cache è il solo ExprPtr, quindi una entry calcolata con
+    // la raccolta simbolica ATTIVA non vale quando è stata sospesa (expand) —
+    // sarebbe la forma fattorizzata restituita a chi ha chiesto quella
+    // espansa, e il difetto tornerebbe per via della cache invece che della
+    // regola.  In quella modalità la cache si salta in lettura e in scrittura;
+    // il default (true) lascia il path normale intatto.
+    // A55: stesso argomento per la distribuzione simbolica sospesa da
+    // `algebra::together` (CombinedFormScope) — una entry calcolata a
+    // distribuzione ATTIVA non vale quando è sospesa, e viceversa.
+    const bool cache_usable =
+        caching_enabled_ && !trace_enabled_
+        && symbolic_like_term_factoring() && symbolic_sum_distribution();
+
+    if (cache_usable) {
         if (auto cached = simplify_cache_.get(expr)) {
-            return ok(*cached);
+            // A31 fase 1 (spec §4.2): a cache hit must re-emit the
+            // conditions that were recorded when this entry was first
+            // computed, or a second simplify(same expr) would silently
+            // under-report last_side_conditions() vs the first call.
+            // A31 fase 2 (spec §10.1): a TOP-LEVEL hit must also reset the
+            // accumulator first — without this, a hit following an unrelated
+            // top-level call merged into that call's leftover set and
+            // over-reported (a/a, b/b, a/a-hit -> {a,b} instead of {a}).
+            // An inner hit (operation_active_) keeps merging without reset.
+            if (!operation_active_) side_conditions_.clear();
+            side_conditions_.merge(cached->conditions);
+            return ok(cached->result);
         }
     }
 
     const bool owns_operation = !operation_active_;
     if (owns_operation) {
         operation_active_ = true;
-        trace_capture_active_ = trace_enabled_;
-        trace_.clear();
-        ops_count_ = 0;
-        operation_started_at_ = std::chrono::steady_clock::now();
+        begin_operation_budget(trace_enabled_);
+        side_conditions_.clear();
     }
+    // A31 fase 1: snapshot before processing `expr` so the PUT below can
+    // store exactly the conditions this specific call contributed, not the
+    // full accumulated set of a multi-expression outer operation.
+    const SideConditionSet conditions_mark = side_conditions_;
     auto result = symbolic::simplify(expr, *this);
     if (owns_operation) {
         operation_active_ = false;
-        trace_capture_active_ = false;
-        ops_count_ = 0;
+        end_operation_budget();
 
-        // Post-simplify hook: algebraic extension reduction (e.g. Q(alpha) via bridge).
-        // Only runs at the top-level call to avoid O(N) overhead on sub-expressions.
         if (result.is_ok() && post_simplify_hook_) {
             auto hook_res = post_simplify_hook_(result.value(), *this);
             if (hook_res.is_ok() && hook_res.value() != result.value()) {
-                // Hook produced a distinct expression; re-simplify to canonical form.
                 auto resimplified = symbolic::simplify(hook_res.value(), *this);
                 result = resimplified.is_ok() ? resimplified : hook_res;
             }
         }
     }
 
-    if (caching_enabled_ && !trace_enabled_ && result.is_ok()) {
-        simplify_cache_.put(expr, result.value());
+    if (cache_usable && result.is_ok()) {
+        simplify_cache_.put(expr, SimplifyCacheEntry{
+            result.value(), side_conditions_.since(conditions_mark)});
     }
 
 #ifndef NDEBUG
-    // F7.0-A4.2: debug-only canonical invariant check.
-    // Reports invariant violations on stderr without aborting — emits one
-    // warning per top-level simplify call. Helps catch invariant regressions
-    // close to their source during dev/test runs.
     if (owns_operation && result.is_ok()
         && !is_strictly_canonical(result.value())) {
         std::fprintf(stderr,
@@ -587,27 +300,16 @@ Result<ExprPtr> CASContext::simplify(ExprPtr expr) {
     return result;
 }
 
-Result<ExprPtr> materialize_expr(ExprPtr expr, AstArena& arena) {
-    return materialize_expr_impl(expr, arena);
-}
-
-// NOTE: mathematically_equal is defined in cas_algebra (algebraic_equal.cpp)
-// so it can use split_num_den for rational cross-multiplication.
-// The declaration in cas/symbolic.hpp is satisfied by the algebra library at link time.
-
 void CASContext::collect_garbage(const std::vector<ExprPtr*>& external_roots) {
     AstArena new_arena;
     std::unordered_map<ExprPtr, ExprPtr> cache;
 
-    // 1. Update variables
     for (auto& [name, expr] : variables_) {
         expr = clone_into_arena(expr, new_arena, cache);
     }
 
-    // 2. Update assumptions
     assumptions_.update_roots(new_arena, cache);
 
-    // 3. Update trace
     if (trace_enabled_) {
         for (auto& step : trace_) {
             step.target_before = clone_into_arena(step.target_before, new_arena, cache);
@@ -616,21 +318,47 @@ void CASContext::collect_garbage(const std::vector<ExprPtr*>& external_roots) {
         }
     }
 
-    // 4. Update external roots
     for (auto* root_ptr : external_roots) {
         if (root_ptr && *root_ptr) {
             *root_ptr = clone_into_arena(*root_ptr, new_arena, cache);
         }
     }
 
-    // 5. Update caches
     if (!simplify_cache_.empty()) {
-        CacheContainer<ExprPtr, ExprPtr, ExprHash, ExprEqual> new_simplify_cache(simplify_cache_.max_size());
+        CacheContainer<ExprPtr, SimplifyCacheEntry, ExprHash, ExprEqual> new_simplify_cache(simplify_cache_.max_size());
         for (auto& it : simplify_cache_) {
-            new_simplify_cache.put(clone_into_arena(it.first, new_arena, cache), clone_into_arena(it.second.first, new_arena, cache));
+            const SimplifyCacheEntry& entry = it.second.first;
+            // A31 fase 1: each condition's `subject` is an ExprPtr rooted in
+            // the OLD arena — must be re-interned exactly like every other
+            // ExprPtr root, or last_side_conditions()/cache hits after a GC
+            // would dereference stale memory.
+            SideConditionSet new_conditions;
+            new_conditions.set_max_size(entry.conditions.max_size());
+            for (const auto& c : entry.conditions.items()) {
+                new_conditions.add(DomainCondition{
+                    c.kind, clone_into_arena(c.subject, new_arena, cache)});
+            }
+            new_simplify_cache.put(
+                clone_into_arena(it.first, new_arena, cache),
+                SimplifyCacheEntry{
+                    clone_into_arena(entry.result, new_arena, cache),
+                    std::move(new_conditions)});
         }
         new_simplify_cache.metrics() = simplify_cache_.metrics();
         simplify_cache_ = std::move(new_simplify_cache);
+    }
+
+    {
+        // A31 fase 1: re-intern the live side_conditions_ accumulator too —
+        // it holds ExprPtr subjects from the OLD arena until the next
+        // top-level simplify() call clears it.
+        SideConditionSet new_side_conditions;
+        new_side_conditions.set_max_size(side_conditions_.max_size());
+        for (const auto& c : side_conditions_.items()) {
+            new_side_conditions.add(DomainCondition{
+                c.kind, clone_into_arena(c.subject, new_arena, cache)});
+        }
+        side_conditions_ = std::move(new_side_conditions);
     }
 
     if (!diff_cache_.empty()) {
@@ -662,7 +390,6 @@ void CASContext::collect_garbage(const std::vector<ExprPtr*>& external_roots) {
         integrate_cache_ = std::move(new_integrate_cache);
     }
 
-    // 6. Swap arena
     arena_ = std::move(new_arena);
 }
 

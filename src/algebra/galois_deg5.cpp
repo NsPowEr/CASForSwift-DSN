@@ -182,9 +182,18 @@ Result<std::string> galois_group_quintic_irreducible(
     std::size_t primes_scanned = 0U;
     std::size_t total_primes_tried = 0U;
     // Hard upper bound on the *outer* loop to prevent runaway in pathological
-    // inputs (e.g. disc with enormous small-prime divisors). Configurable via
-    // the same context knob: scan at most 8× prime_budget candidates.
-    const std::size_t max_candidates = prime_budget * 8U + 16U;
+    // inputs (e.g. disc with enormous small-prime divisors). Derived, not magic:
+    // a candidate prime is skipped only when it divides lc·disc_num·disc_den.
+    // The number of *distinct* prime divisors of an integer N is ≤ bit_length(N)
+    // (k distinct primes ⇒ product ≥ 2^k ≤ N). Hence collecting `prime_budget`
+    // usable primes needs at most `prime_budget + (#bad primes)` candidates,
+    // bounded above by the sum of the operands' bit-lengths. (The 2^30 range
+    // break below remains the absolute backstop.)
+    const std::size_t bad_prime_bound =
+        lc.bit_length()
+        + disc_rat->numerator().bit_length()
+        + disc_rat->denominator().bit_length();
+    const std::size_t max_candidates = prime_budget + bad_prime_bound;
 
     BigInt p_walker(2);
     while (primes_scanned < prime_budget &&

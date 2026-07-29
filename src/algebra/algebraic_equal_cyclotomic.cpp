@@ -26,8 +26,10 @@
 #include "cas/ast.hpp"
 #include "cas/symbolic.hpp"
 #include "algebra_internal.hpp"
+#include "polynomial_internal.hpp"
 
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace cas::algebra {
@@ -50,6 +52,37 @@ namespace {
         return arena.make<IntegerLit>(r.numerator());
     }
     return arena.make<RationalLit>(r.numerator(), r.denominator());
+}
+
+[[nodiscard]] int igcd(int a, int b) {
+    while (b != 0) { int t = a % b; a = b; b = t; }
+    return a < 0 ? -a : a;
+}
+
+// Match an ascending integer-coefficient vector against the n-th cyclotomic
+// polynomial Φ_n for some n, returning that n. deg(Φ_n) = φ(n), so a degree
+// mismatch rules out a candidate immediately. φ(n) ≥ √(n/2) ⇒ n ≤ 2·φ(n)² = 2d²,
+// giving a complete, finite search window (capped by ctx.max_cyclotomic_n when
+// the user has set a budget). Exact integer comparison — no floating point.
+[[nodiscard]] std::optional<int> detect_cyclotomic_index(
+    const std::vector<BigInt>& coeffs_asc, symbolic::CASContext& ctx) {
+    if (coeffs_asc.size() < 2U) return std::nullopt;        // need degree ≥ 1
+    const std::size_t d = coeffs_asc.size() - 1U;
+    if (coeffs_asc[d] != BigInt(1)) return std::nullopt;     // Φ_n is monic
+    const long long dd = static_cast<long long>(d);
+    long long bound = 2 * dd * dd + 2;
+    const int cap = ctx.max_cyclotomic_n();
+    if (cap > 0 && static_cast<long long>(cap) < bound) bound = cap;
+    for (long long n = 1; n <= bound; ++n) {
+        algebra::IntPoly phi = algebra::compute_cyclotomic(static_cast<int>(n));
+        if (phi.size() != coeffs_asc.size()) continue;       // φ(n) ≠ d
+        bool eq = true;
+        for (std::size_t k = 0; k < coeffs_asc.size(); ++k) {
+            if (phi[k] != coeffs_asc[k]) { eq = false; break; }
+        }
+        if (eq) return static_cast<int>(n);
+    }
+    return std::nullopt;
 }
 
 }  // namespace
@@ -152,6 +185,54 @@ enumerate_geometric_rootof(const RootOf& node, symbolic::CASContext& ctx) {
     return roots;
 }
 
+// Expand a RootOf whose polynomial is the GENUINE n-th cyclotomic Φ_n into its
+// φ(n) primitive roots `exp(2πi·m/n)` with gcd(m,n)=1. Complements the geometric
+// enumerator above, which only covers Φ_p for prime p (= (x^p−1)/(x−1)); this
+// handles composite n where Φ_n is not geometric (Φ_8 = x⁴+1, Φ_12 = x⁴−x²+1, …).
+// Each root is emitted twice (positive angle m·2π/n and its (m−n) negative-angle
+// representative) so the comparison aligns with Maxima's (−π, π] canonical range,
+// matching the geometric enumerator's convention. nullopt when the polynomial is
+// not a cyclotomic Φ_n with integer-literal coefficients.
+[[nodiscard]] std::optional<std::vector<ExprPtr>>
+enumerate_cyclotomic_rootof(const RootOf& node, symbolic::CASContext& ctx) {
+    AstArena& arena = ctx.arena();
+    auto coeffs = algebra::univariate_coefficients(
+        node.polynomial, node.variable, ctx);
+    if (!coeffs.is_ok()) return std::nullopt;
+
+    std::vector<BigInt> int_coeffs;
+    int_coeffs.reserve(coeffs.value().size());
+    for (ExprPtr c : coeffs.value()) {
+        const auto* il = expr_cast<IntegerLit>(c);
+        if (il == nullptr) return std::nullopt;  // Φ_n has integer coefficients
+        int_coeffs.push_back(il->value);
+    }
+
+    auto n_opt = detect_cyclotomic_index(int_coeffs, ctx);
+    if (!n_opt.has_value()) return std::nullopt;
+    const int n = *n_opt;
+
+    ExprPtr two = arena.make<IntegerLit>(BigInt(2));
+    ExprPtr pi = arena.make<Constant>(MathConstant::Pi);
+    ExprPtr i = arena.make<Constant>(MathConstant::I);
+    ExprPtr n_expr = arena.make<IntegerLit>(BigInt(n));
+    auto emit = [&](long long m_signed) -> ExprPtr {
+        ExprPtr num = arena.make<Product>(std::vector<ExprPtr>{
+            two, arena.make<IntegerLit>(BigInt(m_signed)), pi, i});
+        ExprPtr arg = arena.make<Binary>(BinaryOp::Div, num, n_expr);
+        return arena.make<FuncCall>(BuiltinOp::Exp, std::vector<ExprPtr>{arg});
+    };
+
+    std::vector<ExprPtr> roots;
+    for (int m = 1; m < n; ++m) {
+        if (igcd(m, n) != 1) continue;  // primitive roots only
+        roots.push_back(emit(m));
+        roots.push_back(emit(static_cast<long long>(m) - n));
+    }
+    if (roots.empty()) return std::nullopt;
+    return roots;
+}
+
 }  // namespace cas::algebra
 
 namespace cas::symbolic {
@@ -190,6 +271,8 @@ namespace cas::algebra {
         const RootOf* root = lhs_root != nullptr ? lhs_root : rhs_root;
         ExprPtr other = lhs_root != nullptr ? rhs : lhs;
         auto enumerated = enumerate_geometric_rootof(*root, ctx);
+        if (!enumerated.has_value())
+            enumerated = enumerate_cyclotomic_rootof(*root, ctx);  // T-025: composite Φ_n
         if (!enumerated.has_value()) return std::nullopt;
         for (ExprPtr candidate : *enumerated) {
             auto eq = symbolic::mathematically_equal(candidate, other, ctx);

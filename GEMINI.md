@@ -69,7 +69,7 @@ bash scripts/benchmark.sh --check
 
 ## Key Files
 - `CLAUDE.md`: The "Supreme Law" - architectural and anti-hardcode rules.
-- `CAS_TASKS.md`: Current development tasks and roadmap.
+- `TASKLIST_MASTER.md`: Current development tasks and roadmap (single source of truth; i vecchi tracker sono in docs/archive/).
 - `include/cas/ast.hpp`: Core expression definitions and `AstArena`.
 - `include/cas/symbolic.hpp`: `CASContext` and simplification interfaces.
 - `CMakeLists.txt`: Build system configuration.

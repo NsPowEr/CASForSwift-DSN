@@ -70,7 +70,6 @@ Result<ExprPtr> bareiss_determinant(const MatrixExpr& matrix,
             if (pivot_row == n || score > best_score) {
                 best_score = score;
                 pivot_row = i;
-                if (score.certainty == 3) break;
             }
         }
         if (pivot_row == n) return ok(integer(ctx, 0));

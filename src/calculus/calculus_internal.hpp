@@ -51,6 +51,19 @@ struct QuotientView {
     const Symbol& var,
     symbolic::CASContext& ctx);
 
+// A43 §5 — `integrate_nonelementary_fallback` (Ei, Si, Ci, Shi, Chi, li, Li₂,
+// erfi) è dichiarata nell'header del proprio modulo,
+// `integrate_nonelementary.hpp`, non qui: questo header è condiviso da tutto
+// `cas_calculus` ed è già al limite anti-monolito.
+
+/// @brief A7 step 5 — Meijer G fallback for ∫ K·x^μ·f(c·x^r) dx, wired as
+/// the LAST resort after Risch and Weierstrass (Meijer_G_Slater.md §8-§9).
+/// May return a Meijer G / pFq closed form (first-class result, §9.4).
+[[nodiscard]] Result<ExprPtr> integrate_meijerg_fallback(
+    ExprPtr expr,
+    const Symbol& var,
+    symbolic::CASContext& ctx);
+
 /// @brief Finite-difference symbolic derivative formulas (L3-12).
 enum class FiniteDiffOrder {
     Forward1,   // O(h)
@@ -224,6 +237,31 @@ solve_risch_de_parametric_q(
     const Symbol& var,
     symbolic::CASContext& ctx);
 
+/// @brief Rational limited integration over Q(x) — the f = 0 case of the
+/// parametric Risch DE:  solve  y' = Σ_i c_i·g_i  for c_i ∈ Q and y ∈ Q(x)
+/// with rational g_i (Bronstein §7.2/§7.3).  Complements
+/// solve_risch_de_parametric_q (Q[x] only) which bails on a rational g.
+/// Sound by construction: each solution is verified by back-substitution.
+/// (A26 / HC-A26-PRIMITIVE-PARAMQ-RATIONAL.)
+[[nodiscard]] Result<std::vector<ParametricRischDeQSolution>>
+solve_param_limited_integration_rational_q(
+    const std::vector<ExprPtr>& g_vec,
+    const Symbol& var,
+    symbolic::CASContext& ctx);
+
+/// @brief Full parametric Risch DE over Q(x), f ≠ 0 case:  solve
+/// y' + f·y = Σ_i c_i·g_i  for c_i ∈ Q and y ∈ Q(x), with f, g_i rational.
+/// Ansatz y = P/D (D = lcm of denominators) → homogeneous Q-linear system →
+/// null-space basis, each verified by back-substitution.  Complements
+/// solve_param_limited_integration_rational_q (f = 0).  Sound by construction.
+/// (A26 / HC-A26-PRIMITIVE-PARAMQ-RATIONAL.)
+[[nodiscard]] Result<std::vector<ParametricRischDeQSolution>>
+solve_param_risch_de_rational_q(
+    ExprPtr f_expr,
+    const std::vector<ExprPtr>& g_vec,
+    const Symbol& var,
+    symbolic::CASContext& ctx);
+
 /// @brief Limited Integration in Q[x] (Bronstein §7.2 caso polinomiale).
 /// Dato f ∈ Q[var], trova rappresentazione  f = g' + Σ_i c_i · h_i
 /// dove g ∈ Q[var] è "elementary" (antiderivata esatta della parte ridotta) e
@@ -333,6 +371,20 @@ limited_integration_q(
     unsigned int pole_budget,
     symbolic::CASContext& ctx);
 
+// A37: Taylor expansion of a quotient whose denominator vanishes at `center`.
+// Expands numerator and denominator separately and divides the truncated
+// series (via laurent_series_general) instead of evaluating derivatives at the
+// center, which is a 0/0 form there. Succeeds exactly when the singularity is
+// removable (val(N) >= val(D)); reports Unimplemented TAYLOR_POLE_NOT_REMOVABLE
+// on a genuine pole and TAYLOR_REMOVABLE_DEPTH when val(D) exceeds the search
+// bound. Never returns a silently truncated series.
+[[nodiscard]] Result<TaylorExpansion> taylor_series_removable(
+    ExprPtr expr,
+    const Symbol& var,
+    ExprPtr center,
+    unsigned int order,
+    symbolic::CASContext& ctx);
+
 [[nodiscard]] Result<ExprPtr> residue(
     ExprPtr expr,
     const Symbol& var,
@@ -366,5 +418,79 @@ using MRVSet = std::set<ExprPtr, MRVCompare>;
 
 [[nodiscard]] Result<std::vector<ParametricRischDeQSolution>> solve_risch_de_parametric_field(
     ExprPtr f, const std::vector<ExprPtr>& g_vec, std::size_t ext_idx, const DifferentialField& field, symbolic::CASContext& ctx);
+
+/// @brief Riduzione della famiglia di forzanti di una Risch DE parametrica su
+/// monomio primitivo, per cancellazione dei poli (Bronstein §7.1 + Teorema
+/// 5.1.1 / formula 5.1: nel caso primitivo k⟨t⟩ = k[t], quindi Σ c_i·g_i deve
+/// essere polinomiale in t anche quando le singole g_i hanno poli).
+struct ParametricForcingReduction {
+    std::vector<ExprPtr> g_reduced;             ///< forzanti ridotte, in k[t]
+    std::vector<std::vector<Rational>> basis;   ///< basis[j][i]: g_reduced[j] = Σ_i basis[j][i]·g_i
+};
+
+/// @brief Calcola il sottospazio {c : Σ c_i·g_i ∈ k[t]} e ne restituisce una
+/// base di forzanti (tutte polinomiali in t) più la matrice di cambio base.
+/// Ritorna `nullopt` quando non c'è nulla da fare (nessuna g_i ha poli in t),
+/// così il chiamante prosegue sul percorso ordinario.
+/// (HC-A26-PRIMITIVE-PARAMQ-RATIONAL.)
+[[nodiscard]] Result<std::optional<ParametricForcingReduction>>
+reduce_parametric_forcing_poles(
+    const std::vector<ExprPtr>& g_vec,
+    const Symbol& t,
+    const Symbol& base_var,
+    symbolic::CASContext& ctx);
+
+/// @brief Solution of the Limited Integration Problem over a tower (A38).
+struct LimitedIntegrationFieldSolution {
+    ExprPtr v;                  ///< the K-part of the decomposition
+    std::vector<Rational> c;    ///< constants c_1..c_m on w_1..w_m
+};
+
+/// @brief Limited Integration over K = Q(x, t_1..t_n) (Bronstein §7.2, eq. 7.30):
+/// given f, w_1..w_m ∈ K, find v ∈ K and c_i ∈ Const(K) = Q with
+///   f = D(v) + Σ_i c_i·w_i.
+/// Solved as the parametric Risch DE (7.36)  D(v) = c_0·f + Σ c_i·(−w_i)  under
+/// the constraint c_0 = 1, via solve_risch_de_parametric_field (§7.1) — the
+/// route Bronstein recommends for arbitrary w_i.  This is the wiring that makes
+/// the parametric tower solver reachable from integrate() (A38; the solver
+/// itself came from A1 + A26).  Sound by construction: the returned pair is
+/// re-verified by exact back-substitution in the tower.  A tower in which no
+/// solution has c_0 = 1 is a legitimate NEGATIVE, reported as a distinct
+/// diagnostic (RISCH_NO_MATCH), never silence.
+[[nodiscard]] Result<LimitedIntegrationFieldSolution> limited_integrate_field(
+    ExprPtr f,
+    const std::vector<ExprPtr>& w_vec,
+    const DifferentialField& field,
+    symbolic::CASContext& ctx);
+
+/// @brief Parametric PolyRischDE, non-cancellation case (Bronstein §7.1,
+/// ParamPolyRischDENoCancel1 — "When deg(b) is Large Enough").  Solves the
+/// cleared parametric equation  D(q) + f_new·q = Σ_i c_i·g_new_i  for q ∈ K[t]
+/// (deg ≤ N) and c_i ∈ Const(K)=Q, in the regime deg_t(f_new) > max(0,δ(t)−1)
+/// (df>0 for log/exp towers).  This is the df>0 branch of A1.  Sound: every
+/// candidate is verified by field back-substitution.  Reached from the df>0
+/// site of solve_risch_de_parametric_field.  Returns solutions as {q, c} (the
+/// caller divides q by the denominator D).  The residual constant system is
+/// solved for any tower K = k(t_1,…,t_j) via constant_system_nullspace
+/// (Bronstein §7.1 ConstantSystem), not just K = Q(x).
+[[nodiscard]] Result<std::vector<ParametricRischDeQSolution>>
+solve_param_poly_risch_de_nocancel1(
+    ExprPtr f_new, const std::vector<ExprPtr>& g_new_vec, int N,
+    const Symbol& t, const DifferentialField& field, symbolic::CASContext& ctx);
+
+/// @brief Bronstein §7.1 ConstantSystem (Fig 7.1) / Lemma 7.1.2.  Given a
+/// homogeneous linear system A·c = 0 whose entries live in a differential field K
+/// (ExprPtr rational functions of the base variable and the lower tower
+/// generators), reduce it — by row operations plus the derivation-generated rows
+/// R_{m+1} = D(R_i)/D(a_ij) — to the system for its CONSTANT solutions, and return
+/// a null-space basis over Const(K)=Q.  The right side is 0 throughout (u=0 ⇒
+/// v=0).  Terminates in ≤ m column-clearing passes.  Declines with Unimplemented
+/// only if a reduced constant entry is not rational over Q (Const(K) ⊋ Q — not
+/// produced by log/exp towers).  Generalises the Q(x)-only clear-denominators
+/// shortcut, enabling deep towers K ⊋ Q(x) (closes HC-F8-PENDING-17).
+[[nodiscard]] Result<std::vector<std::vector<Rational>>>
+constant_system_nullspace(
+    std::vector<std::vector<ExprPtr>> A, std::size_t m,
+    const DifferentialField& field, symbolic::CASContext& ctx);
 
 }  // namespace cas::calculus

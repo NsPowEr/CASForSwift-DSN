@@ -99,21 +99,40 @@ using namespace kovacic_impl;
     // Step 1: compute the Kovacic invariant r.
     auto r_res = compute_r(a2, a1, a0, x, ctx);
     if (r_res.is_error()) return r_res;
+    ExprPtr r = r_res.value();
+
+    // Riccati certificate: η = e^{∫ω} solves y'' = r·y  iff  ω' + ω² = r.
+    // case1_omega assembles ω₊/ω₋ by flipping the √r sign at each pole; for
+    // poles of order > 2 the flipped branch need not satisfy the Riccati, so
+    // every candidate must be certified before use (silent-wrong guard).
+    auto riccati_ok = [&](ExprPtr w) -> bool {
+        auto wp = diff(w, x, 1U, ctx);
+        if (wp.is_error()) return false;
+        auto res = ctx.simplify(kv_sub(a, kv_add(a, wp.value(), kv_mul(a, w, w)), r));
+        return res.is_ok() && kv_is_zero(res.value(), ctx);
+    };
 
     // Step 2: Case 1 — find rational ω₊, ω₋.
-    auto omega_res = case1_omega(r_res.value(), x, ctx);
-    if (omega_res.is_error()) {
-        CASError case1_err = omega_res.error();
-        // Case 1 failed — route through Case 2 (dihedral D∞ subgroup).
-        // case2_omega implements Kovacic 1986 §4 Steps 1-4 with Riccati
-        // algebraic certificate (HC-KV-03 CHIUSO).
-        auto case2_res = case2_omega(r_res.value(), x, ctx);
+    bool from_case1 = true;
+    auto omega_res = case1_omega(r, x, ctx);
+    bool case1_ok = omega_res.is_ok()
+        && (riccati_ok(omega_res.value().plus) || riccati_ok(omega_res.value().minus));
+
+    if (!case1_ok) {
+        // Case 1 failed, or assembled a ω that fails the Riccati certificate —
+        // route through Case 2 (dihedral D∞ subgroup).  case2_omega implements
+        // Kovacic 1986 §4 Steps 1-4 with its own algebraic certificate.
+        CASError case1_err = omega_res.is_error()
+            ? omega_res.error()
+            : kv_unimpl("Kovacic Case 1: assembled ω fails the Riccati certificate ω'+ω²=r.");
+        auto case2_res = case2_omega(r, x, ctx);
         if (case2_res.is_ok()) {
             omega_res = case2_res;
+            from_case1 = false;
         } else {
             // Case 2 failed too — try Case 3 (SL(2,C) finite subgroups).
             // case3_omega implements Kovacic 1986 §5 with n ∈ {4, 6, 12}.
-            auto case3_res = case3_omega(r_res.value(), x, ctx);
+            auto case3_res = case3_omega(r, x, ctx);
             if (case3_res.is_error()) {
                 // Surface original Case 1 diagnostic — most specific for
                 // Case-1-friendly inputs.  Case 2/3 errors are also
@@ -122,11 +141,15 @@ using namespace kovacic_impl;
                 return fail<ExprPtr>(case1_err);
             }
             omega_res = case3_res;
+            from_case1 = false;
         }
     }
 
     ExprPtr op = omega_res.value().plus;
     ExprPtr om = omega_res.value().minus;
+
+    // For Case 1, make ω₊ the certified branch so z₁ is always a genuine solution.
+    if (from_case1 && !riccati_ok(op) && riccati_ok(om)) std::swap(op, om);
 
     // Step 3a: z₁ = exp(∫ω₊ dx).
     auto Fp = integrate(op, x, ctx);
@@ -142,7 +165,13 @@ using namespace kovacic_impl;
     auto odiff = ctx.simplify(kv_sub(a, op, om));
     bool same  = odiff.is_ok() && kv_is_zero(odiff.value(), ctx);
 
-    if (same) {
+    // ω₋ yields an independent solution z₂ = e^{∫ω₋} only if it is itself a
+    // genuine (certified) Riccati solution; otherwise fall back to reduction of
+    // order, which is always valid (and may leave an honest unevaluated integral
+    // when the second solution is non-elementary).
+    bool om_usable = (!from_case1 || riccati_ok(om));
+
+    if (same || !om_usable) {
         auto z2_res = reduction_of_order(z1, x, ctx);
         if (z2_res.is_error()) return z2_res;
         z2 = z2_res.value();

@@ -5,6 +5,11 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <cstddef>
+#include <vector>
+
+#include "algebra/polynomial_internal.hpp"
 #include "cas/algebra.hpp"
 #include "cas/lexer.hpp"
 #include "cas/parser.hpp"
@@ -70,6 +75,31 @@ TEST_F(FactorizationPolynomialsSmokeTest, FactorPolynomialQAlphaFallback) {
     auto r = algebra::factor_polynomial(e, x, ctx);
     ASSERT_TRUE(r.is_ok()) << r.error().message;
     EXPECT_GE(r.value().factors.size(), 2U);
+}
+
+TEST_F(FactorizationPolynomialsSmokeTest,
+       RecombinationComplementKeepsLargeModularFactor) {
+    // Regression (found via A6, Φ₇ 3-set resolvent): mod 109 this factors
+    // as degrees {1, 5, 2}. The historic recombination DROPPED modular
+    // factors of degree > n/2 from the pool, so the complement `right` no
+    // longer satisfied left·right ≡ f (mod p): hensel_lift then produced
+    // garbage for every subset and the polynomial was silently declared
+    // irreducible. Expected: {2, 6} — Maxima-verified
+    // (y²+y+2)·(y⁶+3y⁵+2y⁴−y³+4y²−2y+1).
+    auto e = parse(
+        "x^8 + 4*x^7 + 7*x^6 + 7*x^5 + 7*x^4 + 7*x^2 - 3*x + 2");
+    auto r = algebra::factor_over_integers(e, x, ctx);
+    ASSERT_TRUE(r.is_ok()) << r.error().message;
+    std::vector<std::size_t> degs;
+    for (const auto& pf : r.value().factors) {
+        auto pp = algebra::parse_polynomial(pf.factor, x, ctx);
+        ASSERT_TRUE(pp.is_ok());
+        for (unsigned int m = 0U; m < pf.multiplicity; ++m) {
+            degs.push_back(algebra::poly_degree(pp.value()));
+        }
+    }
+    std::sort(degs.begin(), degs.end());
+    EXPECT_EQ(degs, (std::vector<std::size_t>{2U, 6U}));
 }
 
 }  // namespace

@@ -306,11 +306,11 @@ Result<PrimitiveElementResult> compute_primitive_element(
                 std::size_t iters = 0U;
                 // Bit-length cap: when R_s is reducible, Q[y]/(R_s) is not a
                 // field and Euclidean step coefficients grow without bound
-                // even when iteration count is small.  Cap at 8192 bits per
-                // coefficient (= ~2466 decimal digits) — far beyond any
+                // even when iteration count is small. Configurable via
+                // CASContext (HC-F8-PENDING-26) — default far beyond any
                 // legitimate inverse computation in the irreducible (field)
                 // case, but tight enough to catch the degenerate path fast.
-                const std::size_t max_bits = 8192U;
+                const std::size_t max_bits = ctx.algebraic_tower_eval_max_bits();
                 auto max_coef_bits = [](const RatPoly& g) -> std::size_t {
                     std::size_t mb = 0U;
                     for (std::size_t i = 0; i < g.size(); ++i) {
@@ -369,7 +369,7 @@ Result<PrimitiveElementResult> compute_primitive_element(
                 }
                 return mb;
             };
-            const std::size_t kMaxRingBits = 8192U;
+            const std::size_t kMaxRingBits = ctx.algebraic_tower_eval_max_bits();
 
             auto rpoly_divmod_t = [&](RingPoly A, const RingPoly& B)
                 -> std::optional<std::pair<RingPoly, RingPoly>> {

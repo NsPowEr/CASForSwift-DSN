@@ -76,7 +76,17 @@ namespace {
             if (!is_weierstrass_candidate_walk(f, var)) return false;
         return true;
     }
-    return true;  // literals, symbols, constants: OK
+    if (auto* s = expr_cast<Symbol>(expr)) {
+        // var may appear ONLY as the argument of sin(var)/cos(var), which is
+        // accepted and short-circuited above (its arg is never walked).  A bare
+        // var reaching here means the integrand is not a rational function of
+        // sin(x), cos(x) — e.g. sin(x)/x — so Weierstrass does not apply.  Left
+        // unchecked, substitute_trig leaves the bare x in place, producing a
+        // mixed x·t expression that drives the integrator into non-terminating
+        // recursion (Si/Ci-type integrals are non-elementary).
+        return s->name != var.name;
+    }
+    return true;  // literals, other-variable symbols, constants: OK
 }
 
 // Replace FuncCall(Sin, [var]) → sin_repl and FuncCall(Cos, [var]) → cos_repl

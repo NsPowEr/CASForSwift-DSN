@@ -26,14 +26,66 @@ using BSparsePoly = std::map<BMonomial, BigInt>;
 [[nodiscard]] BSparsePoly reduce_sparse_mod_p(const BSparsePoly& sp, const BigInt& p);
 [[nodiscard]] BigInt      sparse_inf_norm(const BSparsePoly& sp);
 [[nodiscard]] std::size_t deg_in_var(const BSparsePoly& sp, std::size_t var_idx);
+
+// HPP-003C — proven upper bound on the number of leading-monomial reduction
+// steps a sparse polynomial division can take when `dividend` is genuinely
+// divisible: every step yields one quotient monomial q with q[i] <= deg_i
+// (dividend) for each variable i (degree arithmetic of exact polynomial
+// division), so the quotient has at most prod_i (deg_i(dividend)+1) distinct
+// monomials. Termination itself is guaranteed unconditionally by the
+// leading-monomial well-ordering (each step strictly decreases the reducible
+// leading monomial); this bound only distinguishes a legitimate large
+// division from a corrupted invariant, replacing the previous unproven
+// heuristic `(|rem|+1)*(|divisor|+1)+16` that could false-negative on a
+// genuine divisor with many quotient terms.
+[[nodiscard]] std::size_t proven_division_step_bound(
+    const BSparsePoly& dividend, std::size_t n_vars);
 [[nodiscard]] BSparsePoly eval_var_mod_p(const BSparsePoly& sp, std::size_t var_idx,
                                           const BigInt& val, const BigInt& p);
+
+[[nodiscard]] std::optional<BSparsePoly> univariate_sparse_gcd_fp(
+    const BSparsePoly& A, const BSparsePoly& B,
+    std::size_t var_idx, const BigInt& p);
+
+[[nodiscard]] std::optional<BSparsePoly> lagrange_interp_fp(
+    const std::vector<BigInt>& bs, const std::vector<BSparsePoly>& vals,
+    std::size_t var_idx, std::size_t target_deg, const BigInt& p);
+
+[[nodiscard]] std::map<std::size_t, BSparsePoly> layers_by_var(
+    const BSparsePoly& sp, std::size_t var_idx);
+
+[[nodiscard]] BSparsePoly reassemble_layers(
+    const std::map<std::size_t, BSparsePoly>& layers,
+    std::size_t var_idx, const BigInt& p);
+
+[[nodiscard]] BSparsePoly mul_mod_p(
+    const BSparsePoly& A, const BSparsePoly& B, const BigInt& p);
+
+[[nodiscard]] std::optional<BSparsePoly> exact_div_fp(
+    const BSparsePoly& A, const BSparsePoly& B, const BigInt& p);
 
 // Recursive Brown-in-Fp gcd of A,B in Fp[active_vars].
 [[nodiscard]] std::optional<BSparsePoly> sparse_gcd_fp(
     const BSparsePoly& A, const BSparsePoly& B,
     const std::vector<std::size_t>& active_vars,
     const BigInt& p, symbolic::CASContext& ctx, std::size_t depth);
+
+[[nodiscard]] BSparsePoly to_sparse(const MultivariatePolynomial& p,
+                                    const std::vector<Symbol>& vars);
+
+[[nodiscard]] MultivariatePolynomial from_sparse(const BSparsePoly& sp,
+                                                 const std::vector<Symbol>& vars);
+
+[[nodiscard]] std::vector<Symbol> collect_vars(const MultivariatePolynomial& p,
+                                               const MultivariatePolynomial& q);
+
+[[nodiscard]] BigInt multivar_mignotte_bound(const BSparsePoly& P,
+                                             const BSparsePoly& Q);
+
+[[nodiscard]] bool divides_sparse_z(
+    const BSparsePoly& dividend,
+    const BSparsePoly& divisor,
+    std::size_t n_vars);
 
 }  // namespace cas::algebra::fp_helpers
 
@@ -79,5 +131,19 @@ void scale_by_lc(fp_helpers::BSparsePoly& gp, const BigInt& u, const BigInt& p);
     const fp_helpers::BSparsePoly& dividend,
     const fp_helpers::BSparsePoly& divisor,
     std::size_t n_vars, fp_helpers::BSparsePoly& quo);
+
+// Polynomial-content pre-extraction w.r.t. main_var (Geddes §7.4 setup).
+// Decomposes ppP = cont_main(ppP) · pp_main(ppP) (same for ppQ) and divides
+// both by gcd(cont_main_P, cont_main_Q); ppP/ppQ are updated in place when
+// the extraction succeeds. Returns the extracted content gcd (1 when none)
+// and whether the inputs were actually divided by it.
+struct MainVarContentGcd {
+    MultivariatePolynomial content_gcd;
+    bool stripped{false};
+};
+[[nodiscard]] MainVarContentGcd extract_main_var_content_gcd(
+    fp_helpers::BSparsePoly& ppP, fp_helpers::BSparsePoly& ppQ,
+    const std::vector<Symbol>& vars, std::size_t n_vars, std::size_t main_var,
+    symbolic::CASContext& ctx);
 
 }  // namespace cas::algebra

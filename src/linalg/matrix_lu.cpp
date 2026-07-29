@@ -151,7 +151,6 @@ Result<PLUDecomposition> lu_decompose_pivoted(const MatrixExpr& matrix,
             if (pivot_row == n || score > best_score) {
                 best_score = score;
                 pivot_row = i;
-                if (score.certainty == 3) break;  // numerico esatto, ottimo
             }
         }
         if (best_score.certainty < 0) pivot_row = n;

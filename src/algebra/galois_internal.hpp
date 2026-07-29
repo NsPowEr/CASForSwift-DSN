@@ -12,6 +12,7 @@
 #include "cas/rational.hpp"
 #include "cas/result.hpp"
 #include "cas/symbolic.hpp"
+#include "perm_bsgs_internal.hpp"
 
 #include <optional>
 #include <string>
@@ -42,6 +43,31 @@ namespace cas::algebra {
 // the input has total degree 5.
 [[nodiscard]] Result<std::string> galois_group_quintic_irreducible(
     ExprPtr poly, const Symbol& var, symbolic::CASContext& ctx);
+
+// A6 — identify the Galois group of an irreducible f ∈ Q[x] of degree 6 or 7
+// via the fully exact resolvent pipeline (discriminant parity + Dedekind sieve
+// + k-set resolvents) matched against the exhaustively *generated* transitive
+// lattice of S_n (no transcribed group tables). Ambiguity → structured
+// Unimplemented listing the surviving candidates (never a guess). Degree ≠
+// {6,7} → Unimplemented (n ≥ 8 is the Stauduhar descent increment).
+// Implemented in galois_deg6.cpp.
+[[nodiscard]] Result<std::string> galois_group_irreducible_resolvent(
+    ExprPtr poly, const Symbol& var, symbolic::CASContext& ctx);
+
+// A6 Brick 4 — identify the Galois group of an irreducible f ∈ Q[x] of degree
+// 8, 9 or 10 via the fully exact Stauduhar descent (galois_stauduhar_identify:
+// BSGS first-layer maximal candidates + certified p-adic containment walk).
+// The returned label is a *structural descriptor derived from the identified
+// group's own certified invariants* (order, parity, primitivity, block system,
+// abelian exponent) — never a transcribed group table. Degree ∉ {8,9,10} →
+// Unimplemented. Implemented in galois_deg8.cpp.
+[[nodiscard]] Result<std::string> galois_group_irreducible_deg8_to_10(
+    ExprPtr poly, const Symbol& var, symbolic::CASContext& ctx);
+
+// Structural name of a certified transitive permutation group from its own
+// invariants (no lookup table). Exposed for unit tests. In galois_deg8.cpp.
+[[nodiscard]] std::string structural_transitive_group_name(
+    const permgrp::BsgsGroup& g);
 
 // Returns true if rational is a perfect square in Q (i.e. p/q with
 // p, q both perfect squares as BigInt and same sign). Shared with deg-4 path.

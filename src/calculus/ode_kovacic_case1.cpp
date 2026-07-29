@@ -50,38 +50,82 @@ Result<ExprPtr> compute_r(
     return std::nullopt;
 }
 
+// A pole factor (x − c)^{−k} as emitted by simplify/partial_fractions, i.e.
+// Pow(base, IntegerLit(neg)).  Returns the pole base and the (positive) order k.
+[[nodiscard]] static std::optional<std::pair<ExprPtr, unsigned>> match_neg_power(
+    ExprPtr f, const Symbol& x, AstArena& a) {
+
+    auto* pw = expr_cast<Binary>(f);
+    if (!pw || pw->op != BinaryOp::Pow) return std::nullopt;
+    auto* el = expr_cast<IntegerLit>(pw->right);
+    if (!el || !el->value.is_negative()) return std::nullopt;
+
+    const long long ev = el->value.abs().to_double();
+    if (ev < 1 || ev > 1024) return std::nullopt;
+
+    auto pole_opt = factor_pole(pw->left, x, a);
+    if (!pole_opt) return std::nullopt;
+    return std::make_pair(*pole_opt, static_cast<unsigned>(ev));
+}
+
 [[nodiscard]] static std::optional<PFPole> try_extract_pole(
     ExprPtr term, const Symbol& x, symbolic::CASContext& ctx) {
 
     AstArena& a = ctx.arena();
-    auto* dv = expr_cast<Binary>(term);
-    if (!dv || dv->op != BinaryOp::Div) return std::nullopt;
 
-    ExprPtr num  = dv->left;
-    ExprPtr den  = dv->right;
-    unsigned pow = 1;
-    ExprPtr base = den;
+    // Form 1 — explicit division  num / (x−c)^k  (legacy representation).
+    if (auto* dv = expr_cast<Binary>(term); dv && dv->op == BinaryOp::Div) {
+        ExprPtr num  = dv->left;
+        ExprPtr den  = dv->right;
+        unsigned pow = 1;
+        ExprPtr base = den;
 
-    if (auto* pw = expr_cast<Binary>(den)) {
-        if (pw->op == BinaryOp::Pow) {
-            if (auto* el = expr_cast<IntegerLit>(pw->right)) {
-                if (el->value.is_negative() || el->value.is_zero())
-                    return std::nullopt;
-                long long ev = el->value.to_double();
-                if (ev < 1 || ev > 1024) return std::nullopt;
-                pow  = static_cast<unsigned>(ev);
-                base = pw->left;
-            } else { return std::nullopt; }
+        if (auto* pw = expr_cast<Binary>(den)) {
+            if (pw->op == BinaryOp::Pow) {
+                if (auto* el = expr_cast<IntegerLit>(pw->right)) {
+                    if (el->value.is_negative() || el->value.is_zero())
+                        return std::nullopt;
+                    long long ev = el->value.to_double();
+                    if (ev < 1 || ev > 1024) return std::nullopt;
+                    pow  = static_cast<unsigned>(ev);
+                    base = pw->left;
+                } else { return std::nullopt; }
+            }
         }
+
+        auto pole_opt = factor_pole(base, x, a);
+        if (!pole_opt) return std::nullopt;
+        auto ps = ctx.simplify(*pole_opt);
+        return PFPole{ps.is_ok() ? ps.value() : *pole_opt, pow, num};
     }
 
-    auto pole_opt = factor_pole(base, x, a);
-    if (!pole_opt) return std::nullopt;
+    // Form 2 — coeff·(x−c)^{−k}: the negative-power Pow representation that
+    // simplify/partial_fractions actually emit.  The (optional) coefficient is
+    // the product of all non-pole factors.
+    ExprPtr coeff = kv_int(a, 1);
+    ExprPtr pole_factor = nullptr;
 
-    auto ps = ctx.simplify(*pole_opt);
-    ExprPtr pole = ps.is_ok() ? ps.value() : *pole_opt;
+    if (auto* prod = expr_cast<Product>(term)) {
+        for (ExprPtr f : prod->factors) {
+            if (match_neg_power(f, x, a)) {
+                if (pole_factor) return std::nullopt;  // ≥2 pole factors — unsupported
+                pole_factor = f;
+            } else {
+                coeff = kv_mul(a, coeff, f);
+            }
+        }
+    } else {
+        pole_factor = term;
+    }
+    if (!pole_factor) return std::nullopt;
 
-    return PFPole{pole, pow, num};
+    auto pp = match_neg_power(pole_factor, x, a);
+    if (!pp) return std::nullopt;
+
+    auto ps = ctx.simplify(pp->first);
+    auto cs = ctx.simplify(coeff);
+    return PFPole{ps.is_ok() ? ps.value() : pp->first, pp->second,
+                  cs.is_ok() ? cs.value() : coeff};
 }
 
 Result<OmegaPair> case1_omega(
@@ -210,6 +254,25 @@ Result<OmegaPair> case1_omega(
     if (r_prop_parts.is_error()) return fail<OmegaPair>(r_prop_parts.error());
     ExprPtr num_prop = r_prop_parts.value().numerator;
     ExprPtr den_prop = r_prop_parts.value().denominator;
+
+    // apart_num_den returns num/den over a common denominator without reducing
+    // to lowest terms (e.g. x⁻⁴−2x⁻³ → (x³−2x⁴)/x⁷ rather than (1−2x)/x⁴).
+    // The pole-expansion below needs den_prop to carry each pole at exactly its
+    // multiplicity, so cancel the polynomial gcd first.
+    {
+        auto g_res = algebra::polynomial_gcd(num_prop, den_prop, x, ctx);
+        if (g_res.is_ok()) {
+            auto dg_res = algebra::polynomial_degree(g_res.value(), x, ctx);
+            if (dg_res.is_ok() && dg_res.value() >= 1U) {
+                auto nq = algebra::polynomial_divmod(num_prop, g_res.value(), x, ctx);
+                auto dq = algebra::polynomial_divmod(den_prop, g_res.value(), x, ctx);
+                if (nq.is_ok() && dq.is_ok()) {
+                    num_prop = nq.value().quotient;
+                    den_prop = dq.value().quotient;
+                }
+            }
+        }
+    }
 
     std::vector<PFPole> collected_poles;
     for (ExprPtr term : pf_res.value()) {
@@ -343,7 +406,7 @@ Result<OmegaPair> case1_omega(
                 return fail<OmegaPair>(kv_unimpl("Kovacic Case 1: polynomial division failed."));
             }
             ExprPtr d_other = div_res.value().quotient;
-            
+
             auto u_coeffs_opt = compute_taylor_rational(num_prop, d_other, x, cp.pole, v, ctx);
             if (!u_coeffs_opt) {
                 return fail<OmegaPair>(kv_unimpl("Kovacic Case 1: Taylor coefficient calculation failed."));

@@ -95,7 +95,11 @@ INSTANTIATE_TEST_SUITE_P(
         RoundTripCase{"diff(sin(x),x,2)"},
         RoundTripCase{"lim(sin(x)/x,x,0,left)"},
         RoundTripCase{"RootOf(x^2-2,x,1)"},
-        RoundTripCase{"[[1,2],[3,4]]"}));
+        RoundTripCase{"[[1,2],[3,4]]"},
+        // A7 Brick 1: MeijerG(m,n,p,q,a_1..a_p,b_1..b_q,z), flat args, no
+        // dedicated grammar (Meijer_G_Slater.md §7) -- generic FuncCall
+        // round-trip must handle the variable arity like any other function.
+        RoundTripCase{"MeijerG(1,1,1,2,1,1/2,0,x^2)"}));
 
 }  // namespace
 }  // namespace cas

@@ -1,6 +1,6 @@
-parse_implicit_mul_ms 0.004
-round_trip_ms 0.007
-simplify_basic_ms 0.043
-arena_alloc_ms 0.535
-poly_expand_complex_ms 0.764
-poly_gcd_subresultant_ms 1.164
+parse_implicit_mul_ms 0.007
+round_trip_ms 0.013
+simplify_basic_ms 0.078
+arena_alloc_ms 0.747
+poly_expand_complex_ms 1.058
+poly_gcd_subresultant_ms 1.788

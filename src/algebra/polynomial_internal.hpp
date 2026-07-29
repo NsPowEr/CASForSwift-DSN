@@ -187,12 +187,17 @@ template <typename Coeff>
 // When the subresultant chain exceeds the deadline, returns Unimplemented.
 using ResultantDeadline = std::optional<std::chrono::steady_clock::time_point>;
 
+// A45: when chain_out is non-null it receives the full subresultant PRS
+// (R_0, R_1, ..., R_k), which Lazard-Rioboo-Trager needs on top of the
+// resultant itself (Bronstein, Symbolic_Integration_I.md:1823). Passing
+// nullptr keeps the previous behaviour exactly.
 template <typename Coeff>
 [[nodiscard]] Result<Coeff> resultant_generic(
     std::vector<Coeff> a,
     std::vector<Coeff> b,
     symbolic::CASContext* ctx = nullptr,
-    const ResultantDeadline& deadline = std::nullopt);
+    const ResultantDeadline& deadline = std::nullopt,
+    std::vector<std::vector<Coeff>>* chain_out = nullptr);
 
 void normalize_rational_coefficients(RatPoly& coefficients);
 [[nodiscard]] RatPoly add_rational_poly(const RatPoly& a, const RatPoly& b);
@@ -243,12 +248,20 @@ void lll_reduction(LatticeMatrix& b, double delta = 0.75);
     std::size_t max_deg,
     double delta = 0.75);
 
-[[nodiscard]] std::optional<IntPoly> find_factor_by_hensel_recombination(
+// Zassenhaus subset recombination over Z from the ALREADY Hensel-lifted
+// factors (∏ lifted_factors ≡ f mod `modulus`, the invariant guaranteed by
+// hensel_lift_multi). Returns one true Z-factor of f of degree ≤ max_degree
+// if the subset search finds one, else nullopt. On a lucky prime (f
+// squarefree mod p, modulus = p^a above the Mignotte bound) the search is
+// exhaustive, so nullopt is a proof of irreducibility for degrees ≤
+// max_degree. An interrupt (ctx poll, HC-F70-A33) surfaces as an error —
+// never as nullopt, which would forge that proof.
+[[nodiscard]] Result<std::optional<IntPoly>> find_factor_by_hensel_recombination(
     const IntPoly& f,
-    const std::vector<IntPoly>& modular_factors,
-    const BigInt& prime,
-    std::size_t lift_steps,
-    std::size_t max_degree);
+    const std::vector<IntPoly>& lifted_factors,
+    const BigInt& modulus,
+    std::size_t max_degree,
+    symbolic::CASContext* ctx = nullptr);
 
 // Van Hoeij knapsack-lattice recombination (van Hoeij 2002 §2-4, Belabas 2004 §4).
 // Finds one factor of f ∈ Z[x] from r lifted modular factors mod p^a = pk.

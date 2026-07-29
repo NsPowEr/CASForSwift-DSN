@@ -227,9 +227,24 @@ TEST(BranchCutsGlobalTest, LnOfProduct_StrictMode_AllPositive_ReducesCleanly) {
         << "all-positive factors must not require K(·) correction";
 }
 
-TEST(BranchCutsGlobalTest, SqrtOfSquare_LegacyMode_ComplexGeneric_EmitsAbs) {
+TEST(BranchCutsGlobalTest, SqrtOfSquare_LegacyMode_ComplexGeneric_DoesNotEmitAbs) {
     symbolic::CASContext ctx;
     // strict_branch_cuts left false (legacy default).
+    ExprPtr x = ctx.arena().make<Symbol>("x");
+    ExprPtr x_sq = ctx.arena().make<Binary>(BinaryOp::Pow, x,
+        ctx.arena().make<IntegerLit>(BigInt(2)));
+    ExprPtr expr = ctx.arena().make<FuncCall>(BuiltinOp::Sqrt,
+        std::vector<ExprPtr>{x_sq});
+    auto r = ctx.simplify(expr);
+    ASSERT_TRUE(r.is_ok());
+    const auto* fc = expr_cast<FuncCall>(r.value());
+    ASSERT_NE(fc, nullptr);
+    EXPECT_EQ(fc->func_id, BuiltinOp::Sqrt);
+}
+
+TEST(BranchCutsGlobalTest, SqrtOfSquare_LegacyMode_RealGeneric_EmitsAbs) {
+    symbolic::CASContext ctx;
+    ctx.assumptions().assume_real(Symbol{"x"});
     ExprPtr x = ctx.arena().make<Symbol>("x");
     ExprPtr x_sq = ctx.arena().make<Binary>(BinaryOp::Pow, x,
         ctx.arena().make<IntegerLit>(BigInt(2)));

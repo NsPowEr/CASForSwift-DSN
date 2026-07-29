@@ -1,9 +1,12 @@
 #include "cas/symbolic.hpp"
+#include "cas/error_helpers.hpp"
 #include "cas/rational.hpp"
 #include "symbolic_internal.hpp"
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <functional>
+#include <string>
 #include <vector>
 
 namespace cas::symbolic {
@@ -25,6 +28,20 @@ public:
         if (context_.is_interrupted()) {
             return fail<ExprPtr>(make_error(
                 CASErrorKind::Timeout, "Operation cancelled by interrupt request"));
+        }
+        // A30: deterministic per-operation ops budget (primary gate, every op);
+        // wall-clock below is only the outer anti-hang safety net.
+        if (const std::uint64_t max_ops = context_.max_operation_ops();
+            max_ops > 0U && context_.ops_count_ > max_ops) {
+            return fail<ExprPtr>(make_unimplemented_error(
+                UnimplementedInfo{
+                    .module = "symbolic",
+                    .function = "Substituter::substitute_expr",
+                    .input_shape = "operation exceeding " + std::to_string(max_ops) + " node visits",
+                    .reason = error::reason_codes::OPS_BUDGET_EXCEEDED,
+                    .suggestion = "Increase max_operation_ops in CASContext (0 disables the budget)",
+                    .ticket = "A30"},
+                "Symbolic operation ops budget exceeded"));
         }
         if ((context_.ops_count_ % context_.timeout_check_interval()) == 0U &&
             std::chrono::steady_clock::now() - context_.operation_started_at_ >= context_.timeout_) {
@@ -430,21 +447,10 @@ private:
 };
 
 Result<ExprPtr> CASContext::substitute(ExprPtr expr, const Symbol& variable, ExprPtr value) {
-    const bool owns_operation = !operation_active_;
-    if (owns_operation) {
-        operation_active_ = true;
-        trace_capture_active_ = trace_enabled_;
-        trace_.clear();
-        ops_count_ = 0;
-        operation_started_at_ = std::chrono::steady_clock::now();
-    }
-    auto result = symbolic::substitute(expr, variable, value, *this);
-    if (owns_operation) {
-        operation_active_ = false;
-        trace_capture_active_ = false;
-        ops_count_ = 0;
-    }
-    return result;
+    // A51: apertura/chiusura del budget via RAII — l'invariante non e' piu'
+    // violabile per omissione (era violato in `mathematically_equal`).
+    OperationScope op_scope(*this, trace_enabled_);
+    return symbolic::substitute(expr, variable, value, *this);
 }
 
 Result<ExprPtr> substitute(ExprPtr expr, const Symbol& variable, ExprPtr value, CASContext& context) {

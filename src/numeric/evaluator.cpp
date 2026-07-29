@@ -17,10 +17,46 @@ namespace {
 
 } // namespace
 
+NumericEvaluator::NumericEvaluator(symbolic::CASContext& ctx, const NumericEnv& env)
+    : env_(env),
+      max_recursion_depth_(ctx.max_recursion_depth()),
+      hyp_1f1_max_terms_(ctx.hypergeometric_1f1_max_terms()),
+      hyp_1f1_rel_tol_(ctx.hypergeometric_1f1_rel_tol()) {}
+
 Result<double> NumericEvaluator::evaluate(ExprPtr expr) {
     if (!expr) {
         return fail<double>(make_error(CASErrorKind::InvalidArgument, "Cannot evaluate null expression"));
     }
+
+    if (current_depth_ >= max_recursion_depth_) {
+        return make_unimplemented<double>(
+            "numeric", "NumericEvaluator::evaluate",
+            "expression recursion depth",
+            error::reason_codes::RECURSION_DEPTH_EXCEEDED,
+            "Increase max_recursion_depth in CASContext",
+            "A20",
+            "Numeric evaluation recursion depth limit exceeded");
+    }
+
+    auto [it, inserted] = active_nodes_.insert(expr);
+    if (!inserted) {
+        return make_unimplemented<double>(
+            "numeric", "NumericEvaluator::evaluate",
+            "expression cycle",
+            error::reason_codes::CYCLE_DETECTED,
+            "Ensure expression AST has no cyclic references",
+            "A20",
+            "Cyclic evaluation detected during numeric evaluation");
+    }
+
+    struct ScopeGuard {
+        std::size_t& depth;
+        std::unordered_set<ExprPtr, ExprHash>& nodes;
+        ExprPtr expr;
+        ScopeGuard(std::size_t& d, std::unordered_set<ExprPtr, ExprHash>& n, ExprPtr e)
+            : depth(d), nodes(n), expr(e) { ++depth; }
+        ~ScopeGuard() { --depth; nodes.erase(expr); }
+    } scope_guard(current_depth_, active_nodes_, expr);
 
     return visit_expr(
         expr,
@@ -150,7 +186,34 @@ Result<double> NumericEvaluator::evaluate(ExprPtr expr) {
                 if (node.func_id == BuiltinOp::Acos) return ok(std::acos(args[0]));
                 if (node.func_id == BuiltinOp::Atan) return ok(std::atan(args[0]));
                 if (node.name == "atan2") return ok(std::atan2(args[0], args[1]));
-                
+
+                // Confluent hypergeometric ₁F₁(a;b;z) = Σ_k (a)_k/(b)_k · z^k/k!.
+                // Entire in z ⇒ the Maclaurin series converges for every finite
+                // argument (no analytic-continuation trap, unlike ₂F₁): summed
+                // by the exact term ratio t_{k+1}/t_k = (a+k)z/((b+k)(k+1)).
+                // b a non-positive integer is a Γ-pole ⇒ undefined (structured
+                // error, never a wrong value).
+                if (node.func_id == BuiltinOp::Hypergeometric1F1 && args.size() == 3U) {
+                    const double a = args[0], b = args[1], z = args[2];
+                    if (b <= 0.0 && std::floor(b) == b)
+                        return fail<double>(make_error(CASErrorKind::Undefined,
+                            "1F1: parameter b is a non-positive integer (Gamma pole)"));
+                    double term = 1.0, sum = 1.0;
+                    const auto max_terms = static_cast<int>(hyp_1f1_max_terms_);
+                    for (int k = 0; k < max_terms; ++k) {
+                        term *= (a + k) * z / ((b + k) * (k + 1));
+                        sum += term;
+                        if (k > 4 && std::abs(term) <= hyp_1f1_rel_tol_ * std::abs(sum))
+                            return ok(sum);
+                    }
+                    return make_unimplemented<double>(
+                        "numeric", "NumericEvaluator::evaluate",
+                        "1F1 series did not converge in double precision",
+                        error::reason_codes::NUMERIC_UNSUPPORTED_FUNCTION,
+                        "Use a higher-precision evaluator for this 1F1 argument",
+                        "A7");
+                }
+
                 // F0.8-MIGRATED
                 return make_unimplemented<double>(
                     "numeric", "NumericEvaluator::evaluate",
@@ -230,6 +293,10 @@ Result<double> NumericEvaluator::evaluate(ExprPtr expr) {
 
 Result<double> eval(ExprPtr expr, const NumericEnv& env) {
     return NumericEvaluator(env).evaluate(expr);
+}
+
+Result<double> eval(ExprPtr expr, symbolic::CASContext& ctx, const NumericEnv& env) {
+    return NumericEvaluator(ctx, env).evaluate(expr);
 }
 
 } // namespace cas::numeric

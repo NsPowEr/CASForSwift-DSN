@@ -433,7 +433,16 @@ std::optional<Result<ExprPtr>> try_logarithmic_root_limit(
     LimitDirection dir,
     AstArena& arena) {
     const auto* call = expr_cast<FuncCall>(expr);
-    if (call == nullptr || call->func_id != BuiltinOp::Ln || call->args.size() != 1U) {
+    // A41: "log" parses to BuiltinOp::Log, a distinct enum value from Ln, but
+    // it is the SAME natural logarithm everywhere else in the engine (see
+    // simplify_exp_log.cpp, differentiate_rules.cpp, integrate_elementary.cpp,
+    // limit_infinite.cpp, ...) — this was the one call site still checking
+    // only Ln, silently excluding log(x) from the one-sided log-pole rule and
+    // making limit(x*log(x), x, 0, plus) fail with a raw division-by-zero
+    // instead of resolving log(x) -> -infinity.
+    if (call == nullptr ||
+        (call->func_id != BuiltinOp::Ln && call->func_id != BuiltinOp::Log) ||
+        call->args.size() != 1U) {
         return std::nullopt;
     }
 

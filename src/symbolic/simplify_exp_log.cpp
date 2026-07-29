@@ -3,233 +3,12 @@
 
 namespace cas::symbolic::detail {
 
-// ── sqrt helpers ─────────────────────────────────────────────────────────────
-
-// Forward declaration: defined later in this file.
-[[nodiscard]] static BigInt integer_sqrt(const BigInt& n);
-
-// Extract perfect-square factor from n: returns {k, m} with n = k²·m.
-// Phase 1: trial-divide squares i² for i ∈ [2, trial_bound]; this is the
-// "small squarefull" extraction step.
-// Phase 2: check whether the residue is itself a perfect square via
-// integer_sqrt (Newton). If so, fold it entirely into k.
-//
-// Without a bound, the unbounded O(sqrt(n)) loop hung on big rational
-// radicands (norm² for QR Householder on 8×8 random Q rationals).
-// Reference: HC-F4-QR-SYMBOLIC-TIMEOUT.
-[[nodiscard]] static std::pair<BigInt, BigInt> extract_square_factor(BigInt n, std::size_t trial_bound) {
-    // Regola 1: no int64_t/double arithmetic in symbolic core; loop counter is
-    // BigInt.  trial_bound is a CASContext-configurable budget (boundary
-    // conversion to BigInt is permitted; arithmetic on the value is BigInt).
-    BigInt k(1);
-    BigInt bound(static_cast<std::int64_t>(trial_bound));
-    BigInt i(2);
-    while (i <= bound) {
-        BigInt i2 = i * i;
-        if (i2 > n) break;
-        while ((n % i2).is_zero()) {
-            k = k * i;
-            n = n / i2;
-        }
-        i = i + BigInt(1);
-    }
-    // Fallback: if residue is itself a perfect square, absorb it.
-    BigInt s = integer_sqrt(n);
-    if (!(s * s == n)) return {k, n};
-    k = k * s;
-    return {k, BigInt(1)};
-}
-
-// sqrt(r) for rational r ≥ 0: extract perfect-square factors.
-// Returns k·sqrt(m), k rational, m squarefree.
-[[nodiscard]] static Result<ExprPtr> simplify_rational_sqrt(const Rational& r, AstArena& arena, std::size_t trial_bound) {
-    const BigInt& p = r.numerator();
-    const BigInt& q = r.denominator();
-    if (p.is_zero()) return ok(arena.make<IntegerLit>(BigInt(0)));
-    auto [p_out, p_rem] = extract_square_factor(p, trial_bound);
-    auto [q_out, q_rem] = extract_square_factor(q, trial_bound);
-    BigInt final_radicand = p_rem * q_rem;
-    Rational coeff(p_out, q_out * q_rem);
-
-    ExprPtr coeff_expr;
-    if (coeff.denominator() == BigInt(1)) {
-        coeff_expr = arena.make<IntegerLit>(coeff.numerator());
-    } else {
-        coeff_expr = arena.make<RationalLit>(coeff.numerator(), coeff.denominator());
-    }
-
-    if (final_radicand == BigInt(1)) return ok(coeff_expr);
-
-    ExprPtr sqrt_expr = arena.make<FuncCall>(BuiltinOp::Sqrt,
-        std::vector<ExprPtr>{arena.make<IntegerLit>(final_radicand)});
-    if (coeff.numerator() == BigInt(1) && coeff.denominator() == BigInt(1))
-        return ok(sqrt_expr);
-    return ok(arena.make<Binary>(BinaryOp::Mul, coeff_expr, sqrt_expr));
-}
-
-// Try to extract a rational sqrt: if r = (p/q)² returns p/q, else nullopt.
-[[nodiscard]] static std::optional<Rational> try_rational_sqrt(const Rational& r) {
-    if (r.numerator().is_negative()) return std::nullopt;
-    if (r.numerator().is_zero()) return Rational(BigInt(0));
-    auto isqrt = [](const BigInt& n) -> std::optional<BigInt> {
-        if (n.is_zero()) return BigInt(0);
-        // Newton-Raphson integer sqrt
-        BigInt x = n;
-        BigInt y = (x + BigInt(1)) / BigInt(2);
-        while (y < x) {
-            x = y;
-            y = (x + n / x) / BigInt(2);
-        }
-        if (x * x == n) return x;
-        return std::nullopt;
-    };
-    auto num_sqrt = isqrt(r.numerator());
-    auto den_sqrt = isqrt(r.denominator());
-    if (!num_sqrt || !den_sqrt) return std::nullopt;
-    return Rational(*num_sqrt, *den_sqrt);
-}
-
-// Borodin-Fagin-Hopcroft-Tompa (1985) denesting:
-//   sqrt(a + b·sqrt(c)) = sqrt(p) + sign(b)·sqrt(q)
-// iff a² - b²·c is a rational square. Then p = (a+d)/2, q = (a-d)/2
-// with d = sqrt(a² - b²c).
-//
-// Detects argument shapes:
-//   Sum([rat_a, Product([rat_b, sqrt(rat_c)])]) — generic a + b·sqrt(c)
-//   Sum([rat_a, sqrt(rat_c)])                   — b = 1
-//   Sum([rat_a, Unary(Neg, Product([rat_b, sqrt(rat_c)]))]) — negative b
-//   Sum([rat_a, Unary(Neg, sqrt(rat_c))])       — b = -1
-//
-// Returns the denested form on match; nullopt on no match or non-denestable.
-[[nodiscard]] static std::optional<ExprPtr> try_denest_borodin_fagin(
-    ExprPtr radicand, AstArena& arena) {
-    const auto* sum = expr_cast<Sum>(radicand);
-    if (!sum || sum->terms.size() != 2) return std::nullopt;
-
-    auto extract_rational = [](ExprPtr e) -> std::optional<Rational> {
-        if (auto* il = expr_cast<IntegerLit>(e))
-            return Rational(il->value, BigInt(1));
-        if (auto* rl = expr_cast<RationalLit>(e))
-            return Rational(rl->numerator, rl->denominator);
-        return std::nullopt;
-    };
-
-    // Extract b·sqrt(c) from a term: returns {b, c} or nullopt.
-    auto extract_b_sqrt_c =
-        [&](ExprPtr term) -> std::optional<std::pair<Rational, Rational>> {
-        bool negate = false;
-        if (auto* un = expr_cast<Unary>(term); un && un->op == UnaryOp::Neg) {
-            negate = true;
-            term = un->operand;
-        }
-        Rational b(BigInt(1), BigInt(1));
-        ExprPtr sqrt_node = nullptr;
-        if (auto* call = expr_cast<FuncCall>(term);
-            call && call->func_id == BuiltinOp::Sqrt && call->args.size() == 1) {
-            sqrt_node = term;
-        } else if (auto* prod = expr_cast<Product>(term)) {
-            std::vector<ExprPtr> coeff_factors;
-            for (ExprPtr f : prod->factors) {
-                if (auto* call = expr_cast<FuncCall>(f);
-                    call && call->func_id == BuiltinOp::Sqrt && call->args.size() == 1) {
-                    if (sqrt_node) return std::nullopt;
-                    sqrt_node = f;
-                } else {
-                    coeff_factors.push_back(f);
-                }
-            }
-            if (!sqrt_node) return std::nullopt;
-            if (coeff_factors.size() == 1) {
-                auto r = extract_rational(coeff_factors[0]);
-                if (!r) return std::nullopt;
-                b = *r;
-            } else if (!coeff_factors.empty()) {
-                return std::nullopt;
-            }
-        } else if (auto* bin = expr_cast<Binary>(term);
-                   bin && bin->op == BinaryOp::Mul) {
-            // Binary Mul: rat * sqrt(c)
-            ExprPtr lhs = bin->left, rhs = bin->right;
-            auto rl = extract_rational(lhs);
-            auto rr = extract_rational(rhs);
-            if (rl && !rr) {
-                b = *rl;
-                sqrt_node = rhs;
-            } else if (rr && !rl) {
-                b = *rr;
-                sqrt_node = lhs;
-            } else {
-                return std::nullopt;
-            }
-            auto* call = expr_cast<FuncCall>(sqrt_node);
-            if (!call || call->func_id != BuiltinOp::Sqrt || call->args.size() != 1)
-                return std::nullopt;
-        } else {
-            return std::nullopt;
-        }
-        auto* call = expr_cast<FuncCall>(sqrt_node);
-        if (!call) return std::nullopt;
-        auto c = extract_rational(call->args[0]);
-        if (!c) return std::nullopt;
-        if (c->numerator().is_negative()) return std::nullopt;  // complex outside scope
-        if (negate) b = -b;
-        return std::make_pair(b, *c);
-    };
-
-    // Try both orderings: term[0]=a, term[1]=b·sqrt(c); and swapped.
-    for (int swap = 0; swap < 2; ++swap) {
-        ExprPtr a_term = sum->terms[swap];
-        ExprPtr bsc_term = sum->terms[1 - swap];
-        auto a = extract_rational(a_term);
-        if (!a) continue;
-        auto bsc = extract_b_sqrt_c(bsc_term);
-        if (!bsc) continue;
-        auto [b, c] = *bsc;
-        // Discriminant: d² = a² - b²·c
-        Rational disc_sq = (*a) * (*a) - b * b * c;
-        if (disc_sq.numerator().is_negative()) continue;
-        auto d = try_rational_sqrt(disc_sq);
-        if (!d) continue;
-        Rational p = ((*a) + *d) / Rational(BigInt(2), BigInt(1));
-        Rational q = ((*a) - *d) / Rational(BigInt(2), BigInt(1));
-        if (p.numerator().is_negative()) continue;
-        if (q.numerator().is_negative()) continue;
-        // Build sqrt(p) and sqrt(q) (could simplify if perfect square)
-        ExprPtr sqrt_p, sqrt_q;
-        if (auto pr = try_rational_sqrt(p)) {
-            sqrt_p = arena.make<RationalLit>(pr->numerator(), pr->denominator());
-        } else {
-            sqrt_p = arena.make<FuncCall>(BuiltinOp::Sqrt,
-                std::vector<ExprPtr>{arena.make<RationalLit>(p.numerator(), p.denominator())});
-        }
-        if (auto qr = try_rational_sqrt(q)) {
-            sqrt_q = arena.make<RationalLit>(qr->numerator(), qr->denominator());
-        } else {
-            sqrt_q = arena.make<FuncCall>(BuiltinOp::Sqrt,
-                std::vector<ExprPtr>{arena.make<RationalLit>(q.numerator(), q.denominator())});
-        }
-        // sign(b) determines + or - on sqrt(q)
-        if (b.numerator().is_negative()) {
-            return arena.make<Binary>(BinaryOp::Sub, sqrt_p, sqrt_q);
-        }
-        return arena.make<Binary>(BinaryOp::Add, sqrt_p, sqrt_q);
-    }
-    return std::nullopt;
-}
-
-[[nodiscard]] static BigInt integer_sqrt(const BigInt& n) {
-    if (n.is_zero()) return BigInt(0);
-    static const BigInt one(1);
-    if (n == one) return one;
-    BigInt x = one.shift_left_bits((n.bit_length() + 1) / 2);
-    while (true) {
-        BigInt y = (x + n / x) / BigInt(2);
-        if (y >= x) return x;
-        x = std::move(y);
-    }
-}
-
 // ── Simplifier::simplify_funcall_exp_log_sqrt ─────────────────────────────────
+//
+// W9.3 split: the Sqrt branch (and its rational-sqrt / denesting helpers) was
+// extracted to simplify_sqrt.cpp + simplify_sqrt_helpers.cpp to keep this
+// translation unit under the 500-line anti-monolith limit. This function now
+// handles Exp and Ln/Log directly and delegates Sqrt to simplify_funcall_sqrt.
 
 Result<ExprPtr> Simplifier::simplify_funcall_exp_log_sqrt(
     ExprPtr original, BuiltinOp op, std::vector<ExprPtr> args, ExprPtr target_before) {
@@ -244,10 +23,24 @@ Result<ExprPtr> Simplifier::simplify_funcall_exp_log_sqrt(
         // rule was applied unconditionally — wrong for symbolic x.
         // Reference: Bronstein "Symbolic Integration" §3.3.
         if (const auto* ln_call = expr_cast<FuncCall>(args.front());
-            ln_call && ln_call->func_id == BuiltinOp::Ln && ln_call->args.size() == 1U) {
+            ln_call
+            && (ln_call->func_id == BuiltinOp::Ln || ln_call->func_id == BuiltinOp::Log)
+            && ln_call->args.size() == 1U) {
             ExprPtr ln_arg = ln_call->args[0];
             if (is_known_positive(ln_arg)) {
                 return ok(ln_arg);
+            }
+            // A31 fase 2 (Domain_Conditions_Propagation.md §10.3.R1): on the
+            // principal branch exp(ln z) = z is exact for EVERY z != 0 (ln is
+            // a right inverse of exp, including on the cut: exp(ln(-1)) =
+            // exp(i*pi) = -1). Opt-in: rewrite and register NonZero(z).
+            if (context_ != nullptr && context_->conditional_domain_rules()
+                && !is_zero_expr(ln_arg)) {
+                auto cond = context_->emit_side_condition(
+                    DomainConditionKind::NonZero, ln_arg);
+                if (cond.is_error()) return fail<ExprPtr>(cond.error());
+                return traced_result(RuleId::SimplifyExpLnPositive,
+                    target_before, ln_arg);
             }
             // Otherwise keep symbolic exp(ln(arg)).
         }
@@ -389,6 +182,34 @@ Result<ExprPtr> Simplifier::simplify_funcall_exp_log_sqrt(
             return traced_result(RuleId::SimplifyLnExp, target_before,
                 build_branch_aware_logexp(exp_call->args[0]));
 
+        // A31 fase 2 (Domain_Conditions_Propagation.md §10.3.R2a):
+        // ln(b^e) -> e*ln(b), base != E (the E case is the exact rule above).
+        // Exact when b > 0 real and e real: b^e = exp(e*ln b) with e*ln b
+        // real, so ln never leaves the principal strip. Opt-in: rewrite and
+        // register Positive(b) and Real(e); refuse when the assumptions
+        // prove the base non-positive (contradiction guard).
+        if (const auto* power = expr_cast<Binary>(args.front());
+            power != nullptr && power->op == BinaryOp::Pow
+            && !is_constant_expr(power->left, MathConstant::E)
+            && context_ != nullptr && context_->conditional_domain_rules()
+            && !is_zero_expr(power->left)
+            && !is_known_negative(power->left)) {
+            auto cond_base = context_->emit_side_condition(
+                DomainConditionKind::Positive, power->left);
+            if (cond_base.is_error()) return fail<ExprPtr>(cond_base.error());
+            auto cond_exp = context_->emit_side_condition(
+                DomainConditionKind::Real, power->right);
+            if (cond_exp.is_error()) return fail<ExprPtr>(cond_exp.error());
+            ExprPtr ln_base = arena_.make<FuncCall>(BuiltinOp::Ln,
+                std::vector<ExprPtr>{power->left});
+            auto rewritten = simplify_expr(arena_.make<Binary>(
+                BinaryOp::Mul, power->right, ln_base));
+            if (rewritten.is_ok())
+                append_trace(RuleId::SimplifyLnPowerPositiveBase,
+                    target_before, rewritten.value());
+            return rewritten;
+        }
+
         // ln(a*b) -> ln(a) + ln(b) for a,b > 0
         // F8.0-6.2 / Task 20 BC-3 (Branch_Cut_Propagation.md §2 rule 4):
         //   ln(z1·z2) = ln(z1) + ln(z2) - 2πi · K(ln(z1) + ln(z2))
@@ -408,7 +229,34 @@ Result<ExprPtr> Simplifier::simplify_funcall_exp_log_sqrt(
                 }
                 return simplify_expr(arena_.make<Sum>(std::move(ln_factors)));
             }
+            // A31 fase 2 (§10.3.R2b): opt-in expansion with registration of
+            // Positive(f) for every factor not already proven positive
+            // (emit_side_condition drops proven ones, §3.3). Contradiction
+            // guard: a factor proven negative keeps the refusal. When
+            // strict_branch_cuts is ALSO on, the exact unwinding form below
+            // wins over the conditioned generic form.
             const bool strict = (context_ != nullptr) && context_->strict_branch_cuts();
+            if (!strict && context_ != nullptr
+                && context_->conditional_domain_rules()) {
+                bool any_negative = false;
+                for (auto f : prod->factors)
+                    if (is_known_negative(f) || is_zero_expr(f)) { any_negative = true; break; }
+                if (!any_negative) {
+                    for (auto f : prod->factors) {
+                        auto cond = context_->emit_side_condition(
+                            DomainConditionKind::Positive, f);
+                        if (cond.is_error()) return fail<ExprPtr>(cond.error());
+                    }
+                    std::vector<ExprPtr> ln_factors;
+                    for (auto f : prod->factors) {
+                        auto res = simplify_expr(arena_.make<FuncCall>(BuiltinOp::Ln,
+                            std::vector<ExprPtr>{f}));
+                        if (res.is_error()) return res;
+                        ln_factors.push_back(res.value());
+                    }
+                    return simplify_expr(arena_.make<Sum>(std::move(ln_factors)));
+                }
+            }
             if (strict && prod->factors.size() >= 2U) {
                 // Build  Σ ln(fᵢ)  +  Σ_{i<j}  −2πi · K(ln(fᵢ) + ln(fⱼ))
                 // The pairwise K(·) terms encode the multi-factor unwinding by
@@ -448,12 +296,27 @@ Result<ExprPtr> Simplifier::simplify_funcall_exp_log_sqrt(
                 ExprPtr correction = symbolic::branch_cut::make_log_quotient_correction(div->left, div->right, arena_);
                 return simplify_expr(arena_.make<Binary>(BinaryOp::Add, diff, correction));
             }
-            // Legacy / non-strict default: ln(z1) - ln(z2)
-            auto ln_a = simplify_expr(arena_.make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{div->left}));
-            if (ln_a.is_error()) return ln_a;
-            auto ln_b = simplify_expr(arena_.make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{div->right}));
-            if (ln_b.is_error()) return ln_b;
-            return simplify_expr(arena_.make<Binary>(BinaryOp::Sub, ln_a.value(), ln_b.value()));
+            // A31 fase 2 (§10.3.R2c): opt-in ln(a/b) -> ln(a) - ln(b) with
+            // Positive(a), Positive(b) registered (proven ones dropped,
+            // §3.3); refusal preserved when either side is proven negative
+            // or zero (contradiction guard). strict handled above (exact
+            // unwinding form wins).
+            if (context_ != nullptr && context_->conditional_domain_rules()
+                && !is_known_negative(div->left) && !is_zero_expr(div->left)
+                && !is_known_negative(div->right) && !is_zero_expr(div->right)) {
+                auto cond_a = context_->emit_side_condition(
+                    DomainConditionKind::Positive, div->left);
+                if (cond_a.is_error()) return fail<ExprPtr>(cond_a.error());
+                auto cond_b = context_->emit_side_condition(
+                    DomainConditionKind::Positive, div->right);
+                if (cond_b.is_error()) return fail<ExprPtr>(cond_b.error());
+                auto ln_a = simplify_expr(arena_.make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{div->left}));
+                if (ln_a.is_error()) return ln_a;
+                auto ln_b = simplify_expr(arena_.make<FuncCall>(BuiltinOp::Ln, std::vector<ExprPtr>{div->right}));
+                if (ln_b.is_error()) return ln_b;
+                return simplify_expr(arena_.make<Binary>(BinaryOp::Sub, ln_a.value(), ln_b.value()));
+            }
+            // If not positive and not strict, do not expand ln(z1/z2) as it violates branch cuts on complex numbers.
         }
 
         // ln(sqrt(x)) = (1/2)*ln(x) — identità esatta
@@ -545,6 +408,17 @@ Result<ExprPtr> Simplifier::simplify_funcall_exp_log_sqrt(
                 return c != nullptr && c->value == MathConstant::I;
             };
             auto extract_imag_coeff = [&](ExprPtr term) -> ExprPtr {
+                // Post-F1.6 a standalone `i` canonicalizes to ComplexLit(0,1),
+                // so a Sum like √3 + i carries a pure-imaginary ComplexLit term.
+                // Recognize it (re=0) and return its imaginary coefficient, matching
+                // extract_complex_parts in simplify_complex.cpp. (A ComplexLit with
+                // nonzero real part is fully handled by the ln(ComplexLit) branch
+                // above and never reaches this Sum path.)
+                if (const auto* cl = expr_cast<ComplexLit>(term)) {
+                    if (cl->re_num.is_zero() && !cl->im_num.is_zero())
+                        return make_rational(arena_, Rational(cl->im_num, cl->im_den));
+                    return nullptr;
+                }
                 if (is_i_unit(term)) return make_integer(arena_, BigInt(1));
                 if (const auto* prod = expr_cast<Product>(term)) {
                     bool found_i = false;
@@ -581,270 +455,8 @@ Result<ExprPtr> Simplifier::simplify_funcall_exp_log_sqrt(
         }
     }
 
-    if (op == BuiltinOp::Sqrt && args.size() == 1U) {
-        // Denesting sqrt(a + b*sqrt(c))
-        if (const auto* sum = expr_cast<Sum>(args.front()); sum && sum->terms.size() == 2) {
-            LiteralRational rat_a, rat_b, rat_c;
-            ExprPtr a_ptr = nullptr, b_ptr = nullptr, c_ptr = nullptr;
-            for (auto term : sum->terms) {
-                if (auto ex = try_get_exact_rational(term, rat_a); ex.is_ok() && ex.value()) {
-                    a_ptr = term;
-                } else if (const auto* prod = expr_cast<Product>(term)) {
-                    Rational b_coeff(1);
-                    ExprPtr c_val = nullptr;
-                    bool found_sqrt = false;
-                    for (ExprPtr f : prod->factors) {
-                        LiteralRational lr;
-                        if (auto ex = try_get_exact_rational(f, lr); ex.is_ok() && ex.value()) {
-                            b_coeff *= lr.value;
-                        } else if (const auto* sqrt_c = expr_cast<FuncCall>(f);
-                            sqrt_c && sqrt_c->func_id == BuiltinOp::Sqrt && !found_sqrt) {
-                            c_val = sqrt_c->args[0];
-                            found_sqrt = true;
-                        } else {
-                            found_sqrt = false;
-                            break;
-                        }
-                    }
-                    if (found_sqrt && c_val) {
-                        LiteralRational lr_c;
-                        if (auto ex_c = try_get_exact_rational(c_val, lr_c); ex_c.is_ok() && ex_c.value()) {
-                            rat_b.value = b_coeff;
-                            rat_c.value = lr_c.value;
-                            b_ptr = make_rational(arena_, b_coeff);
-                            c_ptr = c_val;
-                        }
-                    }
-                }
-            }
-            if (a_ptr && b_ptr && c_ptr) {
-                Rational a = rat_a.value;
-                Rational b = rat_b.value;
-                Rational c = rat_c.value;
-                Rational discriminant = a*a - b*b*c;
-                if (discriminant >= Rational(0)) {
-                    BigInt d_num = discriminant.numerator();
-                    BigInt d_den = discriminant.denominator();
-                    BigInt s_num = integer_sqrt(d_num);
-                    BigInt s_den = integer_sqrt(d_den);
-                    if (s_num * s_num == d_num && s_den * s_den == d_den) {
-                        Rational s(s_num, s_den);
-                        Rational x = (a + s) / Rational(2);
-                        Rational y = (a - s) / Rational(2);
-                        auto sqrt_x = simplify_expr(arena_.make<FuncCall>(BuiltinOp::Sqrt,
-                            std::vector<ExprPtr>{make_rational(arena_, x)}));
-                        auto sqrt_y = simplify_expr(arena_.make<FuncCall>(BuiltinOp::Sqrt,
-                            std::vector<ExprPtr>{make_rational(arena_, y)}));
-                        if (sqrt_x.is_ok() && sqrt_y.is_ok()) {
-                            ExprPtr res;
-                            if (b >= Rational(0))
-                                res = arena_.make<Sum>(std::vector<ExprPtr>{sqrt_x.value(), sqrt_y.value()});
-                            else
-                                res = arena_.make<Binary>(BinaryOp::Sub, sqrt_x.value(), sqrt_y.value());
-                            return simplify_expr(res);
-                        }
-                    }
-                }
-            }
-        }
-
-        LiteralRational rat;
-        auto exact = try_get_exact_rational(args.front(), rat);
-        if (exact.is_error()) return fail<ExprPtr>(exact.error());
-        if (exact.is_ok() && exact.value()) {
-            if (rat.value.numerator().is_zero())
-                return traced_result(RuleId::Unknown, target_before, make_integer(arena_, BigInt(0)));
-            if (rat.value == Rational(BigInt(1)))
-                return traced_result(RuleId::Unknown, target_before, make_integer(arena_, BigInt(1)));
-            if (rat.value.numerator().is_negative()) {
-                auto pos_rat = -rat.value;
-                auto sqrt_pos = simplify_expr(arena_.make<FuncCall>(BuiltinOp::Sqrt,
-                    std::vector<ExprPtr>{make_rational(arena_, pos_rat)}));
-                if (sqrt_pos.is_ok()) {
-                    auto product = simplify_expr(arena_.make<Binary>(
-                        BinaryOp::Mul,
-                        arena_.make<Constant>(MathConstant::I),
-                        sqrt_pos.value()));
-                    if (product.is_error()) return product;
-                    return traced_result(RuleId::Unknown, target_before, product.value());
-                }
-            }
-            auto num_sqrt = integer_sqrt(rat.value.numerator());
-            auto den_sqrt = integer_sqrt(rat.value.denominator());
-            if (num_sqrt * num_sqrt == rat.value.numerator()
-                && den_sqrt * den_sqrt == rat.value.denominator())
-                return traced_result(RuleId::Unknown, target_before,
-                    make_rational(arena_, Rational(num_sqrt, den_sqrt)));
-            const std::size_t trial_bound = context_
-                ? context_->simplify_sqrt_trial_division_bound()
-                : 10000U;
-            auto denested = simplify_rational_sqrt(rat.value, arena_, trial_bound);
-            if (denested.is_ok())
-                return traced_result(RuleId::Unknown, target_before, denested.value());
-        }
-
-        if (is_known_negative(args.front())) {
-            auto negated_arg = simplify_expr(arena_.make<Unary>(UnaryOp::Neg, args.front()));
-            if (negated_arg.is_ok()) {
-                auto sqrt_pos = simplify_expr(arena_.make<FuncCall>(BuiltinOp::Sqrt,
-                    std::vector<ExprPtr>{negated_arg.value()}));
-                if (sqrt_pos.is_ok()) {
-                    ExprPtr res = arena_.make<Binary>(BinaryOp::Mul,
-                        arena_.make<Constant>(MathConstant::I), sqrt_pos.value());
-                    return traced_result(RuleId::Unknown, target_before, res);
-                }
-            }
-        }
-        // sqrt(x^2) with branch-cut awareness (F4.K / Branch_Cut_Propagation.md):
-        //   x known nonneg     → x          (always safe)
-        //   x known real       → abs(x)     (real branch)
-        //   complex generic    : if ctx.strict_branch_cuts() → keep structural
-        //                        else                         → abs(x) (legacy)
-        // Reference: Kahan 1987; Corless-Davenport-Jeffrey 2000.
-        if (const auto* power = expr_cast<Binary>(args.front());
-            power != nullptr && power->op == BinaryOp::Pow) {
-            if (auto exp = try_get_integer_exponent(power->right);
-                exp.has_value() && *exp == BigInt(2)) {
-                if (is_known_nonnegative(power->left)) {
-                    append_assumption(target_before);
-                    return traced_result(RuleId::SimplifySqrtSquare,
-                        target_before, power->left);
-                }
-                const bool x_is_real = (context_ != nullptr)
-                    && context_->assumptions().is_real(power->left);
-                if (x_is_real) {
-                    return traced_result(RuleId::SimplifySqrtSquare, target_before,
-                        arena_.make<FuncCall>(BuiltinOp::Abs,
-                            std::vector<ExprPtr>{power->left}));
-                }
-                // x not provably real.
-                const bool strict = (context_ != nullptr) && context_->strict_branch_cuts();
-                if (strict) {
-                    // F8.0-6.2 / Task 20 BC-1 (Branch_Cut_Propagation.md §2 rule 1):
-                    //   sqrt(z²) = z · (-1)^K(2·ln(z))
-                    // Emit the explicit unwinding correction so the identity
-                    // stays algebraically exact in the complex plane.
-                    ExprPtr correction = symbolic::branch_cut::make_sqrt_of_square_correction(
-                        power->left, arena_);
-                    ExprPtr corrected = arena_.make<Binary>(BinaryOp::Mul,
-                        power->left, correction);
-                    return traced_result(RuleId::SimplifySqrtSquare, target_before, corrected);
-                }
-                // Legacy default for complex generic x: emit abs(x).
-                return traced_result(RuleId::SimplifySqrtSquare, target_before,
-                    arena_.make<FuncCall>(BuiltinOp::Abs,
-                        std::vector<ExprPtr>{power->left}));
-            }
-        }
-        // sqrt(sqrt(x)) -> x^(1/4)
-        if (const auto* inner = expr_cast<FuncCall>(args.front());
-            inner && inner->func_id == BuiltinOp::Sqrt) {
-            return simplify_expr(arena_.make<Binary>(BinaryOp::Pow,
-                inner->args[0],
-                make_rational(arena_, Rational(BigInt(1), BigInt(4)))));
-        }
-        // HC-KV-04: sqrt(Pow(a, b)) with rational b, a non-literal — legacy mode.
-        //   sqrt(a^b) → a^(b/2)
-        // The b=2 case is handled above with branch-cut awareness.  This rule
-        // covers b != 2 for symbolic bases (e.g. Kovacic Case 2 sqrt(x^{-1}) →
-        // x^{-1/2}).  Integer-literal bases are routed through the existing
-        // integer-sqrt and prime-power factorization paths so that downstream
-        // tests expecting canonical `2^{k}` forms keep working.
-        if (const auto* power = expr_cast<Binary>(args.front());
-            power != nullptr && power->op == BinaryOp::Pow) {
-            const bool base_is_literal = expr_is<IntegerLit>(power->left)
-                || expr_is<RationalLit>(power->left);
-            LiteralRational exp_rat;
-            auto ex_res = try_get_exact_rational(power->right, exp_rat);
-            const bool strict = (context_ != nullptr)
-                && context_->strict_branch_cuts();
-            if (!strict && !base_is_literal
-                && ex_res.is_ok() && ex_res.value()
-                && exp_rat.value != Rational(BigInt(2))) {
-                Rational half_b = exp_rat.value / Rational(BigInt(2));
-                if (half_b.numerator().is_zero())
-                    return traced_result(RuleId::Unknown, target_before,
-                        make_integer(arena_, BigInt(1)));
-                return simplify_expr(arena_.make<Binary>(BinaryOp::Pow,
-                    power->left, make_rational(arena_, half_b)));
-            }
-        }
-        // HC-KV-04: sqrt(N / D) → sqrt(N) / sqrt(D) — legacy mode only.
-        if (const auto* div = expr_cast<Binary>(args.front());
-            div != nullptr && div->op == BinaryOp::Div) {
-            const bool strict = (context_ != nullptr)
-                && context_->strict_branch_cuts();
-            if (!strict) {
-                auto sqrt_n = simplify_expr(arena_.make<FuncCall>(
-                    BuiltinOp::Sqrt, std::vector<ExprPtr>{div->left}));
-                auto sqrt_d = simplify_expr(arena_.make<FuncCall>(
-                    BuiltinOp::Sqrt, std::vector<ExprPtr>{div->right}));
-                if (sqrt_n.is_ok() && sqrt_d.is_ok()) {
-                    return simplify_expr(arena_.make<Binary>(BinaryOp::Div,
-                        sqrt_n.value(), sqrt_d.value()));
-                }
-            }
-        }
-        // HC-KV-04: sqrt(c · Pow(x, n)) with c ≥ 0 rational, x symbolic →
-        //   sqrt(c) · Pow(x, n/2).
-        // Restricted to the Kovacic Case 2 / ω-construction shape: a single
-        // Pow factor whose base is non-literal.  This avoids disturbing
-        // existing tests that depend on the canonical `2^k` form when the
-        // radicand is purely rational-number arithmetic.
-        if (const auto* prod = expr_cast<Product>(args.front()); prod) {
-            const bool strict = (context_ != nullptr)
-                && context_->strict_branch_cuts();
-            if (!strict) {
-                std::vector<ExprPtr> nonrational;
-                Rational scalar(BigInt(1));
-                bool found_scalar = false;
-                bool scalar_negative = false;
-                for (ExprPtr f : prod->factors) {
-                    LiteralRational lr;
-                    if (auto ex = try_get_exact_rational(f, lr);
-                        ex.is_ok() && ex.value()) {
-                        if (lr.value.numerator().is_negative())
-                            scalar_negative = true;
-                        scalar = scalar * lr.value;
-                        found_scalar = true;
-                    } else {
-                        nonrational.push_back(f);
-                    }
-                }
-                // Require: single Pow(non-literal-base, anything) factor.
-                bool shape_ok = (nonrational.size() == 1U);
-                if (shape_ok) {
-                    auto* pw = expr_cast<Binary>(nonrational[0]);
-                    shape_ok = pw && pw->op == BinaryOp::Pow
-                        && !(expr_is<IntegerLit>(pw->left)
-                             || expr_is<RationalLit>(pw->left));
-                }
-                if (found_scalar && shape_ok && !scalar_negative
-                    && !scalar.numerator().is_zero()) {
-                    auto sqrt_c = simplify_expr(arena_.make<FuncCall>(
-                        BuiltinOp::Sqrt,
-                        std::vector<ExprPtr>{make_rational(arena_, scalar)}));
-                    auto sqrt_rest = simplify_expr(arena_.make<FuncCall>(
-                        BuiltinOp::Sqrt,
-                        std::vector<ExprPtr>{nonrational[0]}));
-                    if (sqrt_c.is_ok() && sqrt_rest.is_ok()) {
-                        return simplify_expr(arena_.make<Binary>(BinaryOp::Mul,
-                            sqrt_c.value(), sqrt_rest.value()));
-                    }
-                }
-            }
-        }
-        // Borodin-Fagin-Hopcroft-Tompa denesting:
-        //   sqrt(a + b·sqrt(c)) → sqrt(p) ± sqrt(q)
-        // when a²-b²c is a rational square.
-        if (auto denested = try_denest_borodin_fagin(args.front(), arena_)) {
-            // Recurse simplify on result to cascade any inner reductions.
-            auto recursed = simplify_expr(*denested);
-            if (recursed.is_ok())
-                return traced_result(RuleId::Unknown, target_before, recursed.value());
-            return traced_result(RuleId::Unknown, target_before, *denested);
-        }
-    }
+    if (op == BuiltinOp::Sqrt && args.size() == 1U)
+        return simplify_funcall_sqrt(original, std::move(args), target_before);
 
     const auto& orig_args = expr_ref<FuncCall>(original).args;
     if (expr_ptr_sequence_identical(args, orig_args)) return ok(original);

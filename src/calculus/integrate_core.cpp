@@ -1,7 +1,7 @@
 #include "integrate_engine.hpp"
+#include "integrate_nonelementary.hpp"
 
 #include "cas/algebra.hpp"
-#include "cas/differential_algebra.hpp"
 #include "cas/error_helpers.hpp"
 #include "../algebra/polynomial_internal.hpp"
 
@@ -14,7 +14,7 @@ thread_local std::size_t Integrator::depth_ = 0U;
 
 Integrator::Integrator(symbolic::CASContext& context) noexcept : context_(context), arena_(context.arena()) {}
 
-Result<ExprPtr> Integrator::integrate(ExprPtr expr, const Symbol& var) {
+Result<ExprPtr> Integrator::integrate_impl(ExprPtr expr, const Symbol& var) {
     // HC-F75-A3-HARD-TIMEOUT: poll the interrupt flag at every recursive
     // entry into the integrator. The check is a single atomic load + branch
     // (CASContext::check_interrupt is inline noexcept), so the cost per
@@ -51,8 +51,13 @@ Result<ExprPtr> Integrator::integrate(ExprPtr expr, const Symbol& var) {
     //    Detect early per evitare che integrate_once tratti δ come integrand
     //    elementare e fallisca.  La routine restituisce Unimplemented se
     //    l'integranda non contiene δ riconoscibile, fall-through naturale.
+    // A53 — ogni strategia libera qui sotto e' un tentativo come i metodi di
+    // Integrator, ma non passa dai loro wrapper: va avvolta al call-site, o le
+    // side-conditions che emette prima di arrendersi restano addosso al
+    // risultato prodotto da una strategia successiva.
     {
-        auto sifting = try_integrate_dirac_sifting(expr, var, context_);
+        auto sifting = attempt_with_condition_rollback(
+            context_, [&] { return try_integrate_dirac_sifting(expr, var, context_); });
         if (sifting.is_ok()) {
             return context_.simplify(sifting.value());
         }
@@ -68,24 +73,40 @@ Result<ExprPtr> Integrator::integrate(ExprPtr expr, const Symbol& var) {
 
     // NEW: Try general u-substitution recognition (CAS-L2-16)
     {
-        auto sub_res = integrate_by_substitution(expr, var, context_);
+        auto sub_res = attempt_with_condition_rollback(
+            context_, [&] { return integrate_by_substitution(expr, var, context_); },
+            accept_if_matched);
         if (sub_res.is_ok() && sub_res.value().has_value()) {
             return ok(sub_res.value().value());
         }
     }
 
     // 2. Simplify then retry elementary patterns
-    auto simplified = context_.simplify(expr);
-    if (simplified.is_ok() && !structural_equal(simplified.value(), expr)) {
-        auto direct = integrate_once(simplified.value(), var);
-        if (direct.is_ok()) {
-            return direct;
+    // La simplify di questo passo e' parte del tentativo: se il retry fallisce,
+    // l'integrando semplificato non entra nel risultato (i passi 3+ ripartono da
+    // `expr`), quindi nemmeno le sue condizioni.
+    {
+        auto step2 = attempt_with_condition_rollback(context_, [&]() -> Result<ExprPtr> {
+            auto simplified = context_.simplify(expr);
+            if (simplified.is_error() || structural_equal(simplified.value(), expr)) {
+                return make_unimplemented<ExprPtr>(
+                    "calculus", "Integrator::integrate",
+                    "simplify produced no new form to retry",
+                    cas::error::reason_codes::INTEGRATE_NO_STRATEGY,
+                    "internal: step 2 declines, the caller falls through to step 3",
+                    "A53");
+            }
+            return integrate_once(simplified.value(), var);
+        });
+        if (step2.is_ok()) {
+            return step2;
         }
     }
 
     // 3. Risch Algorithm (handles transcendental extensions, rational functions)
     {
-        auto risch_result = integrate_risch(expr, var, context_);
+        auto risch_result = attempt_with_condition_rollback(
+            context_, [&] { return integrate_risch(expr, var, context_); });
         if (risch_result.is_ok()) {
             return context_.simplify(risch_result.value());
         }
@@ -96,9 +117,46 @@ Result<ExprPtr> Integrator::integrate(ExprPtr expr, const Symbol& var) {
     //    not a pattern table — driven by structural detection of sin/cos
     //    of var only.
     {
-        auto weier_result = integrate_weierstrass(expr, var, context_);
+        auto weier_result = attempt_with_condition_rollback(
+            context_, [&] { return integrate_weierstrass(expr, var, context_); });
         if (weier_result.is_ok()) {
             return context_.simplify(weier_result.value());
+        }
+    }
+
+    // 5. A43 §5 — non-elementary antiderivatives (Ei, Si, Ci, Shi, Chi, li,
+    //    Li₂, erfi). Strictly after Risch, which is the decision procedure:
+    //    only once Risch has answered "not elementary" does looking for a
+    //    closed form in the extended family make sense (spec §5). Before the
+    //    Meijer G fallback, because on this class Ei/Si/erfi is the canonical
+    //    shape both oracles emit, while the Meijer route yields an equivalent
+    //    but less readable ₁F₁ (measured: ∫e^{x²} came out as x·₁F₁(½,3⁄2,x²)).
+    //
+    //    Only on the OUTERMOST frame (depth_ == 1). Steps 1-2 above are
+    //    heuristic strategies, not decision procedures, and the by-parts chain
+    //    among them recurses into integrate(): letting it consume this fallback
+    //    at depth ≥ 2 makes ∫e^x/x "succeed" through seven levels of by-parts
+    //    that raise the pole to x⁻⁸ and then wrap the Ei form back up —
+    //    measured, and mathematically equal to Ei(x) but unusable. Restricting
+    //    to the outermost frame leaves Risch's precedence untouched (it still
+    //    runs first here) and keeps the canonical shape the oracles emit.
+    if (depth_ == 1U) {
+        auto special_result = attempt_with_condition_rollback(
+            context_, [&] { return integrate_nonelementary_fallback(expr, var, context_); });
+        if (special_result.is_ok()) {
+            return special_result;
+        }
+    }
+
+    // 6. A7 step 5 — Meijer G fallback (Meijer_G_Slater.md §8-§9): LAST
+    //    resort, strictly after Risch (spec §8 wiring constraint) and after
+    //    Weierstrass. May legitimately return a Meijer G / pFq closed form
+    //    (first-class antiderivative node, §9.4).
+    {
+        auto meijerg_result = attempt_with_condition_rollback(
+            context_, [&] { return integrate_meijerg_fallback(expr, var, context_); });
+        if (meijerg_result.is_ok()) {
+            return meijerg_result;
         }
     }
 
@@ -111,7 +169,7 @@ Result<ExprPtr> Integrator::integrate(ExprPtr expr, const Symbol& var) {
         "F0.8");
 }
 
-Result<bool> Integrator::expressions_match_after_simplify(ExprPtr lhs, ExprPtr rhs) {
+Result<bool> Integrator::expressions_match_after_simplify_impl(ExprPtr lhs, ExprPtr rhs) {
     auto simplified_lhs = context_.simplify(lhs);
     if (simplified_lhs.is_error()) {
         return fail<bool>(simplified_lhs.error());
@@ -123,91 +181,10 @@ Result<bool> Integrator::expressions_match_after_simplify(ExprPtr lhs, ExprPtr r
     return ok(structural_equal(simplified_lhs.value(), simplified_rhs.value()));
 }
 
-Result<ExprPtr> Integrator::integrate_rational(ExprPtr expr, const Symbol& var) {
-    auto parts = algebra::apart_num_den(expr, context_);
-    if (parts.is_error()) return fail<ExprPtr>(parts.error());
-    
-    ExprPtr P = parts.value().numerator;
-    ExprPtr Q = parts.value().denominator;
-    
-    // Handle polynomial part if deg(P) >= deg(Q)
-    auto P_poly = algebra::parse_polynomial(P, var, context_);
-    auto Q_poly = algebra::parse_polynomial(Q, var, context_);
-    
-    ExprPtr poly_integral = make_integer(arena_, 0);
-    
-    if (P_poly.is_ok() && Q_poly.is_ok() && !algebra::is_zero_poly(Q_poly.value())) {
-        if (algebra::poly_degree(P_poly.value()) >= algebra::poly_degree(Q_poly.value())) {
-            auto div_res = algebra::divide_poly_with_remainder(P_poly.value(), Q_poly.value(), context_);
-            if (div_res.is_ok()) {
-                std::vector<ExprPtr> terms;
-                for (std::size_t k = 0; k < div_res.value().quotient.size(); ++k) {
-                    ExprPtr coeff = div_res.value().quotient[k];
-                    if (!coeff) continue;
-                    if (const auto* il = expr_cast<IntegerLit>(coeff); il && il->value.is_zero()) continue;
-                    
-                    ExprPtr kp1 = make_integer(arena_, static_cast<long long>(k + 1));
-                    ExprPtr term;
-                    if (k == 0) {
-                        term = make_product(arena_, {coeff, arena_.make<Symbol>(var)});
-                    } else {
-                        term = make_product(arena_, {
-                            make_binary(arena_, BinaryOp::Div, coeff, kp1),
-                            make_binary(arena_, BinaryOp::Pow, arena_.make<Symbol>(var), kp1)
-                        });
-                    }
-                    terms.push_back(term);
-                }
-                if (!terms.empty()) {
-                    auto poly_sum = make_sum(arena_, std::move(terms));
-                    auto simplified = context_.simplify(poly_sum);
-                    if (simplified.is_ok()) poly_integral = simplified.value();
-                }
-                
-                auto rem_expr = algebra::polynomial_to_expr(div_res.value().remainder, var, context_);
-                if (rem_expr.is_ok()) P = rem_expr.value();
-            }
-        }
-    }
+// Integrator::integrate_rational lives in integrate_rational_part.cpp
+// (anti-monolith split).
 
-    DifferentialField field(var);
-    auto hermite = hermite_reduce(P, Q, var, field, context_);
-    if (hermite.is_error()) return fail<ExprPtr>(hermite.error());
-    // F7.5: route ∫c/(x²±a²)^n past the (buggy) LRT via Apostol/Bronstein recursion.
-    ExprPtr lrt_value;
-    if (ExprPtr rP = hermite.value().remaining_P, rQ = hermite.value().remaining_Q; !depends_on(rP, var)) {
-        if (auto qd = algebra::polynomial_degree(rQ, var, context_); qd.is_ok() && qd.value() == 2U)
-            if (auto r = integrate_inverse_quadratic_power(rQ, BigInt(-1), var); r.is_ok())
-                lrt_value = make_product(arena_, {rP, r.value()});
-        if (!lrt_value) if (const auto* dp = expr_cast<Binary>(rQ); dp && dp->op == BinaryOp::Pow)
-            if (const auto* ei = expr_cast<IntegerLit>(dp->right); ei && !ei->value.is_negative() && ei->value >= BigInt(2))
-                if (auto r = integrate_inverse_quadratic_power(dp->left, -ei->value, var); r.is_ok())
-                    lrt_value = make_product(arena_, {rP, r.value()});
-    }
-    if (!lrt_value) {
-        auto lrt_res = algebra::integrate_rational_lrt(hermite.value().remaining_P, hermite.value().remaining_Q, var, context_);
-        if (lrt_res.is_error()) return fail<ExprPtr>(lrt_res.error());
-        lrt_value = lrt_res.value();
-    }
-    auto lrt_res = ok(lrt_value);
-    
-    std::vector<ExprPtr> total;
-    auto is_expr_zero = [](ExprPtr e) {
-        if (!e) return true;
-        if (const auto* il = expr_cast<IntegerLit>(e)) return il->value.is_zero();
-        return false;
-    };
-
-    if (!is_expr_zero(poly_integral)) total.push_back(poly_integral);
-    if (!is_expr_zero(hermite.value().rational_part)) total.push_back(hermite.value().rational_part);
-    if (!is_expr_zero(lrt_res.value())) total.push_back(lrt_res.value());
-    
-    if (total.empty()) return ok(make_integer(arena_, 0));
-    if (total.size() == 1) return ok(total[0]);
-    return ok(make_sum(arena_, std::move(total)));
-}
-
-Result<ExprPtr> Integrator::integrate_once(ExprPtr expr, const Symbol& var) {
+Result<ExprPtr> Integrator::integrate_once_impl(ExprPtr expr, const Symbol& var) {
     // HC-F75-A3-HARD-TIMEOUT: see comment in integrate() above. integrate_once
     // is the per-node recursive entry, so polling here guarantees that any
     // sub-integrand a strategy (by-parts, substitution, Hermite, …) hands
@@ -290,7 +267,7 @@ Result<ExprPtr> Integrator::integrate_once(ExprPtr expr, const Symbol& var) {
         "F0.8");
 }
 
-Result<ExprPtr> Integrator::integrate_binary(const Binary& binary, const Symbol& var) {
+Result<ExprPtr> Integrator::integrate_binary_impl(const Binary& binary, const Symbol& var) {
     switch (binary.op) {
     case BinaryOp::Add: {
         auto lhs = integrate_once(binary.left, var);
@@ -368,7 +345,7 @@ Result<ExprPtr> Integrator::integrate_binary(const Binary& binary, const Symbol&
         }
         {
             ExprPtr arctan_base{};
-            if (is_one(binary.left) && matches_square_plus_constant_square(arena_, binary.right, var, arctan_base)) {
+            if (is_one(binary.left) && matches_square_plus_constant_square(binary.right, var, arctan_base)) {
                 ExprPtr x = arena_.make<Symbol>(var);
                 return ok(make_binary(arena_, BinaryOp::Div,
                     make_function(arena_, "arctan", {make_binary(arena_, BinaryOp::Div, x, arctan_base)}),
@@ -381,12 +358,15 @@ Result<ExprPtr> Integrator::integrate_binary(const Binary& binary, const Symbol&
             if (is_sqrt && matches_one_minus_square(sc->args.front(), var))
                 return ok(make_function(arena_, "arcsin", {arena_.make<Symbol>(var)}));
             ExprPtr cb{};
-            if (is_sqrt && matches_constant_square_minus_variable_square(arena_, sc->args.front(), var, cb))
+            if (is_sqrt && matches_constant_square_minus_variable_square(sc->args.front(), var, cb))
                 return ok(make_function(arena_, "arcsin", {make_binary(arena_, BinaryOp::Div, arena_.make<Symbol>(var), cb)}));
-            if (is_sqrt && (matches_square_plus_constant_square(arena_, sc->args.front(), var, cb)
-                         || matches_square_minus_constant_square(arena_, sc->args.front(), var, cb)))
+            if (is_sqrt && (matches_square_plus_constant_square(sc->args.front(), var, cb)
+                         || matches_square_minus_constant_square(sc->args.front(), var, cb)))
                 return ok(make_function(arena_, "ln", {make_function(arena_, "abs", {make_sum(arena_, {arena_.make<Symbol>(var), binary.right})})}));
-            if (!is_sqrt && matches_square_minus_constant_square(arena_, binary.right, var, cb)) {
+            if (is_sqrt)  // ∫1/√(Ax²+Bx+C) general, completing the square
+                if (auto g = integrate_inverse_sqrt_quadratic(sc->args.front(), var); g.is_ok())
+                    return g;
+            if (!is_sqrt && matches_square_minus_constant_square(binary.right, var, cb)) {
                 ExprPtr x = arena_.make<Symbol>(var);
                 return ok(make_product(arena_, {
                     make_binary(arena_, BinaryOp::Div, make_integer(arena_, 1), make_product(arena_, {make_integer(arena_, 2), cb})),
@@ -411,7 +391,7 @@ Result<ExprPtr> Integrator::integrate_binary(const Binary& binary, const Symbol&
                     return ok(make_unary(arena_, UnaryOp::Neg, binary.right));
                 }
                 // x/sqrt(a^2-x^2) = -sqrt(a^2-x^2)
-                if (matches_constant_square_minus_variable_square(arena_, radicand, var, cbase)) {
+                if (matches_constant_square_minus_variable_square(radicand, var, cbase)) {
                     return ok(make_unary(arena_, UnaryOp::Neg, binary.right));
                 }
                 // x/sqrt(x^2+1) = sqrt(x^2+1)
@@ -419,12 +399,12 @@ Result<ExprPtr> Integrator::integrate_binary(const Binary& binary, const Symbol&
                     return ok(binary.right);
                 }
                 // x/sqrt(x^2+a^2) = sqrt(x^2+a^2)
-                if (matches_square_plus_constant_square(arena_, radicand, var, cbase)) {
+                if (matches_square_plus_constant_square(radicand, var, cbase)) {
                     return ok(binary.right);
                 }
                 ExprPtr cbase2{};
                 // x/sqrt(x^2-a^2) = sqrt(x^2-a^2)
-                if (matches_square_minus_constant_square(arena_, radicand, var, cbase2)) {
+                if (matches_square_minus_constant_square(radicand, var, cbase2)) {
                     return ok(binary.right);
                 }
             }

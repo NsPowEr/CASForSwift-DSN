@@ -1,9 +1,11 @@
 #pragma once
 
+#include "cas/assumptions.hpp"
 #include "cas/ast.hpp"
 #include "cas/cas_cache_keys.hpp"
 #include "cas/cas_context_params.hpp"
 #include "cas/result.hpp"
+#include "cas/side_conditions.hpp"
 #include "cas/trace.hpp"
 
 #include <atomic>
@@ -65,97 +67,15 @@ public:
         CASContext* context = nullptr) const = 0;
 };
 
-struct RangeAssumption {
-    ExprPtr lower;
-    ExprPtr upper;
-};
-
-enum class RelType : std::uint8_t {
-    Less,          // <
-    LessEqual      // <=
-};
-
-struct Relation {
-    ExprPtr target;
-    RelType type;
-};
-
-enum class Domain : std::uint8_t {
-    Complex,
-    Real,
-    Integer,
-    Rational,
-    Natural,     // >= 0
-    Positive,    // > 0
-    Negative,    // < 0
-    NonZero,
-};
-
-class Assumptions {
-public:
-    void assume_real(const Symbol& symbol);
-    void assume_positive(const Symbol& symbol);
-    void assume_integer(const Symbol& symbol);
-    void assume_nonzero(const Symbol& symbol);
-    void assume_in_range(const Symbol& symbol, ExprPtr lower, ExprPtr upper);
-    void assume_domain(const Symbol& symbol, Domain domain);
-
-    // Advanced Assumptions (F9-A4)
-    void assume_greater(ExprPtr lhs, ExprPtr rhs);
-    void assume_greater_equal(ExprPtr lhs, ExprPtr rhs);
-    void assume(ExprPtr condition);
-
-    [[nodiscard]] bool is_real(const Symbol& symbol) const;
-    [[nodiscard]] bool is_real(ExprPtr expr) const;
-    [[nodiscard]] bool is_positive(const Symbol& symbol) const;
-    [[nodiscard]] bool is_positive(ExprPtr expr) const;
-    [[nodiscard]] bool is_nonnegative(ExprPtr expr) const;
-    [[nodiscard]] bool is_negative(ExprPtr expr) const;
-    [[nodiscard]] bool is_greater(ExprPtr lhs, ExprPtr rhs) const;
-    [[nodiscard]] bool is_greater_equal(ExprPtr lhs, ExprPtr rhs) const;
-    [[nodiscard]] bool is_nonzero(const Symbol& symbol) const;
-    [[nodiscard]] bool is_nonzero(ExprPtr expr) const;
-    [[nodiscard]] bool could_be_zero(const Symbol& symbol) const;
-    [[nodiscard]] bool could_be_zero(ExprPtr expr) const;
-    [[nodiscard]] bool is_integer(const Symbol& symbol) const;
-    [[nodiscard]] bool is_integer(ExprPtr expr) const;
-    [[nodiscard]] Domain get_domain(const Symbol& symbol) const;
-    [[nodiscard]] std::optional<RangeAssumption> get_range(const Symbol& symbol) const;
-    [[nodiscard]] Result<void> check_consistency() const;
-
-    void update_roots(AstArena& target, std::unordered_map<ExprPtr, ExprPtr>& cache);
-
-    // F7.0-A4.1: monotonically increasing revision counter, incremented by
-    // every mutator (assume_*, assume()). Used by CASContext::simplify() to
-    // detect assumption changes since the last cache fill, and invalidate
-    // simplify_cache_ / integrate_cache_ on mismatch.
-    //
-    // Mathematical correctness: simplify(abs(x)) returns x when x is known
-    // positive, but -x when x is known negative — without cache invalidation
-    // on assumption change, a stale entry would corrupt the session.
-    [[nodiscard]] std::uint64_t revision() const noexcept { return revision_; }
-
-private:
-    // F7.0-A4.1: bump in every mutator above (assume_*, assume).
-    std::uint64_t revision_{0};
-
-    [[nodiscard]] bool prove_relation(ExprPtr start, ExprPtr end, bool strict, std::unordered_set<const ExprNode*>& visited) const;
-    [[nodiscard]] bool prove_positive_linear(ExprPtr expr) const;
-    [[nodiscard]] bool prove_positive_product(const Product& prod) const;
-
-    std::unordered_set<std::string> real_symbols_;
-    std::unordered_set<std::string> positive_symbols_;
-    std::unordered_set<std::string> negative_symbols_;
-    std::unordered_set<std::string> integer_symbols_;
-    std::unordered_set<std::string> nonzero_symbols_;
-    std::unordered_map<std::string, RangeAssumption> range_symbols_;
-    std::unordered_map<std::string, Domain> symbol_domains_;
-
-    // Relation graph for deduction chains
-    std::unordered_map<ExprPtr, std::vector<Relation>, ExprHash, ExprEqual> relations_;
-};
-
 class Substituter;
+
+// A31 fase 2 (Domain_Conditions_Propagation.md §10.4): result of
+// CASContext::simplify_tracked — the simplified expression together with
+// exactly the domain conditions that call reported.
+struct Simplified {
+    ExprPtr expr;
+    SideConditionSet conditions;
+};
 
 struct SimplifyHints {
     bool fold_exp_products = false;
@@ -188,11 +108,37 @@ public:
 
     void define(const Symbol& symbol, ExprPtr value);
     void clear_variables() noexcept;
+    // Reset every assumption to the empty set (used e.g. by the golden runner
+    // between independent corpus entries so per-entry `assume` predicates do
+    // not leak). Callers that also cache should clear caches (assumption
+    // revision is reset, which the simplify cache keys on).
+    void clear_assumptions() noexcept;
     [[nodiscard]] std::optional<ExprPtr> lookup(const Symbol& symbol) const;
     [[nodiscard]] const std::unordered_map<std::string, ExprPtr>& variables() const noexcept { return variables_; }
 
     [[nodiscard]] Assumptions& assumptions() noexcept;
     [[nodiscard]] const Assumptions& assumptions() const noexcept;
+
+    // A31 fase 1 (Domain_Conditions_Propagation.md) — side-conditions
+    // accumulated by the LAST top-level simplify() call (nested/recursive
+    // calls inside it accumulate into the same set; a call whose result was
+    // served from cache re-merges the conditions recorded when that entry
+    // was first computed). simplify()'s ExprPtr output is unaffected: this
+    // is purely an opt-in side channel.
+    [[nodiscard]] const SideConditionSet& last_side_conditions() const noexcept;
+
+    // Registers that a simplification step just applied is valid only where
+    // `kind` holds of `subject` — UNLESS ctx.assumptions() already proves it
+    // (a fact of the input needs no registration). Called by rewrite sites
+    // that apply a domain-restricted identity (e.g. x/x -> 1 needs x != 0).
+    // Fails structured (Unimplemented) only if max_side_conditions() would be
+    // exceeded; never drops a condition silently.
+    [[nodiscard]] Result<void> emit_side_condition(DomainConditionKind kind, ExprPtr subject);
+
+    // A31 fase 2 (spec §10.4): simplify() plus a snapshot of exactly the
+    // conditions this call reported (cache hit or miss). Result and side
+    // effects identical to calling simplify() then last_side_conditions().
+    [[nodiscard]] Result<Simplified> simplify_tracked(ExprPtr expr);
 
     [[nodiscard]] AstArena& arena() noexcept;
     [[nodiscard]] const AstArena& arena() const noexcept;
@@ -201,6 +147,7 @@ public:
     [[nodiscard]] const RewriteProvider* rewrite_provider() const noexcept;
 
     void enable_trace(bool enabled) noexcept;
+    [[nodiscard]] bool is_trace_enabled() const noexcept { return trace_enabled_; }
     [[nodiscard]] const ComputationTrace& get_trace() const noexcept;
     void set_timeout(std::chrono::milliseconds timeout) noexcept;
     // Read-only access to the per-operation timeout budget.  Used by long-running
@@ -212,6 +159,9 @@ public:
     // Getters for these are inherited from CASContextParams.
     void set_timeout_check_interval(std::uint64_t interval) noexcept;
     void set_max_simplification_depth(int depth) noexcept;
+    void set_max_recursion_depth(std::size_t depth) noexcept;
+    void set_intern_shards(std::size_t n) noexcept;
+    void set_max_operation_ops(std::uint64_t ops) noexcept;
     void set_max_integration_depth(std::size_t depth) noexcept;
     void set_gcd_error_probability(double prob) noexcept;
     void set_zippel_error_probability(double prob) noexcept;
@@ -236,6 +186,20 @@ public:
     void interrupt() noexcept { interrupted_ = true; }
     void clear_interrupt() noexcept { interrupted_ = false; }
     [[nodiscard]] bool is_interrupted() const noexcept { return interrupted_; }
+
+    // Opt-in wall-clock deadline for long-running combinatorial routines
+    // (e.g. Kronecker recombination) that have no internal step budget.  A
+    // caller that owns a wall-clock budget — currently the composite Trager
+    // tower shift search, which derives its budget from ctx.timeout() — sets
+    // this so inner routines abort instead of running past it; unset (the
+    // default) means UNBOUNDED, preserving the historical behaviour of direct
+    // factorisation calls that legitimately run far longer than ctx.timeout().
+    void set_hard_deadline(std::chrono::steady_clock::time_point tp) noexcept { hard_deadline_ = tp; }
+    void clear_hard_deadline() noexcept { hard_deadline_ = std::chrono::steady_clock::time_point::max(); }
+    [[nodiscard]] std::chrono::steady_clock::time_point hard_deadline() const noexcept { return hard_deadline_; }
+    [[nodiscard]] bool past_hard_deadline() const noexcept {
+        return interrupted_ || std::chrono::steady_clock::now() >= hard_deadline_;
+    }
 
     // F7.0-A3.3: poll-point helper for heavy non-simplify loops
     // (polynomial GCD, Groebner, factorization, matrix Bareiss, etc.).
@@ -290,7 +254,84 @@ public:
     [[nodiscard]] CacheMetrics get_diff_metrics() const noexcept;
     [[nodiscard]] CacheMetrics get_integrate_metrics() const noexcept;
 
+    // A51 — massimo budget ops consumato da una singola operazione top-level
+    // dall'ultimo azzeramento. Rende osservabile il gate di A30: senza,
+    // `max_operation_ops` resta una costante presa a intuito.
+    [[nodiscard]] std::uint64_t ops_high_water() const noexcept { return ops_high_water_; }
+    void reset_ops_high_water() noexcept;
+
+    // A51 — apertura RAII di un'operazione top-level con budget proprio, per
+    // chi consuma budget senza passare da `simplify`/`substitute` (i due soli
+    // punti che contano le ops). Rientrante: se un'operazione e' gia' aperta
+    // non fa nulla (`owns()` false), quindi annidare motori e' sicuro e il
+    // costo dei rami interni resta addebitato al chiamante piu' esterno.
+    // Motivazione misurata: context_core.cpp, alla definizione.
+    // A53 — `ops_cap` (opzionale) impone all'operazione un tetto PROPRIO, piu'
+    // stretto di quello del contesto: il budget effettivo e' il `min` dei due.
+    // Serve a calculus::integrate, il cui costo legittimo massimo misurato sta
+    // un ordine di grandezza sotto il default per-simplify (derivazione:
+    // cas_context_simplifier_params.hpp, max_integration_ops). Se il gate ops
+    // del contesto e' spento (0), il tetto NON viene imposto: il chiamante
+    // possiede il budget (contratto A30) e un motore interno non glielo toglie.
+    // Il valore precedente e' ripristinato alla chiusura dello scope.
+    class OperationScope {
+    public:
+        OperationScope(CASContext& ctx, bool capture_trace) noexcept;
+        OperationScope(CASContext& ctx, bool capture_trace, std::uint64_t ops_cap) noexcept;
+        ~OperationScope() noexcept;
+        OperationScope(const OperationScope&) = delete;
+        OperationScope& operator=(const OperationScope&) = delete;
+        OperationScope(OperationScope&&) = delete;
+        OperationScope& operator=(OperationScope&&) = delete;
+        [[nodiscard]] bool owns() const noexcept { return owns_; }
+
     private:
+        CASContext& ctx_;
+        bool owns_;
+        // Stato del gate ops da ripristinare quando lo scope ha imposto un
+        // tetto proprio (costruttore con `ops_cap`).
+        std::uint64_t restore_max_ops_{0};
+        bool restore_max_ops_explicit_{false};
+        bool capped_{false};
+    };
+
+    // A53 — annulla le side-conditions (A31) emesse da un tentativo ABBANDONATO.
+    // L'accumulatore `side_conditions_` e' azzerato solo dalla simplify
+    // TOP-LEVEL: dentro un'operazione aperta (OperationScope) cresce in modo
+    // monotono, quindi le condizioni di un ramo scartato sopravvivrebbero nel
+    // risultato di un ramo diverso — misurato: `∫e^{-x²}` usciva con `x>0`,
+    // emessa dal fallback Meijer/Mellin dentro una sotto-integrazione di
+    // by-parts poi scartata, mentre il risultato viene dal completamento del
+    // quadrato, esatto su tutto R (REGOLA ZERO: una condizione non necessaria
+    // e' una restrizione di dominio inventata, non un'assunzione presa).
+    //
+    // Semantica: il costruttore marca lo stato corrente; `commit()` conferma le
+    // condizioni emesse nello scope; il distruttore SENZA commit le annulla,
+    // ripristinando esattamente il mark. Il ripristino non tocca la cache di
+    // simplify: la' le condizioni restano attribuite alla loro entry e vengono
+    // ri-emesse a ogni hit (spec A31 §4.2), come dev'essere.
+    class SideConditionRollback {
+    public:
+        explicit SideConditionRollback(CASContext& ctx);
+        ~SideConditionRollback() noexcept;
+        SideConditionRollback(const SideConditionRollback&) = delete;
+        SideConditionRollback& operator=(const SideConditionRollback&) = delete;
+        SideConditionRollback(SideConditionRollback&&) = delete;
+        SideConditionRollback& operator=(SideConditionRollback&&) = delete;
+        void commit() noexcept { committed_ = true; }
+
+    private:
+        CASContext& ctx_;
+        SideConditionSet mark_;
+        bool committed_{false};
+    };
+
+    private:
+    // A51 — chi apre un'operazione top-level DEVE inizializzarne il budget con
+    // questi due. Motivazione e conseguenze: context_core.cpp, alla definizione.
+    void begin_operation_budget(bool capture_trace) noexcept;
+    void end_operation_budget() noexcept;
+
     friend class Substituter;
     friend Result<ExprPtr> simplify(ExprPtr expr, CASContext& context);
     friend Result<ExprPtr> substitute(ExprPtr expr, const Symbol& variable, ExprPtr value, CASContext& context);
@@ -306,9 +347,16 @@ public:
     bool operation_active_{false};
     bool caching_enabled_{true};
     ComputationTrace trace_;
-    std::chrono::milliseconds timeout_{1000};
+    // A30: wall-clock timeout is an outer anti-hang safety net only; the
+    // primary, deterministic per-operation gate is max_operation_ops (see
+    // CASContextSimplifierParams).  10s covers ~10x load-induced slowdown of
+    // any operation that fits the default ops budget, so pass/fail outcomes
+    // do not depend on machine load.
+    std::chrono::milliseconds timeout_{10000};
     std::chrono::steady_clock::time_point operation_started_at_{};
+    std::chrono::steady_clock::time_point hard_deadline_{std::chrono::steady_clock::time_point::max()};
     std::uint64_t ops_count_{0};
+    std::uint64_t ops_high_water_{0};
     std::uint64_t fresh_symbol_counter_{0U};
     PostSimplifyHook post_simplify_hook_{nullptr};
     std::atomic_bool interrupted_{false};
@@ -350,7 +398,17 @@ struct IntegrateHash {
     }
 };
 
-CacheContainer<ExprPtr, ExprPtr, ExprHash, ExprEqual> simplify_cache_;
+// A31 fase 1: a simplify_cache_ entry carries not just the memoized result
+// but the SideConditionSet that was emitted while computing it, so a cache
+// HIT re-merges those conditions into side_conditions_ instead of silently
+// losing them (spec §4.2 — without this, hitting the cache a second time
+// would report fewer side-conditions than computing it fresh).
+struct SimplifyCacheEntry {
+    ExprPtr result;
+    SideConditionSet conditions;
+};
+
+CacheContainer<ExprPtr, SimplifyCacheEntry, ExprHash, ExprEqual> simplify_cache_;
 CacheContainer<DiffKey, ExprPtr, DiffHash> diff_cache_;
 CacheContainer<IntegrateKey, ExprPtr, IntegrateHash> integrate_cache_;
 
@@ -360,6 +418,13 @@ CacheContainer<IntegrateKey, ExprPtr, IntegrateHash> integrate_cache_;
 // mid-session (e.g. assume(x>0); simplify(abs(x)); assume(x<0); ...).
 mutable std::uint64_t last_assumptions_revision_{0};
 SimplifyHints hints_;
+
+// A31 fase 1: side-conditions accumulated by the current/last top-level
+// simplify() call. Cleared only when a NEW top-level call begins (mirrors
+// the operation_active_/ops_count_ pattern already used for A30's ops
+// budget); nested/recursive simplify() calls inside one top-level call
+// accumulate into the same set. See emit_side_condition / last_side_conditions.
+SideConditionSet side_conditions_;
 };
 
 inline ScopedSimplifyHint::ScopedSimplifyHint(CASContext& ctx, SimplifyHints hints) noexcept
@@ -375,44 +440,9 @@ inline ScopedSimplifyHint CASContext::with_hint(SimplifyHints hints) noexcept {
     return ScopedSimplifyHint(*this, hints);
 }
 
-[[nodiscard]] int canonical_compare(ExprPtr lhs, ExprPtr rhs) noexcept;
-
-// F7.0-A4.2: post-simplify canonical-form invariant check.
-// Returns true if `expr` and every reachable sub-expression respect the
-// invariants that simplify() is supposed to maintain:
-//   - Sum::terms sorted by polynomial degree descending then canonical_compare,
-//     no nested Sum, no exact-zero IntegerLit / RationalLit summand.
-//   - Product::factors sorted by canonical_compare, no nested Product, no
-//     exact-one IntegerLit / RationalLit factor.
-//   - All Sum/Product nodes have ≥ 2 operands (singletons collapsed).
-//
-// Used in DEBUG builds via an assert at the end of CASContext::simplify()
-// to catch invariant violations close to their source. In release builds
-// the function is still available for explicit verification but the assert
-// is compiled out.
-[[nodiscard]] bool is_strictly_canonical(ExprPtr expr) noexcept;
-[[nodiscard]] TermOrderRelation compare_rewrite_terms(ExprPtr lhs, ExprPtr rhs);
-[[nodiscard]] bool rewrite_rule_is_oriented(const RewriteRule& rule);
-[[nodiscard]] bool is_strongly_normalizing(const std::vector<RewriteRule>& rules);
-[[nodiscard]] bool match_pattern(ExprPtr expr, ExprPtr pattern, MatchMap& out_matches);
-[[nodiscard]] bool match_ac_pattern(ExprPtr expr, ExprPtr pattern, MatchMap& out_matches);
-[[nodiscard]] Result<ExprPtr> apply_rule(ExprPtr expr, const RewriteRule& rule, TraversalStrategy strategy, AstArena& arena);
-[[nodiscard]] Result<ExprPtr> apply_rule_set(ExprPtr expr, const std::vector<RewriteRule>& rules, AstArena& arena);
-[[nodiscard]] Result<ExprPtr> materialize_expr(ExprPtr expr, AstArena& arena);
-[[nodiscard]] const RewriteProvider& default_rewrite_provider();
-[[nodiscard]] Result<ExprPtr> simplify(ExprPtr expr, AstArena& arena);
-[[nodiscard]] Result<ExprPtr> simplify(ExprPtr expr, CASContext& context);
-[[nodiscard]] Result<ExprPtr> substitute(ExprPtr expr, const Symbol& variable, ExprPtr value, CASContext& context);
-[[nodiscard]] Result<bool> mathematically_equal(ExprPtr lhs, ExprPtr rhs, CASContext& context);
-
-// L2-19: decidable subset of transcendental equivalence via Risch-style
-// log/exp/trig normalisation.  Applies opt-in expansion rules to lhs/rhs
-// (log(x*y) -> log(x)+log(y) under x>0, y>0; exp(x+y) -> exp(x)*exp(y);
-// exp(n*ln(x)) -> x^n under x>0; sin^2+cos^2 collapse) before delegating
-// to mathematically_equal.  Returns false (not Unimplemented) for cases
-// outside the decidable subset — Richardson's theorem precludes a total
-// decision procedure.
-[[nodiscard]] Result<bool> mathematically_equal_subset_risch(
-    ExprPtr lhs, ExprPtr rhs, CASContext& context);
 
 }  // namespace cas::symbolic
+
+// Funzioni libere del namespace: estratte per il limite anti-monolito.
+// Vanno DOPO le definizioni di CASContext/RewriteRule/MatchMap.
+#include "cas/symbolic_api.hpp"

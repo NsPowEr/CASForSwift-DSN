@@ -31,7 +31,7 @@ namespace {
 // run Euclidean algorithm on (p, x+i) in Z[i] until norm(remainder) ≤ p.
 // Cohen GTM 138, Proposition 4.2.5.
 // -------------------------------------------------------------------------
-[[nodiscard]] GaussianInt split_prime_factor(const BigInt& p) {
+[[nodiscard]] Result<GaussianInt> split_prime_factor(const BigInt& p) {
     // Step 1: find x such that x² ≡ -1 (mod p).
     // By Fermat's little theorem x = ((p-1)/2)! mod p (Wilson's theorem).
     // Equivalently iterate small bases: for base b, x = b^((p-1)/4) mod p
@@ -81,34 +81,32 @@ namespace {
     BigInt im = alpha.imag().abs();
     // Invariant (Cohen GTM 138 Proposition 4.2.5): the Euclidean GCD
     // algorithm on Z[i] terminates with N(alpha) = p, so re²+im² must
-    // equal p.  If this fails the Hermite-Serret step produced an
-    // incorrect intermediate — swap (re, im) as the last-resort recovery
-    // and assert in debug builds to surface the regression.
+    // equal p. If this fails the Hermite-Serret step produced an
+    // incorrect intermediate — swap (re, im) as the last-resort recovery.
     //
     // Note: all four unit-rotations (±re, ±im) have the same norm, so
     // swapping cannot fix a genuine norm mismatch; a swap only helps if
     // the abs() above discarded sign information that affected which of
-    // re/im ended up as which component.  A true norm != p is an
-    // algorithm bug; the assert ensures it is caught in testing.
+    // re/im ended up as which component. A true norm != p is an algorithm
+    // bug in split_prime_factor, not a caller-input error.
     if (re * re + im * im != p) {
-        // Attempt swap: swap does not change norm, but ensures re ≥ im
-        // when both are non-zero (canonical Gaussian prime form).
-        std::swap(re, im);
-        // If norm still fails after swap, the Euclidean step is broken.
-        // HARDCODE-OF-PASSAGE: HPP-018 — assert fires only in debug;
-        // in release we return the best available value and let the
-        // caller's norm-check test detect the failure.
-        assert(re * re + im * im == p &&
-               "HPP-018 Hermite-Serret invariant: N(alpha) must equal p "
-               "after Z[i] Euclidean GCD — algorithm bug in split_prime_factor");
+        return fail<GaussianInt>(CASError{
+            .kind    = CASErrorKind::InternalError,
+            .message = "HPP-018 Hermite-Serret invariant violated: "
+                       "N(alpha) != p after Z[i] Euclidean GCD",
+            .hint    = std::nullopt,
+        });
     }
-    return GaussianInt(re, im);
+    if (re < im) {
+        std::swap(re, im);
+    }
+    return ok(GaussianInt(re, im));
 }
 
 // -------------------------------------------------------------------------
 // Lift a single rational prime power p^e to a list of Gaussian factors.
 // -------------------------------------------------------------------------
-[[nodiscard]] std::vector<GaussianFactor> lift_prime_power(
+[[nodiscard]] Result<std::vector<GaussianFactor>> lift_prime_power(
     const BigInt& p, unsigned int e)
 {
     std::vector<GaussianFactor> result;
@@ -119,7 +117,7 @@ namespace {
     if (p == BigInt(2)) {
         // Gaussian prime: 1+i (norm 2, canonical: real>0, imag>0 → already fine)
         result.push_back(GaussianFactor{GaussianInt(BigInt(1), BigInt(1)), 2U * e});
-        return result;
+        return ok(std::move(result));
     }
 
     // Determine p mod 4 via p % 4.
@@ -128,12 +126,16 @@ namespace {
     if (mod4 == BigInt(3)) {
         // p ≡ 3 mod 4: inert, p stays prime in Z[i].
         result.push_back(GaussianFactor{GaussianInt(p, BigInt(0)), e});
-        return result;
+        return ok(std::move(result));
     }
 
     // p ≡ 1 mod 4: split. p = π · π̄ with N(π) = p.
     assert(mod4 == BigInt(1));
-    GaussianInt pi = split_prime_factor(p);
+    auto pi_result = split_prime_factor(p);
+    if (!pi_result.is_ok()) {
+        return fail<std::vector<GaussianFactor>>(pi_result.error());
+    }
+    GaussianInt pi = pi_result.value();
     GaussianInt pi_conj = pi.conjugate();
 
     // Canonicalize pi_conj so its real > 0.
@@ -152,7 +154,7 @@ namespace {
         // Degenerate: pi is real (norm = pi² → shouldn't happen for p prime ≡ 1 mod 4).
         result.push_back(GaussianFactor{pi, e});
     }
-    return result;
+    return ok(std::move(result));
 }
 
 // -------------------------------------------------------------------------
@@ -206,7 +208,10 @@ Result<GaussianFactorization> factor_gaussian(const BigInt& n) {
             result.unit = result.unit * unit_powers[exp % 4U];
         }
         auto lifted = lift_prime_power(prime, exp);
-        for (auto& f : lifted) {
+        if (!lifted.is_ok()) {
+            return fail<GaussianFactorization>(lifted.error());
+        }
+        for (auto& f : lifted.value()) {
             f.prime = canonicalize(f.prime);
             result.factors.push_back(std::move(f));
         }

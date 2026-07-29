@@ -415,6 +415,32 @@ TEST(ZippelPronyProbe, FourVarSparseSampleCount) {
     EXPECT_TRUE(same_mv(g_disp.value(), expected.value(), vars));
 }
 
+// T-006: multi-prime CRT + Farey path. The gcd 2w+3x+5y is monic-in-w only up to
+// the constant leading coefficient 2, so the per-prime monic-over-Fp coefficients
+// are the rationals 3/2, 5/2 — the single-prime center-lift fails its certificate
+// and hands off to gcd_zippel_prony_crt, which CRT-combines + Farey-reconstructs
+// the rationals and clears to the primitive integer gcd. Asserts the CRT path
+// itself certifies (returns ok), not merely that the dispatcher falls back.
+TEST(ZippelCrtMultiPrime, NonMonicConstantLeadingCoeff) {
+    symbolic::CASContext ctx;
+    Symbol x{"x"}, y{"y"};
+    // Monic gcd = x² + (3/2)y: x²-coeff 1 and the y-term are both present in the
+    // P,Q per-degree skeletons, so per-prime interpolation succeeds; the 3/2 then
+    // overflows a single prime's center-lift → CRT + Farey reconstruct it.
+    auto P = parse_to_mv("(2*x^2 + 3*y) * (x^2 + 1)", ctx);
+    auto Q = parse_to_mv("(2*x^2 + 3*y) * (x^2 + x + 1)", ctx);
+    ASSERT_TRUE(P.is_ok()) << P.error().message;
+    ASSERT_TRUE(Q.is_ok()) << Q.error().message;
+    std::size_t samples_used = 0;
+    auto g = gcd_zippel_prony(P.value(), Q.value(), ctx, &samples_used);
+    ASSERT_TRUE(g.is_ok()) << "multi-prime CRT failed to certify: "
+                           << g.error().message;
+    auto expected = parse_to_mv("2*x^2 + 3*y", ctx);
+    ASSERT_TRUE(expected.is_ok());
+    std::vector<Symbol> vars = {x, y};
+    EXPECT_TRUE(same_mv(g.value(), expected.value(), vars)) << "CRT gcd mismatch";
+}
+
 // ── Block A3 (T3-Opus): lc-poly-scaling tests (Geddes §7.4.2 Alg 7.2) ────────
 
 // F3.1-BROWN-LC-POLY-SCALING canonical probe.  True gcd is x^2 + y*z; the main

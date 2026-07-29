@@ -1,5 +1,6 @@
 #include "simplify_impl.hpp"
-#include <iostream>
+#include "cas/error_helpers.hpp"
+
 
 namespace cas::symbolic {
 namespace detail {
@@ -29,20 +30,35 @@ Result<ExprPtr> Simplifier::simplify_expr(ExprPtr expr) {
         return fail<ExprPtr>(make_error(CASErrorKind::InvalidArgument, "Cannot simplify null expression"));
     }
 
+    // L0-12 contract: the simplifier recursion budget stays governed by
+    // max_simplification_depth (set_max_simplification_depth); the A20
+    // max_recursion_depth parameter governs the numeric evaluators.
     const int max_depth = (context_ != nullptr) ? context_->max_simplification_depth() : MAX_SIMPLIFICATION_DEPTH;
     DepthGuard guard(max_depth);
     if (guard.exceeded()) {
-        return fail<ExprPtr>(make_error(CASErrorKind::InternalError, "Simplification depth limit exceeded (possible infinite recursion)"));
-    }
-
-    CycleGuard cycle_guard(expr);
-    if (cycle_guard.cycle_detected()) {
-        return ok(expr);
+        return make_unimplemented<ExprPtr>(
+            "symbolic", "Simplifier::simplify_expr",
+            "expression recursion depth",
+            error::reason_codes::RECURSION_DEPTH_EXCEEDED,
+            "Increase max_simplification_depth in CASContext",
+            "A20",
+            "Simplification recursion depth limit exceeded");
     }
 
     auto timeout = check_timeout();
     if (timeout.is_error()) {
         return fail<ExprPtr>(timeout.error());
+    }
+
+    CycleGuard cycle_guard(expr);
+    if (cycle_guard.cycle_detected()) {
+        return make_unimplemented<ExprPtr>(
+            "symbolic", "Simplifier::simplify_expr",
+            "expression cycle",
+            error::reason_codes::CYCLE_DETECTED,
+            "Ensure expression AST has no cyclic references",
+            "A20",
+            "Cyclic evaluation detected during simplification");
     }
 
     auto simplified = visit_expr(
@@ -82,6 +98,22 @@ Result<void> Simplifier::check_timeout() {
         return ok();
     }
     ++(*ops_count_);
+    // A30: deterministic per-operation node-visit budget is the PRIMARY gate.
+    // Checked on every op (cheap integer compare) so the outcome for a given
+    // input+params never depends on machine load; the wall-clock timeout below
+    // remains only as an outer anti-hang safety net.
+    const std::uint64_t max_ops = (context_ != nullptr) ? context_->max_operation_ops() : 0U;
+    if (max_ops > 0U && *ops_count_ > max_ops) {
+        return Result<void>(make_unimplemented_error(
+            UnimplementedInfo{
+                .module = "symbolic",
+                .function = "Simplifier::simplify_expr",
+                .input_shape = "operation exceeding " + std::to_string(max_ops) + " node visits",
+                .reason = error::reason_codes::OPS_BUDGET_EXCEEDED,
+                .suggestion = "Increase max_operation_ops in CASContext (0 disables the budget)",
+                .ticket = "A30"},
+            "Symbolic operation ops budget exceeded"));
+    }
     const std::uint64_t interval = (context_ != nullptr) ? context_->timeout_check_interval() : 1024U;
     if ((*ops_count_ % interval) != 0U) {
         return ok();

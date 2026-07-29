@@ -40,4 +40,8 @@ using DefinitePatternFn = Result<std::optional<ExprPtr>> (*)(const DefiniteConte
 [[nodiscard]] Result<std::optional<ExprPtr>> pattern_chebyshev_t_orthogonality(const DefiniteContext& dc);
 [[nodiscard]] Result<std::optional<ExprPtr>> pattern_chebyshev_u_orthogonality(const DefiniteContext& dc);
 
+// A7 §6.7 — Mellin convolution: ∫_0^∞ K·x^μ·f_1·f_2 dx when each f_i is a
+// Meijer G linear in x. Committed only under a convergence certificate.
+[[nodiscard]] Result<std::optional<ExprPtr>> pattern_mellin_g_convolution(const DefiniteContext& dc);
+
 }  // namespace cas::calculus

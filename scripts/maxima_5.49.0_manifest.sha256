@@ -1,4 +1,5 @@
-4ed767a49b269cbd4e1f42318f850e902094d02d9645f8eeb1dfb3b8378aa52e  bin/maxima
+92ab9d56afeb568f5207d3089ebbcb3892fd9d1696b5be444dd4a8a8d126e5b4  bin/maxima
+5769a0457b35a1b1e9d64972e53d3022159fb6d37adc1641c22d9460e2ed34c3  share/maxima/5.49.0/src/autoconf-variables.lisp
 c2da6e48314fbebfae8e0547792393c374e824072e6950a7b1e2993bc3be805f  share/maxima/5.49.0/src/acall.lisp
 3ad3dea33f369cca94d44dfbf72179e42f3abc3139ed3e31fc858ebccc5afc44  share/maxima/5.49.0/src/airy.lisp
 0f0bcfaa8209765c510ff2da3e01bf00826ed9014c15df918161bfaf0211a7e3  share/maxima/5.49.0/src/algfac.lisp
@@ -6,7 +7,6 @@ c2da6e48314fbebfae8e0547792393c374e824072e6950a7b1e2993bc3be805f  share/maxima/5
 c210d91d0355f3b910c0594a755d6407fa6fc17a857170e204186ce4c5bce6b8  share/maxima/5.49.0/src/ar.lisp
 2eaa306f1c93164249d2b345f6135c05a010375db4f97658a73160319249fa8b  share/maxima/5.49.0/src/askp.lisp
 cc1033672feb36520eba4887e5e2eec77f89a38a4588bb3b9d07034de11c406a  share/maxima/5.49.0/src/asum.lisp
-2aa6d75dc74a773d9f3d236441ae88d78f5b044fa8d32bfc91d7bd0ba157eb06  share/maxima/5.49.0/src/autoconf-variables.lisp
 7c9590ee688a3a7a03fb72f4f5b6df6d7f22a7479cf06ea445b5dc4d1f73286c  share/maxima/5.49.0/src/autol.lisp
 91295b2fb7e44d65074f66fce03befed79cf809d53788e9da1758f6c98389c6e  share/maxima/5.49.0/src/bessel.lisp
 210a00e514f8a59ee60db66aaaaefc97194a306a1389f75bace85d2effaacd70  share/maxima/5.49.0/src/buildq.lisp

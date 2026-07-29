@@ -11,7 +11,7 @@ int canonical_compare(ExprPtr lhs, ExprPtr rhs) noexcept;
 namespace detail {
 
 thread_local int simplification_depth = 0;
-thread_local std::unordered_set<ExprPtr, ExprHash> active_simplify_nodes;
+thread_local std::vector<ExprPtr> simplify_ancestor_path;
 
 DepthGuard::DepthGuard(int max_depth) : max_depth_(max_depth) { ++simplification_depth; }
 DepthGuard::~DepthGuard() { --simplification_depth; }
@@ -46,6 +46,24 @@ namespace {
     return false;
 }
 
+// A34: mirror the sort key that `merge_symbolic_factors`
+// (simplify_arithmetic.cpp) uses to order Product factors. That sorter keys on
+// the (base, exponent) pair's BASE via canonical_compare, and emits either the
+// bare base (exponent 1) or Pow(base, integer_exponent). A factor that is a
+// Pow with an INTEGER-literal exponent therefore sorts by its base, not by the
+// whole Pow node. The strict-canonical checker must compare by that same key,
+// otherwise e.g. sin(x)·sqrt(pi)^(-1) — correctly ordered by base
+// (Sin < Sqrt(pi)) — is a false alarm when the whole factors Sin(x) and
+// Pow(Sqrt(pi),-1) are compared and the node-kind rank (FuncCall vs Binary)
+// disagrees with the base order. Non-integer-exponent Pow (e.g. 5^(1/2)) is
+// kept whole by the sorter, so its sort key is the factor itself — matched here.
+[[nodiscard]] ExprPtr product_factor_sort_base(ExprPtr f) noexcept {
+    if (const auto* b = expr_cast<Binary>(f); b != nullptr && b->op == BinaryOp::Pow) {
+        if (detail::try_get_integer_exponent(b->right).has_value()) return b->left;
+    }
+    return f;
+}
+
 }  // namespace
 
 bool is_strictly_canonical(ExprPtr expr) noexcept {
@@ -75,7 +93,8 @@ bool is_strictly_canonical(ExprPtr expr) noexcept {
             if (expr_is<Product>(f)) return false;        // nested Product
             if (is_exact_one_lit(f)) return false;        // one factor
             if (!is_strictly_canonical(f)) return false;
-            if (i > 0 && canonical_compare(prod->factors[i - 1], f) > 0) {
+            if (i > 0 && canonical_compare(product_factor_sort_base(prod->factors[i - 1]),
+                                           product_factor_sort_base(f)) > 0) {
                 return false;
             }
         }

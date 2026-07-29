@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include "cas/ode.hpp"
 #include "cas/symbolic.hpp"
+#include "cas/calculus.hpp"
 #include "cas/ast_debug.hpp"
 #include <iostream>
 
@@ -342,5 +343,134 @@ TEST_F(OdeTest, Kovacic_SimplePole_Unimplemented) {
         if (sol.is_error())
             EXPECT_EQ(sol.error().kind, CASErrorKind::Unimplemented);
     }
+}
+
+// Kovacic Case 1: r with a finite pole of EVEN order 4 (exercises the
+// Laurent-expansion-of-√r branch, ode_kovacic_case1.cpp else-path v=cp.power/2).
+// Construction: ω = 1/x²  ⇒  r = ω' + ω² = 1/x⁴ − 2/x³.
+// Then η = exp(∫ω) = exp(−1/x) solves  y'' = r·y  (verified: η''−rη ≡ 0).
+// Equivalent reduced form:  y'' + (2/x³ − 1/x⁴)·y = 0.
+TEST_F(OdeTest, Kovacic_Case1_EvenPoleOrder4) {
+    symbolic::CASContext ctx;
+    Symbol y("y");
+    Symbol x("x");
+    AstArena& arena = ctx.arena();
+
+    ExprPtr x_sym = arena.make<Symbol>("x");
+    ExprPtr y_sym = arena.make<Symbol>("y");
+    ExprPtr ypp   = arena.make<Derivative>(y_sym, Symbol("x"), 2);
+
+    ExprPtr x4 = arena.make<Binary>(BinaryOp::Pow, x_sym, arena.make<IntegerLit>(BigInt(4)));
+    // Cleared-denominator (polynomial-coefficient) form of  y'' + (2/x³ − 1/x⁴)y = 0:
+    //   x⁴·y'' + (2x − 1)·y = 0
+    ExprPtr coeff = arena.make<Sum>(std::vector<ExprPtr>{
+        arena.make<Binary>(BinaryOp::Mul, arena.make<IntegerLit>(BigInt(2)), x_sym),
+        arena.make<Unary>(UnaryOp::Neg, arena.make<IntegerLit>(BigInt(1)))
+    });
+
+    // x⁴·y'' + (2x − 1)·y = 0
+    ExprPtr lhs = arena.make<Sum>(std::vector<ExprPtr>{
+        arena.make<Binary>(BinaryOp::Mul, x4, ypp),
+        arena.make<Binary>(BinaryOp::Mul, coeff, y_sym)
+    });
+    ExprPtr eq = arena.make<Binary>(BinaryOp::Equal, lhs, arena.make<IntegerLit>(BigInt(0)));
+
+    auto cls = classify_ode(eq, y, x, ctx);
+    ASSERT_TRUE(cls.is_ok()) << cls.error().message;
+    EXPECT_EQ(cls.value().type, OdeType::Linear2ndOrderRationalCoeff);
+
+    auto sol = solve_ode(eq, y, x, ctx);
+    ASSERT_TRUE(sol.is_ok()) << sol.error().message;
+    std::cout << "Kovacic order-4 pole solution: " << debug_print(sol.value()) << "\n";
+
+    auto* eq_node = expr_cast<Binary>(sol.value());
+    ASSERT_NE(eq_node, nullptr);
+    EXPECT_EQ(eq_node->op, BinaryOp::Equal);
+    ExprPtr Y = eq_node->right;
+
+    // Regression guards on the solver output:
+    //  (1) the elementary branch must carry the exponential e^{−1/x} — guards
+    //      against the old ω=0 degenerate result  y = C₁ + C₂x;
+    //  (2) the independent second branch must be the reduction-of-order form
+    //      with an unevaluated integral — guards against the silent-wrong
+    //      closed form  x²·e^{1/x}  the uncertified ω₋ branch used to fabricate.
+    const std::string Ys = debug_print(Y);
+    EXPECT_NE(Ys.find("exp"), std::string::npos);
+    EXPECT_NE(Ys.find("Integral("), std::string::npos);
+
+    // Algebraic certificate for the elementary solution η₁ = e^{−1/x}:
+    // substitute it into the operator  x⁴·Y'' + (2x − 1)·Y  and require it to
+    // vanish identically (η₁ is the closed-form branch the solver reports).
+    ExprPtr eta1 = arena.make<FuncCall>("exp", std::vector<ExprPtr>{
+        arena.make<Unary>(UnaryOp::Neg,
+            arena.make<Binary>(BinaryOp::Div, arena.make<IntegerLit>(BigInt(1)), x_sym))});
+    auto eta1_pp = diff(eta1, x, 2U, ctx);
+    ASSERT_TRUE(eta1_pp.is_ok()) << eta1_pp.error().message;
+    ExprPtr residual = arena.make<Sum>(std::vector<ExprPtr>{
+        arena.make<Binary>(BinaryOp::Mul, x4, eta1_pp.value()),
+        arena.make<Binary>(BinaryOp::Mul, coeff, eta1)
+    });
+    // The residual equals  p(x)·e^{−1/x}  with p ≡ 0 of degree ≤ 1; evaluating it
+    // at two distinct points proves p ≡ 0 (independent of how far simplify folds
+    // the symbolic form).  e^{−1/x} ≠ 0, so each evaluation must collapse to 0.
+    for (long long v : {2, 3, 5}) {
+        auto at = ctx.substitute(residual, x, arena.make<IntegerLit>(BigInt(v)));
+        ASSERT_TRUE(at.is_ok()) << at.error().message;
+        auto at_simp = ctx.simplify(at.value());
+        ASSERT_TRUE(at_simp.is_ok()) << at_simp.error().message;
+        auto* zero = expr_cast<IntegerLit>(at_simp.value());
+        EXPECT_TRUE(zero != nullptr && zero->value.is_zero())
+            << "operator did not annihilate η₁ = e^{−1/x} at x=" << v
+            << "; residual = " << debug_print(at_simp.value());
+    }
+}
+
+// Fundamental Theorem of Calculus:  d/dx ∫ f dx = f  for an indefinite integral
+// whose integration variable matches the differentiation variable.
+TEST_F(OdeTest, DiffOfIndefiniteIntegral_FTC) {
+    symbolic::CASContext ctx;
+    Symbol x("x");
+    AstArena& arena = ctx.arena();
+
+    ExprPtr x_sym = arena.make<Symbol>("x");
+    // f = exp(2/x)
+    ExprPtr f = arena.make<FuncCall>("exp", std::vector<ExprPtr>{
+        arena.make<Binary>(BinaryOp::Div, arena.make<IntegerLit>(BigInt(2)), x_sym)});
+    ExprPtr integ = arena.make<Integral>(f, Symbol("x"), std::nullopt, std::nullopt);
+
+    auto d = diff(integ, x, 1U, ctx);
+    ASSERT_TRUE(d.is_ok()) << d.error().message;
+    // d/dx ∫ f dx − f  must vanish identically.
+    auto diff0 = ctx.simplify(arena.make<Binary>(BinaryOp::Sub, d.value(), f));
+    ASSERT_TRUE(diff0.is_ok()) << diff0.error().message;
+    auto* zero = expr_cast<IntegerLit>(diff0.value());
+    EXPECT_TRUE(zero != nullptr && zero->value.is_zero())
+        << "FTC failed; d/dx∫f − f = " << debug_print(diff0.value());
+}
+
+// Leibniz integral rule:  d/dx ∫₀ˣ t² dt = x²  (bounds depend on x, integrand
+// independent of x → boundary term only).
+TEST_F(OdeTest, DiffOfDefiniteIntegral_Leibniz) {
+    symbolic::CASContext ctx;
+    Symbol x("x");
+    AstArena& arena = ctx.arena();
+
+    ExprPtr x_sym = arena.make<Symbol>("x");
+    Symbol t("t");
+    ExprPtr t_sym = arena.make<Symbol>("t");
+    ExprPtr integrand = arena.make<Binary>(BinaryOp::Pow, t_sym, arena.make<IntegerLit>(BigInt(2)));
+    ExprPtr integ = arena.make<Integral>(integrand, t,
+        std::optional<ExprPtr>(arena.make<IntegerLit>(BigInt(0))),
+        std::optional<ExprPtr>(x_sym));
+
+    auto d = diff(integ, x, 1U, ctx);
+    ASSERT_TRUE(d.is_ok()) << d.error().message;
+    // result − x²  must vanish.
+    ExprPtr x2 = arena.make<Binary>(BinaryOp::Pow, x_sym, arena.make<IntegerLit>(BigInt(2)));
+    auto diff0 = ctx.simplify(arena.make<Binary>(BinaryOp::Sub, d.value(), x2));
+    ASSERT_TRUE(diff0.is_ok()) << diff0.error().message;
+    auto* zero = expr_cast<IntegerLit>(diff0.value());
+    EXPECT_TRUE(zero != nullptr && zero->value.is_zero())
+        << "Leibniz failed; d/dx∫₀ˣt²dt − x² = " << debug_print(diff0.value());
 }
 

@@ -155,13 +155,65 @@ inline std::string normalize_maxima_output(const std::string& raw) {
     if (s.find("gamma_incomplete") != std::string::npos)
         return "";
 
-    // Maxima sometimes outputs "bessel_j(...)" — SKIP (different arg order)
-    if (s.find("bessel_j(") != std::string::npos)
-        return "";
+    // Maxima's bessel_j(order, arg) has the SAME argument order as our
+    // BesselJ(order, arg), and `bessel_j` is already an accepted alias of the
+    // BesselJ builtin (builtin_functions.hpp). The skip that used to sit here
+    // (justified as "different arg order") was a false limit of the runner and
+    // hid three real comparisons — A37.
 
-    // Maxima sometimes outputs "erf(%i*x)" — SKIP (complex erf)
-    if (s.find("erf(i*") != std::string::npos || s.find("erf(-i") != std::string::npos)
-        return "";
+    // Maxima writes the polygamma family with a subscript: psi[0](x) is the
+    // digamma function, psi[n](x) the n-th polygamma. Both are builtins on our
+    // side, so rewrite instead of skipping.
+    {
+        std::regex psi_zero_re(R"(psi\[0\]\()");
+        s = std::regex_replace(s, psi_zero_re, "digamma(");
+        std::regex psi_n_re(R"(psi\[(\d+)\]\(([^()]*)\))");
+        s = std::regex_replace(s, psi_n_re, "polygamma($1,$2)");
+    }
+
+    // Maxima writes the exponential integral of the Ei family through the
+    // GENERALISED exponential integral E_n. For n = 1 the two are the same
+    // function up to a branch constant:
+    //
+    //     E_1(-y) = -Ei(y) - i*pi        (y > 0, A&S 5.1.7 / DLMF 6.2.7)
+    //
+    // Verified numerically (mpmath, 30 cifre): `-e1(-y)` and `Ei(y)` have
+    // IDENTICAL real parts and differ by exactly `+i*pi` — the naive identity
+    // `E_1(z) = -Ei(-z)`, without that constant, is FALSE, and the measurement
+    // is what showed it.
+    //
+    // Dropping the constant is nevertheless sound HERE, and only here: the
+    // integrate area is compared with `antiderivative_equivalent`, which
+    // differentiates both sides (integrate_equiv.hpp). Two antiderivatives
+    // that differ by a constant — imaginary or not — are the same
+    // antiderivative for that comparison. The bridge is confined to n = 1;
+    // any other order stays unmapped and the entry keeps skipping, which is
+    // the honest outcome rather than a wrong mapping.
+    {
+        std::regex e1_re(R"(expintegral_e\(1,\s*([^()]*)\))");
+        s = std::regex_replace(s, e1_re, "(-Ei(-($1)))");
+    }
+
+    // Maxima writes the imaginary-error function as an `erf` of an imaginary
+    // argument. Both spellings are now parseable on our side (A43 introduced
+    // the `erfi` builtin and the exact identity erf(i·u) = i·erfi(u) lives in
+    // `nonelementary_normalize`), so keep the text as-is instead of skipping:
+    // the skip that used to sit here was the residual A44 bridge, and it hid
+    // every ∫e^{x²}-family comparison. `i` is already the normalised spelling
+    // of Maxima's `%i` at this point.
+    //
+    // The guard below survives only for shapes the parser genuinely cannot
+    // take (an `erf` whose imaginary argument is not a plain product, e.g.
+    // nested inside another unparsed construct) — those still skip rather than
+    // producing a bogus mismatch.
+    if (s.find("erf(i") != std::string::npos || s.find("erf(-i") != std::string::npos) {
+        std::regex erf_imag_re(R"(erf\((-?)i\*([^()]*)\))");
+        // Parenthesised: the rewrite can land inside a quotient or a power,
+        // where a bare leading `-` would re-associate (`a/erf(-i*x)`).
+        s = std::regex_replace(s, erf_imag_re, "($1i*erfi($2))");
+        if (s.find("erf(i") != std::string::npos || s.find("erf(-i") != std::string::npos)
+            return "";
+    }
 
     // Maxima sometimes outputs "sec(x)^2" — our parser accepts sec, keep as-is.
 
@@ -227,11 +279,26 @@ inline std::string extract_maxima_result_line(const std::string& file_content) {
     //    x = -((sqrt(3)*%i+1)/2),x = -((sqrt(3)*%i-1)/2),x = 1]
     //
     // We need both lines as a single string.
+    // A37: Maxima also wraps a long SCALAR result across lines, marking the
+    // continuation by indenting it — the wrap happens before an operator:
+    //
+    //   integrate(1/(x^4+1),x)
+    //   log(x^2+sqrt(2)*x+1)/2^(5/2)-log(x^2-sqrt(2)*x+1)/2^(5/2)
+    //                               +atan((2*x+sqrt(2))/sqrt(2))/2^(3/2)
+    //
+    // Trimming the indentation before deciding what the answer is destroyed
+    // that signal, so only the LAST physical line survived (`+atan(...)`) — a
+    // syntactically valid fragment of the answer, reported as a parse failure
+    // (and, worse, a fragment that parses would have been compared as if it
+    // were the whole result). Indentation is therefore recorded first and used
+    // to glue each continuation onto the logical line it belongs to.
     std::vector<std::string> lines;
     {
         std::istringstream ss(file_content);
         std::string line;
         while (std::getline(ss, line)) {
+            const bool is_continuation =
+                !line.empty() && (line.front() == ' ' || line.front() == '\t');
             while (!line.empty() && (line.front() == ' ' || line.front() == '\t'))
                 line.erase(line.begin());
             while (!line.empty() && (line.back() == ' ' || line.back() == '\r'))
@@ -241,6 +308,10 @@ inline std::string extract_maxima_result_line(const std::string& file_content) {
             if (line == "display2d:false" || line == "display2d:false;" ||
                 line == "display2d:false$")
                 continue;
+            if (is_continuation && !lines.empty()) {
+                lines.back() += line;
+                continue;
+            }
             // Skip lines that are pure prompt labels like "(%i1)" without
             // body, but keep "(%o1) expr".
             lines.push_back(line);

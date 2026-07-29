@@ -95,62 +95,27 @@ Result<ExprPtr> Simplifier::simplify_power(ExprPtr base, ExprPtr exponent, ExprP
     if (is_one_expr(exponent)) return traced_result(RuleId::SimplifyPowerOne, target_before, base);
     if (is_one_expr(base)) return ok(base);
 
+    // (−x)^n for integer n: even → x^n, odd → −(x^n). Letting the sign escape the
+    // power lets downstream consumers collapse e.g. (−√3)² → 3 (needed by abs(z),
+    // arg(z) and the trig special-value tables). Exact for any integer n; the I /
+    // −I fast-paths below still apply to x^n via the recursive call.
+    if (const auto* neg_base = expr_cast<Unary>(base);
+        neg_base != nullptr && neg_base->op == UnaryOp::Neg) {
+        if (auto n = try_get_integer_exponent(exponent); n.has_value()) {
+            auto inner = simplify_power(neg_base->operand, exponent);
+            if (inner.is_error()) return inner;
+            if ((*n % BigInt(2)) == BigInt(0))
+                return traced_result(RuleId::SimplifyPowerOne, target_before, inner.value());
+            return traced_result(RuleId::SimplifyPowerOne, target_before,
+                arena_.make<Unary>(UnaryOp::Neg, inner.value()));
+        }
+    }
+
     if (e_exact.value() && exp_rat.value.is_integer()) {
-        const BigInt n = exp_rat.value.numerator();
-        // Chebyshev/DeMoivre linearization: sin/cos^n → multiple-angle sum for n ≥ 2.
-        // Even n=2m: trig^n = (1/4^m)*[C(n,m) + 2*Σ_{j=0}^{m-1} s_j*C(n,j)*cos((n-2j)*arg)]
-        //   sin: s_j = (-1)^(m-j),  cos: s_j = 1
-        // Odd n=2m+1: trig^n = (1/4^m)*Σ_{j=0}^{m} s_j*C(n,j)*trig((n-2j)*arg)
-        //   sin: s_j = (-1)^(m-j),  cos: s_j = 1
-        // Limit: ctx.max_trig_power_reduction (default 32) — returns unchanged if exceeded.
-        if (n >= BigInt(2) && !n.is_negative()) {
-            if (const auto* func = expr_cast<FuncCall>(base)) {
-                const bool is_sin = (func->func_id == BuiltinOp::Sin);
-                const bool is_cos = (func->func_id == BuiltinOp::Cos);
-                if ((is_sin || is_cos) && func->args.size() == 1U) {
-                    const long long max_n = context_ ? static_cast<long long>(context_->max_trig_power_reduction()) : 32LL;
-                    if (n <= BigInt(max_n)) {
-                        const long long n_ll = static_cast<long long>(n.to_u64());
-                        ExprPtr arg = func->args[0];
-                        // Pascal's triangle for C(n, j), j = 0..n
-                        std::vector<BigInt> binom(static_cast<std::size_t>(n_ll + 1), BigInt(0));
-                        binom[0] = BigInt(1);
-                        for (long long i = 1; i <= n_ll; ++i)
-                            for (long long j = i; j >= 1; --j)
-                                binom[static_cast<std::size_t>(j)] = binom[static_cast<std::size_t>(j)] + binom[static_cast<std::size_t>(j - 1)];
-
-                        const long long m = n_ll / 2;
-                        BigInt denom(1);
-                        for (long long i = 0; i < m; ++i) denom = denom * BigInt(4);
-
-                        std::vector<ExprPtr> terms;
-                        if (n_ll % 2 == 0) {
-                            // Constant: C(n,m)/4^m
-                            terms.push_back(make_rational(arena_, Rational(binom[static_cast<std::size_t>(m)], denom)));
-                            for (long long j = 0; j < m; ++j) {
-                                BigInt c2 = binom[static_cast<std::size_t>(j)] * BigInt(2);
-                                Rational coeff(c2, denom);
-                                if (is_sin && ((m - j) % 2 == 1)) coeff = -coeff;
-                                const long long k = n_ll - 2 * j;
-                                ExprPtr ka = arena_.make<Binary>(BinaryOp::Mul, make_integer(arena_, BigInt(k)), arg);
-                                ExprPtr cos_ka = arena_.make<FuncCall>(BuiltinOp::Cos, std::vector<ExprPtr>{ka});
-                                terms.push_back(arena_.make<Binary>(BinaryOp::Mul, make_rational(arena_, coeff), cos_ka));
-                            }
-                        } else {
-                            const BuiltinOp trig_op = is_sin ? BuiltinOp::Sin : BuiltinOp::Cos;
-                            for (long long j = 0; j <= m; ++j) {
-                                Rational coeff(binom[static_cast<std::size_t>(j)], denom);
-                                if (is_sin && ((m - j) % 2 == 1)) coeff = -coeff;
-                                const long long k = n_ll - 2 * j;
-                                ExprPtr ka = arena_.make<Binary>(BinaryOp::Mul, make_integer(arena_, BigInt(k)), arg);
-                                ExprPtr trig_ka = arena_.make<FuncCall>(trig_op, std::vector<ExprPtr>{ka});
-                                terms.push_back(arena_.make<Binary>(BinaryOp::Mul, make_rational(arena_, coeff), trig_ka));
-                            }
-                        }
-                        return simplify_expr(arena_.make<Sum>(std::move(terms)));
-                    }
-                }
-            }
+        // Chebyshev/DeMoivre linearization: sin/cos^n → multiple-angle sum (n ≥ 2).
+        // Self-contained; extracted to simplify_arithmetic_power_trig.cpp.
+        if (auto trig = try_linearize_trig_power(base, exp_rat.value.numerator())) {
+            return *trig;
         }
     }
 
@@ -236,10 +201,33 @@ Result<ExprPtr> Simplifier::simplify_power(ExprPtr base, ExprPtr exponent, ExprP
         }
     }
     if (is_zero_expr(base)) {
+        // 0^x = 0 whenever x is PROVABLY positive (literal or assumption): exact
+        // and unconditional (no A31 side-condition). Covers 0^(1/2)=0; 0^0 and
+        // 0^(negative) stay symbolic (dedicated branches / conditional path below).
+        if (is_known_positive(exponent)) {
+            return traced_result(RuleId::SimplifyZeroPowerPositive, target_before,
+                make_integer(arena_, BigInt(0)));
+        }
         LiteralRational exp_rat_check;
         auto exp_check = try_get_exact_rational(exponent, exp_rat_check);
         if (exp_check.is_ok() && exp_check.value() && exp_rat_check.value.is_integer() && !exp_rat_check.value.numerator().is_negative() && !exp_rat_check.value.numerator().is_zero()) {
             return traced_result(RuleId::SimplifyZeroPowerPositive, target_before, make_integer(arena_, BigInt(0)));
+        }
+        // A31 fase 2 (Domain_Conditions_Propagation.md §10.3.R4): 0^e -> 0
+        // for a SYMBOLIC exponent, exact when Re(e) > 0 (§1). The vocabulary
+        // has no real-part predicate (§3.2), so the stronger Positive(e) is
+        // registered — sound, possibly over-restrictive. Literal exponents
+        // stay with the exact branch above; a provably negative or zero
+        // exponent keeps the refusal (contradiction guard; 0^0 and 0^-k are
+        // handled by the dedicated branches elsewhere in this function).
+        if (context_ != nullptr && context_->conditional_domain_rules()
+            && !(exp_check.is_ok() && exp_check.value())
+            && !is_zero_expr(exponent) && !is_known_negative(exponent)) {
+            auto cond = context_->emit_side_condition(
+                DomainConditionKind::Positive, exponent);
+            if (cond.is_error()) return fail<ExprPtr>(cond.error());
+            return traced_result(RuleId::SimplifyZeroPowerPositive,
+                target_before, make_integer(arena_, BigInt(0)));
         }
     }
 
@@ -261,10 +249,25 @@ Result<ExprPtr> Simplifier::simplify_power(ExprPtr base, ExprPtr exponent, ExprP
         // applicava la cancellazione anche a simboli ignoti.
         // Riferimento math: Bronstein "Symbolic Integration" §3.3.
         const auto* call = expr_cast<FuncCall>(exponent);
-        if (call != nullptr && call->func_id == BuiltinOp::Ln && call->args.size() == 1U) {
+        if (call != nullptr
+            && (call->func_id == BuiltinOp::Ln || call->func_id == BuiltinOp::Log)
+            && call->args.size() == 1U) {
             ExprPtr arg = call->args.front();
             if (is_known_positive(arg)) {
                 return traced_result(RuleId::SimplifyExpLnPositive, target_before, arg);
+            }
+            // A31 fase 2 (Domain_Conditions_Propagation.md §10.3.R1): on the
+            // principal branch E^(ln z) = z is exact for EVERY z != 0 (ln is
+            // a right inverse of exp, cut included). Opt-in: rewrite and
+            // register NonZero(z). Mirrors the FuncCall(Exp) site in
+            // simplify_exp_log.cpp.
+            if (context_ != nullptr && context_->conditional_domain_rules()
+                && !is_zero_expr(arg)) {
+                auto cond = context_->emit_side_condition(
+                    DomainConditionKind::NonZero, arg);
+                if (cond.is_error()) return fail<ExprPtr>(cond.error());
+                return traced_result(RuleId::SimplifyExpLnPositive,
+                    target_before, arg);
             }
             // Altrimenti: mantieni forma simbolica E^(ln(arg)).
         }
@@ -302,27 +305,23 @@ Result<ExprPtr> Simplifier::simplify_power(ExprPtr base, ExprPtr exponent, ExprP
         sqrt_call != nullptr && sqrt_call->func_id == BuiltinOp::Sqrt && sqrt_call->args.size() == 1U) {
         if (auto maybe_n = try_get_integer_exponent(exponent); maybe_n.has_value()) {
             const BigInt n = *maybe_n;
-            if (n.is_negative()) {  // HC-KV-04: reciprocal sqrt(A)^(-m)
-                ExprPtr pp = arena_.make<Binary>(BinaryOp::Pow, base, make_integer(arena_, -n));
-                auto ps = simplify_expr(pp);
-                if (ps.is_ok()) return simplify_expr(arena_.make<Binary>(BinaryOp::Div,
-                    make_integer(arena_, BigInt(1)), ps.value()));
-            }
-            if (!n.is_negative() && !n.is_zero()) {
+            if (!n.is_zero()) {
                 ExprPtr arg = sqrt_call->args.front();
                 BigInt k = n / BigInt(2);
                 BigInt rem = n % BigInt(2);
 
-                if (k.is_zero()) {
-                    // sqrt(A)^1 = sqrt(A), handled by default return
-                } else if (rem.is_zero()) {
-                    // (sqrt(A))^(2k) = A^k
+                if (rem.is_zero()) {
+                    // (sqrt(A))^(2k) = A^k  (works for both positive and negative k)
                     return simplify_power(arg, make_integer(arena_, k));
-                } else {
+                } else if (n != BigInt(-1) && !k.is_zero()) {
                     // (sqrt(A))^(2k+1) = A^k * sqrt(A)
+                    // Under Euclidean division for negative n:
+                    // e.g. -3 / 2 = -2, -3 % 2 = 1.
+                    // (sqrt(A))^-3 = A^-2 * sqrt(A). This is correct and contains no negative sqrt.
+                    // We skip n == -1 to avoid infinite loop.
                     auto ak = simplify_power(arg, make_integer(arena_, k));
                     if (ak.is_error()) return ak;
-                    return simplify_product_factors({ak.value(), base});
+                    return simplify_product_factors({ak.value(), base}, ExprPtr{}, false);
                 }
             }
         }
@@ -378,6 +377,15 @@ Result<ExprPtr> Simplifier::simplify_power(ExprPtr base, ExprPtr exponent, ExprP
                         }
                         return simplify_product_factors(factors);
                     }
+                    // Full distribution unsafe (a symbolic factor may vanish):
+                    // keep Pow(Product, n) intact and fall through. NOTE: pulling
+                    // out just the numeric coefficient here — (c·rest)^n →
+                    // c^n·Pow(rest,n) — is mathematically exact but BREAKS Gruntz:
+                    // its mrv machinery relies on the single un-split Pow node for
+                    // vanishing intermediates (regression: AcidTest Gruntz limit →
+                    // "ComplexRational: division by zero"). The numeric-factor
+                    // normalization that asin/atan round-trips need belongs at the
+                    // Sum/like-term layer, not in this universal power path. → T-054.
                 }
             }
         }

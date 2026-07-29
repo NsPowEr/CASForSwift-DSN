@@ -36,6 +36,23 @@ template <typename T>
 [[nodiscard]] Result<ExprPtr> pow_expr(ExprPtr base, std::size_t exponent, symbolic::CASContext& ctx);
 [[nodiscard]] Result<ExprPtr> subtract_exprs(ExprPtr lhs, ExprPtr rhs, symbolic::CASContext& ctx);
 
+[[nodiscard]] bool same_generator_expr(
+    ExprPtr expr,
+    ExprPtr alpha_expr,
+    symbolic::CASContext& ctx);
+
+[[nodiscard]] Result<std::vector<ExprPtr>> solve_degree_two_expr(
+    const PolyExpr& poly,
+    symbolic::CASContext& ctx);
+
+[[nodiscard]] Result<std::vector<ExprPtr>> solve_degree_three_expr(
+    const PolyExpr& poly,
+    symbolic::CASContext& ctx);
+
+[[nodiscard]] Result<std::vector<ExprPtr>> solve_degree_four_expr(
+    const PolyExpr& poly,
+    symbolic::CASContext& ctx);
+
 [[nodiscard]] BigInt pow_bigint_nonnegative(BigInt base, unsigned int exponent);
 
 // Polynomial helpers
@@ -141,10 +158,41 @@ struct MultivariateSquareFreeFactor {
 // Spec: .APROJECT_REFERENCES/MISSING_FEATURES_SPECS/Sech_Csch_Identity.md.
 [[nodiscard]] ExprPtr hyperbolic_normalize(ExprPtr expr, AstArena& arena);
 
+// A44: rewrites u! / factorial(u) to gamma(u+1) (exact identity) so the two
+// interchangeable spellings become structurally comparable. Applied to both
+// sides of mathematically_equal, like hyperbolic_normalize above.
+[[nodiscard]] ExprPtr factorial_gamma_normalize(ExprPtr expr, AstArena& arena);
+
+// A43 §4: riduce li/Shi/Chi a Ei ed erfi a erf (identità esatte), così che le
+// ortografie interscambiabili della famiglia non elementare diventino
+// confrontabili strutturalmente. Applicato ai due lati di mathematically_equal,
+// come i due normalizzatori sopra. Si/Ci NON vengono toccati (le loro identità
+// verso Ei introdurrebbero un i spurio in un risultato reale — spec §4).
+[[nodiscard]] ExprPtr nonelementary_normalize(ExprPtr expr, AstArena& arena);
+
+// A50 (identità 2): espande sin/cos/sinh/cosh di un argomento `Sum` che
+// mescola una parte SENZA simboli liberi (fase/traslazione costante) e una
+// parte CON simboli, via la formula di addizione esatta —
+// sin(P+C)=sin(P)cos(C)+cos(P)sin(C) e le tre analoghe. Non è una
+// canonicalizzazione globale (stessa cautela di A43/A44): un argomento
+// interamente costante o interamente simbolico non viene toccato. Applicato
+// ai due lati di mathematically_equal, come i normalizzatori sopra — chiude
+// D(F)=f su ∫sin(x+c)/x = cos(c)·Si(x)+sin(c)·Ci(x) e sulla famiglia
+// traslata ∫sin(x)/(x-c) (le funzioni speciali shiftate si ricombinano
+// nell'argomento originale via la stessa identità applicata in senso
+// inverso su D(F)).
+[[nodiscard]] ExprPtr trig_addition_normalize(ExprPtr expr, AstArena& arena);
+
 // F7.5.A1 — Geometric / cyclotomic RootOf expansion (closes
 // HC-F75-CYCLOTOMIC-ROOTOF). See src/algebra/algebraic_equal_cyclotomic.cpp.
 [[nodiscard]] std::optional<std::vector<ExprPtr>>
 enumerate_geometric_rootof(const RootOf& node, symbolic::CASContext& ctx);
+
+// T-025 — genuine cyclotomic Φ_n (composite n) RootOf expansion into its φ(n)
+// primitive roots exp(2πi·m/n), gcd(m,n)=1. Complements the geometric enumerator
+// (which only covers prime-n Φ_p). See src/algebra/algebraic_equal_cyclotomic.cpp.
+[[nodiscard]] std::optional<std::vector<ExprPtr>>
+enumerate_cyclotomic_rootof(const RootOf& node, symbolic::CASContext& ctx);
 
 // Returns Some(bool) when the RootOf-specific dispatch (distinct-index
 // guard + geometric expansion) can decide the equality outright;
@@ -152,5 +200,57 @@ enumerate_geometric_rootof(const RootOf& node, symbolic::CASContext& ctx);
 // pipeline.
 [[nodiscard]] std::optional<bool> try_rootof_decision(
     ExprPtr lhs, ExprPtr rhs, symbolic::CASContext& ctx);
+
+// A54 — sospende la raccolta simbolica dei like-term (F1.4) per la durata di
+// una costruzione la cui post-condizione è la forma ESPANSA.  F1.4 è l'inversa
+// della distribuzione: senza questa sospensione il `simplify` che costruisce i
+// Sum di `expand` ri-fattorizza ciò che expand ha appena distribuito, e la
+// post-condizione viene violata dalla FORMA dei fattori (basta una base
+// condivisa non-Symbol).  Rientrante: ripristina il valore precedente, quindi
+// chiamate annidate e chiamanti che l'hanno già sospesa non si disturbano.
+class ExpandedFormScope {
+public:
+    explicit ExpandedFormScope(symbolic::CASContext& ctx)
+        : ctx_(ctx), previous_(ctx.symbolic_like_term_factoring()) {
+        ctx_.set_symbolic_like_term_factoring(false);
+    }
+    ~ExpandedFormScope() { ctx_.set_symbolic_like_term_factoring(previous_); }
+    ExpandedFormScope(const ExpandedFormScope&) = delete;
+    ExpandedFormScope& operator=(const ExpandedFormScope&) = delete;
+    ExpandedFormScope(ExpandedFormScope&&) = delete;
+    ExpandedFormScope& operator=(ExpandedFormScope&&) = delete;
+
+private:
+    symbolic::CASContext& ctx_;
+    bool previous_;
+};
+
+// A55 — sospende la distribuzione simbolica di un fattore su un `Sum` (Step 8
+// di `simplify_product_factors`, `k·(a+b) → k·a+k·b`) per la durata di una
+// costruzione la cui post-condizione è la forma COMBINATA `N/D`.  È l'esatto
+// complementare di `ExpandedFormScope`: lì si sospendeva la raccolta (inversa
+// della distribuzione) perché la post-condizione era la forma espansa; qui si
+// sospende la distribuzione (inversa della combinazione) perché la
+// post-condizione è una frazione unica.  Senza questa sospensione,
+// `divide_exprs(N, D)` in `algebra::together` costruisce `Product(Sum(N),
+// Pow(D,-1))`, che Step 8 ridistribuisce immediatamente in una somma di
+// frazioni — `together` non "mette insieme" nulla.  Rientrante: ripristina il
+// valore precedente.
+class CombinedFormScope {
+public:
+    explicit CombinedFormScope(symbolic::CASContext& ctx)
+        : ctx_(ctx), previous_(ctx.symbolic_sum_distribution()) {
+        ctx_.set_symbolic_sum_distribution(false);
+    }
+    ~CombinedFormScope() { ctx_.set_symbolic_sum_distribution(previous_); }
+    CombinedFormScope(const CombinedFormScope&) = delete;
+    CombinedFormScope& operator=(const CombinedFormScope&) = delete;
+    CombinedFormScope(CombinedFormScope&&) = delete;
+    CombinedFormScope& operator=(CombinedFormScope&&) = delete;
+
+private:
+    symbolic::CASContext& ctx_;
+    bool previous_;
+};
 
 } // namespace cas::algebra

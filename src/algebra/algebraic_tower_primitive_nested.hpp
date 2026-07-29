@@ -17,18 +17,24 @@ namespace cas {
 namespace algebra {
 namespace primitive_internal {
 
+struct ResolvedGen {
+    ExprPtr canon;
+    const RootOf* node{nullptr};
+    AlgebraicNumber::CoeffVec mp;
+};
+
 // Attempt to compute α's absolute monic min-poly over Q given:
-//   outer        — RootOf whose polynomial f(x) ∈ Q(β)[x]
-//   beta_canon   — canonical ExprPtr for β (used for structural substitution)
-//   beta_min_poly — rational min-poly of β (ascending coeffs)
-//
-// Returns:
-//   ok(nullopt)   — β not present in outer's polynomial, OR f(x, β) cannot be
-//                   parsed as a bivariate polynomial in (x, y) with rational
-//                   coefficients (e.g. depends on a third RootOf γ).
-//   ok(coeffs)    — squarefree monic R(x) = Res_y(g(y), f(x, y)) ∈ Q[x].
-//   fail(...)     — explicit Unimplemented when R is not squarefree
-//                   (irreducible-factor selection over Q(β)[x] not implemented).
+//   outer        — RootOf whose polynomial f(x) ∈ Q(β₁, ..., β_k)[x]
+//   outer_canon  — canonical ExprPtr for outer (for vanishing test)
+//   resolved_gens — list of already resolved generators in the tower
+[[nodiscard]] Result<std::optional<AlgebraicNumber::CoeffVec>> try_nested_lift_min_poly_multi(
+    const RootOf& outer,
+    ExprPtr outer_canon,
+    const std::vector<ResolvedGen>& resolved_gens,
+    symbolic::CASContext& ctx,
+    const Deadline& deadline);
+
+// Legacy 1-generator overload
 [[nodiscard]] Result<std::optional<AlgebraicNumber::CoeffVec>> try_nested_lift_min_poly(
     const RootOf& outer,
     ExprPtr beta_canon,
@@ -39,3 +45,4 @@ namespace primitive_internal {
 }  // namespace primitive_internal
 }  // namespace algebra
 }  // namespace cas
+
