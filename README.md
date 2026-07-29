@@ -3,8 +3,9 @@
 > An industrial-grade symbolic computer algebra system in modern C++20.
 
 [![Build](https://img.shields.io/badge/build-passing-brightgreen)](#build)
-[![Tests](https://img.shields.io/badge/tests-2307%20passing-brightgreen)](#testing)
-[![HP Prime Parity](https://img.shields.io/badge/HP--Prime%20parity-94.5%25-blue)](#golden-corpus)
+[![Tests](https://img.shields.io/badge/tests-2858%20passing-brightgreen)](#testing)
+[![Maxima Golden](https://img.shields.io/badge/golden%20vs%20Maxima-99.6%25%20non--skip-blue)](#golden-corpus)
+[![Giac Parity](https://img.shields.io/badge/second%20oracle-Giac%202.0.0-lightgrey)](#golden-corpus)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-blue)](#requirements)
 
 ---
@@ -40,8 +41,8 @@ The engine provides exact arithmetic (BigInt / Rational), a hash-consed immutabl
 
 ### Calculus
 - **Differentiation** — full symbolic diff, implicit diff `F(x,y)=0`, Jacobian, Hessian, gradient, partial derivatives, numeric difference formulas (Forward/Central O(h²)/O(h⁴))
-- **Integration (indefinite)** — Risch algorithm (Bronstein Ch. 5–9): Hermite reduction, Trager/LRT, log-derivative recognizer, Risch structure theorem (algebraic independence of log/exp extensions), IBP, Weierstrass substitution `t = tan(x/2)`, u-substitution framework
-- **Integration (definite)** — Fundamental Theorem of Calculus, singularity detection (rational poles, algebraic, transcendental), Cauchy principal value, Hadamard finite part (poles of order m ≥ 2), residue theorem (quadratic and biquadratic irreducible factors), multiple integrals via Fubini (rectangular domains), orthogonal polynomial patterns (Legendre, Hermite-H/He, Chebyshev T/U)
+- **Integration (indefinite)** — Risch algorithm (Bronstein Ch. 5–9): Hermite reduction, Trager/LRT, log-derivative recognizer, Risch structure theorem (algebraic independence of log/exp extensions), IBP, Weierstrass substitution `t = tan(x/2)`, u-substitution framework; non-elementary closed forms (Ei, Si, Ci, Shi, Chi, li, Li₂, erfi) via Meijer-G bridge (Slater expansion) once Liouville's theorem proves no elementary antiderivative exists
+- **Integration (definite)** — Fundamental Theorem of Calculus, singularity detection (rational poles, algebraic, transcendental), Cauchy principal value, Hadamard finite part (poles of order m ≥ 2), residue theorem (quadratic and biquadratic irreducible factors), multiple integrals via Fubini (rectangular domains), orthogonal polynomial patterns (Legendre, Hermite-H/He, Chebyshev T/U), Mellin-convolution definite integrator
 - **Limits** — Gruntz algorithm with recursive asymptotic comparison (no static rank), MRV set extraction, cancellation tower, ∞/∞ closure, L'Hôpital; lateral limits, signed −∞; asymptotes (vertical, horizontal, oblique)
 - **Series** — Taylor/Maclaurin with generalized binomial and systematic generic fallback; Laurent series (rational fast-path + general transcendental); Padé approximants; partial fractions
 - **ODEs** — 1st-order (separable, linear); Frobenius method at regular singular points; variation of parameters; Laplace-transform solver for constant-coefficient n-th order
@@ -58,7 +59,7 @@ The engine provides exact arithmetic (BigInt / Rational), a hash-consed immutabl
 ### Algebraic Structures
 - Algebraic numbers — `AlgebraicNumber` (Q(α)), `AlgebraicTowerTwoLevel` (Q(α₁, α₂)), generic n-level recursive tower `AlgebraicElement<C>`
 - Factorization over algebraic extensions (Trager shift, composite resultant, 2-level tower)
-- Galois groups (deg ≤ 3 via discriminant; deg ≤ 4 in progress)
+- Galois groups — exact deg ≤ 7 (Newton power-sum resolvents), certified Stauduhar descent deg 8–10 (p-adic root lifting, structural naming from certified invariants only, no lookup tables); deg ≥ 11 out of scope
 - Gaussian integers Z[i] — Euclidean algorithm, canonical form, norm, unit detection
 
 ### Equation Solving
@@ -81,6 +82,11 @@ The engine provides exact arithmetic (BigInt / Rational), a hash-consed immutabl
 ### Units
 - SI base dimensions (m, kg, s, A, K, mol, cd); 30+ named units; exact rational scaling; dimension mismatch detection
 
+### Statistics
+- Distributions — Normal (symbolic pdf/cdf via Erf, Newton quantile), Binomial, Poisson, Chi-squared, Student-t, Fisher-Snedecor F (pdf/cdf/quantile)
+- Regression — univariate OLS and multivariate OLS (normal equations via Gauss-Jordan with partial pivoting), R², residual sum of squares
+- Hypothesis testing — one/two-sample z-test and t-test (Welch), chi-squared goodness-of-fit, F-test for variance ratio
+
 ---
 
 ## Architecture
@@ -92,17 +98,19 @@ src/
   foundation/         BigInt, Rational, BigFloat
   ast/                AST nodes, AstArena, hash-consing
   lexer/ parser/      Expression parsing, token stream
-  symbolic/           Simplifier, assumptions, rewrite engine
-  algebra/            Polynomials, GCD, factorization, Gröbner
-  calculus/           Diff, integrate, limits, series, ODE
+  symbolic/           Simplifier, assumptions, side-conditions, Meijer-G
+  algebra/            Polynomials, GCD, factorization, Gröbner, Galois groups
+  calculus/           Diff, integrate (Risch), limits (Gruntz), series, ODE
+  rewrite/            Discrimination-net builtin rewrite rules
   linalg/             Matrix algorithms
+  statistics/         Distributions, OLS regression, hypothesis tests
   numeric/            MPFR evaluation, interval arithmetic
   numtheory/          Bernoulli, Euler phi, primality
   formatter/          Plain text and LaTeX output
   c_api/              C API bridge (cas_api.h implementation)
-test/                 GoogleTest unit + property-based tests
-  golden/             HP Prime G2 golden corpus (1 026 entries, Maxima oracle)
-scripts/              CI helpers: benchmark, anti-monolith, milestone
+test/                 GoogleTest unit + property-based tests (2 858 tests)
+  golden/             HP Prime G2 golden corpus (1 026 entries, dual oracle: Maxima + Giac)
+scripts/              CI helpers: benchmark, anti-monolith, golden/parity measurement
 ```
 
 **Key invariants enforced at all times:**
@@ -114,7 +122,7 @@ scripts/              CI helpers: benchmark, anti-monolith, milestone
 | Arena allocation | All AST nodes allocated via `AstArena::make`; `new` / `make_unique` forbidden |
 | Zero hardcode | Every constant must have a mathematical justification or a `CASContext` knob |
 | Zero warnings | `-Wall -Wextra -Wpedantic -Werror` on all targets |
-| 500 LOC gate | Each `.cpp` / `.hpp` ≤ 500 lines (active refactor; 28 files pending split) |
+| 500 LOC gate | Each `.cpp` / `.hpp` ≤ 500 lines; enforced pre-commit (0 files pending split) |
 
 ---
 
@@ -184,7 +192,7 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug \
 ## Testing
 
 ```bash
-# Full test suite (2 307 tests)
+# Full test suite (2 858 tests)
 ctest --test-dir build --output-on-failure
 
 # Fast smoke suite only
@@ -226,25 +234,40 @@ Requires `lcov` + `genhtml` (`brew install lcov`).
 
 ## Golden Corpus
 
-The engine is validated against a Maxima 5.49.0 oracle across **1 026 test cases** spanning 11 mathematical areas.
+The engine is validated against two independent, unmodified reference implementations (fork/exec only — never linked, patched, or embedded; see [Reference Oracles](#reference-oracles)) across **1 026 test cases** spanning 11 mathematical areas (diff, gcd, factor, simplify, series, special_fn, limit, solve, matrix, integrate, bronstein).
 
-| Area | Pass | Fail | Skip | % non-skip |
-|------|------|------|------|-----------|
-| diff | 77 | 3 | 0 | 96.2 % |
-| gcd | 70 | 0 | 11 | 100.0 % |
-| factor | 98 | 1 | 0 | 99.0 % |
-| simplify | 110 | 6 | 0 | 94.8 % |
-| series | 70 | 2 | 9 | 97.2 % |
-| special_fn | 74 | 1 | 5 | 98.7 % |
-| limit | 83 | 4 | 12 | 95.4 % |
-| solve | 81 | 0 | 0 | 100.0 % |
-| matrix | 79 | 0 | 0 | 100.0 % |
-| integrate | 96 | 17 | 27 | 85.0 % |
-| bronstein | 35 | 17 | 38 | 67.3 % |
-| **Total** | **873** | **51** | **102** | **94.5 %** |
+**Primary oracle — Maxima 5.49.0** (ratchet-gated, `scripts/golden_baseline.txt`, tolerance 0):
 
-> *94.5 % excludes SKIP entries. Total coverage including SKIP: 85.1 %.*  
-> *Bronstein (Risch integration corpus) is the primary open area; Hermite cap. 5 is next.*
+| Metric | Value |
+|--------|-------|
+| Pass | 980 |
+| Fail | 4 |
+| Undecided (skip + over-budget) | 42 |
+| Non-skip pass rate | 99.6 % |
+| Full coverage (incl. undecided) | 95.5 % |
+
+The ratchet is a floor/ceiling gate (`scripts/check_golden_ratchet.sh`): pass cannot drop, fail/undecided cannot rise, without an explicit `--update-baseline` after human review. **Bronstein (Risch integration corpus)** remains the area with the highest residual fail/skip share.
+
+**Second oracle — Giac 2.0.0** (parity target, not a correctness gate): `PARITY_GIAC.md` is a regenerable scoreboard (`giac-parity-scan` skill / `scripts/giac_parity_report.py`) comparing Giac's own closed-form coverage against the CAS pass rate per area, plus a per-entry cross-diff dump for areas with the largest gap. It is a measurement artifact, not a tracker — every gap it surfaces becomes a task in `TASKLIST_MASTER.md`.
+
+```bash
+# Regenerate the Maxima ratchet report
+bash scripts/run_golden_measurement.sh
+bash scripts/check_golden_ratchet.sh --report <report.json>
+
+# Regenerate the Giac parity scoreboard
+bash scripts/run_golden_giac.sh
+python3 scripts/giac_parity_report.py
+```
+
+### Reference Oracles
+
+| Oracle | Version | License | Usage |
+|--------|---------|---------|-------|
+| Maxima | 5.49.0 | GPL-2.0-only | `maxima --very-quiet --batch-string=...`, textual output parsing only |
+| Giac | 2.0.0 | GPL-3.0-or-later | `icas` via stdin, textual output parsing only |
+
+Both are pinned by SHA-256 manifest (`scripts/verify_maxima_integrity.sh`, `scripts/giac_integrity.sh`). Neither is patched, recompiled, or linked into the engine — modifying either would create a copyleft derivative work and invalidate them as independent oracles.
 
 ---
 
@@ -268,7 +291,7 @@ Baseline and policy: `test/benchmarks/baseline_release.txt` / `test/benchmarks/p
 ## Code Quality Gates
 
 ### Anti-monolith
-Every `.cpp` and `.hpp` under `src/` and `include/` must be ≤ 500 lines. Pre-existing violations are whitelisted in `scripts/file_size_whitelist.txt` and tracked in `HARDCODE_LEDGER.md` with mandatory split tickets.
+Every `.cpp` and `.hpp` under `src/` and `include/` must be ≤ 500 lines. `scripts/file_size_whitelist.txt` currently holds zero active entries (all past violations split below the limit); any new one requires a split ticket in `HARDCODE_LEDGER.md` before it can be added.
 
 ```bash
 bash scripts/check_file_size.sh --verbose
@@ -307,15 +330,17 @@ Target mutation score: ≥ 70 % per module.
 | F4 — Differentiation, integration (Risch), limits (Gruntz) | ✅ Complete |
 | F5 — Special functions, series, ODE, transforms | ✅ Complete |
 | F6 — Linear algebra (Jordan, Smith, QR, eigenvectors) | ✅ Complete |
-| F7.5 — HP Prime G2 parity corpus (94.5 % non-skip) | ✅ Complete (conditional) |
+| F7.2 — Statistics (distributions, OLS, hypothesis tests) | ✅ Complete |
+| F7.5 — HP Prime G2 parity corpus (99.6 % non-skip vs Maxima) | ✅ Complete (conditional) |
+| F7.5.G — Giac 2.0.0 second-oracle parity infra (per-entry cross-diff, `PARITY_GIAC.md`) | ✅ Active (continuous measurement) |
 | F8 — C API hardening, Swift bridge integration | 🔜 Next |
 
 ### Open research targets (permanent)
 
-- Risch structure theorem — Hermite reduction over deep exp+log towers (Bronstein Ch. 5, B2/B3)
-- Galois groups for deg ≥ 5 (Stauduhar / Soubin)
+- Bronstein corpus residual — deepest Risch parametric cases still fail/skip against Maxima (primary open area, see [Golden Corpus](#golden-corpus))
+- Galois groups for deg ≥ 11 (beyond certified Stauduhar descent, currently exact through deg 10)
 - CAD (Cylindrical Algebraic Decomposition) for quantifier elimination
-- Hypergeometric `_pFq` — Wilf–Zeilberger, Pochhammer, Gauss 2F1
+- Full Zeilberger / WZ certificate algorithm (creative telescoping beyond current partial summation support)
 - Schönhage–Strassen FFT multiplication for BigInt (n ≥ 4096 limbs)
 
 ---
@@ -342,6 +367,9 @@ See [`CLAUDE.md`](CLAUDE.md) for the full architectural constitution and [`CONTR
 | `test/` | Unit, property, and golden tests |
 | `scripts/` | CI and developer tooling |
 | `CLAUDE.md` | Architectural constitution |
-| `CAS_TASKS.md` | Milestone tracker and gap inventory |
+| `TASKLIST_MASTER.md` | Single source of truth: open/closed task tracker |
+| `PARITY_GIAC.md` | Regenerable Giac parity scoreboard (measurement, not a tracker) |
 | `HARDCODE_LEDGER.md` | Hardcode audit ledger |
+| `docs/rules/` | Detailed operating protocols (perf root-cause, verification, oracles) |
+| `docs/archive/` | Superseded trackers (STATE, TODO*, PLAN_*, CAS_TASKS, …) |
 | `.APROJECT_REFERENCES/` | Module specs and architecture docs |
