@@ -5,13 +5,14 @@ This document provides essential context and instructions for developing the REA
 ## Project Overview
 An industrial-grade Computer Algebra System (CAS) implemented in modern C++20. The project prioritizes mathematical correctness, performance via structural sharing, and a zero-hardcode policy.
 
-- **Current Focus:** Calculus foundations (Module `F4`), including differentiation, integration (Risch/Hermite), limits (Gruntz/MRV), and Taylor series.
+- **Current Focus:** Golden-corpus parity vs Maxima 5.49.0 (primary oracle, 99.6% non-skip) and Giac 2.0.0 (second oracle, `PARITY_GIAC.md`); see `TASKLIST_MASTER.md` for the open task list.
 - **Key Modules:**
   - `foundation`: BigInt (limb-based) and Rational arithmetic.
   - `ast`: Immutable expression tree with interning and Arena allocation.
-  - `symbolic`: Simplification core, assumptions, and rewrite engine.
-  - `algebra`: Polynomial arithmetic, GCD (modular/heuristic), and factorization.
-  - `calculus`: Symbolic differentiation and integration.
+  - `symbolic`: Simplification core, assumptions, side-conditions, Meijer-G.
+  - `algebra`: Polynomial arithmetic, GCD, factorization, Gröbner bases, Galois groups (deg ≤ 10).
+  - `calculus`: Differentiation, Risch integration, Gruntz limits, series, ODEs.
+  - `statistics`: Distributions, OLS regression, hypothesis testing.
 
 ## Architectural Mandates (The "Technical Constitution")
 Refer to `CLAUDE.md` for the full "Technical Constitution". Key highlights:

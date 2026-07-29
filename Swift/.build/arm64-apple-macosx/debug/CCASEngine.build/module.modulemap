@@ -1,4 +1,0 @@
-module CCASEngine {
-    umbrella "/Users/davidesaba/Desktop/REAL_CAS_ENGINE_C++/Swift/Sources/CCASEngine/include"
-    export *
-}

@@ -1,10 +1,11 @@
 name: ci
 
-# Controllo costi (repo privato, runner macOS = 10× minuti): la CI gira solo dove
-# serve. I push di feature-branch NON triggerano la CI — sono coperti dai gate
-# LOCALI (pre-commit debt-gate + pre-push Tier-2, che girano sul Mac dello
-# sviluppatore). La CI resta il backstop su `main` e sulle PR. La riduzione è di
-# FREQUENZA, non di piattaforma: tutto resta su macOS (Maxima/Homebrew, Swift, Qt).
+# Scope minimo (repo pubblico, minuti macOS gratuiti — non è più un vincolo di
+# costo): la CI gira solo dove serve. I push di feature-branch NON triggerano
+# la CI — sono coperti dai gate LOCALI (pre-commit debt-gate + pre-push Tier-2,
+# che girano sul Mac dello sviluppatore). La CI resta il backstop su `main` e
+# sulle PR. La riduzione è di
+# FREQUENZA, non di piattaforma: tutto resta su macOS (Maxima/Homebrew, Qt).
 on:
   push:
     branches: [main]
