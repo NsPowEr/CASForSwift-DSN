@@ -7,6 +7,7 @@
 [![Maxima Golden](https://img.shields.io/badge/golden%20vs%20Maxima-99.6%25%20non--skip-blue)](#golden-corpus)
 [![Giac Parity](https://img.shields.io/badge/second%20oracle-Giac%202.0.0-lightgrey)](#golden-corpus)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-blue)](#requirements)
+[![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
 ---
 
@@ -353,7 +354,7 @@ Target mutation score: ≥ 70 % per module.
 - Tests validate AST structure or mathematical equivalence — never formatter output.
 - Every constant requires a mathematical justification or a `CASContext` configuration knob (zero-hardcode policy).
 
-See [`CLAUDE.md`](CLAUDE.md) for the full architectural constitution and [`CONTRIBUTING.md`](CONTRIBUTING.md) for contributor rules.
+See [`CLAUDE.md`](CLAUDE.md) for the full architectural constitution and [`CONTRIBUTING.md`](CONTRIBUTING.md) for contributor rules. Licensed under [MIT](LICENSE).
 
 ---
 
