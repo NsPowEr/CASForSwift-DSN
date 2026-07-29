@@ -70,8 +70,28 @@ aggiorna SOLO lì. Vietato creare tracker paralleli o todo-list nello scoreboard
   (utile: se NOI rispondiamo dove giac non risponde, siamo avanti su quell'entry).
 - `TIMEOUT`/`ERROR`: contare a parte; non gonfiano il gap.
 
-## Fase 2 (task tracciata in TASKLIST_MASTER.md)
+## Fase 2 — cross-diff per-entry (A35, FATTA 2026-07-29)
 
-Cross-diff per-entry (CAS vs giac entry per entry, equivalenza matematica vera
-dentro il runner C++) richiede `--per-entry-json` in `cas_golden_runner` +
-parser dialetto giac. Finché non è fatta, lo scoreboard è area-level.
+Verdetto per-entry (non solo area-level), con equivalenza matematica VERA
+(non solo ANSWERED vs pass) via `giac_parser.hpp` + confronto diretto nel
+runner C++ (stessa `mathematically_equal`/`compare_solve_sets`/
+`antiderivative_equivalent` già usata contro Maxima). Usa la fase 1 (scan
+`.giac.out` già presenti) come dato d'ingresso — nessun nuovo scan giac.
+
+```bash
+# per ogni area d'interesse (richiede maxima_out/<area> e giac_out/<area> già presenti):
+build/cas_golden_runner test/golden/corpus/<area>/basic.jsonl \
+    build-golden/maxima_out/<area> --giac-dir build-golden/giac_out/<area> \
+    --per-entry-json build-golden/per_entry_<area>.jsonl
+
+# cross-diff su una o più aree:
+python3 scripts/giac_per_entry_diff.py build-golden/per_entry_*.jsonl
+```
+
+Il report elenca: "giac risolve, noi no" (candidati diretti per task in
+`TASKLIST_MASTER.md` — verificare a codice PRIMA), e "entrambi rispondono ma
+divergono" (quasi sempre equivalenza vera non ancora provata dal motore, non
+un errore — verificare con `numeric-certify` prima di aprire task). Il
+verdetto giac NON tocca `AreaStats`/il ratchet: resta ancorato a Maxima.
+`--giac-dir` è opt-in — senza, il runner si comporta esattamente come prima
+di A35 (verificato bit-per-bit: 980/4/42 invariato).

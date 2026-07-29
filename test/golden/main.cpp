@@ -24,6 +24,7 @@
 #include "integrate_equiv.hpp"
 #include "runner_timeout.hpp"
 #include "runner_format.hpp"
+#include "giac_parser.hpp"
 
 #include "cas/algebra.hpp"
 #include "cas/ast.hpp"
@@ -227,13 +228,16 @@ struct AreaStats {
 int main(int argc, char* argv[]) {
     if (argc < 3) {
         std::cerr << "Usage: " << argv[0]
-                  << " <corpus.jsonl> <maxima_out_dir> [--json <output.json>]\n";
+                  << " <corpus.jsonl> <maxima_out_dir> [--json <output.json>]"
+                     " [--per-entry-json <output.jsonl>]\n";
         return 1;
     }
 
     const std::string corpus_path = argv[1];
     const std::string maxima_dir  = argv[2];
     std::string json_output_path;
+    std::string per_entry_json_path;
+    std::string giac_dir; // A35 — opt-in, per-area dir written by run_golden_giac.sh
     unsigned int per_entry_timeout_sec = 30;
     bool ops_report = false;
     std::optional<std::uint64_t> max_operation_ops_override;
@@ -242,6 +246,23 @@ int main(int argc, char* argv[]) {
         std::string a(argv[i]);
         if (a == "--json" && i + 1 < argc) {
             json_output_path = argv[++i];
+        } else if (a == "--per-entry-json" && i + 1 < argc) {
+            // A35 — dump per-entry {idx, area, ref, input, verdict, cas_output}
+            // (JSONL, una entry per riga) necessario per il cross-diff con i
+            // verdetti giac gia' salvati per-entry da run_golden_giac.sh: gli
+            // aggregati di --json non bastano a produrre la lista "giac
+            // risolve, noi no" ne' a confrontare il VALORE (non solo
+            // ANSWERED/pass) contro giac.
+            per_entry_json_path = argv[++i];
+        } else if (a == "--giac-dir" && i + 1 < argc) {
+            // A35 — quando fornita, per ogni entry si legge anche
+            // <giac-dir>/<idx>.giac.out (scritto da run_golden_giac.sh) e si
+            // confronta col risultato CAS via la STESSA equivalenza vera gia'
+            // usata per Maxima (mathematically_equal / compare_solve_sets /
+            // antiderivative_equivalent) — non solo ANSWERED vs pass. Il
+            // verdetto giac finisce SOLO nel dump --per-entry-json: non tocca
+            // AreaStats / il ratchet, che resta ancorato a Maxima soltanto.
+            giac_dir = argv[++i];
         } else if (a == "--per-entry-timeout" && i + 1 < argc) {
             per_entry_timeout_sec = static_cast<unsigned int>(std::stoul(argv[++i]));
         } else if (a == "--ops-report") {
@@ -262,6 +283,18 @@ int main(int argc, char* argv[]) {
     if (!corpus_file.is_open()) {
         std::cerr << "ERROR: cannot open corpus: " << corpus_path << "\n";
         return 1;
+    }
+
+    // A35 — JSONL, una entry per riga: scritta in streaming (non un array
+    // JSON accumulato) cosi' un run interrotto lascia comunque righe valide.
+    std::ofstream per_entry_jf;
+    if (!per_entry_json_path.empty()) {
+        per_entry_jf.open(per_entry_json_path);
+        if (!per_entry_jf.is_open()) {
+            std::cerr << "ERROR: cannot open --per-entry-json output: "
+                      << per_entry_json_path << "\n";
+            return 1;
+        }
     }
 
     std::map<std::string, AreaStats> area_stats;
@@ -375,9 +408,60 @@ int main(int argc, char* argv[]) {
         // PASS (`integrate[94]`) con margine 1.0x — cioe' il loro esito si
         // decide esattamente sul confine.
         //
-        // Qui l'entry troncata perde il verdetto e finisce in una categoria
-        // propria. Il conteggio pass/fail torna cosi' a dipendere solo dalle
-        // entry che il motore ha effettivamente deciso.
+        // A35 — output CAS testuale per il dump per-entry, popolato dal ramo
+        // che effettivamente calcola un risultato (matrix/solve/generico);
+        // resta vuoto per gli SKIP decisi prima di ottenere un risultato CAS
+        // (nessun dispatch, area matrice non supportata, ecc.).
+        std::string current_cas_output;
+
+        // A35 — verdetto/valore giac per QUESTA entry, popolati dai blocchi
+        // solve/generico via la stessa equivalenza vera usata per Maxima
+        // (mathematically_equal / compare_solve_sets / antiderivative_equivalent
+        // per integrate-bronstein). "not_compared" quando --giac-dir non e'
+        // fornita o l'area non ha ancora un confronto giac cablato (matrix).
+        std::string current_giac_verdict = "not_compared";
+        std::string current_giac_output;
+
+        // A35 — dump {idx, area, ref, input, verdict, cas_output, giac_verdict,
+        // giac_output} per il cross-diff con Giac: gli aggregati non bastano a
+        // produrre la lista "giac risolve, noi no". Stesso trucco RAII di
+        // OverBudgetGuard sotto (dichiarato PRIMA cosi' il suo distruttore
+        // gira DOPO — vede lo stato FINALE di stats, incluso l'eventuale
+        // over_budget) per non dover toccare ognuno dei punti di uscita del
+        // corpo del loop: il verdetto CAS si deduce dal DIFF dei contatori
+        // invece di essere passato a mano.
+        struct PerEntryJsonGuard {
+            std::ofstream& out;
+            AreaStats& stats;
+            int entry_idx;
+            const std::string& area;
+            const std::string& ref;
+            const std::string& input;
+            const std::string& cas_output;
+            const std::string& giac_verdict;
+            const std::string& giac_output;
+            int pass0, fail0, skip0, over0;
+            ~PerEntryJsonGuard() {
+                if (!out.is_open()) return;
+                const char* verdict = "unknown";
+                if (stats.over_budget > over0)      verdict = "over_budget";
+                else if (stats.pass > pass0)        verdict = "pass";
+                else if (stats.fail > fail0)        verdict = "fail";
+                else if (stats.skip > skip0)        verdict = "skip";
+                out << "{\"idx\":" << entry_idx
+                    << ",\"area\":\"" << json_escape(area) << "\""
+                    << ",\"ref\":\"" << json_escape(ref) << "\""
+                    << ",\"input\":\"" << json_escape(input) << "\""
+                    << ",\"verdict\":\"" << verdict << "\""
+                    << ",\"cas_output\":\"" << json_escape(cas_output) << "\""
+                    << ",\"giac_verdict\":\"" << json_escape(giac_verdict) << "\""
+                    << ",\"giac_output\":\"" << json_escape(giac_output) << "\"}\n";
+            }
+        } per_entry_json_guard{per_entry_jf, stats, idx, area, ref, input_str,
+                                current_cas_output,
+                                current_giac_verdict, current_giac_output,
+                                stats.pass, stats.fail, stats.skip, stats.over_budget};
+
         struct OverBudgetGuard {
             AreaStats& stats;
             int entry_idx;
@@ -443,6 +527,44 @@ int main(int argc, char* argv[]) {
             bool pass = false;
             bool skip = false;
             std::string skip_reason;
+
+            // A35 — cattura il risultato CAS per il dump per-entry, prima del
+            // confronto: nessun formatter di matrici esiste ancora nel
+            // runner, ne basta uno minimale (righe fra parentesi quadre).
+            switch (cas_v.kind) {
+                case K::Scalar:
+                    current_cas_output = format_expr(cas_v.scalar);
+                    break;
+                case K::Matrix: {
+                    std::ostringstream ms;
+                    ms << "[";
+                    for (std::size_t r = 0; r < cas_v.matrix.rows(); ++r) {
+                        if (r) ms << ",";
+                        ms << "[";
+                        for (std::size_t c = 0; c < cas_v.matrix.cols(); ++c) {
+                            if (c) ms << ",";
+                            ms << format_expr(cas_v.matrix(r, c));
+                        }
+                        ms << "]";
+                    }
+                    ms << "]";
+                    current_cas_output = ms.str();
+                    break;
+                }
+                case K::Eigenvalues: {
+                    std::ostringstream es;
+                    es << "{";
+                    for (std::size_t i = 0; i < cas_v.eigenvalues_list.size(); ++i) {
+                        if (i) es << ",";
+                        es << format_expr(cas_v.eigenvalues_list[i]);
+                    }
+                    es << "}";
+                    current_cas_output = es.str();
+                    break;
+                }
+                default:
+                    break;
+            }
             switch (cas_v.kind) {
                 case K::Scalar: {
                     // HC-F75-A2-MAXIMA-MATTRACE: if Maxima emits
@@ -547,6 +669,37 @@ int main(int argc, char* argv[]) {
                 ++idx;
                 continue;
             }
+            // A35 — cattura il set di radici per il dump per-entry.
+            {
+                std::ostringstream rs;
+                rs << "{";
+                for (std::size_t i = 0; i < cas_solve.value().size(); ++i) {
+                    if (i) rs << ",";
+                    rs << format_expr(cas_solve.value()[i]);
+                }
+                rs << "}";
+                current_cas_output = rs.str();
+            }
+            // A35 — confronto giac (opt-in, indipendente da Maxima/dal ratchet).
+            if (!giac_dir.empty()) {
+                auto gf = read_giac_file(giac_dir, idx);
+                if (gf.tag.empty()) {
+                    current_giac_verdict = "no_giac_file";
+                } else if (gf.tag != "ANSWERED") {
+                    current_giac_verdict = gf.tag; // UNEVALUATED | TIMEOUT | ERROR
+                } else {
+                    auto giac_solve = parse_giac_solve_list(gf.result, ctx.arena());
+                    if (!giac_solve.is_ok()) {
+                        current_giac_verdict = "unparseable";
+                        current_giac_output = gf.result;
+                    } else {
+                        current_giac_output = gf.result;
+                        auto geq = compare_solve_sets(cas_solve.value(), giac_solve.value(), ctx);
+                        current_giac_verdict = (!geq.is_ok()) ? "inconclusive"
+                                              : (geq.value() ? "pass" : "fail");
+                    }
+                }
+            }
             std::string maxima_out_path = maxima_dir + "/" + std::to_string(idx) + ".maxima.out";
             std::string maxima_raw = read_file(maxima_out_path);
             if (maxima_raw.empty()) {
@@ -607,6 +760,41 @@ int main(int argc, char* argv[]) {
                       << input_str << " => " << cas_result.error().message << "\n";
             ++idx;
             continue;
+        }
+
+        // A35 — cattura il risultato CAS per il dump per-entry: da qui in
+        // poi ogni ramo (SKIP lato Maxima incluso) ha gia' un cas_output.
+        current_cas_output = format_expr(cas_result.value());
+
+        // A35 — confronto giac (opt-in, indipendente da Maxima/dal ratchet).
+        // Stessa equivalenza vera usata sotto per Maxima: mathematically_equal
+        // con fallback antiderivative_equivalent per integrate/bronstein
+        // (due antiderivate dello stesso integrando differiscono al piu' per
+        // una costante — lo stesso motivo per cui serve anche lato Maxima).
+        if (!giac_dir.empty()) {
+            auto gf = read_giac_file(giac_dir, idx);
+            if (gf.tag.empty()) {
+                current_giac_verdict = "no_giac_file";
+            } else if (gf.tag != "ANSWERED") {
+                current_giac_verdict = gf.tag; // UNEVALUATED | TIMEOUT | ERROR
+            } else {
+                auto giac_expr = parse_giac_expr(gf.result, ctx.arena());
+                if (!giac_expr.is_ok()) {
+                    current_giac_verdict = "unparseable";
+                    current_giac_output = gf.result;
+                } else {
+                    current_giac_output = gf.result;
+                    auto geq = mathematically_equal(cas_result.value(), giac_expr.value(), ctx);
+                    bool gpass = geq.is_ok() && geq.value();
+                    if (!gpass && (area == "integrate" || area == "bronstein")) {
+                        auto gantieq = cas::golden::antiderivative_equivalent(
+                            input_str, cas_result.value(), giac_expr.value(), ctx);
+                        gpass = gantieq.is_ok() && gantieq.value();
+                    }
+                    current_giac_verdict = (!geq.is_ok() && !gpass) ? "inconclusive"
+                                          : (gpass ? "pass" : "fail");
+                }
+            }
         }
 
         // A31 §10.5: show the domain conditions registered while evaluating
